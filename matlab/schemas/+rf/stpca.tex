@@ -1,0 +1,54 @@
+\documentclass[10pt,twocolumn]{article}
+% amsmath package, useful for mathematical formulas
+\usepackage{amsmath}
+% amssymb package, useful for mathematical symbols
+\usepackage{graphicx}
+\usepackage{amssymb}
+\usepackage{amsmath}
+\usepackage{relsize}
+\usepackage{fullpage}
+\usepackage{natbib}
+\newcommand{\T}{{\sf T}}
+\setlength{\parskip}{6pt}
+\setlength{\parindent}{0pt}
+\newcommand{\E}[1]{\mathbb E\left[ #1\right]}
+\newcommand{\R}{\mathbb R}
+\newcommand{\N}{\mathbb N}
+\newcommand*\diff{\mathop{}\!\mathrm{d}}
+\DeclareMathOperator{\var}{var}
+
+\title{Spike-triggered PCA}
+\author{Dimitri Yatsenko}
+\begin{document}
+\maketitle
+Let $x(t)$ be the spike train or calcium signal and $s(t)$ the stimulus vector, both indexed by the time bin $t$. 
+Let $D$ be the delay matrix so that 
+\begin{equation}
+d(t) = \sum\limits_\tau D_\tau s(t-\tau)
+\end{equation}
+is the time-expanded stimulus vector containing delayed versions of $s(t)$
+The number of delays and the intervals between delays in $D$ define the duration and temporal resolution of the resulting receptive field.
+
+We seek the eigenvector $w$ that accounts for most of the variance.  This vector will minimize the cost function 
+\begin{equation}
+\mathcal L = \left\langle \left\| d -y w \right\|^2 \right\rangle_x 
+\end{equation}
+where $y=w^\T d$ and $\langle\cdot\rangle_x$ is the weighted average so that 
+\begin{equation}
+\langle z \rangle_x = \sum\limits_t x_t z_t
+\end{equation}
+is the average weighted by the spike train $x_t$.
+
+To minimize $\mathcal L$ with respect to $w$, we compute its (scaled) derivative
+\begin{equation}
+\frac{\partial \mathcal L}{\partial w} =
+-\langle y(d-y w) \rangle_x
+\end{equation}
+
+This gradient yields Oja's update rule for computing the largest principle component without computing the spike-triggered covariance matrix and its eigenspectrum:
+\begin{equation}
+\Delta w = \gamma \langle y(d-yw) \rangle_x
+\end{equation}
+where $\gamma$ is the update coefficient, which is optimized at each iteration by the nonlinear conjugate gradient algorithm.
+
+\end{document}
