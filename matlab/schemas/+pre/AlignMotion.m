@@ -14,6 +14,13 @@ classdef AlignMotion < dj.Relvar & dj.AutoPopulate
         popRel  = pre.AlignRaster
     end
     
+    
+    methods
+        function fun = get_fix_motion_fun(self)
+            xy = self.fetch1('motion_xy');
+            fun = @(frame, i) ne7.ip.correctMotion(frame, xy(:,i));
+        end
+    end
         
     methods(Access=protected)
         
@@ -34,7 +41,7 @@ classdef AlignMotion < dj.Relvar & dj.AutoPopulate
             sharpen = @(im) im-imfilter(imfilter(im,k,'symmetric'),k','symmetric');
             taper = 40;  % the larger the number the thinner the taper
             mask = atan(taper*hanning(sz(1)))*atan(taper*hanning(sz(2)))'/atan(taper)^2;
-            template = fixRaster(self.getTemplate(key));
+            template = fetch1(pre.ScanCheck & key, 'template');
             template = sharpen(mask.*(template - mean(template(:))));
        
             ftemplate = conj(fft2(double(template)));
@@ -76,13 +83,6 @@ classdef AlignMotion < dj.Relvar & dj.AutoPopulate
             key.avg_frame=avgFrame;
                         
             self.insert(key)
-        end
-    end
-    
-    
-    methods(Static)
-        function img = getTemplate(key)
-            img = fetch1(pre.ScanCheck & key, 'template');
         end
     end
     
