@@ -1,19 +1,19 @@
 %{
-nmf.SelectedMask (computed) # selected masks from the tesselation
--> nmf.SegmentationTile
+pre.SelectedMask (computed) # selected masks from the tesselation
+-> pre.SegmentationTile
 -----
 %}
 
 classdef SelectedMask < dj.Relvar & dj.AutoPopulate
     
     properties
-        popRel = nmf.Segment
+        popRel = pre.NMFSegment
     end
     
     methods(Access=protected)
         
         function makeTuples(self, key)
-            [masks, tiles] = nmf.SegmentationTile().fetch_scale_masks(key);
+            [masks, tiles] = pre.SegmentationTile().fetch_scale_masks(key);
             [d1, d2] = fetch1(pre.ScanInfo() & key, 'px_height', 'px_width');
             M = reshape(masks, d1*d2, size(masks, 3));
             C = M'*M;
@@ -41,7 +41,7 @@ classdef SelectedMask < dj.Relvar & dj.AutoPopulate
     methods(Static)
         %%------------------------------------------------------------
         function [masks, keys] = load_masks(key)
-            [masks, keys] = nmf.SegmentationTile().fetch_scale_masks(nmf.SelectedMask() & key);
+            [masks, keys] = pre.SegmentationTile().fetch_scale_masks(pre.SelectedMask() & key);
         end
     end
     

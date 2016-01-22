@@ -1,6 +1,6 @@
 %{
-nmf.SegmentationTile (computed) # my newest table
--> nmf.Tesselation
+pre.SegmentationTile (computed) # my newest table
+-> pre.Tesselation
 idx                    : int  # index of the mask and its spike trace
 -----
 mask                 : longblob # weighted inferred neuron mask
@@ -13,13 +13,13 @@ segment_ts=CURRENT_TIMESTAMP: timestamp                     # automatic
 classdef SegmentationTile < dj.Relvar & dj.AutoPopulate
     
     properties
-        popRel  = nmf.Tesselation()
+        popRel  = pre.Tesselation()
     end
     
     methods(Access=protected)
         
         function makeTuples(self, key)
-            cfg = fetch(nmf.Settings & key,'*');
+            cfg = fetch(pre.Settings & key,'*');
             [d1, d2, nslices] = self.get_resolution(key);
             assert(nslices==1, 'This schema only supports one slice.')
             
@@ -69,7 +69,7 @@ classdef SegmentationTile < dj.Relvar & dj.AutoPopulate
         %%------------------------------------------------------------
         function [masks, keys] = fetch_scale_masks(key)
             [d1, d2] = fetch1(pre.ScanInfo() & key, 'px_height', 'px_width');
-            keys = fetch(nmf.SegmentationTile & key,'mask');
+            keys = fetch(pre.SegmentationTile & key,'mask');
             masks = zeros(d1, d2, length(keys));
             for i = 1:length(keys)
                 masks(keys(i).rstart:keys(i).rend,keys(i).cstart:keys(i).cend,i)  = keys(i).mask;
@@ -172,7 +172,7 @@ classdef SegmentationTile < dj.Relvar & dj.AutoPopulate
                 frames = pointer:pointer+step-1;
                 fprintf('Reading block (%i:%i, %i:%i, %i:%i) of maximally %i (video has %i frames)\n', ...
                     rows(1), rows(end), cols(1), cols(end), pointer, pointer + step - 1, maxT, reader.nframes);
-                tmp_scan = nmf.load_corrected_block(key, reader, frames);
+                tmp_scan = pre.load_corrected_block(key, reader, frames);
                 
                 if scale == 1
                     scan(:, :, 1, frames) = tmp_scan(rows, cols,1,:);

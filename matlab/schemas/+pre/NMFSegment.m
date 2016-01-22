@@ -1,18 +1,18 @@
 %{
-nmf.Segment (imported) # 2d cell segmentations computed with NMF
+pre.NMFSegment (imported) # 2d cell segmentations computed with NMF
 -> pre.AlignMotion
 -> rf.VolumeSlice
--> nmf.Settings
+-> pre.Settings
 ---
 segment_ts=CURRENT_TIMESTAMP: timestamp                     # automatic
 %}
 
 
 
-classdef Segment < dj.Relvar & dj.AutoPopulate
+classdef NMFSegment < dj.Relvar & dj.AutoPopulate
     
     properties
-        popRel  = pre.AlignMotion * nmf.Settings
+        popRel  = pre.AlignMotion * pre.Settings
     end
     
     methods(Access=protected)
@@ -30,7 +30,7 @@ classdef Segment < dj.Relvar & dj.AutoPopulate
                     key.rend = i + patch_size - 1;
                     key.cstart = j;
                     key.cend = j + patch_size - 1;
-                    nmf.Tesselation().insert(key);
+                    pre.Tesselation().insert(key);
                 end
             end
         end

@@ -1,5 +1,5 @@
 %{
-nmf.Settings (lookup) # Settings for the NMF algorithm
+pre.Settings (lookup) # Settings for the NMF algorithm
 name                   : varchar(200) # unique name for the configuration
 -----
 p=2                    : int          # initial order of autoregressive system (p = 0 no dynamics, p=1 just decay, p = 2, both rise and decay)

@@ -1,6 +1,6 @@
 %{
-nmf.MaskAverageTrace (computed) # compute traces with masks
-->nmf.SelectedMask
+pre.MaskAverageTrace (computed) # compute traces with masks
+->pre.SelectedMask
 -----
 trace              : longblob # avg(mask.*scan)
 %}
@@ -8,13 +8,13 @@ trace              : longblob # avg(mask.*scan)
 classdef MaskAverageTrace < dj.Relvar & dj.AutoPopulate
     
     properties
-        popRel  = nmf.Segment() & nmf.SelectedMask()
+        popRel  = pre.NMFSegment() & pre.SelectedMask()
     end
     
     methods(Access=protected)
         
         function makeTuples(self, key)
-            [masks, keys] = nmf.SelectedMask().load_masks(key);
+            [masks, keys] = pre.SelectedMask().load_masks(key);
             reader = pre.getReader(key, '/tmp');
             assert(reader.nslices == 1, 'schema only supports one slice at the moment');
             
@@ -30,7 +30,7 @@ classdef MaskAverageTrace < dj.Relvar & dj.AutoPopulate
             
                 fprintf('Reading frames  %i:%i of maximally %i \n', ...
                         frames(1), frames(end), maxT);
-                block = nmf.load_corrected_block(key, reader, frames);
+                block = pre.load_corrected_block(key, reader, frames);
                 for i = 1:size(masks,3)
                     traces(i, frames) = squeeze(sum(sum(bsxfun(@times, block, masks(:,:,i)), 1),2));
                 end
