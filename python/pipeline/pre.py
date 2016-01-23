@@ -2,6 +2,7 @@ import datajoint as dj
 from djaddon import gitlog
 import numpy as np
 import c2s
+import matplotlib.pyplot as plt
 schema = dj.schema('pipeline_preprocessing', locals())
 
 
@@ -89,8 +90,20 @@ class SelectedMask(dj.Computed):
             masks[i1-1:i2,j1-1:j2,i]  = mask
         return masks
 
-
-
+    def plot_masks(self, key):
+        masks = self.load_masks(key) 
+        amask = (masks>0).sum(axis=2)
+        v = np.unique(amask)
+        masked = np.ma.masked_where(masks == 0, masks)
+        
+        for i in range(masks.shape[2]):
+            fig, ax = plt.subplots()
+            ax.contour(amask, v)
+            ax.imshow(masked[::-1,:,i], cmap=plt.cm.BuPu)
+            ax.set_aspect(1)
+            ax.axis('tight')
+            plt.show()
+            exit()
 @schema
 class MaskAverageTrace(dj.Computed):
     definition = None
