@@ -1,5 +1,7 @@
 # Dependencies
+**Matlab and Python**
 * [DataJoint](http://datajoint.github.com/)
+* [Tolias lab commons schema](https://github.com/atlab/commons/)
 
 **Matlab specific**
 * [ca_source_extraction](https://github.com/epnev/ca_source_extraction)
