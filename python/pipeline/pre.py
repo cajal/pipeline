@@ -99,6 +99,10 @@ class MaskAverageTrace(dj.Computed):
         raise NotImplementedError('This table is populated from matlab.')
 
 @schema
+class Tesselation(dj.Manual):
+    definition = None
+
+@schema
 @gitlog
 class STMSpikeRate(dj.Computed):
     definition = """
