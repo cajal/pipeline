@@ -24,9 +24,10 @@ classdef SelectedMask < dj.Relvar & dj.AutoPopulate
                     I = find(C(i,:) > 0.8);
                     R = [];
                     for j = I
-                        [ii, jj] = find(masks(:,:,i));
-                        r = sqrt( (mean(ii) - .5*(tiles(j).rstart + tiles(j).rend))^2 ...
-                            + (mean(jj) - .5*(tiles(j).cstart + tiles(j).cend))^2);
+                        [ii, jj] = find(masks(:,:,j));
+                        row_center = mean([tiles(j).rstart, tiles(j).rend]);
+                        col_center = mean([tiles(j).cstart, tiles(j).cend]);
+                        r = sqrt( (mean(ii) - row_center)^2  + (mean(jj) - col_center)^2);
                         R = [R, r];
                     end
                     [~, sel] = min(R);
