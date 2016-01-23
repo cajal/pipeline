@@ -81,6 +81,15 @@ class SelectedMask(dj.Computed):
     def _make_tuples(self, key):
         raise NotImplementedError('This table is populated from matlab.')
 
+    def load_masks(self, key):
+        d1, d2 = (ScanInfo() & key).fetch1['px_height', 'px_width']
+        selection = (SegmentationTile() & self & key).project('mask')
+        masks = np.zeros((d1, d2, len(selection)))
+        for i, (i1, i2, j1, j2, mask) in enumerate(zip(*selection.fetch['rstart','rend','cstart','cend','mask'])):
+            masks[i1-1:i2,j1-1:j2,i]  = mask
+        return masks
+
+
 
 @schema
 class MaskAverageTrace(dj.Computed):
