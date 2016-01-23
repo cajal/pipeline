@@ -7,7 +7,6 @@ mask                 : longblob # weighted inferred neuron mask
 spiketrace           : longblob # inferred spike trace
 p                    : int      # order of AR process
 gn                   : longblob # parameters of AR process
-segment_ts=CURRENT_TIMESTAMP: timestamp                     # automatic
 %}
 
 classdef SegmentationTile < dj.Relvar & dj.AutoPopulate
