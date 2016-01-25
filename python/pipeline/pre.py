@@ -2,6 +2,7 @@ import datajoint as dj
 from djaddon import gitlog
 import numpy as np
 import c2s
+import matplotlib.pyplot as plt
 schema = dj.schema('pipeline_preprocessing', locals())
 
 
@@ -81,13 +82,38 @@ class SelectedMask(dj.Computed):
     def _make_tuples(self, key):
         raise NotImplementedError('This table is populated from matlab.')
 
+    def load_masks(self, key):
+        d1, d2 = (ScanInfo() & key).fetch1['px_height', 'px_width']
+        selection = (SegmentationTile() & self & key).project('mask')
+        masks = np.zeros((d1, d2, len(selection)))
+        for i, (i1, i2, j1, j2, mask) in enumerate(zip(*selection.fetch['rstart','rend','cstart','cend','mask'])):
+            masks[i1-1:i2,j1-1:j2,i]  = mask
+        return masks
 
+    def plot_masks(self, key):
+        masks = self.load_masks(key) 
+        amask = (masks>0).sum(axis=2)
+        v = np.unique(amask)
+        masked = np.ma.masked_where(masks == 0, masks)
+        
+        for i in range(masks.shape[2]):
+            fig, ax = plt.subplots()
+            ax.contour(amask, v)
+            ax.imshow(masked[::-1,:,i], cmap=plt.cm.BuPu)
+            ax.set_aspect(1)
+            ax.axis('tight')
+            plt.show()
+            exit()
 @schema
 class MaskAverageTrace(dj.Computed):
     definition = None
 
     def _make_tuples(self, key):
         raise NotImplementedError('This table is populated from matlab.')
+
+@schema
+class Tesselation(dj.Manual):
+    definition = None
 
 @schema
 @gitlog

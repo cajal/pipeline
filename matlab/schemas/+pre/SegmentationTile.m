@@ -7,7 +7,6 @@ mask                 : longblob # weighted inferred neuron mask
 spiketrace           : longblob # inferred spike trace
 p                    : int      # order of AR process
 gn                   : longblob # parameters of AR process
-segment_ts=CURRENT_TIMESTAMP: timestamp                     # automatic
 %}
 
 classdef SegmentationTile < dj.Relvar & dj.AutoPopulate
@@ -84,6 +83,9 @@ classdef SegmentationTile < dj.Relvar & dj.AutoPopulate
         %%------------------------------------------------------------
         
         function params = run_nmf(Y, cfg)
+        %
+        % Runs the nonnegative matrix factorization algorithm on Y with configuration cfg. 
+        %  
             [d1,d2, T] = size(Y);
             d = d1*d2;
             
@@ -136,6 +138,14 @@ classdef SegmentationTile < dj.Relvar & dj.AutoPopulate
         
         %%------------------------------------------------------------
         function scan = load_scan(key, scale, rows, cols, maxT, blockSize)
+        % 
+        %  Loads a block from TIFF stack identified by key, scales each frame by scale,
+        %  applies raster and motion correction, and selects rows and cols. 
+        % 
+        %  If maxT is specified, it loads the first maxT frames. 
+        %  If blockSize is specified, the TIFF stack is loaded in chunks of blockSize. 
+        %  Default is blockSize=10000. 
+        %
             reader = pre.getReader(key, '/tmp');
             assert(reader.nslices == 1, 'schema only supports one slice at the moment');
             
