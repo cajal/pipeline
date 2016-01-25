@@ -1,5 +1,5 @@
 %{
-trippy.RF (computed) # my newest table
+trippy.RF (computed) # receptive fields from the trippy stimulus
 -> rf.Sync
 -> pre.Spikes
 -----
@@ -13,7 +13,7 @@ map             : longblob                      # receptive field map
 classdef RF < dj.Relvar & dj.AutoPopulate
     
     properties
-        popRel  = pre.Segment*pre.SpikeInference*(rf.Sync & psy.Trippy)
+        popRel  = pre.ExtractSpikes*(rf.Sync & psy.Trippy)
     end
     
     methods(Access=protected)
