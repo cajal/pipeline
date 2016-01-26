@@ -16,14 +16,38 @@ classdef RF < dj.Relvar & dj.AutoPopulate
         popRel  = pre.ExtractSpikes*(rf.Sync & psy.Trippy)
     end
     
+    
+    methods
+        function dump(self)
+            for key = self.fetch'
+                disp(key)
+                map = fetch1(self & key, 'map');
+                mx = max(abs(map(:)));
+                map = round(map/mx*31.5 + 32.5);
+                cmap = ne7.vis.doppler;
+                
+                for i=1:size(map,3)
+                    try
+                        im = reshape(cmap(map(:,:,i),:),[size(map,1) size(map,2) 3]);
+                        f = sprintf('~/dump/trippy%u-%d-%d.%03d_%02d.png', ...
+                            key.spike_inference, key.animal_id, key.scan_idx, key.trace_id, i);
+                        imwrite(im,f,'png')
+                    catch err
+                        disp(err)
+                    end
+                end
+            end
+        end
+    end
+    
     methods(Access=protected)
         
         function makeTuples(self, key)
             % temporal binning
             nbins = 6;
-            bin_width = 0.1;  %(s)            
+            bin_width = 0.1;  %(s)
             dfactor = 4;  % oversampling
-                        
+            
             disp 'loading traces...'
             caTimes = fetch1(rf.Sync & key, 'frame_times');
             dt = median(diff(caTimes));
@@ -31,7 +55,7 @@ classdef RF < dj.Relvar & dj.AutoPopulate
             X = [X{:}];
             X = @(t) interp1(caTimes-caTimes(1), X, t, 'linear', nan);  % traces indexed by time
             ntraces = length(traceKeys);
-
+            
             disp 'loading movies...'
             trials = pro(rf.Sync*psy.Trial & key & 'trial_idx between first_trial and last_trial', 'cond_idx', 'flip_times');
             trials = fetch(trials*psy.Trippy, '*', 'ORDER BY trial_idx');
@@ -66,11 +90,11 @@ classdef RF < dj.Relvar & dj.AutoPopulate
                 for itrace = 1:ntraces
                     fprintf .
                     update = conv2(movie, snippet(:,itrace)', 'valid')';
-                    update = interp1((0:size(update,1)-1)*dt, update, (0:nbins*dfactor-1)*bin_width/dfactor);                    
+                    update = interp1((0:size(update,1)-1)*dt, update, (0:nbins*dfactor-1)*bin_width/dfactor);
                     update = downsample(conv2(update, ones(dfactor, 1)/dfactor, 'valid'), dfactor)';
                     update = reshape(update, sz(1), sz(2), nbins);
                     maps(:,:,:,itrace) = maps(:,:,:,itrace) + update;
-                end                
+                end
             end
             fprintf \n
             disp 'inserting...'
@@ -87,7 +111,7 @@ classdef RF < dj.Relvar & dj.AutoPopulate
                 self.insert(tuple)
             end
             
-
+            
         end
     end
     

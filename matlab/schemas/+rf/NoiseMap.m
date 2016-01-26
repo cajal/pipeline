@@ -71,14 +71,14 @@ classdef NoiseMap < dj.Relvar & dj.AutoPopulate
         function dump(self)
             for key = self.fetch'
                 disp(key)
-                map = fetch1(self & key, 'rf_map');
+                map = fetch1(self & key, 'map');
                 mx = max(abs(map(:)));
                 map = round(map/mx*31.5 + 32.5);
                 cmap = ne7.vis.doppler;
                 
                 for i=1:size(map,3)
                     im = reshape(cmap(map(:,:,i),:),[size(map,1) size(map,2) 3]);
-                    f = sprintf('~/Desktop/carfs/%s-%d/%d-%d_%02d.png',...
+                    f = sprintf('~/dump/%s-%d-%d-%d_%02d.png',...
                         fetch1(rf.NoiseMapMethod & key, 'noise_map_algorithm'), key.animal_id, key.scan_idx, key.trace_id, i);
                     imwrite(im,f)
                 end
