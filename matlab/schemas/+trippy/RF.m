@@ -1,7 +1,7 @@
 %{
-trippy.RF (computed) # my newest table
+trippy.RF (computed) # receptive fields from the trippy stimulus
 -> rf.Sync
--> pre.Trace
+-> pre.Spikes
 -----
 nbins              : smallint                      # temporal bins
 bin_size           : float                         # (ms) temporal bin size
@@ -13,88 +13,105 @@ map             : longblob                      # receptive field map
 classdef RF < dj.Relvar & dj.AutoPopulate
     
     properties
-        popRel  = pre.Segment*rf.Sync & psy.Trippy
+        popRel  = pre.ExtractSpikes*(rf.Sync & psy.Trippy)
+    end
+    
+    
+    methods
+        function dump(self)
+            for key = self.fetch'
+                disp(key)
+                map = fetch1(self & key, 'map');
+                mx = max(abs(map(:)));
+                map = round(map/mx*31.5 + 32.5);
+                cmap = ne7.vis.doppler;
+                
+                for i=1:size(map,3)
+                    try
+                        im = reshape(cmap(map(:,:,i),:),[size(map,1) size(map,2) 3]);
+                        f = sprintf('~/dump/trippy%u-%d-%d.%03d_%02d.png', ...
+                            key.spike_inference, key.animal_id, key.scan_idx, key.trace_id, i);
+                        imwrite(im,f,'png')
+                    catch err
+                        disp(err)
+                    end
+                end
+            end
+        end
     end
     
     methods(Access=protected)
         
         function makeTuples(self, key)
             % temporal binning
-            nBins = 6;
-            binSize = 0.1;  %s
+            nbins = 6;
+            bin_width = 0.1;  %(s)
+            dfactor = 4;  % oversampling
             
-            disp 'loading movies ...'
-            caTimes = fetch1(rf.Sync & key,'frame_times');
+            disp 'loading traces...'
+            caTimes = fetch1(rf.Sync & key, 'frame_times');
             dt = median(diff(caTimes));
-            trials = fetch(rf.Sync*psy.Trial*psy.Trippy & key & 'trial_idx between first_trial and last_trial', '*');
+            [X, traceKeys] = fetchn(pre.Spikes & key, 'spike_trace');
+            X = [X{:}];
+            X = @(t) interp1(caTimes-caTimes(1), X, t, 'linear', nan);  % traces indexed by time
+            ntraces = length(traceKeys);
+            
+            disp 'loading movies...'
+            trials = pro(rf.Sync*psy.Trial & key & 'trial_idx between first_trial and last_trial', 'cond_idx', 'flip_times');
+            trials = fetch(trials*psy.Trippy, '*', 'ORDER BY trial_idx');
             sess = fetch(rf.Sync*psy.Session & key,'resolution_x','resolution_y','monitor_distance','monitor_size');
-
+            fps = round(1./median(diff(trials(1).flip_times)));
+            
             % compute physical dimensions
             rect = [sess.resolution_x sess.resolution_y];
             degPerPix = 180/pi*sess.monitor_size*2.54/norm(rect(1:2))/sess.monitor_distance;
             degSize = degPerPix*rect;
             
-            disp 'concatenating stimulus movies...'
-            fps = round(1./median(diff(trials(1).flip_times))*trials(1).frame_downsample);
-            stimTimes = cat(2,stimTimes{:});
-            movie = (double(cat(3,movie{:}))-1)/126-1;
+            disp 'integrating maps...'
+            maps = zeros(trials(1).tex_ydim, trials(1).tex_xdim, nbins, ntraces);
+            sz = size(maps);
             
-            disp 'interpolation...'
-            % clip stimulus movie to fit within the calcium recording to avoid extrapolation
-            ix = stimTimes > caTimes(1) & stimTimes < caTimes(end) - nBins*binSize;
-            movie = movie(:,:,ix);
-            stimTimes = stimTimes(ix);
-            
-            t0 = max(caTimes(1),stimTimes(1)+(nBins-1)*binSize)+0.1;   % start time for calcium traces
-            t1 = t0-(nBins-1)*binSize;                                 % start time for stimulus
-            t2 = min(caTimes(end),stimTimes(end));                     % end time for both
-            movie = permute(interp1(stimTimes',permute(movie,[3 1 2]),(t1:binSize:t2)','linear'),[2 3 1]);
-            sz = size(movie);
-            
-            method = fetch1(monet.RFMethod & key, 'method');
-            
-            disp 'computing RF...'
-            [traces, traceKey] = fetchn(rf.Trace & key, 'ca_trace');
-            for iTrace=1:length(traces)
-                fprintf('trace %d\n', traceKey(iTrace).trace_id)
-                tuple = dj.struct.join(key,traceKey(iTrace));
+            total_frames = 0;
+            for trial = trials'
+                fprintf('\nTrial %d', trial.trial_idx);
+                % reconstruct movie
+                phase = psy.Trippy.interp_time(trial.packed_phase_movie, trial, fps/trial.frame_downsample);
+                trial_frames = size(phase,1);
+                assert(trial_frames == length(trial.flip_times), 'frame number mismatch')
+                phase = psy.Trippy.interp_space(phase, trial);
+                assert(size(phase,1)==sz(1) && size(phase,2)==sz(2))
+                movie = cos(2*pi*phase);
+                movie = fliplr(reshape(movie, [], trial_frames));
+                total_frames = total_frames + trial_frames;
                 
-                % highpass filter and deconvolve
-                cutoff = 0.03; % Hz
-                k = hamming(round(1/dt/cutoff)*2+1);
-                k = k/sum(k);
-                trace = double(traces{iTrace});
-                trace = (trace-ne7.dsp.convmirr(double(trace),k))/mean(trace);
-                %trace = fast_oopsi(trace,struct('dt',dt),struct('lambda',.01));
-                
-                % interpolate to common time bins
-                k = hamming(2*round(binSize/dt)+1); k = k/sum(k);  % interpolation kernel
-                trace = ne7.dsp.convmirr(trace,k);
-                trace = interp1(caTimes,trace,(t0:binSize:t2)','linear');
-                trace = trace/sum(trace);
-                
-                disp 'computing RF...'
-                switch method
-                    case 'STA'
-                        map = reshape(conv2(fliplr(reshape(movie,sz(1)*sz(2),sz(3))),trace','valid'),sz(1),sz(2),[]);
-                    otherwise
-                        error('The "%s" method is not implemented yet', method)
+                % extract relevant trace
+                t = trial.flip_times(ceil(nbins*bin_width/dt):end) - caTimes(1);
+                snippet = X(t);
+                for itrace = 1:ntraces
+                    fprintf .
+                    update = conv2(movie, snippet(:,itrace)', 'valid')';
+                    update = interp1((0:size(update,1)-1)*dt, update, (0:nbins*dfactor-1)*bin_width/dfactor);
+                    update = downsample(conv2(update, ones(dfactor, 1)/dfactor, 'valid'), dfactor)';
+                    update = reshape(update, sz(1), sz(2), nbins);
+                    maps(:,:,:,itrace) = maps(:,:,:,itrace) + update;
                 end
-                
-                disp 'saving...'
-                tuple.nbins = nBins;
-                tuple.bin_size = binSize*1000;
+            end
+            fprintf \n
+            disp 'inserting...'
+            
+            maps = maps/total_frames;
+            
+            for itrace = 1:ntraces
+                tuple = dj.struct.join(key, traceKeys(itrace));
+                tuple.nbins = nbins;
+                tuple.bin_size = bin_width;
                 tuple.degrees_x = degSize(1);
                 tuple.degrees_y = degSize(2);
-                tuple.map = single(map);
-                
-                imagesc(map(:,:,1),[-1 1]*0.05), axis image
-                colormap(ne7.vis.doppler)
-                drawnow
+                tuple.map = maps(:,:,:,itrace);
                 self.insert(tuple)
             end
-            disp done
-            self.insert(key)
+            
+            
         end
     end
     
