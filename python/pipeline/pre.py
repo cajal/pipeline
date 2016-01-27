@@ -8,7 +8,7 @@ schema = dj.schema('pipeline_preprocessing', locals())
 
 @schema
 class AlignMotion(dj.Imported):
-    definition = None
+    definition = ...
 
     def _make_tuples(self, key):
         raise NotImplementedError("This schema is populated from Matlab")
@@ -16,23 +16,30 @@ class AlignMotion(dj.Imported):
 
 @schema
 class AlignRaster(dj.Computed):
-    definition = None
+    definition = ...
 
     def _make_tuples(self, key):
         raise NotImplementedError("This schema is populated from Matlab")
 
 
-# @schema
-# class Check(dj.Imported):
-#     definition = None
-#
-#     def _make_tuples(self, key):
-#         raise NotImplementedError("This schema is populated from Matlab")
-#
+@schema
+class Check(dj.Imported):
+    definition = ...
+
+    def _make_tuples(self, key):
+        raise NotImplementedError("This schema is populated from Matlab")
+
+@schema
+class ExtractSpike(dj.Computed):
+    definition = ...
+
+    def _make_tuples(self, key):
+        raise NotImplementedError("This schema is populated from Matlab")
+
 
 @schema
 class ManualSegment(dj.Imported):
-    definition = None
+    definition = ...
 
     def _make_tuples(self, key):
         raise NotImplementedError("This schema is populated from Matlab")
@@ -40,7 +47,7 @@ class ManualSegment(dj.Imported):
 
 @schema
 class ScanCheck(dj.Imported):
-    definition = None
+    definition = ...
 
     def _make_tuples(self, key):
         raise NotImplementedError("This schema is populated from Matlab")
@@ -48,7 +55,7 @@ class ScanCheck(dj.Imported):
 
 @schema
 class ScanInfo(dj.Imported):
-    definition = None
+    definition = ...
 
     def _make_tuples(self, key):
         raise NotImplementedError("This schema is populated from Matlab")
@@ -56,12 +63,12 @@ class ScanInfo(dj.Imported):
 
 @schema
 class Settings(dj.Lookup):
-    definition = None
+    definition = ...
 
 
 @schema
 class NMFSegment(dj.Imported):
-    definition = None
+    definition = ...
 
     def _make_tuples(self, key):
         raise NotImplementedError('This table is populated from matlab.')
@@ -69,7 +76,7 @@ class NMFSegment(dj.Imported):
 
 @schema
 class SegmentationTile(dj.Computed):
-    definition = None
+    definition = ...
 
     def _make_tuples(self, key):
         raise NotImplementedError('This table is populated from matlab.')
@@ -77,7 +84,7 @@ class SegmentationTile(dj.Computed):
 
 @schema
 class SelectedMask(dj.Computed):
-    definition = None
+    definition = ...
 
     def _make_tuples(self, key):
         raise NotImplementedError('This table is populated from matlab.')
@@ -106,14 +113,14 @@ class SelectedMask(dj.Computed):
             exit()
 @schema
 class MaskAverageTrace(dj.Computed):
-    definition = None
+    definition = ...
 
     def _make_tuples(self, key):
         raise NotImplementedError('This table is populated from matlab.')
 
 @schema
 class Tesselation(dj.Manual):
-    definition = None
+    definition = ...
 
 @schema
 @gitlog
