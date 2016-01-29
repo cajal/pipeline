@@ -8,7 +8,7 @@ design_matrix   : longblob   # times x nConds
 regressor_cov   : longblob   # regressor covariance matrix,  nConds x nConds
 %}
 
-classdef OriDesign < dj.Relvar & dj.AutoPopulate
+cclassdef OriDesign < dj.Relvar & dj.AutoPopulate
     
     properties
         popRel = rf.Sync*rf.SpaceTime & rf.GratingResponses %  rf.GratingResponses should already be computed, which populates rf.SpaceTime

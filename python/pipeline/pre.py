@@ -24,20 +24,20 @@ class AlignRaster(dj.Computed):
         raise NotImplementedError("This schema is populated from Matlab")
 
 
-@schema
-class Check(dj.Imported):
-    definition = ...
+# @schema
+# class Check(dj.Imported):
+#     definition = ...
 
-    def _make_tuples(self, key):
-        raise NotImplementedError("This schema is populated from Matlab")
+#     def _make_tuples(self, key):
+#         raise NotImplementedError("This schema is populated from Matlab")
 
 
-@schema
-class ExtractSpike(dj.Computed):
-    definition = ...
+# @schema
+# class ExtractSpike(dj.Computed):
+#     definition = ...
 
-    def _make_tuples(self, key):
-        raise NotImplementedError("This schema is populated from Matlab")
+#     def _make_tuples(self, key):
+#         raise NotImplementedError("This schema is populated from Matlab")
 
 
 @schema
@@ -146,46 +146,46 @@ class Tesselation(dj.Manual):
     definition = ...
 
 
-@schema
-@gitlog
-class STMSpikeRate(dj.Computed):
-    definition = """
-    # inferred spike rate trace
+# @schema
+# @gitlog
+# class STMSpikeRate(dj.Computed):
+#     definition = """
+#     # inferred spike rate trace
 
-    ->MaskAverageTrace
-    ---
-    rate          : longblob  # inferred spikes
-    """
+#     ->MaskAverageTrace
+#     ---
+#     rate          : longblob  # inferred spikes
+#     """
 
-    def _make_tuples(self, key):
-        data = (MaskAverageTrace() * ScanInfo() & key).project('fps').fetch1()
-        data['calcium'] = (MaskAverageTrace() & key).fetch1['trace'].squeeze()
-        data = c2s.preprocess([data], fps=data['fps'])
-        data[0]['calcium'] = np.atleast_2d(data[0]['calcium'])
-        data = c2s.predict(data)
-        data = data[0]
-        data['rate'] = data.pop('predictions').squeeze()
-        data.pop('calcium')
-        data.pop('fps')
-        self.insert1(data)
+#     def _make_tuples(self, key):
+#         data = (MaskAverageTrace() * ScanInfo() & key).project('fps').fetch1()
+#         data['calcium'] = (MaskAverageTrace() & key).fetch1['trace'].squeeze()
+#         data = c2s.preprocess([data], fps=data['fps'])
+#         data[0]['calcium'] = np.atleast_2d(data[0]['calcium'])
+#         data = c2s.predict(data)
+#         data = data[0]
+#         data['rate'] = data.pop('predictions').squeeze()
+#         data.pop('calcium')
+#         data.pop('fps')
+#         self.insert1(data)
 
-@schema
-class Segmentation(dj.Imported):
-    definition = ...
+# @schema
+# class Segmentation(dj.Imported):
+#     definition = ...
 
 @schema
 class SpikeInference(dj.Lookup):
     definition = ...
 
-@schema
-class Spikes(dj.Computed):
-    definition = ...
+# @schema
+# class Spikes(dj.Computed):
+#     definition = ...
 
-@schema
-class Template(dj.Imported):
-    definition = ...
+# @schema
+# class Template(dj.Imported):
+#     definition = ...
 
-@schema
-class Trace(dj.Imported):
-    definition = ...
+# @schema
+# class Trace(dj.Imported):
+#     definition = ...
 
