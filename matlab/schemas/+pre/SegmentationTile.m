@@ -1,7 +1,7 @@
 %{
 pre.SegmentationTile (computed) # my newest table
 -> pre.Tesselation
-idx                    : int  # index of the mask and its spike trace
+tile_idx             : int  # index of the mask and its spike trace
 -----
 mask                 : longblob # weighted inferred neuron mask
 spiketrace           : longblob # inferred spike trace
@@ -47,9 +47,10 @@ classdef SegmentationTile < dj.Relvar & dj.AutoPopulate
             A = bsxfun(@rdivide, A, sqrt(sum(sum(A.^2, 1),2))); % normalize to norm 1
             
             for idx = 1:size(A,3)
-                key.idx = idx;
+                key.tile_idx = idx;
                 key.p = params.p(idx);
-                key.gn = params.gn(idx);
+                tmp = params.gn(idx);
+                key.gn = tmp{1};
                 
                 % insert mask
                 key.mask = A(:,:,idx);

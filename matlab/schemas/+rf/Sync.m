@@ -1,6 +1,6 @@
 %{
 rf.Sync (imported) # mapping of h5,ca imaging, and vis stim clocks
--> rf.Align
+-> rf.Scan
 ---
 -> psy.Session
 first_trial                 : int                           # first trial in recording
@@ -13,7 +13,7 @@ sync_ts=CURRENT_TIMESTAMP   : timestamp                     # automatic
 classdef Sync < dj.Relvar & dj.AutoPopulate
     
     properties
-        popRel = rf.Align
+        popRel = rf.Scan
     end
     
     methods(Access=protected)
