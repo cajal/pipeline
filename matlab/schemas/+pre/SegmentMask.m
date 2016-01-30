@@ -24,8 +24,9 @@ classdef SegmentMask < dj.Relvar
                     self.insert(tuples)
                 %% NMF segmentation
                 case 'nmf' 
-                    cfg = fetch(pre.Settings & key,'*');
-                    [d1, d2, nslices] = self.get_resolution(key);
+                    cfg = fetch(pre.NMFSettings & key,'*');
+                    
+                    nslices = fetch1(pre.ScanInfo & key, 'nslices');
                     assert(nslices==1, 'This schema only supports one slice.')
 
                     [um_width, um_height] = fetch1(pre.ScanInfo & key, 'um_width', 'um_height');
@@ -33,15 +34,13 @@ classdef SegmentMask < dj.Relvar
 
                     fprintf('Using max %i neurons\n',cfg.max_neurons);
 
-                    % make sure a 6 um diameter cell body is at least covered by 2x2 pixels
-                    % use a power of two
-
-                    Y = squeeze(self.load_scan(key, scale, key.rstart:key.rend, key.cstart:key.cend));
+                    % downsample to two Hz
+                    stride = floor(fetch1(pre.ScanInfo & key, 'fps')/2);
+                    
+                    
+                    Y = squeeze(self.load_scan(key, stride));
 
                     A = self.run_nmf(Y, cfg);
-
-                    A = full(A);
-                    A = reshape(A, d1, d2, size(A,2)); % reshape into masks
 
                     for idx = 1:size(A,2)
                         key.mask_id = idx;
@@ -92,27 +91,19 @@ classdef SegmentMask < dj.Relvar
             Yr = reshape(Y,d,T);
             clear Y;
             
-            % REMOVE TEMPORAL UPDATE STEP
-            for i = 1:cfg.max_iter
-                % update spatial components
-                [A,b] = update_spatial_components(Yr,C,f,A,P,options);
-                % update temporal components
-                [C,f,Y_res,P,S] = update_temporal_components(Yr,A,b,C,f,P,options);
-                
-                % merge found components
-                [A,C,K,~,P,S] = merge_components(Y_res,A,b,C,f,P,S,options);
-            end
-            [A,C,S,P] = order_ROIs(A,C,S,P);    % order components
-            [C,~,S] = extract_DF_F(Yr,[A,b],[C;f],S,K+1); % extract dF/F values
+            % update spatial components
+            [A,b] = update_spatial_components(Yr,C,f,A,P,options);
+            [C,f,Yr,P,S] = update_temporal_components(Yr,A,b,C,f,P,options);
+            % merge found components
+            [A,C,~,~,P,S] = merge_components(Yr,A,b,C,f,P,S,options);
+            [A,~,~,~] = order_ROIs(A,C,S,P);    % order components
            
         end
         
         
         %%------------------------------------------------------------
-        function scan = load_scan(key, maxT, blockSize)
+        function scan = load_scan(key, stride, maxT, blockSize)
         % 
-        %  Loads a block from TIFF stack identified by key, scales each frame by scale,
-        %  applies raster and motion correction, and selects rows and cols. 
         % 
         %  If maxT is specified, it loads the first maxT frames. 
         %  If blockSize is specified, the TIFF stack is loaded in chunks of blockSize. 
@@ -122,10 +113,14 @@ classdef SegmentMask < dj.Relvar
             assert(reader.nslices == 1, 'schema only supports one slice at the moment');
             
             if nargin < 2
-                maxT = reader.nframes;
+                stride = 1;
             end
             
             if nargin < 3
+                maxT = reader.nframes;
+            end
+            
+            if nargin < 4
                 blockSize = min(maxT, 10000);
             end
             
@@ -137,7 +132,9 @@ classdef SegmentMask < dj.Relvar
             
             
             scan = zeros(r,c, 1, maxT);
-
+            
+            h = hamming(2*stride+1);
+            h = reshape(h/sum(h), 1,1,1,2*stride+1);
             pointer = 1;
             while pointer < maxT
                 step =  min(blockSize, maxT-pointer+1);
@@ -145,12 +142,13 @@ classdef SegmentMask < dj.Relvar
                 fprintf('Reading frames %i:%i of maximally %i (video has %i frames)\n', ...
                     pointer, pointer + step - 1, maxT, reader.nframes);
                 
-                % TODO replace that
+                % TODO replace that with Dimitri's functions
                 tmp_scan = pre.load_corrected_block(key, reader, frames);
-                % TODO insert aggressive temporal downsampling
-                scan(:, :, 1, frames) = tmp_scan(rows, cols,1,:);
+                scan(:, :, 1, frames) = tmp_scan(:, :,1,:);
                 pointer = pointer + step;
             end
+            scan = convn(scan, h, 'same');
+            scan = scan(:,:,:,1:stride:end);
             
         end
     end
