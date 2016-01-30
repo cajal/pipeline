@@ -26,7 +26,7 @@ classdef AlignMotion < dj.Relvar & dj.AutoPopulate
         
         function makeTuples(self, key)
             tic
-            
+            assert(count(pre.ScanCheck & key)==1, 'pre.Align does not yet work with multiple channels')
             [zero_var_intercept, quantal_size] = fetch1(pre.ScanCheck & key, ...
                 'min_var_intensity', 'quantal_size');
             

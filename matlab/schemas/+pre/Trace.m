@@ -1,7 +1,6 @@
 %{
 pre.Trace (imported) # calcium trace
--> pre.Segment
-trace_id        : smallint               # mask number in segmentation
+-> pre.SegmentMask
 ---
 ca_trace                    : longblob                      # raw calcium trace
 %}
@@ -11,8 +10,11 @@ ca_trace                    : longblob                      # raw calcium trace
 % r = 'animal_id=5269';
 % for k=fetch(pre.Segment*rf.Sync&r)',t=fetch1(rf.Sync&k,'frame_times');x=fetchn(pre.Trace&k,'ca_trace');x=[x{:}];plot(t-t(1),bsxfun(@plus,bsxfun(@rdivide,x,mean(x)),1:size(x,2)));keyboard;end
 
-classdef Trace < dj.Relvar
+classdef Trace < dj.Relvar & dj.AutoPopulate
     
+    properties
+        popRel = pre.Segment
+    end
     methods
         
         function plot(self)
@@ -25,15 +27,16 @@ classdef Trace < dj.Relvar
             end
         end
         
+    end
+    
+    methods(Access = protected)
         
         function makeTuples(self, key)
             tic
             fixRaster = get_fix_raster_fun(pre.AlignRaster & key);
             fixMotion = get_fix_motion_fun(pre.AlignMotion & key);
             
-            mask = fetch1(pre.Segment & key, 'mask');
-            pixels = regionprops(mask, 'PixelIdxList');
-            pixels = {pixels.PixelIdxList};
+            [pixels, weights, maskKeys] = fetchn(pre.SegmentMask & key, 'mask_pixels', 'mask_weights');
             ntraces = length(pixels);
             
             reader = pre.getReader(key, '~/cache');
@@ -45,14 +48,12 @@ classdef Trace < dj.Relvar
                     fprintf('Frame %5d/%d  %4.1fs\n', iframe, nframes, toc);
                 end                
                 frame = fixMotion(fixRaster(double(reader(:,:,:,:,iframe))), iframe);
-                traces(iframe, :) = cellfun(@(pixels) mean(frame(pixels)), pixels);
+                traces(iframe, :) = cellfun(@(pixels,weights) mean(frame(pixels).*weights), pixels, weights);
             end
             
             % save
             for itrace=1:ntraces
-                key.trace_id = itrace;
-                key.ca_trace = traces(:,itrace);
-                self.insert(key)
+                self.insert(setfield(maskKeys(itrace), 'ca_trace', traces(:, itrace))) %#ok<SFLD>
             end
             
         end
