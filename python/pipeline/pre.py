@@ -1,5 +1,5 @@
 import datajoint as dj
-from . import rf
+from . import rf, trippy
 from djaddon import gitlog, hdf5
 import numpy as np
 import c2s
