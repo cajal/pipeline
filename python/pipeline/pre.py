@@ -87,13 +87,22 @@ class Segment(dj.Imported):
         return masks
 
     def plot_masks(self, key, savedir='./'):
+        """
+        Plot the segmentation masks
+
+        :param key:
+        :param savedir:
+        """
+        assert (self * SegmentMethod() & key).fetch1['method_name'] == 'nmf', \
+                            "Only work for nmf segmentation at the moment"
+
         if savedir[-1] != '/': savedir += '/'
         masks = self.load_masks(key)
 
         d1, d2, frames = masks.shape
         xaxis, yaxis = np.arange(d2), np.arange(d1)
         sns.set_style('white')
-        fig, ax = plt.subplots(figsize=(7,7), dpi=400)
+        fig, ax = plt.subplots(figsize=(7, 7), dpi=400)
         y = np.arange(.2, 1, .2)
         theCM = sns.blend_palette(['silver', 'steelblue', 'orange'], n_colors=len(y))  # plt.cm.RdBu_r
         for cell in range(frames):
@@ -104,8 +113,8 @@ class Segment(dj.Imported):
             th = np.interp(y, cdf, ma)
             ax.contour(xaxis, yaxis, masks[..., cell], th, colors=theCM)
 
-        ax.set_title(' '.join(['%s: %s' % (str(k), str(v)) for k,v in key.items()]), fontsize=16, fontweight='bold' )
+        ax.set_title(' '.join(['%s: %s' % (str(k), str(v)) for k, v in key.items()]), fontsize=8, fontweight='bold')
         ax.set_aspect(1)
         ax.axis('tight')
         ax.axis('off')
-        fig.savefig(savedir + '__'.join(['%s_%s' % (str(k), str(v)) for k,v in key.items()]) + '.png')
+        fig.savefig(savedir + '__'.join(['%s_%s' % (str(k), str(v)) for k, v in key.items()]) + '.png')
