@@ -3,12 +3,16 @@ from warnings import warn
 import datajoint as dj
 from . import rf, trippy
 import numpy as np
+from matplotlib import pyplot as plt
+import seaborn as sns
+
 try:
     import c2s
 except:
     warn("c2s was not found. You won't be able to populate ExtracSpikes")
 
 schema = dj.schema('pipeline_preprocessing', locals())
+
 
 @schema
 class SpikeInference(dj.Lookup):
@@ -62,3 +66,46 @@ class ExtractSpikes(dj.Computed):
     def _make_tuples(self, key):
         self.insert1(key)
         Spikes().make_tuples(key)
+
+
+@schema
+class Segment(dj.Imported):
+    definition = ...
+
+    def _make_tuples(self, key):
+        raise NotImplementedError('This table is populated from matlab')
+
+    def load_masks(self, key):
+        d1, d2 = tuple(map(int, (ScanInfo() & key).fetch1['px_height', 'px_width']))
+
+        masks = np.zeros((d1, d2, len(SegmentMask() & key)))
+        for i, mask_dict in enumerate((SegmentMask() & key).fetch.as_dict()):
+            mask = np.zeros(d1 * d2)
+            mask[mask_dict['mask_pixels'].squeeze().astype(int) - 1] = mask_dict['mask_weights']
+
+            masks[..., i] = mask.reshape(d1, d2, order='F')
+        return masks
+
+    def plot_masks(self, key, savedir='./'):
+        if savedir[-1] != '/': savedir += '/'
+        masks = self.load_masks(key)
+
+        d1, d2, frames = masks.shape
+        xaxis, yaxis = np.arange(d2), np.arange(d1)
+        sns.set_style('white')
+        fig, ax = plt.subplots(figsize=(7,7), dpi=400)
+        y = np.arange(.2, 1, .2)
+        theCM = sns.blend_palette(['silver', 'steelblue', 'orange'], n_colors=len(y))  # plt.cm.RdBu_r
+        for cell in range(frames):
+            ma = masks[..., cell].ravel()
+            ma.sort()
+            cdf = ma.cumsum()
+            cdf = cdf / cdf[-1]
+            th = np.interp(y, cdf, ma)
+            ax.contour(xaxis, yaxis, masks[..., cell], th, colors=theCM)
+
+        ax.set_title(' '.join(['%s: %s' % (str(k), str(v)) for k,v in key.items()]), fontsize=16, fontweight='bold' )
+        ax.set_aspect(1)
+        ax.axis('tight')
+        ax.axis('off')
+        fig.savefig(savedir + '__'.join(['%s_%s' % (str(k), str(v)) for k,v in key.items()]) + '.png')
