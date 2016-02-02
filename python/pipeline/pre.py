@@ -1,21 +1,21 @@
+from warnings import warn
+
 import datajoint as dj
 from . import rf, trippy
-from djaddon import gitlog, hdf5
 import numpy as np
-import c2s
-import matplotlib.pyplot as plt
-import seaborn as sns
+try:
+    import c2s
+except:
+    warn("c2s was not found. You won't be able to populate ExtracSpikes")
 
 schema = dj.schema('pipeline_preprocessing', locals())
-
 
 @schema
 class SpikeInference(dj.Lookup):
     definition = ...
 
     def infer_spikes(self, X, dt):
-        method = self.fetch1['short_name']
-        assert method == 'stm', "Everything except 'stm' is computed in matlab"
+        assert self.fetch1['short_name'] == 'stm', "Everything except 'stm' is computed in matlab"
         fps = 1 / dt
         spike_rates = []
         for i, trace in enumerate(X):

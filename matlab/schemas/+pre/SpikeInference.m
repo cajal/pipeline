@@ -27,7 +27,8 @@ classdef SpikeInference < dj.Relvar
                     for i=1:size(X,2)
                         X(:,i) = fast_oopsi(double(X(:,i)),struct('dt',dt),struct('lambda',.01));
                     end
-                    
+                case 'stm'
+                    error 'This deconvolution is called from python'
                 otherwise
                     error 'not implemented yet'
             end
