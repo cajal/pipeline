@@ -12,6 +12,7 @@ classdef SpikeInference < dj.Relvar
             self.inserti({
                 1   'rectdiff'     'thresholded forward difference'
                 2   'fastoopsi'    'nonnegative sparse deconvolution from Vogelstein(2010)'
+                3   'stm'          'spike triggered mixture model from Theis et al. (2016)'
                 })
         end
         
