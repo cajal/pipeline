@@ -34,9 +34,8 @@ classdef SegmentMask < dj.Relvar
 
                     fprintf('Using max %i neurons\n',cfg.max_neurons);
 
-                    % downsample to two Hz
+                    % downsample to 2 Hz
                     stride = floor(fetch1(pre.ScanInfo & key, 'fps')/2);
-                    
                     
                     Y = squeeze(self.load_scan(key, stride));
 
@@ -123,14 +122,12 @@ classdef SegmentMask < dj.Relvar
             if nargin < 4
                 blockSize = min(maxT, 10000);
             end
-            
-            % get TIFF reader for key into rf.Scan
-            
-            % For compatibility with Piezo Z-scanning, get Z-slice keys for each scan
-            % For the case without the piezo, sliceKeys is the same as key, but adds primary key attribute VolumeSlice = 1
+        
             [r,c] = fetch1(pre.ScanInfo & key, 'px_height', 'px_width');
             
-            
+            fixRaster = get_fix_raster_fun(pre.AlignRaster & key);
+            fixMotion = get_fix_motion_fun(pre.AlignMotion & key);
+           
             scan = zeros(r,c, 1, maxT);
             
             h = hamming(2*stride+1);
@@ -141,10 +138,7 @@ classdef SegmentMask < dj.Relvar
                 frames = pointer:pointer+step-1;
                 fprintf('Reading frames %i:%i of maximally %i (video has %i frames)\n', ...
                     pointer, pointer + step - 1, maxT, reader.nframes);
-                
-                % TODO replace that with Dimitri's functions
-                tmp_scan = pre.load_corrected_block(key, reader, frames);
-                scan(:, :, 1, frames) = tmp_scan(:, :,1,:);
+                scan(:, :, 1, frames) = fixMotion(fixRaster(double(reader(:,:,:,:,frames))), frames);
                 pointer = pointer + step;
             end
             scan = convn(scan, h, 'same');
