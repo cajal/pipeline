@@ -19,7 +19,7 @@ class SpikeInference(dj.Lookup):
     definition = ...
 
     def infer_spikes(self, X, dt):
-        assert self.fetch1['short_name'] == 'stm', "Everything except 'stm' is computed in matlab"
+        assert self.fetch1['language'] == 'python', "This tuple cannot be computed in python."
         fps = 1 / dt
         spike_rates = []
         for i, trace in enumerate(X):
