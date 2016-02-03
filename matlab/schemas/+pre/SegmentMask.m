@@ -92,10 +92,10 @@ classdef SegmentMask < dj.Relvar
             
             % update spatial components
             [A,b] = update_spatial_components(Yr,C,f,A,P,options);
-            [C,f,Yr,P,S] = update_temporal_components(Yr,A,b,C,f,P,options);
+            [C,f,P,S] = update_temporal_components(Yr,A,b,C,f,P,options);
             % merge found components
             [A,C,~,~,P,S] = merge_components(Yr,A,b,C,f,P,S,options);
-            [A,~,~,~] = order_ROIs(A,C,S,P);    % order components
+            [A,~,~,~,~] = order_ROIs(A,C,S,P);    % order components
            
         end
         
@@ -108,7 +108,7 @@ classdef SegmentMask < dj.Relvar
         %  If blockSize is specified, the TIFF stack is loaded in chunks of blockSize. 
         %  Default is blockSize=10000. 
         %
-            reader = pre.getReader(key, '/tmp');
+            reader = pre.getReader(key, '~/cache');
             assert(reader.nslices == 1, 'schema only supports one slice at the moment');
             
             if nargin < 2

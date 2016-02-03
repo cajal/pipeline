@@ -61,7 +61,7 @@ class ExtractSpikes(dj.Computed):
     @property
     def populated_from(self):
         # Segment and SpikeInference will be in the workspace if they are in the database
-        return Segment() * SpikeInference() & dict(short_name='stm')
+        return Segment() * SpikeInference() & rf.Sync() & dict(language='python')
 
     def _make_tuples(self, key):
         self.insert1(key)
