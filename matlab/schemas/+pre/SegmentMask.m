@@ -35,7 +35,7 @@ classdef SegmentMask < dj.Relvar
                     fprintf('Using max %i neurons\n',cfg.max_neurons);
 
                     % downsample to 2 Hz
-                    stride = floor(fetch1(pre.ScanInfo & key, 'fps')/2);
+                    stride = floor(fetch1(pre.ScanInfo & key, 'fps')/cfg.downsample_to);
                     
                     Y = squeeze(self.load_scan(key, stride));
 
