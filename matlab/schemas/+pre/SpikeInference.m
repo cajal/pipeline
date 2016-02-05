@@ -12,6 +12,7 @@ classdef SpikeInference < dj.Relvar
             self.inserti({
                 1   'rectdiff'     'thresholded forward difference'
                 2   'fastoopsi'    'nonnegative sparse deconvolution from Vogelstein(2010)'
+                3   'stm'          'spike triggered mixture model from Theis et al. (2016)'
                 })
         end
         
@@ -26,7 +27,8 @@ classdef SpikeInference < dj.Relvar
                     for i=1:size(X,2)
                         X(:,i) = fast_oopsi(double(X(:,i)),struct('dt',dt),struct('lambda',.01));
                     end
-                    
+                case 'stm'
+                    error 'This deconvolution is called from python'
                 otherwise
                     error 'not implemented yet'
             end

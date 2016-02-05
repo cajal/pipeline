@@ -8,7 +8,7 @@ pre.ExtractSpikes (computed) #  inferences of spikes from calcium traces
 classdef ExtractSpikes < dj.Relvar & dj.AutoPopulate
 
 	properties
-		popRel = pre.Segment * pre.SpikeInference
+		popRel = pre.Segment * pre.SpikeInference & rf.Sync & struct('language','matlab')
 	end
 
 	methods(Access=protected)

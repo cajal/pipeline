@@ -18,6 +18,7 @@ classdef AlignMotion < dj.Relvar & dj.AutoPopulate
     methods
         function fun = get_fix_motion_fun(self)
             xy = self.fetch1('motion_xy');
+            size(xy)
             fun = @(frame, i) ne7.ip.correctMotion(frame, xy(:,i));
         end
     end
