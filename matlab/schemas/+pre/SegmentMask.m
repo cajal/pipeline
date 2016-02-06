@@ -138,7 +138,7 @@ classdef SegmentMask < dj.Relvar
                 frames = pointer:pointer+step-1;
                 fprintf('Reading frames %i:%i of maximally %i (video has %i frames)\n', ...
                     pointer, pointer + step - 1, maxT, reader.nframes);
-                scan(:, :, 1, frames) = fixMotion(fixRaster(double(reader(:,:,:,:,frames))), frames);
+                scan(:, :, 1, frames) = fixMotion(fixRaster(single(reader(:,:,:,:,frames))), frames);
                 pointer = pointer + step;
             end
             scan = convn(scan, h, 'same');

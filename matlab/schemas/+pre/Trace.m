@@ -47,7 +47,7 @@ classdef Trace < dj.Relvar & dj.AutoPopulate
                 if ismember(iframe,[1 10 100 500 1000 5000 nframes]) || mod(iframe,10000)==0
                     fprintf('Frame %5d/%d  %4.1fs\n', iframe, nframes, toc);
                 end                
-                frame = fixMotion(fixRaster(double(reader(:,:,:,:,iframe))), iframe);
+                frame = fixMotion(fixRaster(single(reader(:,:,:,:,iframe))), iframe);
                 traces(iframe, :) = cellfun(@(pixels,weights) mean(frame(pixels).*weights), pixels, weights);
             end
             
