@@ -28,7 +28,7 @@ classdef Sync < dj.Relvar & dj.AutoPopulate
                 packetLen = dat.analogPacketLen;
             end
             datT = patch.utils.ts2sec(dat.ts, packetLen);
-            dt = median(diff(datT));
+            dt = median(diff(datT));r
             fs=1/dt;
             n = ceil(0.0002/dt);
             k = hamming(2*n);

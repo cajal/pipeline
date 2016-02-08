@@ -21,8 +21,8 @@ classdef Trace < dj.Relvar & dj.AutoPopulate
             for key = fetch(pre.Segment & self)'
                 X = fetchn(self & key, 'ca_trace');
                 X = [X{:}];
-                t = fetch1(pre.Sync & key, 'frame_times');
-                X = bsxfun(@rdivide,X,mean(X));
+                t = fetch1(rf.Sync & key, 'frame_times');
+                X = bsxfun(@plus,bsxfun(@rdivide,X,mean(X))/2,1:size(X,2));
                 plot(t-t(1),X)
             end
         end
