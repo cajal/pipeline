@@ -10,7 +10,8 @@ classdef Segment < dj.Relvar & dj.AutoPopulate
     
     properties
         popRel  = pro(pre.AlignMotion*pre.SegmentMethod) ...
-            & (pre.ManualSegment*pre.SegmentMethod & 'method_name = "manual"') % | pre.SegmentMethod & 'method_name = "nmf"');
+            & (pre.ManualSegment*pre.SegmentMethod & 'method_name = "manual"' | ...
+               pre.NMFSettings*pre.SegmentMethod & 'method_name = "nmf"');
     end
     
     methods(Access=protected)

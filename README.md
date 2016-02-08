@@ -5,6 +5,7 @@
 
 **Matlab specific**
 * [ca_source_extraction](https://github.com/epnev/ca_source_extraction)
+* [TIFFStack](https://github.com/DylanMuir/TIFFStack)
 
 **Python specific**
 * [DataJoint-AddOns](https://github.com/datajoint/datajoint-addons)
