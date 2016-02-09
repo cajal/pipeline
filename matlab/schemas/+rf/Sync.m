@@ -28,7 +28,7 @@ classdef Sync < dj.Relvar & dj.AutoPopulate
                 packetLen = dat.analogPacketLen;
             end
             datT = patch.utils.ts2sec(dat.ts, packetLen);
-            dt = median(diff(datT));r
+            dt = median(diff(datT));
             fs=1/dt;
             n = ceil(0.0002/dt);
             k = hamming(2*n);
@@ -105,27 +105,15 @@ classdef Sync < dj.Relvar & dj.AutoPopulate
             if quantile(abs(visFlipTime - visTime(pDiodeFlipInd)),0.9) > .01
                 warning('Incorrectly detected flips (%f), skipping...',...
                     quantile(abs(visFlipTime - visTime(pDiodeFlipInd)),0.9))
-                key
+                disp(key)
                 return
             end
-
-%%
             
             pulses = conv(dat.scanImage,k,'same');
             peaks = ne7.dsp.spaced_max(pulses, 0.005/dt);
             peaks = peaks(pulses(peaks) > 0.1*quantile(pulses(peaks),0.9));
-            peaks = longestContiguousBlock(peaks);
-            
-            [requestedFrames, recordedFrames] = ...
-                fetch1(rf.ScanInfo * rf.Align & key, 'nframes_requested*nslices->n1', 'nframes*nslices->n2');
-            
-            assert(ismember(length(peaks), [requestedFrames, recordedFrames]),...
-                'Could not detect frame pulses')
-            
-            nSlices = fetch1(rf.ScanInfo & key,'nslices');
-            peaks = peaks(1:nSlices:end);  % keep only the first slice's times
+            peaks = longestContiguousBlock(peaks);                        
             tuple.frame_times = visTime(peaks);
-            
             self.insert(tuple)
         end
     end
