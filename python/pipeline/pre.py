@@ -50,8 +50,11 @@ class Spikes(dj.Computed):
         """)
 
     def make_tuples(self, key):
-        times = (rf.Sync() & key).fetch1['frame_times']
-        dt = np.median(np.diff(times))
+
+        times = (rf.Sync() & key).fetch1['frame_times'].squeeze()
+        nslices = (ScanInfo() & key).fetch1['nslices']
+        slice_no = key['slice'] - 1
+        dt = np.median(np.diff(times[slice_no::nslices]))
         X = (Trace() & key).project('ca_trace').fetch.as_dict()
         X = (SpikeInference() & key).infer_spikes(X, dt)
         for x in X:
