@@ -1,8 +1,6 @@
 from scipy import ndimage
 from warnings import warn
-
 from sklearn.metrics import roc_curve
-
 import datajoint as dj
 from . import rf, trippy
 import numpy as np
@@ -50,7 +48,6 @@ class Spikes(dj.Computed):
         """)
 
     def make_tuples(self, key):
-
         times = (rf.Sync() & key).fetch1['frame_times'].squeeze()
         nslices = (ScanInfo() & key).fetch1['nslices']
         slice_no = key['slice'] - 1
@@ -87,7 +84,7 @@ class Segment(dj.Imported):
 
         masks = np.zeros((d2, d1, len(SegmentMask() & key)))
         for i, mask_dict in enumerate((SegmentMask() & key).fetch.as_dict()):
-            mask = np.zeros(d1 * d2,)
+            mask = np.zeros(d1 * d2, )
             mask[mask_dict['mask_pixels'].squeeze().astype(int) - 1] = mask_dict['mask_weights'].squeeze()
             masks[..., i] = mask.reshape(d2, d1, order='F')
         return masks
@@ -98,12 +95,12 @@ class Segment(dj.Imported):
         y = np.arange(.2, 1, .2)
         theCM = sns.blend_palette(['silver', 'steelblue', 'orange'], n_colors=len(y))  # plt.cm.RdBu_r
 
-
-        for key in (self.project()*SegmentMethod() - dict(method_name='manual') & ManualSegment().project()).fetch.as_dict:
+        for key in (self.project() * SegmentMethod() - dict(
+                method_name='manual') & ManualSegment().project()).fetch.as_dict:
             with sns.axes_style('white'):
-                fig, ax = plt.subplots(figsize=(8,8))
-            ground_truth = (ManualSegment() & key).fetch1['mask'].T # TODO: remove .T once djbug #191 is fixed
-            template = (ScanCheck() & key).fetch1['template'].T # TODO: remove .T once djbug #191 is fixed
+                fig, ax = plt.subplots(figsize=(8, 8))
+            ground_truth = (ManualSegment() & key).fetch1['mask'].T  # TODO: remove .T once djbug #191 is fixed
+            template = (ScanCheck() & key).fetch1['template'].T  # TODO: remove .T once djbug #191 is fixed
 
             masks = self.load_masks(key)
             frames = masks.shape[2]
@@ -130,14 +127,16 @@ class Segment(dj.Imported):
         sns.set_context('notebook')
 
         with sns.axes_style('whitegrid'):
-            fig, ax = plt.subplots(figsize=(8,8))
-        for key in (self.project()*SegmentMethod() - dict(method_name='manual') & ManualSegment().project()).fetch.as_dict:
-            ground_truth = (ManualSegment() & key).fetch1['mask'].T # TODO: remove .T once djbug #191 is fixed
+            fig, ax = plt.subplots(figsize=(8, 8))
+        for key in (self.project() * SegmentMethod() - dict(
+                method_name='manual') & ManualSegment().project()).fetch.as_dict:
+            ground_truth = (ManualSegment() & key).fetch1['mask'].T  # TODO: remove .T once djbug #191 is fixed
             masks = self.load_masks(key)
             masks /= masks.sum(axis=0).sum(axis=0)[None, None, :]
             masks = masks.max(axis=2)
             fpr, tpr, _ = roc_curve(ground_truth.ravel(), masks.ravel())
-            ax.plot(fpr, tpr, label="animal_id {animal_id}:session {session}:scan_idx {scan_idx}:{method_name}".format(**key))
+            ax.plot(fpr, tpr,
+                    label="animal_id {animal_id}:session {session}:scan_idx {scan_idx}:{method_name}".format(**key))
             ax.set_xlabel('false positives rate')
             ax.set_ylabel('true positives rate')
             ax.legend(loc='lower right')
