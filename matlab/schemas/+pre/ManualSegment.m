@@ -1,6 +1,6 @@
 %{
 pre.ManualSegment (imported) # manual 2d cell segmentation$
--> pre.AlignRaster
+-> pre.AlignMotion
 ---
 mask                        : longblob                      # binary 4-connected mask image segmenting the aligned image
 segment_ts=CURRENT_TIMESTAMP: timestamp                     # automatic
@@ -11,14 +11,13 @@ segment_ts=CURRENT_TIMESTAMP: timestamp                     # automatic
 classdef ManualSegment < dj.Relvar & dj.AutoPopulate
     
     properties
-        popRel  = pre.AlignRaster
+        popRel  = pre.AlignMotion
     end
     
     methods(Access=protected)
         
         function makeTuples(self, key)
-            fixRaster = get_fix_raster_fun(pre.AlignRaster & key);
-            template = fixRaster(fetch1(pre.ScanCheck & key, 'template'));
+            template = fetch1(pre.AlignMotion & key, 'avg_frame');
             template = template - min(template(:));
             template = template / max(template(:));
             bw = pre.ManualSegment.outlineCells(template, false(size(template)));

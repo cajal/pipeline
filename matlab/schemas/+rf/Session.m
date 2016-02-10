@@ -13,6 +13,7 @@ anesthesia="awake"          : enum('isoflurane','fentanyl','awake') # per protoc
 craniotomy_notes            : varchar(4095)                 # free-text notes
 session_notes               : varchar(4095)                 # free-text notes
 session_ts=CURRENT_TIMESTAMP: timestamp                     # automatic
+INDEX(lens)
 %}
 
 classdef Session < dj.Relvar
