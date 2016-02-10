@@ -1,10 +1,14 @@
+from scipy import ndimage
 from warnings import warn
+
+from sklearn.metrics import roc_curve
 
 import datajoint as dj
 from . import rf, trippy
 import numpy as np
 from matplotlib import pyplot as plt
 import seaborn as sns
+from pprint import pprint
 
 try:
     import c2s
@@ -64,6 +68,8 @@ class ExtractSpikes(dj.Computed):
         return Segment() * SpikeInference() & rf.Sync() & dict(language='python')
 
     def _make_tuples(self, key):
+        print('Populating: ')
+        pprint(key)
         self.insert1(key)
         Spikes().make_tuples(key)
 
@@ -78,43 +84,59 @@ class Segment(dj.Imported):
     def load_masks(self, key):
         d1, d2 = tuple(map(int, (ScanInfo() & key).fetch1['px_height', 'px_width']))
 
-        masks = np.zeros((d1, d2, len(SegmentMask() & key)))
+        masks = np.zeros((d2, d1, len(SegmentMask() & key)))
         for i, mask_dict in enumerate((SegmentMask() & key).fetch.as_dict()):
-            mask = np.zeros(d1 * d2)
-            mask[mask_dict['mask_pixels'].squeeze().astype(int) - 1] = mask_dict['mask_weights']
-
-            masks[..., i] = mask.reshape(d1, d2, order='F')
+            mask = np.zeros(d1 * d2,)
+            mask[mask_dict['mask_pixels'].squeeze().astype(int) - 1] = mask_dict['mask_weights'].squeeze()
+            masks[..., i] = mask.reshape(d2, d1, order='F')
         return masks
 
-    def plot_masks(self, key, savedir='./'):
-        """
-        Plot the segmentation masks
+    def plot_masks_vs_manual(self):
 
-        :param key:
-        :param savedir:
-        """
-        assert (self * SegmentMethod() & key).fetch1['method_name'] == 'nmf', \
-                            "Only work for nmf segmentation at the moment"
-
-        if savedir[-1] != '/': savedir += '/'
-        masks = self.load_masks(key)
-
-        d1, d2, frames = masks.shape
-        xaxis, yaxis = np.arange(d2), np.arange(d1)
-        sns.set_style('white')
-        fig, ax = plt.subplots(figsize=(7, 7), dpi=400)
+        sns.set_context('notebook')
         y = np.arange(.2, 1, .2)
         theCM = sns.blend_palette(['silver', 'steelblue', 'orange'], n_colors=len(y))  # plt.cm.RdBu_r
-        for cell in range(frames):
-            ma = masks[..., cell].ravel()
-            ma.sort()
-            cdf = ma.cumsum()
-            cdf = cdf / cdf[-1]
-            th = np.interp(y, cdf, ma)
-            ax.contour(xaxis, yaxis, masks[..., cell], th, colors=theCM)
 
-        ax.set_title(' '.join(['%s: %s' % (str(k), str(v)) for k, v in key.items()]), fontsize=8, fontweight='bold')
-        ax.set_aspect(1)
-        ax.axis('tight')
-        ax.axis('off')
-        fig.savefig(savedir + '__'.join(['%s_%s' % (str(k), str(v)) for k, v in key.items()]) + '.png')
+
+        for key in (self.project()*SegmentMethod() - dict(method_name='manual') & ManualSegment().project()).fetch.as_dict:
+            with sns.axes_style('white'):
+                fig, ax = plt.subplots(figsize=(8,8))
+            ground_truth = (ManualSegment() & key).fetch1['mask'].T # TODO: remove .T once djbug #191 is fixed
+            template = (ScanCheck() & key).fetch1['template'].T # TODO: remove .T once djbug #191 is fixed
+
+            masks = self.load_masks(key)
+            frames = masks.shape[2]
+
+            for cell in range(frames):
+                ma = masks[..., cell].ravel()
+                ma.sort()
+                cdf = ma.cumsum()
+                cdf = cdf / cdf[-1]
+                th = np.interp(y, cdf, ma)
+                ax.contour(masks[..., cell], th, colors=theCM)
+
+            ax.imshow(template, cmap=plt.cm.gray)
+            ax.contour(ground_truth, [.5], colors='deeppink')
+            ax.set_title("animal_id {animal_id}:session {session}:scan_idx {scan_idx}:{method_name}".format(**key))
+            fig.tight_layout()
+
+    def plot_ROC_curves(self):
+        """
+        Takes all masks from an NMF segmentation, L1 normalizes them, computes a MAX image from it and uses that to
+        plot and ROC curve using the manual segmentations as ground truth.
+        """
+
+        sns.set_context('notebook')
+
+        with sns.axes_style('whitegrid'):
+            fig, ax = plt.subplots(figsize=(8,8))
+        for key in (self.project()*SegmentMethod() - dict(method_name='manual') & ManualSegment().project()).fetch.as_dict:
+            ground_truth = (ManualSegment() & key).fetch1['mask'].T # TODO: remove .T once djbug #191 is fixed
+            masks = self.load_masks(key)
+            masks /= masks.sum(axis=0).sum(axis=0)[None, None, :]
+            masks = masks.max(axis=2)
+            fpr, tpr, _ = roc_curve(ground_truth.ravel(), masks.ravel())
+            ax.plot(fpr, tpr, label="animal_id {animal_id}:session {session}:scan_idx {scan_idx}:{method_name}".format(**key))
+            ax.set_xlabel('false positives rate')
+            ax.set_ylabel('true positives rate')
+            ax.legend(loc='lower right')
