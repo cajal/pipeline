@@ -31,7 +31,7 @@ class SpikeInference(dj.Lookup):
             trace['fps'] = fps
 
             data = c2s.preprocess([trace], fps=fps)
-            data = c2s.predict(data)
+            data = c2s.predict(data, verbosity=0)
             data[0]['spike_trace'] = data[0].pop('predictions').T
             data[0].pop('calcium')
             data[0].pop('fps')
@@ -68,8 +68,6 @@ class ExtractSpikes(dj.Computed):
         return Segment() * SpikeInference() & rf.Sync() & dict(language='python')
 
     def _make_tuples(self, key):
-        print('Populating: ')
-        pprint(key)
         self.insert1(key)
         Spikes().make_tuples(key)
 
