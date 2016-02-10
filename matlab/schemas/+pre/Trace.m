@@ -21,8 +21,8 @@ classdef Trace < dj.Relvar & dj.AutoPopulate
             for key = fetch(pre.Segment & self)'
                 X = fetchn(self & key, 'ca_trace');
                 X = [X{:}];
-                t = fetch1(pre.Sync & key, 'frame_times');
-                X = bsxfun(@rdivide,X,mean(X));
+                t = fetch1(rf.Sync & key, 'frame_times');
+                X = bsxfun(@plus,bsxfun(@rdivide,X,mean(X))/2,1:size(X,2));
                 plot(t-t(1),X)
             end
         end
@@ -40,14 +40,13 @@ classdef Trace < dj.Relvar & dj.AutoPopulate
             ntraces = length(pixels);
             
             reader = pre.getReader(key, '~/cache');
-            assert(reader.nslices == 1, 'deal with slices later')
             nframes = reader.nframes;
             traces = nan(nframes, ntraces, 'single');
             for iframe=1:nframes
                 if ismember(iframe,[1 10 100 500 1000 5000 nframes]) || mod(iframe,10000)==0
                     fprintf('Frame %5d/%d  %4.1fs\n', iframe, nframes, toc);
                 end                
-                frame = fixMotion(fixRaster(double(reader(:,:,:,:,iframe))), iframe);
+                frame = fixMotion(fixRaster(double(reader(:,:,1,key.slice,iframe))), iframe);
                 traces(iframe, :) = cellfun(@(pixels,weights) mean(frame(pixels).*weights), pixels, weights);
             end
             

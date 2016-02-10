@@ -12,7 +12,7 @@ classdef SegmentMask < dj.Relvar
         
         function makeTuples(self, key)
             switch fetch1(pre.SegmentMethod & key,'method_name')
-                %% manual segmentation
+                % manual segmentation
                 case 'manual'
                     mask = fetch1(pre.ManualSegment & key, 'mask');
                     regions = regionprops(bwlabel(mask, 4),'PixelIdxList'); %#ok<MRPBW>
@@ -22,7 +22,7 @@ classdef SegmentMask < dj.Relvar
                     [tuples.mask_weights] = deal(1);
                     
                     self.insert(tuples)
-                %% NMF segmentation
+                % NMF segmentation
                 case 'nmf' 
                     cfg = fetch(pre.NMFSettings & key,'*');
                     
@@ -79,14 +79,14 @@ classdef SegmentMask < dj.Relvar
                 'merge_thr',cfg.merge_thr,...
                 'se', strel('disk',cfg.se,0) ...
                 );
-            %% Data pre-processing
+            % Data pre-processing
             
             [P,Y] = preprocess_data(Y,p);
             
-            %% fast initialization of spatial components using greedyROI and HALS
+            % fast initialization of spatial components using greedyROI and HALS
             [A,C,~,f] = initialize_components(Y,K,tau,options);  % initialize
             
-            %% update spatial and temporal components
+            % update spatial and temporal components
             Yr = reshape(Y,d,T);
             clear Y;
             
