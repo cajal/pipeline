@@ -33,7 +33,7 @@ classdef SegmentMask < dj.Relvar
                     fprintf('Using max %i neurons\n',cfg.max_neurons);
                     stride = floor(fetch1(pre.ScanInfo & key, 'fps')/cfg.downsample_to);
                     
-                    fprintf('Processing slice %i/%i\n',slice, nslices);
+                    fprintf('Processing slice %i/%i\n',key.slice, nslices);
                     
                     Y = squeeze(self.load_scan(key, stride));
                     
@@ -106,7 +106,6 @@ classdef SegmentMask < dj.Relvar
         %  Default is blockSize=10000. 
         %
             reader = pre.getReader(key, '~/cache');
-            assert(reader.nslices == 1, 'schema only supports one slice at the moment');
             channel = 1;
             
             if nargin < 2
