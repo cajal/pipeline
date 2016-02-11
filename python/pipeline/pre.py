@@ -15,12 +15,17 @@ except:
 
 schema = dj.schema('pipeline_preprocessing', locals())
 
+def normalize(img):
+    return (img - img.min())/(img.max()-img.min())
+
+def bugfix_reshape(a):
+    return a.ravel(order='C').reshape(a.shape, order='F')
 
 @schema
 class SpikeInference(dj.Lookup):
     definition = ...
 
-    def infer_spikes(self, X, dt):
+    def     infer_spikes(self, X, dt):
         assert self.fetch1['language'] == 'python', "This tuple cannot be computed in python."
         fps = 1 / dt
         spike_rates = []
@@ -79,15 +84,18 @@ class Segment(dj.Imported):
     def _make_tuples(self, key):
         raise NotImplementedError('This table is populated from matlab')
 
-    def load_masks(self, key):
+    def load_masks_with_traces(self, key):
         d1, d2 = tuple(map(int, (ScanInfo() & key).fetch1['px_height', 'px_width']))
 
         masks = np.zeros((d2, d1, len(SegmentMask() & key)))
-        for i, mask_dict in enumerate((SegmentMask() & key).fetch.as_dict()):
+        traces = []
+
+        for i, mask_dict in enumerate((SegmentMask()*Trace() & key).fetch.as_dict()):
             mask = np.zeros(d1 * d2, )
             mask[mask_dict['mask_pixels'].squeeze().astype(int) - 1] = mask_dict['mask_weights'].squeeze()
             masks[..., i] = mask.reshape(d2, d1, order='F')
-        return masks
+            traces.append(mask_dict['ca_trace'].squeeze())
+        return masks, traces
 
     def plot_masks_vs_manual(self):
 
@@ -99,10 +107,14 @@ class Segment(dj.Imported):
                 method_name='manual') & ManualSegment().project()).fetch.as_dict:
             with sns.axes_style('white'):
                 fig, ax = plt.subplots(figsize=(8, 8))
-            ground_truth = (ManualSegment() & key).fetch1['mask'].T  # TODO: remove .T once djbug #191 is fixed
-            template = (ScanCheck() & key).fetch1['template'].T  # TODO: remove .T once djbug #191 is fixed
 
-            masks = self.load_masks(key)
+
+            ground_truth = bugfix_reshape((ManualSegment() & key).fetch1['mask'])   # TODO: remove bugfix_reshape once djbug #191 is fixed
+
+            template = np.stack([normalize(bugfix_reshape(t)[..., key['slice']-1].squeeze())
+                                 for t in (ScanCheck() & key).fetch['template']], axis=2).mean(axis=2) # TODO: remove bugfix_reshape once djbug #191 is fixed
+
+            masks,_ = self.load_masks_with_traces(key)
             frames = masks.shape[2]
 
             for cell in range(frames):
@@ -115,8 +127,42 @@ class Segment(dj.Imported):
 
             ax.imshow(template, cmap=plt.cm.gray)
             ax.contour(ground_truth, [.5], colors='deeppink')
-            ax.set_title("animal_id {animal_id}:session {session}:scan_idx {scan_idx}:{method_name}".format(**key))
+            ax.set_title("animal_id {animal_id}:session {session}:scan_idx {scan_idx}:{method_name}:slice{slice}".format(**key))
             fig.tight_layout()
+
+    def plot_single_ROIs(self, outdir='./'):
+        sns.set_context('notebook')
+        theCM = sns.blend_palette(['lime', 'gold', 'deeppink'], n_colors=10)  # plt.cm.RdBu_r
+
+        for key in (self.project() * SegmentMethod() - dict(
+                method_name='manual') & ManualSegment().project()).fetch.as_dict:
+
+            ground_truth = bugfix_reshape((ManualSegment() & key).fetch1['mask'])   # TODO: remove bugfix_reshape once djbug #191 is fixed
+
+            template = np.stack([normalize(bugfix_reshape(t)[..., key['slice']-1].squeeze())
+                                 for t in (ScanCheck() & key).fetch['template']], axis=2).mean(axis=2) # TODO: remove bugfix_reshape once djbug #191 is fixed
+
+            masks, traces = self.load_masks_with_traces(key)
+
+            gs = plt.GridSpec(5,1)
+            for cell, trace in enumerate(traces):
+                with sns.axes_style('white'):
+                    fig = plt.figure()
+                    ax_image = fig.add_subplot(gs[1:,:])
+
+                with sns.axes_style('ticks'):
+                    ax_trace = fig.add_subplot(gs[0,:])
+                ax_trace.plot(trace,'k')
+
+                ax_image.imshow(template, cmap=plt.cm.gray)
+                ax_image.contour(masks[..., cell], colors=theCM, zorder=10    )
+                sns.despine(ax=ax_trace)
+                ax_trace.axis('tight')
+                fig.suptitle("animal_id {animal_id}:session {session}:scan_idx {scan_idx}:{method_name}:slice{slice}".format(**key))
+                fig.tight_layout()
+                plt.savefig("cell{cell}_animal_id_{animal_id}_session_{session}_scan_idx_{scan_idx}_{method_name}_slice_{slice}".format(cell=cell, **key))
+                plt.close(fig)
+
 
     def plot_ROC_curves(self):
         """
@@ -130,13 +176,13 @@ class Segment(dj.Imported):
             fig, ax = plt.subplots(figsize=(8, 8))
         for key in (self.project() * SegmentMethod() - dict(
                 method_name='manual') & ManualSegment().project()).fetch.as_dict:
-            ground_truth = (ManualSegment() & key).fetch1['mask'].T  # TODO: remove .T once djbug #191 is fixed
-            masks = self.load_masks(key)
+            ground_truth = bugfix_reshape((ManualSegment() & key).fetch1['mask'])   # TODO: remove bugfix_reshape once djbug #191 is fixed
+            masks, _ = self.load_masks_with_traces(key)
             masks /= masks.sum(axis=0).sum(axis=0)[None, None, :]
             masks = masks.max(axis=2)
             fpr, tpr, _ = roc_curve(ground_truth.ravel(), masks.ravel())
             ax.plot(fpr, tpr,
-                    label="animal_id {animal_id}:session {session}:scan_idx {scan_idx}:{method_name}".format(**key))
+                    label="animal_id {animal_id}:session {session}:scan_idx {scan_idx}:{method_name}:slice{slice}".format(**key))
             ax.set_xlabel('false positives rate')
             ax.set_ylabel('true positives rate')
             ax.legend(loc='lower right')
