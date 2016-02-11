@@ -154,16 +154,3 @@ class EyeFrame(dj.Computed):
         pupil_r_major_std           : float                         # pupil radius major axis std
         pupil_angle_std             : float                         # angle of major axis vs. horizontal axis in radians
         """
-
-@schema
-class PandasEx(dj.Manual):
-    definition = """
-    # dummy table
-    idx  : int
-    ---
-    val  : double
-    """
-
-
-# from microns.trk import EyeFrame
-# EyeFrame().populate(restriction=dict(animal_id=2055, group_name='setup_jake'))
