@@ -15,7 +15,8 @@ classdef Spikes < dj.Relvar
                 X = [X{:}];
                 t = fetch1(rf.Sync & key, 'frame_times');
                 X = bsxfun(@plus,bsxfun(@rdivide,X,mean(X))/40,1:size(X,2));
-                plot(t(1:4:end)-t(1),X)
+                nslices = fetch1(pre.StackInfo & key, 'nslices'); 
+                plot(t(1:nslices:end)-t(1),X)
             end
         end
         
