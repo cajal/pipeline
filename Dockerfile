@@ -30,4 +30,3 @@ RUN \
 RUN \
   git clone https://github.com/cajal/pipeline && \
   pip install pipeline/python/
-
