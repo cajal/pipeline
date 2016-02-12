@@ -29,8 +29,8 @@ classdef RF < dj.Relvar & dj.AutoPopulate
                 for i=1:size(map,3)
                     try
                         im = reshape(cmap(map(:,:,i),:),[size(map,1) size(map,2) 3]);
-                        f = sprintf('~/dump/trippy%u-%d-%d.%03d_%02d.png', ...
-                            key.spike_inference, key.animal_id, key.scan_idx, key.mask_id, i);
+                        f = sprintf('~/dump/trippy%u-%d-%d-%u.%03d_%02d.png', ...
+                            key.spike_inference, key.animal_id, key.scan_idx, key.slice, key.mask_id, i);
                         imwrite(im,f,'png')
                     catch err
                         disp(err)
@@ -50,6 +50,8 @@ classdef RF < dj.Relvar & dj.AutoPopulate
             
             disp 'loading traces...'
             caTimes = fetch1(rf.Sync & key, 'frame_times');
+            nslices = fetch1(pre.ScanInfo & key, 'nslices');
+            caTimes = caTimes(key.slice:nslices:end);
             dt = median(diff(caTimes));
             [X, traceKeys] = fetchn(pre.Spikes & key, 'spike_trace');
             X = [X{:}];
