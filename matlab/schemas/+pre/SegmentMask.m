@@ -24,7 +24,7 @@ classdef SegmentMask < dj.Relvar
                     self.insert(tuples)
                     % NMF segmentation
                 case 'nmf'
-                    cfg = fetch(pre.NMFSettings & 'name="more_iterations"','*');
+                    cfg = fetch(pre.NMFSettings & 'name="default"','*');
                     nslices = fetch1(pre.ScanInfo & key, 'nslices');
                     
                     [um_width, um_height] = fetch1(pre.ScanInfo & key, 'um_width', 'um_height');
