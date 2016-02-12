@@ -23,7 +23,8 @@ classdef Trace < dj.Relvar & dj.AutoPopulate
                 X = [X{:}];
                 t = fetch1(rf.Sync & key, 'frame_times');
                 X = bsxfun(@plus,bsxfun(@rdivide,X,mean(X))/2,1:size(X,2));
-                plot(t-t(1),X)
+                nslices = fetch1(pre.ScanInfo & key, 'nslices');
+                plot(t(1:nslices:end)-t(1),X)
             end
         end
         
