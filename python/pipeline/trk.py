@@ -1,10 +1,12 @@
 import datajoint as dj
 
-# import pandas as pd
+import pandas as pd
+
 schema = dj.schema('pipeline_pupiltracking', locals())
 from . import rf
 import numpy as np
 import os
+from IPython import embed
 
 
 @schema
@@ -40,6 +42,17 @@ class SVM(dj.Lookup):
 
 
 @schema
+class ROI(dj.Manual):
+    definition = """
+    # table that stores the correct ROI of the Eye in the video
+    ->rf.Eye
+    x_roi                     : int                         # x coordinate of roi
+    y_roi                     : int                         # y coordinate of roi
+    ---
+    """
+
+
+@schema
 class EyeFrame(dj.Computed):
     definition = """
     # eye tracking info for each frame of a movie
@@ -71,19 +84,23 @@ class EyeFrame(dj.Computed):
         x_roi = (roi[0][0] + roi[0][2]) / 2 - patch_size / 2
         x_roi = 275 - patch_size / 2
         y_roi = 675 - patch_size / 2
-        print(x_roi, y_roi)
+        x_roi = (ROI() & key).fetch1['x_roi']
+        y_roi = (ROI() & key).fetch1['y_roi']
+        print("ROI used for video = ", x_roi, y_roi)
         efd = EyeFrame.EyeFrameDetected()
 
         # Code to do tracking
+        from IPython import embed
+        # embed()
 
         # print(key)
         kk = key['animal_id']
         si = key['scan_idx']
         # svm="/media/lab/users/jagrawal/global_svm/svm_version2/svm"
         out = "/media/lab/users/jagrawal/global_svm/151123/m7199A9eyetracking/out"
-        video = "m" + str(kk) + "A" + str(si) + "eyetracking"
+        video = "m" + str(kk) + "A" + str(si) + "*"
         command = "find /media/scratch01/WholeCell/jake/* -name " + video + ".avi"
-        # print(command)
+        print(command)
         video_path = os.popen(command).read()
         video_path = video_path.strip(' \n\t')
         # print("video_path=",video_path)
@@ -103,8 +120,8 @@ class EyeFrame(dj.Computed):
                 if (svm_path.find('no_SVM') + 1):
                     # print("if")
                     command = "cd " + folder + "/" + video + "; python2 /media/lab/users/jagrawal/Pupil-tracking/track_without_SVM.py " + str(
-                        int(x_roi)) + " " + str(int(y_roi)) + " " + video_path + " -P " + str(
-                        int(patch_size)) + "; cd ../.."
+                            int(x_roi)) + " " + str(int(y_roi)) + " " + video_path + " -P " + str(
+                            int(patch_size)) + "; cd ../.."
                 else:
                     # print("else")
                     command = "cd " + folder + "/" + video + "; python2 /media/lab/users/jagrawal/Pupil-tracking/track.py " + out + " " + svm_path + " " + video_path + "; cd ../.."
@@ -115,28 +132,19 @@ class EyeFrame(dj.Computed):
                     os.system(command)
 
                 # CODE to insert data after tracking
-                # NOTE: Text parsing will change to pandas database
-                for i, line in enumerate(open(str(folder + '/' + video + "/trace.txt"))):
-                    key['frame'] = i + 1
+                df = pd.read_csv(str(folder + '/' + video + "/trace.csv"))
+                for index, data in df.iterrows():
+                    key['frame'] = index + 1
                     self.insert1(key)
-                    if 'NONE' not in line:
-                        sub_key = dict(key)
-                        words = line.split()
-                        sub_key['pupil_x'] = float(words[0].split('=')[1])
-                        sub_key['pupil_y'] = float(words[1].split('=')[1])
-                        sub_key['pupil_r_minor'] = float(words[2].split('=')[1])
-                        sub_key['pupil_r_major'] = float(words[3].split('=')[1])
-                        sub_key['pupil_angle'] = float(words[4].split('=')[1])
-                        sub_key['pupil_x_std'] = float(words[9].split('=')[1])
-                        sub_key['pupil_y_std'] = float(words[10].split('=')[1])
-                        sub_key['pupil_r_minor_std'] = float(words[11].split('=')[1])
-                        sub_key['pupil_r_major_std'] = float(words[12].split('=')[1])
-                        sub_key['pupil_angle_std'] = float(words[13].split('=')[1])
-                        efd.insert1(sub_key)
+                    if pd.notnull(data['pupil_x']):
+                        values = data.to_dict()
+                        values.update(key)
+                        efd.insert1(values)
+
+                        # efd.insert([e.to_dict() for _, e in df.iterrows()])
+
         else:
             print("Video not found")
-
-
 
     class EyeFrameDetected(dj.Part):
         definition = """
@@ -150,20 +158,157 @@ class EyeFrame(dj.Computed):
         pupil_angle                 : float                         # angle of major axis vs. horizontal axis in radians
         pupil_x_std                 : float                         # pupil x position std
         pupil_y_std                 : float                         # pupil y position std
-        pupil_r_minor_std           : float                         # pupil radius minor axis std
+        pupil_r_minor_std            : float                         # pupil radius minor axis std
         pupil_r_major_std           : float                         # pupil radius major axis std
         pupil_angle_std             : float                         # angle of major axis vs. horizontal axis in radians
+        intensity_std               : float                         # standard deviation of the ROI pixel values
         """
 
+
 @schema
-class PandasEx(dj.Manual):
+class EyeFrameDetectedSanity(dj.Computed):
     definition = """
-    # dummy table
-    idx  : int
-    ---
-    val  : double
+    # to filter out noisy frames
+    # this class exists only for non-noisy frames
+    -> EyeFrame.EyeFrameDetected
+
     """
 
+    @property
+    def populated_from(self):
+        return rf.Eye()
+
+    def _make_tuples(self, key):
+        print("Key = ", key)
+        i = (EyeFrame.EyeFrameDetected() & key).fetch['intensity_std']
+        rejected_intensity = np.where(i < np.percentile(i, 50) / 2)
+
+        i = (EyeFrame.EyeFrameDetected() & key).fetch['pupil_x']
+        rejected_spikes = np.where(abs(i-np.mean(i) > 10*np.std(i)))
+
+        rejected_ransac_x=np.asarray([])
+        # i = (EyeFrame.EyeFrameDetected() & key).fetch['pupil_x_std']
+        # rejected_ransac_x = np.where(i > 1)
+
+        rejected_ransac_y = np.asarray([])
+        # i = (EyeFrame.EyeFrameDetected() & key).fetch['pupil_y_std']
+        # rejected_ransac_y = np.where(i >i)
+
+        rej = np.concatenate([rejected_intensity,rejected_spikes, rejected_ransac_x, rejected_ransac_y])
+
+        # remove these indexes and get the valid frames
+        # change the decision parameter video per video basis
+
+
+        # rejected_noise = []
+        # for frame_key in (EyeFrame.EyeFrameDetected() & key).project().fetch.as_dict:
+        #     #embed()
+        #     if int(frame_key['frame']) is 1:
+        #         last_pos = (EyeFrame.EyeFrameDetected() & frame_key).fetch['pupil_x']
+        #     else:
+        #         pos = (EyeFrame.EyeFrameDetected() & frame_key).fetch['pupil_x']
+        #         motion = pos - last_pos
+        #         if abs(motion) < 60:
+        #             last_pos = pos
+        #         else:
+        #             rejected_noise.append(int(frame_key['frame']))
+        #             #print(rejected_noise)
+        #             # if index == 7227:
+        #             # embed()
+        #             last_pos += 25 * np.sign(motion)
+        #             print(rejected_noise)
+        # embed()
+
+
+
+
+
+        # x = EyeFrame.EyeFrameDetected().fetch['pupil_x']
+        # for index, data in enumerate(x):
+        #     embed()
+
+
+@schema
+class EyeFrameQuality(dj.Computed):
+    definition = """
+    # quality assessment of tracking using Jake's tracked frames as ground truth
+    -> rf.Eye
+    ---
+    pos_err       : float # mean Euclidean distance between pupil positions
+    r_err         : float # mean error in radii
+    excess_frames : int   # number of frames detected by tracking but not in Jake's data
+    missed_frames : int   # number of frames detected by Jake but no by tracking
+    total_frames  : int   # total number of frames in the video
+    """
+
+    @property
+    def populated_from(self):
+        return rf.Eye().project() & EyeFrame().project() & rf.EyeFrame().project()
+
+    def _make_tuples(self, key):
+        roi_rf = (rf.Eye() & key).fetch['eye_roi']
+
+        from IPython import embed
+        # embed()
+        pos_errors = np.zeros(len(rf.EyeFrame() & key))
+        r_errors = np.zeros(len(rf.EyeFrame() & key))
+        excess_frames = 0
+        missed_frames = 0
+        total_frames = len(rf.EyeFrame() & key)
+        for frame_key in (rf.EyeFrame() & key).project().fetch.as_dict:
+
+            # from IPython import embed
+            # embed()
+            if np.isnan((rf.EyeFrame() & frame_key).fetch['pupil_x']):
+                if (EyeFrame.EyeFrameDetected() & frame_key).fetch['pupil_x'].shape[0] != 0:
+                    excess_frames += 1
+            else:
+                if (EyeFrame.EyeFrameDetected() & frame_key).fetch['pupil_x'].shape[0] == 0:
+                    missed_frames += 1
+                else:
+                    threshold = 1.2
+                    if (EyeFrame.EyeFrameDetected() & frame_key).fetch1['pupil_x_std'] > threshold or \
+                                    (EyeFrame.EyeFrameDetected() & frame_key).fetch1['pupil_y_std'] > threshold:
+                        missed_frames += 1
+                    else:
+                        d_x = (rf.EyeFrame() & frame_key).fetch['pupil_x'][0] - \
+                              (EyeFrame.EyeFrameDetected() & frame_key).fetch['pupil_x'][0] + roi_rf[0][0][0] - 2
+                        d_y = (rf.EyeFrame() & frame_key).fetch['pupil_y'][0] - \
+                              (EyeFrame.EyeFrameDetected() & frame_key).fetch['pupil_y'][0] + roi_rf[0][0][2] - 2
+                        r_errors[frame_key['frame']] = (rf.EyeFrame() & frame_key).fetch['pupil_r'][0] - \
+                                                       (EyeFrame.EyeFrameDetected() & frame_key).fetch['pupil_r_major'][
+                                                           0]
+                        pos_errors[frame_key['frame']] = pow(d_x, 2) + pow(d_y, 2)
+                        print("Frame Computing = ", frame_key['frame'], " / ", total_frames)
+        key['pos_err'] = np.mean(pos_errors)
+        key['r_err'] = np.mean(r_errors)
+        key['excess_frames'] = excess_frames
+        key['missed_frames'] = missed_frames
+        key['total_frames'] = total_frames
+        embed()
+        self.insert1(key)
+        show_figure = 0
+        if show_figure:
+            import matplotlib.pyplot as plt
+            fig, ax = plt.subplots(3, 1, sharex=True)
+            r_rf = (rf.EyeFrame() & key).fetch['pupil_r']
+            r_trk = (EyeFrame.EyeFrameDetected() & key).fetch['pupil_r_major']
+            ax[0].plot(r_rf)
+            ax[1].plot(r_trk)
+            ax[2].plot(r_errors)
+            fig.savefig('error_radius.png')
+
+            fig, ax = plt.subplots(3, 1, sharex=True)
+            r_rf = (rf.EyeFrame() & key).fetch['pupil_x']
+            r_trk = (EyeFrame.EyeFrameDetected() & key).fetch['pupil_x']
+            ax[0].set_ylim([np.nanmean(r_rf) - 25, np.nanmean(r_rf) + 25])
+            ax[1].set_ylim([np.nanmean(r_rf) - 25, np.nanmean(r_rf) + 25])
+            ax[2].set_ylim([0, 100])
+            ax[0].plot(r_rf)
+            ax[1].plot(r_trk - roi_rf[0][0][0])
+            ax[2].plot(pos_errors)
+            fig.savefig('error_pupil_x.png')
+            # ax[2].plot()
 
 # from microns.trk import EyeFrame
 # EyeFrame().populate(restriction=dict(animal_id=2055, group_name='setup_jake'))
