@@ -26,9 +26,37 @@ RUN \
   python setup.py build && \
   python setup.py install
 
+
+# Install OpenCV
+RUN \
+  apt-get install -y cmake git libgtk2.0-dev pkg-config libavcodec-dev libavformat-dev libswscale-dev && \
+  apt-get install -y python-numpy libtbb2 libtbb-dev libjpeg-dev libpng-dev libtiff-dev libjasper-dev libdc1394-22-dev && \
+  apt-get install -y libatlas-base-dev gfortran && \
+  git clone https://github.com/Itseez/opencv.git && \
+  cd opencv && git checkout 3.1.0 && \
+  cd .. && git clone https://github.com/Itseez/opencv_contrib.git && \
+  cd opencv_contrib && git checkout 3.1.0 && \
+  cd ../opencv && mkdir build && cd build && \
+  cmake -D CMAKE_BUILD_TYPE=RELEASE \
+        -D CMAKE_INSTALL_PREFIX=/usr/local \
+        -D OPENCV_EXTRA_MODULES_PATH=/data/opencv_contrib/modules \
+        -D BUILD_EXAMPLES=ON .. && \
+  make -j4 && \
+  make install && \
+  ldconfig && \
+  rm -rf /data/opencv /data/opencv_contrib
+
 RUN \
   pip install git+https://github.com/cajal/c2s.git
 
 COPY . /data/pipeline
 RUN \
   pip install pipeline/python/
+
+# Get pupil tracking repo
+RUN \
+  git clone https://github.com/cajal/pupil-tracking.git
+
+
+  
+  
