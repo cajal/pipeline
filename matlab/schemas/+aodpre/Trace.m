@@ -4,7 +4,7 @@ aodpre.Trace (imported) #  imported calcium traces
 trace_id :  smallint   # trace number within scan
 channel : tinyint   # microscope channel
 -----
-trace : longblob  #  tracec
+trace : longblob  #  traces
 %}
 
 classdef Trace < dj.Relvar
@@ -18,7 +18,7 @@ classdef Trace < dj.Relvar
                 for itrace = 1:sz(2)
                     key.trace_id = itrace;
                     key.trace = t(:,itrace);
-                    self.insert(key);
+                    self.insert(key)
                 end
             end
         end
