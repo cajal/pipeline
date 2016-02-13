@@ -43,6 +43,7 @@ mapping = {
     '/at_scratch','/mnt/at_scratch','W:','/Volumes/at_scratch'
     '/raw','/mnt/at_scratch','W:','/Volumes/at_scratch'
     '/2P2Drive','/mnt/2P2Drive','Q:','/Volumes/2P2Drive'
+    '/manolism','/mnt/manolism','M:','/Volumes/M'
     };
 
 % local os' column
