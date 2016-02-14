@@ -1,13 +1,14 @@
 %{
 aodpre.Scan (imported) # synchronized AOD scans
--> vis2p.Scans 
------
+-> vis2p.Scans
+---
 -> psy.Session
-hdf5_file : varchar(255)   #   raw data file
-first_trial : int  # first trial index from psy.Trial overlapping recording
-last_trial : int   # last trial index from psy.Trial overlapping recording
-signal_start_time : double  # (s) signal start time on stimulus clock
-signal_duration : double  # (s) signal duration on stimulus time
+hdf5_file                   : varchar(255)                  # raw data file
+sampling_rate               : double                        # sampling rate of the signal
+first_trial                 : int                           # first trial index from psy.Trial overlapping recording
+last_trial                  : int                           # last trial index from psy.Trial overlapping recording
+signal_start_time           : double                        # (s) signal start time on stimulus clock
+signal_duration             : double                        # (s) signal duration on stimulus time
 %}
 
 classdef Scan < dj.Relvar & dj.AutoPopulate
@@ -35,6 +36,10 @@ classdef Scan < dj.Relvar & dj.AutoPopulate
             sync_info = stims.analysis.sync(...
                 struct('animal_id', key.mouse_id), temporal(:,1), temporal.Fs, fps);
             tuple = dj.struct.join(tuple, sync_info);
+            traces = aodReader(tuple.hdf5_file, 'Functional');
+            sz = traces.reshapedSize;
+            tuple.signal_duration = sz(1)/traces.Fs;
+            tuple.sampling_rate = traces.Fs;
                         
 			self.insert(tuple)
             makeTuples(aodpre.Trace, key)
