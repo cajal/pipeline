@@ -1,8 +1,8 @@
 %{
-pre.ExtractSpikes (computed) #  inferences of spikes from calcium traces
+pre.ExtractSpikes (computed) # inferences of spikes from calcium traces
 -> pre.ExtractTraces
 -> pre.SpikeInference
------
+---
 %}
 
 classdef ExtractSpikes < dj.Relvar & dj.AutoPopulate
