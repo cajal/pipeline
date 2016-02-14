@@ -1,7 +1,6 @@
 %{
 monet.DriftResponseSet (computed) # my newest table
 -> monet.DriftTrialSet
--> pre.Segment
 -> pre.ExtractSpikes
 ---
 %}
