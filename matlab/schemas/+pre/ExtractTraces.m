@@ -1,5 +1,5 @@
 %{
-pre.ExtractTraces (imported) # my newest table
+pre.ExtractTraces (imported) # my 
 -> pre.Segment
 -----
 %}
