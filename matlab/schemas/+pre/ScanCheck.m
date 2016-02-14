@@ -1,17 +1,17 @@
 %{
 pre.ScanCheck (imported) # average frame before image corrections
 -> pre.ScanInfo
-channel : int
------
-avg_frame :longblob   # raw average frame
-min_intensity : int    # min value in movie
-max_intensity : int    # max value in movie
-min_var_intensity: int   # signal level with minimal noise variance, presumed zero
-zero_var_intercept: int  # the level at which
-quantal_size: float   # variance slope, corresponds to quantal size
-pixel_intensities :  longblob   #  bins used for fitting
-half_mean_diff_squared: longblob  #  measured frame-to-frame variance for each intensity bin
-template : longblob  # alignment template after anscombe transform
+-> pre.Channel
+---
+avg_frame                   : longblob                      # raw average frame
+min_intensity               : int                           # min value in movie
+max_intensity               : int                           # max value in movie
+min_var_intensity           : int                           # signal level with minimal noise variance, presumed zero
+zero_var_intercept          : int                           # the level at which
+quantal_size                : float                         # variance slope, corresponds to quantal size
+pixel_intensities           : longblob                      # bins used for fitting
+half_mean_diff_squared      : longblob                      # measured frame-to-frame variance for each intensity bin
+template                    : longblob                      # alignment template after anscombe transform
 %}
 
 classdef ScanCheck < dj.Relvar & dj.AutoPopulate
