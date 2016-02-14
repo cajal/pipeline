@@ -25,7 +25,7 @@ class Spikes(dj.Computed):
 
         dt = 1/(Scan() & key).fetch1['sampling_rate']
         X = (Trace() & key).project('ca_trace').fetch.as_dict()
-        X = (pre.SpikeInference() & key).infer_spikes(X, dt)
+        X = (pre.SpikeInference() & key).infer_spikes(X, dt, trace_name='trace')
         for x in X:
             self.insert1(dict(key, **x))
 

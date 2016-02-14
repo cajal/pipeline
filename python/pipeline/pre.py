@@ -25,13 +25,12 @@ def bugfix_reshape(a):
 class SpikeInference(dj.Lookup):
     definition = ...
 
-    def infer_spikes(self, X, dt):
+    def infer_spikes(self, X, dt, trace_name='ca_trace'):
         assert self.fetch1['language'] == 'python', "This tuple cannot be computed in python."
         fps = 1 / dt
         spike_rates = []
         for i, trace in enumerate(X):
-            # if ca_trace then pre.Trace else aodpre.Trace (unfortunately different attribute names)
-            trace['calcium'] = trace.pop('ca_trace').T if 'ca_trace' in trace else trace.pop('trace').T
+            trace['calcium'] = trace.pop(trace_name).T
             trace['fps'] = fps
 
             data = c2s.preprocess([trace], fps=fps)
