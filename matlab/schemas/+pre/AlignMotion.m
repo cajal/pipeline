@@ -1,13 +1,14 @@
 %{
 pre.AlignMotion (imported) # motion correction
 -> pre.AlignRaster
-slice : tinyint   # slice number
+-> pre.Slice
 ---
--> pre.ScanCheck
+-> pre.Channel
 motion_xy                   : longblob                      # (pixels) y,x motion correction offsets
 motion_rms                  : float                         # (um) stdev of motion
 align_times=CURRENT_TIMESTAMP: timestamp                    # automatic
 avg_frame=null              : longblob                      # averaged aligned frame
+INDEX(animal_id,session,scan_idx,channel)
 %}
 
 classdef AlignMotion < dj.Relvar & dj.AutoPopulate
