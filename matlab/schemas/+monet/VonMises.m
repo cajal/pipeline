@@ -23,14 +23,14 @@ classdef VonMises < dj.Relvar & dj.AutoPopulate
         function makeTuples(self, key)
             s = fetch(monet.DriftTrial*monet.DriftResponse & key, 'direction','response');
             [responses, traceIds, direction] = dj.struct.tabulate(s,...
-                'response', 'trace_id', 'direction');
+                'response', 'mask_id', 'direction');
             assert(all(diff(direction)>0), 'just a check that directions are monotonic')
             nShuffles = 1e4;
             [von, r2, p] = ne7.rf.VonMises2.computeSignificance(double(responses), nShuffles);
             r2(isnan(r2)) = 0;
             for iTrace=1:length(traceIds)
                 tuple = key;
-                tuple.trace_id = traceIds(iTrace);
+                tuple.mask_id = traceIds(iTrace);
                 tuple.von_r2 = r2(iTrace);
                 tuple.von_base = von.w(iTrace,1);
                 tuple.von_amp1 = von.w(iTrace,2);
