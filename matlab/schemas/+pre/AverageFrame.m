@@ -32,7 +32,7 @@ classdef AverageFrame < dj.Relvar & dj.AutoPopulate
                             fprintf('Frame %5d/%d  %4.1fs\n', iframe, nframes, toc);
                         end
                     end
-                    key.frame = (frame/nframes).^(1/q);
+                    key.frame = single((frame/nframes).^(1/q));
                     self.insert(key)
                 end
             end
