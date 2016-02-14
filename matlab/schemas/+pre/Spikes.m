@@ -22,7 +22,7 @@ classdef Spikes < dj.Relvar
         
         
         function makeTuples(self, key)
-            dt = 1/fetch1(pre.ScanInfo, 'fps');
+            dt = 1/fetch1(pre.ScanInfo & key, 'fps');
             [X, traceKeys] = fetchn(pre.Trace & key, 'ca_trace');
             X = infer_spikes(pre.SpikeInference & key, cat(2,X{:}), dt);
             for i=1:length(traceKeys)
