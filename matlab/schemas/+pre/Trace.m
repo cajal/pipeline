@@ -1,22 +1,14 @@
 %{
 pre.Trace (imported) # calcium trace
+-> pre.ExtractTraces
 -> pre.SegmentMask
 ---
 ca_trace                    : longblob                      # raw calcium trace
 %}
 
-
-% One-line plotting script:
-% r = 'animal_id=5269';
-% for k=fetch(pre.Segment*rf.Sync&r)',t=fetch1(rf.Sync&k,'frame_times');x=fetchn(pre.Trace&k,'ca_trace');x=[x{:}];plot(t-t(1),bsxfun(@plus,bsxfun(@rdivide,x,mean(x)),1:size(x,2)));keyboard;end
-
-classdef Trace < dj.Relvar & dj.AutoPopulate
+classdef Trace < dj.Relvar 
     
-    properties
-        popRel = pre.Segment
-    end
-    methods
-        
+    methods        
         function plot(self)
             for key = fetch(pre.Segment & self)'
                 X = fetchn(self & key, 'ca_trace');
@@ -26,11 +18,10 @@ classdef Trace < dj.Relvar & dj.AutoPopulate
                 nslices = fetch1(pre.ScanInfo & key, 'nslices');
                 plot(t(1:nslices:end)-t(1),X)
             end
-        end
-        
+        end        
     end
     
-    methods(Access = protected)
+    methods
         
         function makeTuples(self, key)
             tic

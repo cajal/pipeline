@@ -16,12 +16,12 @@ classdef AlignRaster < dj.Relvar & dj.AutoPopulate
             % returns a function that corrects the raster
             rasterPhase = self.fetch1('raster_phase');
             if rasterPhase == 0
-                fixRaster = @(img) img;
+                fixRaster = @(img) double(img);
             else
                 [fillFraction, nslices] = fetch1(self*pre.ScanInfo, ...
                     'fill_fraction', 'nslices');
                 assert(nslices==1, 'adjust this code to handle multiple slices')
-                fixRaster = @(img) ne7.ip.correctRaster(img, rasterPhase, fillFraction);
+                fixRaster = @(img) ne7.ip.correctRaster(double(img), rasterPhase, fillFraction);
             end
         end
     end
