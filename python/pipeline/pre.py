@@ -30,7 +30,8 @@ class SpikeInference(dj.Lookup):
         fps = 1 / dt
         spike_rates = []
         for i, trace in enumerate(X):
-            trace['calcium'] = trace.pop('ca_trace').T
+            # if ca_trace then pre.Trace else aodpre.Trace (unfortunately different attribute names)
+            trace['calcium'] = trace.pop('ca_trace').T if 'ca_trace' in trace else trace.pop('trace').T
             trace['fps'] = fps
 
             data = c2s.preprocess([trace], fps=fps)
