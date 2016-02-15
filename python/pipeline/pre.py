@@ -50,7 +50,7 @@ class Spikes(dj.Computed):
 
     def _make_tuples(self, key):
         raise NotImplementedError("""This is an old style part table inherited from matlab.
-        call worker on dj.ExtracSpikes. This will call make_tuples on this class. Do not
+        call populate on dj.ExtracSpikes. This will call make_tuples on this class. Do not
         call make_tuples in pre.Spikes!
         """)
 
