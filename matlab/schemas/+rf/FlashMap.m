@@ -24,8 +24,9 @@ classdef FlashMap < dj.Relvar & dj.AutoPopulate
                 'flip_times', 'orientation','offset');
             reader = pre.getReader(key);
             sz = size(reader);
-            assert(sz(5)==length(frameTimes))
-            siteTrace = arrayfun(@(i) mean(mean(reader(:,:,1,1,i))),  1:sz(5));
+            assert(sz(5)*sz(4)==length(frameTimes))
+            siteTrace = arrayfun(@(i) squeeze(mean(mean(reader(:,:,1,:,i)))),  1:sz(5), 'uni', false);
+            siteTrace = cat(1,siteTrace{:});
             computeResponse = @(flips) mean(interp1(frameTimes, siteTrace, flips, 'nearest'));
             responses = cellfun(computeResponse, fliptimes);
             
@@ -41,13 +42,6 @@ classdef FlashMap < dj.Relvar & dj.AutoPopulate
             
 			%self.insert(key)
 		end
-	end
-
+    end
 end
 
-
-
-function response = measureResponse(reader, fliptimes, frameTimes)
-f = reader(:,:,1,1,interp1(frameTimes, 1:length(frameTimes), fliptimes, 'nearest'));
-response = mean(f(:));
-end

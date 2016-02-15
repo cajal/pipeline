@@ -163,8 +163,6 @@ class EyeFrame(dj.Computed):
         pupil_angle_std             : float                         # angle of major axis vs. horizontal axis in radians
         intensity_std               : float                         # standard deviation of the ROI pixel values
         """
-
-
 @schema
 class EyeFrameDetectedSanity(dj.Computed):
     definition = """

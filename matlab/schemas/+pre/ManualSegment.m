@@ -1,6 +1,6 @@
 %{
 pre.ManualSegment (imported) # manual 2d cell segmentation$
--> pre.AlignRaster
+-> pre.AlignMotion
 ---
 mask                        : longblob                      # binary 4-connected mask image segmenting the aligned image
 segment_ts=CURRENT_TIMESTAMP: timestamp                     # automatic
@@ -11,17 +11,15 @@ segment_ts=CURRENT_TIMESTAMP: timestamp                     # automatic
 classdef ManualSegment < dj.Relvar & dj.AutoPopulate
     
     properties
-        popRel  = pre.AlignRaster
+        popRel  = pre.AlignMotion & pre.AverageFrame
     end
     
     methods(Access=protected)
         
         function makeTuples(self, key)
-            fixRaster = get_fix_raster_fun(pre.AlignRaster & key);
-            template = fixRaster(fetch1(pre.ScanCheck & key, 'template'));
-            template = template - min(template(:));
-            template = template / max(template(:));
-            bw = pre.ManualSegment.outlineCells(template, false(size(template)));
+            images = fetchn(pre.AverageFrame & key, 'frame', 'ORDER BY channel');
+            assert(ismember(numel(images), [1 2]))
+            bw = pre.ManualSegment.outlineCells(images);
             assert(~isempty(bw), 'user aborted segmentation')
             key.mask = bw;
             self.insert(key)
@@ -30,9 +28,19 @@ classdef ManualSegment < dj.Relvar & dj.AutoPopulate
     
     
     methods(Static)
-        function bw = outlineCells(imgG,bw)
+        function bw = outlineCells(images, bw)
+            if ~exist('bw','var')
+                bw = true(size(images{1}));
+            end
             f = figure;
-            imshow(imgG)
+            if length(images)==2
+                imshowpair(sqrt(images{1}), sqrt(images{2}))
+            else
+                template = sqrt(images{1});
+                template = template - min(template(:));
+                template = template / max(template(:));
+                imshow(template)
+            end
             set(gca, 'Position', [0.05 0.05 0.9 0.9]);
             if strcmp(computer,'GLNXA64')
                 set(f,'Position',[160 160 1400 1000])

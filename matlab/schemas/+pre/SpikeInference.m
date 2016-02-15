@@ -1,9 +1,10 @@
 %{
-pre.SpikeInference (lookup) #  spike inference method
-spike_inference  :tinyint   #  spike inference method
------
-short_name  : char(10)      #  to be used in switch statements, for example
-details     : varchar(255)
+pre.SpikeInference (lookup) # spike inference method
+spike_inference : tinyint                # spike inference method
+---
+short_name                  : char(10)                      # to be used in switch statements, for example
+details                     : varchar(255)                  # 
+language                    : enum('matlab','python')       # the language in which the method is implemented
 %}
 
 classdef SpikeInference < dj.Relvar

@@ -1,44 +1,18 @@
 %{
-trippy.RF (computed) # receptive fields from the trippy stimulus
+trippy.Tuning (computed) # local directional tuning maps
 -> rf.Sync
 -> pre.Spikes
 -----
-nbins              : smallint                      # temporal bins
-bin_size           : float                         # (ms) temporal bin size
-degrees_x          : float                         # degrees along x
-degrees_y          : float                         # degrees along y
-map             : longblob                      # receptive field map
+magnitude           :longblob     #   map of tuning magnitude
+pref_direction      :longblob     #   map of preferred directions
 %}
 
-classdef RF < dj.Relvar & dj.AutoPopulate
-    
+classdef Tuning < dj.Relvar & dj.AutoPopulate
+
     properties
         popRel  = pre.ExtractSpikes*(rf.Sync & psy.Trippy)
     end
-    
-    
-    methods
-        function dump(self)
-            for key = self.fetch'
-                disp(key)
-                map = fetch1(self & key, 'map');
-                mx = max(abs(map(:)));
-                map = round(map/mx*31.5 + 32.5);
-                cmap = ne7.vis.doppler;
-                
-                for i=1:size(map,3)
-                    try
-                        im = reshape(cmap(map(:,:,i),:),[size(map,1) size(map,2) 3]);
-                        f = sprintf('~/dump/trippy%u-%d-%d-%u.%03d_%02d.png', ...
-                            key.spike_inference, key.animal_id, key.scan_idx, key.slice, key.mask_id, i);
-                        imwrite(im,f,'png')
-                    catch err
-                        disp(err)
-                    end
-                end
-            end
-        end
-    end
+
     
     methods(Access=protected)
         
@@ -50,8 +24,6 @@ classdef RF < dj.Relvar & dj.AutoPopulate
             
             disp 'loading traces...'
             caTimes = fetch1(rf.Sync & key, 'frame_times');
-            nslices = fetch1(pre.ScanInfo & key, 'nslices');
-            caTimes = caTimes(key.slice:nslices:end);
             dt = median(diff(caTimes));
             [X, traceKeys] = fetchn(pre.Spikes & key, 'spike_trace');
             X = [X{:}];
@@ -74,6 +46,8 @@ classdef RF < dj.Relvar & dj.AutoPopulate
             sz = size(maps);
             
             total_frames = 0;
+            ndirs = 24;
+            central_spatial_freq = 0.1;
             for trial = trials'
                 fprintf('\nTrial %d', trial.trial_idx);
                 % reconstruct movie
@@ -83,8 +57,13 @@ classdef RF < dj.Relvar & dj.AutoPopulate
                 phase = psy.Trippy.interp_space(phase, trial);
                 assert(size(phase,1)==sz(1) && size(phase,2)==sz(2))
                 movie = cos(2*pi*phase);
-                movie = fliplr(reshape(movie, [], trial_frames));
+                [gx, gy] = gradient(phase, degPerPix);
+                direction = max(1, min(ndirs, ceil(mod(atan2(gy,gx), 2*pi)/(2*pi)*ndirs)));
+                spatial_freq = sqrt(gx.^2 + gy.^2);
+                temp_freq = (phase(:,:,[2:end end]) - phase(:,:,[1 1:end-1]))/dt/2;                
+                spatial_freq_window = exp(-(log(spatial_freq)-log(central_spatial_freq)).^2/2);
                 total_frames = total_frames + trial_frames;
+                
                 
                 % extract relevant trace
                 t = trial.flip_times(ceil(nbins*bin_width/dt):end) - caTimes(1);
