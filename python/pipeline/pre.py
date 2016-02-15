@@ -25,12 +25,12 @@ def bugfix_reshape(a):
 class SpikeInference(dj.Lookup):
     definition = ...
 
-    def     infer_spikes(self, X, dt):
+    def infer_spikes(self, X, dt, trace_name='ca_trace'):
         assert self.fetch1['language'] == 'python', "This tuple cannot be computed in python."
         fps = 1 / dt
         spike_rates = []
         for i, trace in enumerate(X):
-            trace['calcium'] = trace.pop('ca_trace').T
+            trace['calcium'] = trace.pop(trace_name).T
             trace['fps'] = fps
 
             data = c2s.preprocess([trace], fps=fps)
@@ -53,10 +53,7 @@ class Spikes(dj.Computed):
         """)
 
     def make_tuples(self, key):
-        times = (rf.Sync() & key).fetch1['frame_times'].squeeze()
-        nslices = (ScanInfo() & key).fetch1['nslices']
-        slice_no = key['slice'] - 1
-        dt = np.median(np.diff(times[slice_no::nslices]))
+        dt = 1/(ScanInfo() & key).fetch1['fps']
         X = (Trace() & key).project('ca_trace').fetch.as_dict()
         X = (SpikeInference() & key).infer_spikes(X, dt)
         for x in X:
@@ -70,7 +67,7 @@ class ExtractSpikes(dj.Computed):
     @property
     def populated_from(self):
         # Segment and SpikeInference will be in the workspace if they are in the database
-        return ExtractTraces() * SpikeInference() & rf.Sync() & dict(language='python')
+        return ExtractTraces() * SpikeInference() & dict(language='python')
 
     def _make_tuples(self, key):
         self.insert1(key)
