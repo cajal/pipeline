@@ -11,7 +11,7 @@ from pprint import pprint
 try:
     import c2s
 except:
-    warn("c2s was not found. You won't be able to worker ExtracSpikes")
+    warn("c2s was not found. You won't be able to populate ExtracSpikes")
 
 schema = dj.schema('pipeline_preprocessing', locals())
 

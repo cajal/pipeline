@@ -1,10 +1,6 @@
 from warnings import warn
 import numpy as np
 from . import pre
-try:
-    import c2s
-except:
-    warn("c2s was not found. You won't be able to worker ExtracSpikes")
 
 import datajoint as dj
 schema = dj.schema('pipeline_aod_preprocessing', locals())
