@@ -14,7 +14,7 @@ INDEX(animal_id,session,scan_idx,channel)
 classdef AlignMotion < dj.Relvar & dj.AutoPopulate
     
     properties
-        popRel  = pre.AlignRaster & pre.ScanCheck
+        popRel  = pre.AlignRaster
     end
     
     
