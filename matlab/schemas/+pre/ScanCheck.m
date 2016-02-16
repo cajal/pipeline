@@ -26,8 +26,8 @@ classdef ScanCheck < dj.Relvar & dj.AutoPopulate
             disp 'Loading header...'
             reader = pre.getReader(key);
             sz = size(reader);
-            skipFrames = 200;
-            nframes = min(reader.nframes-skipFrames, round(10000/reader.nslices));
+            skipFrames = 500;
+            nframes = min(reader.nframes-skipFrames, round(4000/reader.nslices));
             for channel = 1:reader.nchannels
                 key.channel = reader.channels(channel);
                 fprintf('Channel %d\n', key.channel)
@@ -59,7 +59,7 @@ classdef ScanCheck < dj.Relvar & dj.AutoPopulate
                     half_diff_squared, [length(bins) 1], @mean);
                 
                 step = step + 1; fprintf('Step %d Elapsed time %g s\n', step, toc)
-                kx = counts>100 & bins < 16000;
+                kx = counts>100 & bins < 4000;
                 clear counts
                 bins = bins(kx);
                 half_diff_squared = half_diff_squared(kx);
