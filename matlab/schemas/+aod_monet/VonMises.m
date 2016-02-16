@@ -1,7 +1,7 @@
 %{
 aod_monet.VonMises (computed) # directional tuning
 -> aod_monet.DriftResponseSet
--> pre.Spikes
+-> aodpre.Spikes
 -----
 von_r2     : float  # r-squared explaned by vonMises fit
 von_pref   : float  #  preferred directions
