@@ -29,7 +29,9 @@ class SpikeInference(dj.Lookup):
         assert self.fetch1['language'] == 'python', "This tuple cannot be computed in python."
         fps = 1 / dt
         spike_rates = []
+        N = len(X)
         for i, trace in enumerate(X):
+            print('Predicting trace %i/%i' % (i+1,N))
             trace['calcium'] = trace.pop(trace_name).T
             trace['fps'] = fps
 
