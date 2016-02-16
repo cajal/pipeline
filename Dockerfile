@@ -51,12 +51,12 @@ RUN \
 
 COPY . /data/pipeline
 RUN \
-  pip install pipeline/python/
+  pip install -e pipeline/python/
 
 # Get pupil tracking repo
 RUN \
   git clone https://github.com/cajal/pupil-tracking.git
 
-
+ENTRYPOINT ["worker"]
   
   

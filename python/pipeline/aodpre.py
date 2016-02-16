@@ -1,10 +1,6 @@
 from warnings import warn
 import numpy as np
 from . import pre
-try:
-    import c2s
-except:
-    warn("c2s was not found. You won't be able to populate ExtracSpikes")
 
 import datajoint as dj
 schema = dj.schema('pipeline_aod_preprocessing', locals())
@@ -17,7 +13,7 @@ class Spikes(dj.Computed):
 
     def _make_tuples(self, key):
         raise NotImplementedError("""This is an old style part table inherited from matlab.
-        call populate on dj.ExtracSpikes. This will call make_tuples on this class. Do not
+        call worker on dj.ExtracSpikes. This will call make_tuples on this class. Do not
         call make_tuples in pre.Spikes!
         """)
 
