@@ -1,6 +1,6 @@
 %{
-monet.VonMises (computed) # directional tuning
--> monet.DriftResponseSet
+aod_monet.VonMises (computed) # directional tuning
+-> aod_monet.DriftResponseSet
 -> pre.Spikes
 -----
 von_r2     : float  # r-squared explaned by vonMises fit
@@ -15,13 +15,13 @@ von_pvalue : float  # p-value by shuffling (nShuffles = 1e4)
 classdef VonMises < dj.Relvar & dj.AutoPopulate
     
     properties
-        popRel  = monet.DriftResponseSet 
+        popRel  = aod_monet.DriftResponseSet 
     end
     
     methods(Access=protected)
         
         function makeTuples(self, key)
-            s = fetch(monet.DriftTrial*monet.DriftResponse & key, 'direction','response');
+            s = fetch(aod_monet.DriftTrial*aod_monet.DriftResponse & key, 'direction','response');
             [responses, traceIds, direction] = dj.struct.tabulate(s,...
                 'response', 'trace_id', 'direction');
             assert(all(diff(direction)>0), 'just a check that directions are monotonic')

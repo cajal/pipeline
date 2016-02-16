@@ -1,5 +1,5 @@
 %{
-monet.RF (computed) # receptive fields from the monet stimulus
+aod_monet.RF (computed) # receptive fields from the monet stimulus
 -> rf.Sync
 -> pre.Spikes
 -----
@@ -13,7 +13,7 @@ map             : longblob                      # receptive field map
 classdef RF < dj.Relvar & dj.AutoPopulate
     
     properties
-        popRel  = pre.ExtractSpikes*(rf.Sync & psy.MovingNoise)
+        popRel  = aodpre.Scan & psy.MovingNoise
     end
     
     
@@ -29,7 +29,7 @@ classdef RF < dj.Relvar & dj.AutoPopulate
                 for i=1:size(map,3)
                     try
                         im = reshape(cmap(map(:,:,i),:),[size(map,1) size(map,2) 3]);
-                        f = sprintf('~/dump/monet%u-%d-%d-%u.%03d_%02d.png', ...
+                        f = sprintf('~/dump/aod_monet%u-%d-%d-%u.%03d_%02d.png', ...
                             key.spike_inference, key.animal_id, key.scan_idx, key.slice, key.mask_id, i);
                         imwrite(im,f,'png')
                     catch err
@@ -47,6 +47,7 @@ classdef RF < dj.Relvar & dj.AutoPopulate
             nbins = 10;
             bin_width = 0.1;  %(s)
             
+            assert(false)
             disp 'loading traces...'
             caTimes = fetch1(rf.Sync & key, 'frame_times');
             nslices = fetch1(pre.ScanInfo & key, 'nslices');
