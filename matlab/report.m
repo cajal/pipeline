@@ -24,6 +24,9 @@ r = fetch(vis2p.Experiments &  'exp_date>"2016-02"', '(mouse_id)->animal_id');
 fprintf('Mice %s\n', sprintf('%d ', fetchn(common.Animal & r, 'animal_id')))
 
 progress(aodpre.Scan)
+progress(aodpre.Sync)
+progress(aodpre.Set)
+progress(aodpre.ComputeTraces)
 progress(aodpre.ExtractSpikes)
 progress(aod_monet.DriftTrialSet, r)
 progress(aod_monet.DriftResponseSet, r)

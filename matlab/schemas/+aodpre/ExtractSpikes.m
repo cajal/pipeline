@@ -1,6 +1,6 @@
 %{
 aodpre.ExtractSpikes (computed) # my newest table
--> aodpre.Scan
+-> aodpre.ComputeTraces
 -> pre.SpikeInference
 -----
 # add additional attributes
@@ -9,7 +9,7 @@ aodpre.ExtractSpikes (computed) # my newest table
 classdef ExtractSpikes < dj.Relvar & dj.AutoPopulate
 
 	properties
-		popRel  = aodpre.Scan * pre.SpikeInference & 'language="matlab"'
+		popRel  = aodpre.ComputeTraces * pre.SpikeInference & 'language="matlab"'
 	end
 
 	methods(Access=protected)

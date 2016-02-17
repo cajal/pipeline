@@ -1,7 +1,7 @@
 %{
 aod_monet.DriftResponseSet (computed) # my newest table
--> monet.DriftTrialSet
--> pre.ExtractSpikes
+-> aod_monet.DriftTrialSet
+-> aodpre.ExtractSpikes
 ---
 %}
 
@@ -9,7 +9,7 @@ aod_monet.DriftResponseSet (computed) # my newest table
 classdef DriftResponseSet < dj.Relvar & dj.AutoPopulate
     
     properties
-        popRel = aod_monet.DriftTrialSet*pre.Segment*pre.ExtractSpikes & pre.Spikes
+        popRel = aod_monet.DriftTrialSet*aodpre.ExtractSpikes & aodpre.Spikes
     end
     
     methods(Access=protected)
