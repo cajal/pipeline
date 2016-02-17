@@ -1,6 +1,6 @@
 %{
 aod_monet.DriftTrialSet (computed) # all drift trials for this scan
--> aodpre.Scan
+-> aodpre.Sync
 ---
 %}
 
@@ -8,7 +8,7 @@ aod_monet.DriftTrialSet (computed) # all drift trials for this scan
 classdef DriftTrialSet < dj.Relvar & dj.AutoPopulate
     
     properties
-        popRel = aodpre.Scan  & (psy.MovingNoise & 'speed>0');
+        popRel = aodpre.Sync  & (psy.MovingNoise & 'speed>0');
     end
     
     methods(Access=protected)
@@ -16,7 +16,7 @@ classdef DriftTrialSet < dj.Relvar & dj.AutoPopulate
         function makeTuples(self, key)
             self.insert(key)
             iTrial = 0;
-            for key = fetch(psy.Trial * aodpre.Scan & key)'
+            for key = fetch(psy.Trial * aodpre.Sync & key)'
                 iTrial = makeTuples(aod_monet.DriftTrial, key, iTrial);
             end
         end

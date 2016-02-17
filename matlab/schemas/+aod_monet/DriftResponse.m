@@ -13,8 +13,8 @@ classdef DriftResponse < dj.Relvar
 
 		function makeTuples(self, key)
             disp 'preparing traces...'
-            [start_time, duration] = fetch1(aodpre.Scan & key, 'signal_start_time', 'signal_duration');
-            [traces, traceKeys] = fetchn(aodpre.Spikes & key & 'channel=1', 'spike_trace');
+            [start_time, duration] = fetch1(aodpre.Sync & key, 'signal_start_time', 'signal_duration');
+            [traces, traceKeys] = fetchn(aodpre.Spikes & key, 'spike_trace');
             traces = [traces{:}];
             frameTimes = start_time + linspace(0, duration, size(traces,1));
             

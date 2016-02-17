@@ -1,7 +1,7 @@
 %{
 aod_monet.RF (computed) # receptive fields from the monet stimulus
--> rf.Sync
--> pre.Spikes
+-> aodpre.Sync
+-> aodpre.Spikes
 -----
 nbins              : smallint                      # temporal bins
 bin_size           : float                         # (ms) temporal bin size
@@ -13,7 +13,7 @@ map             : longblob                      # receptive field map
 classdef RF < dj.Relvar & dj.AutoPopulate
     
     properties
-        popRel  = aodpre.Scan & psy.MovingNoise
+        popRel  = aodpre.Sync & psy.MovingNoise
     end
     
     
@@ -47,20 +47,26 @@ classdef RF < dj.Relvar & dj.AutoPopulate
             nbins = 10;
             bin_width = 0.1;  %(s)
             
-            assert(false)
             disp 'loading traces...'
-            caTimes = fetch1(rf.Sync & key, 'frame_times');
-            nslices = fetch1(pre.ScanInfo & key, 'nslices');
-            caTimes = caTimes(key.slice:nslices:end);
-            [X, traceKeys] = fetchn(pre.Spikes & key, 'spike_trace');
-            X = [X{:}];
-            X = @(t) interp1(caTimes-caTimes(1), X, t, 'linear', nan);  % traces indexed by time
+            [start_time, duration] = fetch1(aodpre.Sync & key, 'signal_start_time', 'signal_duration');
+            [X, traceKeys] = fetchn(aodpre.Spikes & key, 'spike_trace');
             ntraces = length(traceKeys);
+            X = [X{:}];
+            
+            % smoothen traces to cutoff frequency
+            cutoff = 0.1;
+            k = hamming(2*floor(cutoff/duration*size(X,1))+1);
+            k = k/sum(k);
+            X  = conv2(X,k,'same');
+
+            % inerpolate traces
+            caTimes = linspace(0, duration, size(X,1));
+            X = @(t) interp1(caTimes, X, t, 'linear', nan);  % traces indexed by time
             
             disp 'loading movies...'
-            trials = pro(rf.Sync*psy.Trial & key & 'trial_idx between first_trial and last_trial', 'cond_idx', 'flip_times');
+            trials = pro(aodpre.Sync*psy.Trial & key & 'trial_idx between first_trial and last_trial', 'cond_idx', 'flip_times');
             trials = fetch(trials*psy.MovingNoise*psy.MovingNoiseLookup, '*', 'ORDER BY trial_idx');
-            sess = fetch(rf.Sync*psy.Session & key,'resolution_x','resolution_y','monitor_distance','monitor_size');
+            sess = fetch(aodpre.Sync*psy.Session & key,'resolution_x','resolution_y','monitor_distance','monitor_size');
             
             % compute physical dimensions
             rect = [sess.resolution_x sess.resolution_y];
@@ -82,7 +88,7 @@ classdef RF < dj.Relvar & dj.AutoPopulate
                 
                 % extract relevant trace
                 fps = 1/median(diff(trial.flip_times));
-                t = trial.flip_times(ceil(nbins*bin_width*fps):end) - caTimes(1);
+                t = trial.flip_times(ceil(nbins*bin_width*fps):end) - start_time;
                 snippet = X(t);
                 for itrace = 1:ntraces
                     fprintf .
