@@ -184,18 +184,27 @@ class EyeFrameDetectedSanity(dj.Computed):
         i = (EyeFrame.EyeFrameDetected() & key).fetch['pupil_x']
         rejected_spikes = np.where(abs(i-np.mean(i) > 10*np.std(i)))
 
-        rejected_ransac_x=np.asarray([])
+        rejected_ransac_x = np.asarray([])
         # i = (EyeFrame.EyeFrameDetected() & key).fetch['pupil_x_std']
         # rejected_ransac_x = np.where(i > 1)
 
         rejected_ransac_y = np.asarray([])
         # i = (EyeFrame.EyeFrameDetected() & key).fetch['pupil_y_std']
         # rejected_ransac_y = np.where(i >i)
-
-        rej = np.concatenate([rejected_intensity,rejected_spikes, rejected_ransac_x, rejected_ransac_y])
+        #embed()
+        rej = np.unique(np.concatenate([rejected_intensity[0],rejected_spikes[0]]))
 
         # remove these indexes and get the valid frames
         # change the decision parameter video per video basis
+
+        for frame_key in (EyeFrame.EyeFrameDetected() & key).project().fetch.as_dict:
+            frame = frame_key['frame']
+            if frame % 1000 is 0:
+                print("Looping in frame: ",frame)
+            if frame not in rej:
+                #embed()
+                self.insert1(frame_key)
+
 
 
         # rejected_noise = []
@@ -233,7 +242,7 @@ class EyeFrameQuality(dj.Computed):
     -> rf.Eye
     ---
     pos_err       : float # mean Euclidean distance between pupil positions
-    r_err         : float # mean error in radii
+    r_corr         : float # correlation of radii
     excess_frames : int   # number of frames detected by tracking but not in Jake's data
     missed_frames : int   # number of frames detected by Jake but no by tracking
     total_frames  : int   # total number of frames in the video
@@ -241,17 +250,20 @@ class EyeFrameQuality(dj.Computed):
 
     @property
     def populated_from(self):
-        return rf.Eye().project() & EyeFrame().project() & rf.EyeFrame().project()
+        return rf.Eye().project() & EyeFrame().project() & rf.EyeFrame().project() & EyeFrameDetectedSanity().project()
 
     def _make_tuples(self, key):
         roi_rf = (rf.Eye() & key).fetch['eye_roi']
 
         from IPython import embed
         # embed()
+        print("Populating for key= ", key)
         pos_errors = np.zeros(len(rf.EyeFrame() & key))
         r_errors = np.zeros(len(rf.EyeFrame() & key))
         excess_frames = 0
         missed_frames = 0
+        r_rf = []
+        r_trk = []
         total_frames = len(rf.EyeFrame() & key)
         for frame_key in (rf.EyeFrame() & key).project().fetch.as_dict:
 
@@ -261,10 +273,11 @@ class EyeFrameQuality(dj.Computed):
                 if (EyeFrame.EyeFrameDetected() & frame_key).fetch['pupil_x'].shape[0] != 0:
                     excess_frames += 1
             else:
-                if (EyeFrame.EyeFrameDetected() & frame_key).fetch['pupil_x'].shape[0] == 0:
+                if (EyeFrame.EyeFrameDetected() & frame_key & EyeFrameDetectedSanity()).fetch['pupil_x'].shape[0] == 0:
                     missed_frames += 1
                 else:
                     threshold = 1.2
+                    threshold = 10
                     if (EyeFrame.EyeFrameDetected() & frame_key).fetch1['pupil_x_std'] > threshold or \
                                     (EyeFrame.EyeFrameDetected() & frame_key).fetch1['pupil_y_std'] > threshold:
                         missed_frames += 1
@@ -273,17 +286,20 @@ class EyeFrameQuality(dj.Computed):
                               (EyeFrame.EyeFrameDetected() & frame_key).fetch['pupil_x'][0] + roi_rf[0][0][0] - 2
                         d_y = (rf.EyeFrame() & frame_key).fetch['pupil_y'][0] - \
                               (EyeFrame.EyeFrameDetected() & frame_key).fetch['pupil_y'][0] + roi_rf[0][0][2] - 2
-                        r_errors[frame_key['frame']] = (rf.EyeFrame() & frame_key).fetch['pupil_r'][0] - \
-                                                       (EyeFrame.EyeFrameDetected() & frame_key).fetch['pupil_r_major'][
-                                                           0]
+                        # r_errors[frame_key['frame']] = (rf.EyeFrame() & frame_key).fetch['pupil_r'][0] - \
+                        #                              (EyeFrame.EyeFrameDetected() & frame_key).fetch['pupil_r_major'][
+                        #                                   0]
+                        r_rf.append((rf.EyeFrame() & frame_key).fetch['pupil_r'][0])
+                        r_trk.append((EyeFrame.EyeFrameDetected() & frame_key).fetch['pupil_r_major'][0])
                         pos_errors[frame_key['frame']] = pow(d_x, 2) + pow(d_y, 2)
-                        print("Frame Computing = ", frame_key['frame'], " / ", total_frames)
-        key['pos_err'] = np.mean(pos_errors)
-        key['r_err'] = np.mean(r_errors)
+                        if frame_key['frame'] % 1000 is 0:
+                            print("Frame Computing = ", frame_key['frame'], " / ", total_frames)
+        key['pos_err'] = pow(np.mean(pos_errors),0.5)
+        key['r_corr'] = np.corrcoef(r_rf, r_trk)[0][1]
         key['excess_frames'] = excess_frames
         key['missed_frames'] = missed_frames
         key['total_frames'] = total_frames
-        embed()
+        # embed()
         self.insert1(key)
         show_figure = 0
         if show_figure:
