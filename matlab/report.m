@@ -2,6 +2,7 @@ function report
 
 fprintf '\nReso pipeline:\n'
 r = rf.Session & 'session_date>"2016-02"';
+%r = 'animal_id=8623';
 fprintf('Mice %s\n', sprintf('%d ', fetchn(common.Animal & r, 'animal_id')))
 
 progress(pre.ScanInfo, r)
