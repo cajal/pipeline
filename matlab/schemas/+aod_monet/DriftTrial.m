@@ -16,7 +16,7 @@ classdef DriftTrial < dj.Relvar
         function iTrial = makeTuples(self, key, iTrial)
             tuple = key;
             tuple.drift_trial = 0;
-            [start_time, duration] = fetch1(aodpre.Scan & key, 'signal_start_time', 'signal_duration');
+            [start_time, duration] = fetch1(aodpre.Sync & key, 'signal_start_time', 'signal_duration');
             [params, flips] = fetch1(psy.MovingNoise*psy.MovingNoiseLookup*psy.Trial & key, ...
                 'params', 'flip_times');
             frametimes = params{4}.frametimes;
