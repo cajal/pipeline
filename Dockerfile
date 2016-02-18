@@ -57,6 +57,10 @@ RUN \
 RUN \
   git clone https://github.com/cajal/pupil-tracking.git
 
+RUN \
+  apt-get install -y python-pip && \
+  pip2 install pandas && \
+  apt-get install -y python-scipy
+
 ENTRYPOINT ["worker"]
-  
   
