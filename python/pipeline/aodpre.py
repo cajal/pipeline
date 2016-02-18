@@ -19,7 +19,7 @@ class Spikes(dj.Computed):
 
     def make_tuples(self, key):
 
-        dt = 1/(Scan() & key).fetch1['sampling_rate']
+        dt = 1/(Set() & key).fetch1['sampling_rate']
         X = (Trace() & key).project('trace').fetch.as_dict()
         X = (pre.SpikeInference() & key).infer_spikes(X, dt, trace_name='trace')
         for x in X:
@@ -33,7 +33,7 @@ class ExtractSpikes(dj.Computed):
     @property
     def populated_from(self):
         # Segment and SpikeInference will be in the workspace if they are in the database
-        return Scan() * pre.SpikeInference() & 'language="python"'
+        return  ComputeTraces() * pre.SpikeInference() & 'language="python"'
 
     def _make_tuples(self, key):
         self.insert1(key)
