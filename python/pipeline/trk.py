@@ -97,7 +97,7 @@ class EyeFrame(dj.Computed):
         kk = key['animal_id']
         si = key['scan_idx']
         # svm="/media/lab/users/jagrawal/global_svm/svm_version2/svm"
-        out = "/media/lab/users/jagrawal/global_svm/151123/m7199A9eyetracking/out"
+        # out = "/media/lab/users/jagrawal/global_svm/151123/m7199A9eyetracking/out"
         video = "m" + str(kk) + "A" + str(si) + "*"
         command = "find /media/scratch01/WholeCell/jake/* -name " + video + ".avi"
         print(command)
@@ -108,40 +108,46 @@ class EyeFrame(dj.Computed):
         print(folder)
         debug = 0
         if len(video_path) != 0:
-            print("do")
-            if (os.path.exists(folder + "/" + video)) and debug == 0:
-                print("Data already exists for " + folder + "/" + video)
-            else:
-                print("Making directory: " + folder + "/" + video)
-                command = "mkdir -p " + folder + "/" + video + "/images"
-                if debug == 0:
-                    os.system(command)
+            print("Found video and going for tracking")
+            # if (os.path.exists(folder + "/" + video)) and debug == 0:
+            #     print("Data already exists for " + folder + "/" + video)
+            # else:
+            # Delete if data already present and start tracking again
+            command = "rm -rf " + folder
+            os.system(command)
+            print("Making directory: " + folder + "/" + video)
+            command = "mkdir -p " + folder + "/" + video + "/images"
+            if debug == 0:
+                os.system(command)
 
-                if (svm_path.find('no_SVM') + 1):
-                    # print("if")
-                    command = "cd " + folder + "/" + video + "; python2 /media/lab/users/jagrawal/Pupil-tracking/track_without_SVM.py " + str(
-                            int(x_roi)) + " " + str(int(y_roi)) + " " + video_path + " -P " + str(
-                            int(patch_size)) + "; cd ../.."
-                else:
-                    # print("else")
-                    command = "cd " + folder + "/" + video + "; python2 /media/lab/users/jagrawal/Pupil-tracking/track.py " + out + " " + svm_path + " " + video_path + "; cd ../.."
+                # if (svm_path.find('no_SVM') + 1):
+                #     # print("if")
+                # Path indicated below is for docker file
+                command = "cd " + folder + "/" + video + "; python2 /data/pupil-tracking/track_without_SVM.py " + str(
+                        int(x_roi)) + " " + str(int(y_roi)) + " " + video_path + " -P " + str(
+                        int(patch_size)) + "; cd ../.."
+            # else:
+            # print("else")
 
-                print("Running command :", command)
-                if debug == 0:
-                    # print(command)
-                    os.system(command)
+            # command = "cd " + folder + "/" + video + "; python2 /data/Pupil-tracking/track.py " + out + " " + svm_path + " " + video_path + "; cd ../.."
 
-                # CODE to insert data after tracking
-                df = pd.read_csv(str(folder + '/' + video + "/trace.csv"))
-                for index, data in df.iterrows():
-                    key['frame'] = index + 1
-                    self.insert1(key)
-                    if pd.notnull(data['pupil_x']):
-                        values = data.to_dict()
-                        values.update(key)
-                        efd.insert1(values)
+            print("Running command :", command)
+            if debug == 0:
+                # print(command)
+                os.system(command)
 
-                        # efd.insert([e.to_dict() for _, e in df.iterrows()])
+            # CODE to insert data after tracking
+            print("Tracking complete... Now inserting data to datajoint")
+            df = pd.read_csv(str(folder + '/' + video + "/trace.csv"))
+            for index, data in df.iterrows():
+                key['frame'] = index + 1
+                self.insert1(key)
+                if pd.notnull(data['pupil_x']):
+                    values = data.to_dict()
+                    values.update(key)
+                    efd.insert1(values)
+
+                    # efd.insert([e.to_dict() for _, e in df.iterrows()])
 
         else:
             print("Video not found")
@@ -163,6 +169,8 @@ class EyeFrame(dj.Computed):
         pupil_angle_std             : float                         # angle of major axis vs. horizontal axis in radians
         intensity_std               : float                         # standard deviation of the ROI pixel values
         """
+
+
 @schema
 class EyeFrameDetectedSanity(dj.Computed):
     definition = """
@@ -182,7 +190,7 @@ class EyeFrameDetectedSanity(dj.Computed):
         rejected_intensity = np.where(i < np.percentile(i, 50) / 2)
 
         i = (EyeFrame.EyeFrameDetected() & key).fetch['pupil_x']
-        rejected_spikes = np.where(abs(i-np.mean(i) > 10*np.std(i)))
+        rejected_spikes = np.where(abs(i - np.mean(i) > 10 * np.std(i)))
 
         rejected_ransac_x = np.asarray([])
         # i = (EyeFrame.EyeFrameDetected() & key).fetch['pupil_x_std']
@@ -191,8 +199,8 @@ class EyeFrameDetectedSanity(dj.Computed):
         rejected_ransac_y = np.asarray([])
         # i = (EyeFrame.EyeFrameDetected() & key).fetch['pupil_y_std']
         # rejected_ransac_y = np.where(i >i)
-        #embed()
-        rej = np.unique(np.concatenate([rejected_intensity[0],rejected_spikes[0]]))
+        # embed()
+        rej = np.unique(np.concatenate([rejected_intensity[0], rejected_spikes[0]]))
 
         # remove these indexes and get the valid frames
         # change the decision parameter video per video basis
@@ -200,39 +208,39 @@ class EyeFrameDetectedSanity(dj.Computed):
         for frame_key in (EyeFrame.EyeFrameDetected() & key).project().fetch.as_dict:
             frame = frame_key['frame']
             if frame % 1000 is 0:
-                print("Looping in frame: ",frame)
+                print("Looping in frame: ", frame)
             if frame not in rej:
-                #embed()
+                # embed()
                 self.insert1(frame_key)
 
 
 
-        # rejected_noise = []
-        # for frame_key in (EyeFrame.EyeFrameDetected() & key).project().fetch.as_dict:
-        #     #embed()
-        #     if int(frame_key['frame']) is 1:
-        #         last_pos = (EyeFrame.EyeFrameDetected() & frame_key).fetch['pupil_x']
-        #     else:
-        #         pos = (EyeFrame.EyeFrameDetected() & frame_key).fetch['pupil_x']
-        #         motion = pos - last_pos
-        #         if abs(motion) < 60:
-        #             last_pos = pos
-        #         else:
-        #             rejected_noise.append(int(frame_key['frame']))
-        #             #print(rejected_noise)
-        #             # if index == 7227:
-        #             # embed()
-        #             last_pos += 25 * np.sign(motion)
-        #             print(rejected_noise)
-        # embed()
+                # rejected_noise = []
+                # for frame_key in (EyeFrame.EyeFrameDetected() & key).project().fetch.as_dict:
+                #     #embed()
+                #     if int(frame_key['frame']) is 1:
+                #         last_pos = (EyeFrame.EyeFrameDetected() & frame_key).fetch['pupil_x']
+                #     else:
+                #         pos = (EyeFrame.EyeFrameDetected() & frame_key).fetch['pupil_x']
+                #         motion = pos - last_pos
+                #         if abs(motion) < 60:
+                #             last_pos = pos
+                #         else:
+                #             rejected_noise.append(int(frame_key['frame']))
+                #             #print(rejected_noise)
+                #             # if index == 7227:
+                #             # embed()
+                #             last_pos += 25 * np.sign(motion)
+                #             print(rejected_noise)
+                # embed()
 
 
 
 
 
-        # x = EyeFrame.EyeFrameDetected().fetch['pupil_x']
-        # for index, data in enumerate(x):
-        #     embed()
+                # x = EyeFrame.EyeFrameDetected().fetch['pupil_x']
+                # for index, data in enumerate(x):
+                #     embed()
 
 
 @schema
@@ -294,7 +302,7 @@ class EyeFrameQuality(dj.Computed):
                         pos_errors[frame_key['frame']] = pow(d_x, 2) + pow(d_y, 2)
                         if frame_key['frame'] % 1000 is 0:
                             print("Frame Computing = ", frame_key['frame'], " / ", total_frames)
-        key['pos_err'] = pow(np.mean(pos_errors),0.5)
+        key['pos_err'] = pow(np.mean(pos_errors), 0.5)
         key['r_corr'] = np.corrcoef(r_rf, r_trk)[0][1]
         key['excess_frames'] = excess_frames
         key['missed_frames'] = missed_frames
