@@ -137,10 +137,12 @@ classdef SegmentMask < dj.Relvar
             pointer = 1;
             while pointer < maxT
                 step =  min(blockSize, maxT-pointer+1);
-                frames = pointer:pointer+step-1;
+                
                 fprintf('Reading slice %i frames %i:%i of %i (max %i)\n', ...
                     key.slice, pointer, pointer + step - 1, maxT, reader.nframes);
-                scan(:, :, 1, frames) = fixMotion(fixRaster(single(reader(:,:, channel, key.slice,frames))), frames);
+                for frame  = pointer:pointer+step-1
+                    scan(:, :, 1, frame) = fixMotion(fixRaster(single(reader(:,:, channel, key.slice,frame))), frame);
+                end
                 pointer = pointer + step;
             end
             if stride > 1

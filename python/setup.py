@@ -18,7 +18,7 @@ setup(
     url='https://github.com/cajal/pipeline',
     keywords='database organization',
     packages=find_packages(exclude=['contrib', 'docs', 'tests*']),
-    install_requires=['numpy'],
+    install_requires=['numpy','slacker'],
     classifiers=[
         'Development Status :: 1 - Beta',
         'Intended Audience :: Science/Research',
@@ -26,4 +26,8 @@ setup(
         'License :: OSI Approved :: Creative Commons Attribution-NonCommercial-ShareAlike 3.0 Unported License',
         'Topic :: Database :: Front-Ends',
     ],
+    scripts=[
+        'scripts/worker',
+        'scripts/worker-populate.py',
+    ]
 )

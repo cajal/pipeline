@@ -15,8 +15,37 @@ von_pvalue : float  # p-value by shuffling (nShuffles = 1e4)
 classdef VonMises < dj.Relvar & dj.AutoPopulate
     
     properties
-        popRel  = monet.DriftResponseSet 
+        popRel  = monet.DriftResponseSet
     end
+    
+    
+    methods
+        function plot(self)
+            for key = fetch(monet.DriftResponseSet & self)'
+                figure
+                s = fetch(monet.DriftTrial*monet.DriftResponse & self & key, 'direction','response');
+                [responses, traceIds, direction] = dj.struct.tabulate(s,...
+                    'response', 'mask_id', 'direction');
+                ncells = length(traceIds);
+                ncols = ceil(sqrt(ncells));
+                nrows = ceil(ncells/ncols);
+                angles = (0:size(responses,2)-1)/size(responses,2)*360;
+                for icell=1:ncells
+                    subplot(nrows, ncols, icell)
+                    plot(angles, squeeze(responses(icell, :, :))', 'k.')
+                    hold on
+                    r = squeeze(responses(icell,:,:));
+                    m = mean(r,2);
+                    s = std(r,[], 2)./sqrt(sum(~isnan(r),2));
+                    errorbar(angles, m, s, 'r', 'LineWidth', 3)
+                    ylim([0 max(m)*4])
+                    xlim([0 360])
+                    box off
+                end
+            end
+        end
+    end
+    
     
     methods(Access=protected)
         

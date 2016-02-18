@@ -30,7 +30,7 @@ classdef ManualSegment < dj.Relvar & dj.AutoPopulate
     methods(Static)
         function bw = outlineCells(images, bw)
             if ~exist('bw','var')
-                bw = true(size(images{1}));
+                bw = false(size(images{1}));
             end
             f = figure;
             if length(images)==2

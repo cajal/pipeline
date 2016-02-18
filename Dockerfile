@@ -51,7 +51,7 @@ RUN \
 
 COPY . /data/pipeline
 RUN \
-  pip install pipeline/python/
+  pip install -e pipeline/python/
 
 # Get pupil tracking repo
 RUN \
@@ -62,3 +62,5 @@ RUN \
   pip2 install pandas && \
   apt-get install -y python-scipy
 
+ENTRYPOINT ["worker"]
+  
