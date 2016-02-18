@@ -87,6 +87,8 @@ def main(argv):
         report = '\n'.join(report)
         post_report(address, report, token=args.slack)
         run_daemon = args.daemon
+        if run_daemon:
+            time.sleep(args.interval*3600)
     return 0
 
 
