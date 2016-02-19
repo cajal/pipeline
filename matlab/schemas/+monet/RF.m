@@ -19,22 +19,26 @@ classdef RF < dj.Relvar & dj.AutoPopulate
     
     methods
         function dump(self)
+            path = '/Volumes/scratch01/RF-party';
             for key = self.fetch'
                 disp(key)
+                fullpath = fullfile(path, ...
+                    sprintf('%05d-%s-%s',key.animal_id, ...
+                    fetch1(pre.SegmentMethod & key, 'method_name'),...
+                    fetch1(pre.SpikeInference & key, 'short_name')));
+                if ~exist(fullpath, 'dir')
+                    mkdir(fullpath);
+                end
+
                 map = fetch1(self & key, 'map');
                 mx = max(abs(map(:)));
                 map = round(map/mx*31.5 + 32.5);
                 cmap = ne7.vis.doppler;
-                
-                for i=1:size(map,3)
-                    try
-                        im = reshape(cmap(map(:,:,i),:),[size(map,1) size(map,2) 3]);
-                        f = sprintf('~/dump/monet%u-%d-%d-%u.%03d_%02d.png', ...
-                            key.spike_inference, key.animal_id, key.scan_idx, key.slice, key.mask_id, i);
-                        imwrite(im,f,'png')
-                    catch err
-                        disp(err)
-                    end
+                for i=1:min(size(map,3),6)
+                    im = reshape(cmap(map(:,:,i),:),[size(map,1) size(map,2) 3]);
+                    f = fullfile(fullpath, sprintf('monet%03u-%u-%03u-%u.png', ...
+                        key.scan_idx, key.slice, key.mask_id, i));
+                    imwrite(im, f, 'png')
                 end
             end
         end
