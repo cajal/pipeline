@@ -17,6 +17,10 @@ def main(argv):
                                       help='Populate the specified relation.')
     subparser.add_argument('--command', default='populate')
 
+    subparser = subparsers.add_parser('report',
+                                      help='Report to slack.')
+    subparser.add_argument('--command', default='report')
+
     args = parser.parse_args(argv[1:2])
 
     return __import__('worker-{0}'.format(args.command)).main([' '.join(argv[:2])] + argv[2:])
