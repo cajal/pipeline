@@ -29,8 +29,8 @@ classdef RF < dj.Relvar & dj.AutoPopulate
                 for i=1:size(map,3)
                     try
                         im = reshape(cmap(map(:,:,i),:),[size(map,1) size(map,2) 3]);
-                        f = sprintf('~/dump/aod_monet%u-%d-%d-%u.%03d_%02d.png', ...
-                            key.spike_inference, key.animal_id, key.scan_idx, key.slice, key.mask_id, i);
+                        f = sprintf('~/dump/aod%u-%d-%d-%u.%03d.png', ...
+                            key.spike_inference, key.mouse_id, key.scan_idx, key.point_id, i);
                         imwrite(im,f,'png')
                     catch err
                         disp(err)
