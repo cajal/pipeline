@@ -1,3 +1,4 @@
 __author__ = 'fabee'
-from .LabelStack import CellLabeler
-from .EyeTracking import readHDF5
+from .label_stack import CellLabeler
+from .eye_tracking import readHDF5
+from .time import ts2sec
