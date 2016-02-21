@@ -23,7 +23,7 @@ class Eye(dj.Imported):
     def populated_from(self):
         return Scan()
 
-    def _make_tuples(self, key):
+    def new_eye(self, key):
         p, f = (Session() & key).fetch1['hd5_path','file_base']
         n = (Scan() & key).fetch1['file_num']
         avi_path = r"{p}/{f}{n}eyetracking.avi".format(f=f, p=p, n=n)
@@ -54,10 +54,7 @@ class Eye(dj.Imported):
             ret, frame = cap.read()
             frames.append(np.asarray(frame)[...,0])
         frames = np.stack(frames, axis=2)
+        return eye_time, frames
 
-        rg = ROIGrabber(frames.mean(axis=2))
-        roi = rg.roi
-        print(roi)
-        key['eye_time'] = eye_time
-        key['eye_roi'] = roi
-        #self.insert1(key)
+    def _make_tuples(self, key):
+        pass

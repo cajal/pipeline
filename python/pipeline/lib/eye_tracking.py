@@ -162,11 +162,9 @@ class ROIGrabber:
         self.current = None
         self.end = None
         self.pressed = False
-        self.roi = None
         sns.set_style('white')
         self.fig, self.ax = plt.subplots(facecolor='w')
 
-        self.fig.canvas.mpl_connect('key_press_event', self.on_key)
         self.fig.canvas.mpl_connect('button_press_event', self.on_press)
         self.fig.canvas.mpl_connect('button_release_event', self.on_release)
         self.fig.canvas.mpl_connect('motion_notify_event', self.on_move)
@@ -197,11 +195,11 @@ class ROIGrabber:
         self.ax.set_title('Press q when done', fontsize=16, fontweight='bold')
         plt.draw()
 
+    @property
+    def roi(self):
+        x = np.vstack((self.start, self.end))
+        return np.hstack((x.min(axis=0),x.max(axis=0))).astype(int)+1
 
-    def on_key(self, event):
-        if event.key == 'q':
-            plt.close(self.fig)
-        self.replot()
 
     def on_press(self, event):
         if event.xdata is not None and event.ydata is not None:
@@ -213,10 +211,6 @@ class ROIGrabber:
             self.end = np.asarray([event.xdata, event.ydata])
         else:
             self.end = self.current
-            x = np.vstack((self.start, self.end))
-            self.roi = np.hstack((x.min(axis=0),x.max(axis=0)))
-
-
         self.pressed = False
         self.replot()
 
