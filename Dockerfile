@@ -47,6 +47,11 @@ RUN \
   rm -rf /data/opencv /data/opencv_contrib
 
 RUN \
+  apt-get update && \
+  apt-get install -y --fix-missing octave 
+
+
+RUN \
   pip install git+https://github.com/cajal/c2s.git
 
 COPY . /data/pipeline
@@ -58,9 +63,13 @@ RUN \
   git clone https://github.com/cajal/pupil-tracking.git
 
 RUN \
-  apt-get install -y python-pip && \
-  pip2 install pandas && \
-  apt-get install -y python-scipy
+  pip install oct2py && \
+  pip install git+https://github.com/atlab/tiffreader
+
+#RUN \
+#  apt-get install -y python-pip && \
+#  pip2 install pandas && \
+#  apt-get install -y python-scipy
 
 ENTRYPOINT ["worker"]
   

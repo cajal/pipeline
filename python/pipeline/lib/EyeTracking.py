@@ -14,19 +14,19 @@ WAVEFORMDESCR = ['Current Input 1',
                  'Voltage Input 2',
                  'Scan Image Sync']
 SETTINGSDESCR = ['Current Gain', 'Voltage Gain', 'Current Low Pass', 'Voltage Low Pass', 'Voltage High Pass']
-iGains = [0.1, 0.2, 0.5, 1, 2, 5, 10]
-vGains = [10, 20, 50, 100, 200, 500, 1000]
-iLowPassCorners = [20, 50, 100, 200, 300, 500, 700, 1000, 1300, 2000, 3000, 5000, 8000, 10000, 13000, 20000]
-vLowPassCorners = [20, 50, 100, 200, 300, 500, 700, 1000, 1300, 2000, 3000, 5000, 8000, 10000, 13000, 20000]
-vHighPassCorners = [0, 0.1, 0.3, 0.5, 1, 3, 5, 10, 30, 50, 100, 300, 500, 800, 1000, 3000]
+iGains = np.asarray([0.1, 0.2, 0.5, 1, 2, 5, 10])
+vGains = np.asarray([10, 20, 50, 100, 200, 500, 1000])
+iLowPassCorners = np.asarray([20, 50, 100, 200, 300, 500, 700, 1000, 1300, 2000, 3000, 5000, 8000, 10000, 13000, 20000])
+vLowPassCorners = np.asarray([20, 50, 100, 200, 300, 500, 700, 1000, 1300, 2000, 3000, 5000, 8000, 10000, 13000, 20000])
+vHighPassCorners = np.asarray([0, 0.1, 0.3, 0.5, 1, 3, 5, 10, 30, 50, 100, 300, 500, 800, 1000, 3000])
 
 def readHDF5(hdf_path):
     data = {}
     with h5py.File(hdf_path, 'r+', driver='family', memb_size=0) as fid:
 
         data['ball'] = np.asarray(fid['ball'])
-        wf = np.asarray(np.asarray(fid['waveform']))
-        sets = np.asarray(np.asarray(fid['settings']))
+        wf = np.asarray(np.asarray(fid['waveform'])).T
+        sets = np.asarray(np.asarray(fid['settings'])).T
         data['cam1ts'] = np.asarray(fid['behaviorvideotimestamp'])
         data['cam2ts'] = np.asarray(fid['eyetrackingvideotimestamp'])
 
@@ -60,16 +60,16 @@ def readHDF5(hdf_path):
             settings['iGain'] = iGains[np.unique(np.round(sets[:,0])).astype(int)]
             assert len(settings['iGain'])==1,'Current gain changed during recording'
 
-            settings['vGain'] = vGains[np.unique(round(sets[:,1])).astype(int)]
+            settings['vGain'] = vGains[np.unique(np.round(sets[:,1])).astype(int)]
             assert len(settings['vGain'])==1, 'Voltage gain changed during recording'
 
-            settings['iLowPass'] = iLowPassCorners[np.unique(round(sets[:,2])).astype(int)+9]
+            settings['iLowPass'] = iLowPassCorners[np.unique(np.round(sets[:,2])).astype(int)+9]
             assert len(settings['iLowPass'])==1, 'Current low pass filter changed during recording'
 
-            settings['vLowPass'] = vLowPassCorners[np.unique(round(sets[:,3])).astype(int)+9]
+            settings['vLowPass'] = vLowPassCorners[np.unique(np.round(sets[:,3])).astype(int)+9]
             assert len(settings['vLowPass'])==1,'Voltage low pass filter changed during recording'
 
-            settings['vHighPass'] = vHighPassCorners[np.unique(round(sets[:,4])).astype(int)+9]
+            settings['vHighPass'] = vHighPassCorners[np.unique(np.round(sets[:,4])).astype(int)+9]
             assert len(settings['vHighPass'])==1,'Voltage high pass filter changed during recording'
 
         else:
