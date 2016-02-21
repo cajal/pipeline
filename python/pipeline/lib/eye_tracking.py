@@ -105,12 +105,12 @@ def read_video_hdf5(hdf_path):
     return data
 
 
-def ts2sec(ts, packetLen=0):
+def ts2sec(ts, packet_length=0):
     """
     Convert 10MHz timestamps from Saumil's patching program (ts) to seconds (s)
 
     :param ts: timestamps
-    :param packetLen: length of timestamped packets
+    :param packet_length: length of timestamped packets
     :returns:
         timestamps converted to seconds
         system time (in seconds) of t=0
@@ -128,10 +128,10 @@ def ts2sec(ts, packetLen=0):
         ts[bad_idx] = f(x_bad)
 
     #  remove wraparound
-    wrapInd = np.where(np.diff(ts)<0)[0]
-    while not len(wrapInd) == 0:
-        ts[wrapInd[0]+1:] += 2**32
-        wrapInd = np.where(np.diff(ts)<0)[0]
+    wrap_idx = np.where(np.diff(ts)<0)[0]
+    while not len(wrap_idx) == 0:
+        ts[wrap_idx[0]+1:] += 2**32
+        wrap_idx = np.where(np.diff(ts)<0)[0]
 
     s = ts/1e7
 
@@ -139,11 +139,11 @@ def ts2sec(ts, packetLen=0):
     if np.any(np.diff(s)<=0):
         # Check to make sure it's packets
         diffs = np.where(np.diff(s)>0)[0]
-        assert packetLen == diffs[0]+1
+        assert packet_length == diffs[0]+1
 
         # Subtract duration of first packet from all timestamps
-        packetDur = s[packetLen-1]-s[0]
-        s -= packetDur
+        packet_duration = s[packet_length-1]-s[0]
+        s -= packet_duration
 
         # Interpolate
         not_zero = np.hstack((0, diffs+1))
