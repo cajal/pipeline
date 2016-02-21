@@ -1,5 +1,7 @@
 import warnings
 import datajoint as dj
+from pipeline.lib import ROIGrabber
+
 schema = dj.schema('pipeline_rf', locals())
 from . import lib
 
@@ -7,7 +9,11 @@ import matplotlib.pyplot as plt
 import h5py
 import seaborn as sns
 import numpy as np
-import cv2
+
+try:
+    import cv2
+except:
+    warnings.warn("OpenCV is not installed. You won't be able to populate rf.Eye")
 
 @schema
 class Eye(dj.Imported):
@@ -48,14 +54,11 @@ class Eye(dj.Imported):
             ret, frame = cap.read()
             frames.append(np.asarray(frame)[...,0])
         frames = np.stack(frames, axis=2)
-        sns.set_style('white')
 
-        fig, ax = plt.subplots()
-        ax.imshow(frames.mean(axis=2), cmap=plt.cm.gray)
-        x = fig.ginput(2)
-        print(x)
-        roi = np.zeros(4)
+        rg = ROIGrabber(frames.mean(axis=2))
 
+        roi = rg.roi
+        print(roi)
         key.eye_time = eye_time
         key.eye_roi = roi
         #self.insert1(key)
