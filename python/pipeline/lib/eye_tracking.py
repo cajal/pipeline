@@ -1,7 +1,7 @@
 import warnings
 import h5py
 import numpy as np
-from scipy.interpolate import interp1d
+from scipy.interpolate import InterpolatedUnivariateSpline as iu_spline
 from pipeline import PipelineException
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -19,21 +19,21 @@ WAVEFORMDESCR = ['Current Input 1',
                  'Voltage Input 2',
                  'Scan Image Sync']
 SETTINGSDESCR = ['Current Gain', 'Voltage Gain', 'Current Low Pass', 'Voltage Low Pass', 'Voltage High Pass']
-iGains = [0.1, 0.2, 0.5, 1, 2, 5, 10]
-vGains = [10, 20, 50, 100, 200, 500, 1000]
-iLowPassCorners = [20, 50, 100, 200, 300, 500, 700, 1000, 1300, 2000, 3000, 5000, 8000, 10000, 13000, 20000]
-vLowPassCorners = [20, 50, 100, 200, 300, 500, 700, 1000, 1300, 2000, 3000, 5000, 8000, 10000, 13000, 20000]
-vHighPassCorners = [0, 0.1, 0.3, 0.5, 1, 3, 5, 10, 30, 50, 100, 300, 500, 800, 1000, 3000]
+iGains = np.asarray([0.1, 0.2, 0.5, 1, 2, 5, 10], dtype=float)
+vGains =  np.asarray([10, 20, 50, 100, 200, 500, 1000], dtype=float)
+iLowPassCorners =  np.asarray([20, 50, 100, 200, 300, 500, 700, 1000, 1300, 2000, 3000, 5000, 8000, 10000, 13000, 20000], dtype=float)
+vLowPassCorners =  np.asarray([20, 50, 100, 200, 300, 500, 700, 1000, 1300, 2000, 3000, 5000, 8000, 10000, 13000, 20000], dtype=float)
+vHighPassCorners =  np.asarray([0, 0.1, 0.3, 0.5, 1, 3, 5, 10, 30, 50, 100, 300, 500, 800, 1000, 3000], dtype=float)
 
 def read_video_hdf5(hdf_path):
     data = {}
     with h5py.File(hdf_path, 'r+', driver='family', memb_size=0) as fid:
 
         data['ball'] = np.asarray(fid['ball'])
-        wf = np.asarray(np.asarray(fid['waveform']))
-        sets = np.asarray(np.asarray(fid['settings']))
-        data['cam1ts'] = np.asarray(fid['behaviorvideotimestamp'])
-        data['cam2ts'] = np.asarray(fid['eyetrackingvideotimestamp'])
+        wf = np.asarray(np.asarray(fid['waveform'])).T
+        sets = np.asarray(np.asarray(fid['settings'])).T
+        data['cam1ts'] = np.asarray(fid['behaviorvideotimestamp']).squeeze()
+        data['cam2ts'] = np.asarray(fid['eyetrackingvideotimestamp']).squeeze()
 
         waveformDescStr = fid.attrs['waveform Channels Description'].decode('utf-8')
         settingsDescStr= fid.attrs['settings Channels Description'].decode('utf-8')
@@ -65,16 +65,16 @@ def read_video_hdf5(hdf_path):
             settings['iGain'] = iGains[np.unique(np.round(sets[:,0])).astype(int)]
             assert len(settings['iGain'])==1,'Current gain changed during recording'
 
-            settings['vGain'] = vGains[np.unique(round(sets[:,1])).astype(int)]
+            settings['vGain'] = vGains[np.unique(np.round(sets[:,1])).astype(int)]
             assert len(settings['vGain'])==1, 'Voltage gain changed during recording'
 
-            settings['iLowPass'] = iLowPassCorners[np.unique(round(sets[:,2])).astype(int)+9]
+            settings['iLowPass'] = iLowPassCorners[np.unique(np.round(sets[:,2])).astype(int)+9]
             assert len(settings['iLowPass'])==1, 'Current low pass filter changed during recording'
 
-            settings['vLowPass'] = vLowPassCorners[np.unique(round(sets[:,3])).astype(int)+9]
+            settings['vLowPass'] = vLowPassCorners[np.unique(np.round(sets[:,3])).astype(int)+9]
             assert len(settings['vLowPass'])==1,'Voltage low pass filter changed during recording'
 
-            settings['vHighPass'] = vHighPassCorners[np.unique(round(sets[:,4])).astype(int)+9]
+            settings['vHighPass'] = vHighPassCorners[np.unique(np.round(sets[:,4])).astype(int)+9]
             assert len(settings['vHighPass'])==1,'Voltage high pass filter changed during recording'
 
         else:
@@ -120,11 +120,11 @@ def ts2sec(ts, packetLen=0):
 
     # find bad indices in camera timestamps and replace with linear est
     bad_idx = ts ==2**31-1
-    if sum(bad_idx) > 10:
+    if bad_idx.sum() > 10:
         raise PipelineException('Bad camera ts...')
         x = np.where(~bad_idx)[0]
         x_bad = np.where(bad_idx)[0]
-        f = interp1d(x, ts[~bad_idx],'linear')
+        f = iu_spline(x, ts[~bad_idx], k=1)
         ts[bad_idx] = f(x_bad)
 
     #  remove wraparound
@@ -136,10 +136,10 @@ def ts2sec(ts, packetLen=0):
     s = ts/1e7
 
     # Remove offset, and if not monotonically increasing (i.e. for packeted ts), interpolate
-    if np.any(np.diff[s]<=0):
+    if np.any(np.diff(s)<=0):
         # Check to make sure it's packets
         diffs = np.where(np.diff(s)>0)[0]
-        assert packetLen == diffs[0]
+        assert packetLen == diffs[0]+1
 
         # Subtract duration of first packet from all timestamps
         packetDur = s[packetLen-1]-s[0]
@@ -147,11 +147,12 @@ def ts2sec(ts, packetLen=0):
 
         # Interpolate
         not_zero = np.hstack((0, diffs+1))
-        f = interp1d(not_zero, s[not_zero],'linear')
+        f = iu_spline(not_zero, s[not_zero], k=1)
         s = f(np.arange(len(s)))
-    s -= s[0]
+    start = s[0]
+    s -= start
 
-
+    return s, start, bad_idx
 
 
 class ROIGrabber:
@@ -163,14 +164,14 @@ class ROIGrabber:
         self.pressed = False
         self.roi = None
         sns.set_style('white')
-        self.fig, self.ax = plt.subplots(facecolor='w', figsize=(10,10))
+        self.fig, self.ax = plt.subplots(facecolor='w')
 
         self.fig.canvas.mpl_connect('key_press_event', self.on_key)
         self.fig.canvas.mpl_connect('button_press_event', self.on_press)
         self.fig.canvas.mpl_connect('button_release_event', self.on_release)
         self.fig.canvas.mpl_connect('motion_notify_event', self.on_move)
         self.replot()
-        plt.show()
+        plt.show(block=True)
 
     def draw_rect(self, fr, to, color='dodgerblue'):
         x = np.vstack((fr, to))
@@ -223,5 +224,6 @@ class ROIGrabber:
         if event.xdata is not None and event.ydata is not None:
             self.current = np.asarray([event.xdata, event.ydata])
             if self.pressed:
+                print(self.current)
                 self.replot()
 

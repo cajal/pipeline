@@ -56,9 +56,8 @@ class Eye(dj.Imported):
         frames = np.stack(frames, axis=2)
 
         rg = ROIGrabber(frames.mean(axis=2))
-
         roi = rg.roi
         print(roi)
-        key.eye_time = eye_time
-        key.eye_roi = roi
+        key['eye_time'] = eye_time
+        key['eye_roi'] = roi
         #self.insert1(key)
