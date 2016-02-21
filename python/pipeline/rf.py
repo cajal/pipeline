@@ -1,7 +1,7 @@
 import warnings
 import datajoint as dj
 schema = dj.schema('pipeline_rf', locals())
-from . import rf, lib
+from . import lib
 
 import matplotlib.pyplot as plt
 import h5py
@@ -9,26 +9,24 @@ import seaborn as sns
 import numpy as np
 import cv2
 
-
+@schema
 class Eye(dj.Imported):
     definition = ...
 
     @property
     def populated_from(self):
-        return rf.Scan()
+        return Scan()
 
     def _make_tuples(self, key):
-        p, f = (rf.Session() & key).fetch1['hd5_path','file_base']
-        n = (rf.Scan() & key).fetch1['file_num']
+        p, f = (Session() & key).fetch1['hd5_path','file_base']
+        n = (Scan() & key).fetch1['file_num']
         avi_path = r"{p}/{f}{n}eyetracking.avi".format(f=f, p=p, n=n)
         hdf_path = r"{p}/{f}{n}%d.h5".format(f=f, p=p, n=n)
-
         data = lib.read_video_hdf5(hdf_path)
 
         packet_length = data['analogPacketLen']
         dat_time,_,_ = lib.ts2sec(data['ts'], packet_length)
         eye_time,_,_ = lib.ts2sec(data['cam2ts'], packet_length)
-
         total_frames = len(eye_time)
         n_sample_frames = 10
         frame_idx = np.round(np.linspace(1,total_frames,n_sample_frames))
@@ -37,7 +35,7 @@ class Eye(dj.Imported):
         no_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
         if total_frames != no_frames:
-            warnings.warn(total_frames, ' timestamps, but ', no_frames, ' movie frames.')
+            warnings.warn("{total_frames} timestamps, but {no_frames}  movie frames.".format(total_frames=total_frames, no_frames=no_frames))
             if total_frames > no_frames and total_frames and no_frames:
                 total_frames = no_frames
                 eye_time = eye_time[:total_frames]
@@ -53,8 +51,8 @@ class Eye(dj.Imported):
         sns.set_style('white')
 
         fig, ax = plt.subplots()
-        fig.imshow(frames.mean(axis=2), cmap=plt.cm.gray)
-        x = plt.ginput(2)
+        ax.imshow(frames.mean(axis=2), cmap=plt.cm.gray)
+        x = fig.ginput(2)
         print(x)
         roi = np.zeros(4)
 
