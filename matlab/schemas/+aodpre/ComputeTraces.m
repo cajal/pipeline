@@ -25,6 +25,7 @@ classdef ComputeTraces < dj.Relvar & dj.AutoPopulate
                     X = double([X{:}]);
                     M = mean(X);
                     % subtract 1 principal component  (not including means)
+                    X = bsxfun(@minus, X, M);
                     [U,D,V] = svds(X,1);
                     X = X - U*D*V';
                     % add the mean back 
