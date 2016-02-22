@@ -77,13 +77,13 @@ class EyeFrame(dj.Computed):
         # x_roi=900
         # y_roi=420
         # pass
-        roi = (rf.Eye() & key).fetch1['eye_roi']
-        print(roi)
-        patch_size = 380
-        y_roi = (roi[0][1] + roi[0][3]) / 2 - patch_size / 2
-        x_roi = (roi[0][0] + roi[0][2]) / 2 - patch_size / 2
-        x_roi = 275 - patch_size / 2
-        y_roi = 675 - patch_size / 2
+        # roi = (rf.Eye() & key).fetch1['eye_roi']
+        # print(roi)
+        patch_size = 350
+        # y_roi = (roi[0][1] + roi[0][3]) / 2 - patch_size / 2
+        # x_roi = (roi[0][0] + roi[0][2]) / 2 - patch_size / 2
+        # x_roi = 275 - patch_size / 2
+        # y_roi = 675 - patch_size / 2
         x_roi = (ROI() & key).fetch1['x_roi']
         y_roi = (ROI() & key).fetch1['y_roi']
         print("ROI used for video = ", x_roi, y_roi)
