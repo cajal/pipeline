@@ -26,6 +26,12 @@ vLowPassCorners =  np.asarray([20, 50, 100, 200, 300, 500, 700, 1000, 1300, 2000
 vHighPassCorners =  np.asarray([0, 0.1, 0.3, 0.5, 1, 3, 5, 10, 30, 50, 100, 300, 500, 800, 1000, 3000], dtype=float)
 
 def read_video_hdf5(hdf_path):
+    """
+    Reads hdf5 file for eye tracking
+
+    :param hdf_path: path of the file. Needs a %d where multiple files differ.
+    :return: dictionary with the data
+    """
     data = {}
     with h5py.File(hdf_path, 'r+', driver='family', memb_size=0) as fid:
 
@@ -141,10 +147,6 @@ def ts2sec(ts, packet_length=0):
         diffs = np.where(np.diff(s)>0)[0]
         assert packet_length == diffs[0]+1
 
-        # Subtract duration of first packet from all timestamps
-        packet_duration = s[packet_length-1]-s[0]
-        s -= packet_duration
-
         # Interpolate
         not_zero = np.hstack((0, diffs+1))
         f = iu_spline(not_zero, s[not_zero], k=1)
@@ -156,6 +158,15 @@ def ts2sec(ts, packet_length=0):
 
 
 class ROIGrabber:
+    """
+    Interactive matplotlib figure to grab an ROI from an image.
+
+    Usage:
+
+    rg = ROIGrabber(img)
+    # select roi
+    print(rg.roi) # get ROI
+    """
     def __init__(self, img):
         self.img = img
         self.start = None
