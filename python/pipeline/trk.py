@@ -1,12 +1,13 @@
 import datajoint as dj
-
 import pandas as pd
+
+from djaddon import hdf5
 
 schema = dj.schema('pipeline_pupiltracking', locals())
 from . import rf
 import numpy as np
 import os
-from IPython import embed
+import matplotlib.pyplot as plt
 
 
 @schema
@@ -87,7 +88,7 @@ class EyeFrame(dj.Computed):
         x_roi = (ROI() & key).fetch1['x_roi']
         y_roi = (ROI() & key).fetch1['y_roi']
         print("ROI used for video = ", x_roi, y_roi)
-        efd = EyeFrame.EyeFrameDetected()
+        efd = EyeFrame.Detection()
 
         # Code to do tracking
         from IPython import embed
@@ -124,8 +125,8 @@ class EyeFrame(dj.Computed):
                 #     # print("if")
                 # Path indicated below is for docker file
                 command = "cd " + folder + "/" + video + "; python2 /data/pupil-tracking/track_without_SVM.py " + str(
-                        int(x_roi)) + " " + str(int(y_roi)) + " " + video_path + " -P " + str(
-                        int(patch_size)) + "; cd ../.."
+                    int(x_roi)) + " " + str(int(y_roi)) + " " + video_path + " -P " + str(
+                    int(patch_size)) + "; cd ../.."
             # else:
             # print("else")
 
@@ -152,7 +153,7 @@ class EyeFrame(dj.Computed):
         else:
             print("Video not found")
 
-    class EyeFrameDetected(dj.Part):
+    class Detection(dj.Part):
         definition = """
         # eye frames with detected eye
         ->EyeFrame
@@ -172,79 +173,145 @@ class EyeFrame(dj.Computed):
 
 
 @schema
-class EyeFrameDetectedSanity(dj.Computed):
+class FilterProtocol(dj.Lookup):
     definition = """
-    # to filter out noisy frames
-    # this class exists only for non-noisy frames
-    -> EyeFrame.EyeFrameDetected
+    # groups of filtering steps to reject bad frames
 
+    filter_protocol_id      : int   # id of the filtering protocol
+    ---
+    protocol_name           : char(50) # descriptive name of the protocol
+    """
+
+    contents = [
+        {'filter_protocol_id': 0, 'protocol_name': 'frame_intensity'},
+    ]
+
+    def apply(self, frames, key):
+        for step in (ProtocolStep() & key).fetch.order_by('priority').as_dict():
+            frames = FrameFilter().apply(frames, step, param=step['filter_param'])
+        return frames
+
+
+@schema
+class FrameFilter(dj.Lookup):
+    definition = """
+    # single filters to reject frames
+    filter_id           : tinyint   # id of the filter
+    ---
+    filter_name         : char(50)   # descriptive name of the filter
+    """
+
+    contents = [
+        {'filter_id': 0, 'filter_name': 'intensity_filter'},
+    ]
+
+    def apply(self, frames, key, param):
+        """
+        Apply takes a restriction of EyeFrame.Detection() and returns an even more restricted set of frames
+        :param frames: restriction of EyeFrame.Detection()
+        :param key: key that singles out a single filter
+        :param param: parameters to the filter
+        :return: an even more restricted set of frames
+        """
+        which = (self & key).fetch1['filter_name']
+
+        if which == 'intensity_filter':
+            i = frames.fetch['intensity_std']
+            th = np.percentile(i, param) / 2
+            return frames & 'intensity_std>{threshold}'.format(threshold=th)
+
+
+@schema
+class ProtocolStep(dj.Lookup):
+    definition = """
+    # single filter in a protocol to accept frames
+    -> FilterProtocol
+    -> FrameFilter
+    priority                : int   # priority of the filter step, the low the higher the priority
+    ---
+    filter_param=null       : longblob # parameters that are passed to the filter
+    """
+
+    # define the protocols. Each protocol has one id, but can have several filters
+    contents = [ # parameter needs to be an array
+        # protocol 0 contains only one filter and is based on intensity
+        {'filter_protocol_id': 0, 'filter_id': 0, 'priority': 50, 'filter_param': np.array(50)},
+    ]
+
+
+@schema
+class FilteredFrame(dj.Computed):
+    definition = """
+    # This schema only contains detected frames that meet a particular quality criterion
+    -> EyeFrame.Detection
+    -> FilterProtocol
     """
 
     @property
     def populated_from(self):
-        return rf.Eye()
+        return rf.Eye() * FilterProtocol() & EyeFrame()
 
     def _make_tuples(self, key):
         print("Key = ", key)
-        i = (EyeFrame.EyeFrameDetected() & key).fetch['intensity_std']
-        rejected_intensity = np.where(i < np.percentile(i, 50) / 2)
 
-        i = (EyeFrame.EyeFrameDetected() & key).fetch['pupil_x']
-        rejected_spikes = np.where(abs(i - np.mean(i) > 10 * np.std(i)))
+        frames = EyeFrame.Detection() & key
+        print('\tLength before filtering: {l}'.format(l=len(frames)))
+        frames = (FilterProtocol() & key).apply(frames, key)
+        print('\tLength after filtering: {l}'.format(l=len(frames)))
+
+        # TODO: move the filters up to FrameFilter
+        # i = (EyeFrame.Detection() & key).fetch['pupil_x']
+        # rejected_spikes = np.where(abs(i - np.mean(i) > 10 * np.std(i)))
 
         rejected_ransac_x = np.asarray([])
-        # i = (EyeFrame.EyeFrameDetected() & key).fetch['pupil_x_std']
+        # i = (EyeFrame.Detection() & key).fetch['pupil_x_std']
         # rejected_ransac_x = np.where(i > 1)
 
         rejected_ransac_y = np.asarray([])
-        # i = (EyeFrame.EyeFrameDetected() & key).fetch['pupil_y_std']
+        # i = (EyeFrame.Detection() & key).fetch['pupil_y_std']
         # rejected_ransac_y = np.where(i >i)
         # embed()
-        rej = np.unique(np.concatenate([rejected_intensity[0], rejected_spikes[0]]))
+        # rej = np.unique(np.concatenate([rejected_intensity[0], rejected_spikes[0]]))
 
         # remove these indexes and get the valid frames
         # change the decision parameter video per video basis
 
-        for frame_key in (EyeFrame.EyeFrameDetected() & key).project().fetch.as_dict:
-            frame = frame_key['frame']
-            if frame % 1000 is 0:
-                print("Looping in frame: ", frame)
-            if frame not in rej:
-                # embed()
-                self.insert1(frame_key)
+        for frame_key in frames.project().fetch.as_dict:
+            key.update(frame_key)
+            self.insert1(key)
 
 
 
-                # rejected_noise = []
-                # for frame_key in (EyeFrame.EyeFrameDetected() & key).project().fetch.as_dict:
-                #     #embed()
-                #     if int(frame_key['frame']) is 1:
-                #         last_pos = (EyeFrame.EyeFrameDetected() & frame_key).fetch['pupil_x']
-                #     else:
-                #         pos = (EyeFrame.EyeFrameDetected() & frame_key).fetch['pupil_x']
-                #         motion = pos - last_pos
-                #         if abs(motion) < 60:
-                #             last_pos = pos
-                #         else:
-                #             rejected_noise.append(int(frame_key['frame']))
-                #             #print(rejected_noise)
-                #             # if index == 7227:
-                #             # embed()
-                #             last_pos += 25 * np.sign(motion)
-                #             print(rejected_noise)
-                # embed()
+            # rejected_noise = []
+            # for frame_key in (EyeFrame.Detection() & key).project().fetch.as_dict:
+            #     #embed()
+            #     if int(frame_key['frame']) is 1:
+            #         last_pos = (EyeFrame.Detection() & frame_key).fetch['pupil_x']
+            #     else:
+            #         pos = (EyeFrame.Detection() & frame_key).fetch['pupil_x']
+            #         motion = pos - last_pos
+            #         if abs(motion) < 60:
+            #             last_pos = pos
+            #         else:
+            #             rejected_noise.append(int(frame_key['frame']))
+            #             #print(rejected_noise)
+            #             # if index == 7227:
+            #             # embed()
+            #             last_pos += 25 * np.sign(motion)
+            #             print(rejected_noise)
+            # embed()
 
 
 
 
 
-                # x = EyeFrame.EyeFrameDetected().fetch['pupil_x']
-                # for index, data in enumerate(x):
-                #     embed()
+            # x = EyeFrame.Detection().fetch['pupil_x']
+            # for index, data in enumerate(x):
+            #     embed()
 
 
 @schema
-class EyeFrameQuality(dj.Computed):
+class Quality(dj.Computed):
     definition = """
     # quality assessment of tracking using Jake's tracked frames as ground truth
     -> rf.Eye
@@ -258,9 +325,12 @@ class EyeFrameQuality(dj.Computed):
 
     @property
     def populated_from(self):
-        return rf.Eye().project() & EyeFrame().project() & rf.EyeFrame().project() & EyeFrameDetectedSanity().project()
+        return rf.Eye().project() & EyeFrame().project() & rf.EyeFrame().project() & FilteredFrame().project()
 
     def _make_tuples(self, key):
+        # TODO: This function needs cleanup. Only keep relevant stuff for computing the comparisons
+        # TODO: Don't plot in _make_tuples. Make plotting an extra function.
+
         roi_rf = (rf.Eye() & key).fetch['eye_roi']
 
         from IPython import embed
@@ -278,27 +348,27 @@ class EyeFrameQuality(dj.Computed):
             # from IPython import embed
             # embed()
             if np.isnan((rf.EyeFrame() & frame_key).fetch['pupil_x']):
-                if (EyeFrame.EyeFrameDetected() & frame_key).fetch['pupil_x'].shape[0] != 0:
+                if (EyeFrame.Detection() & frame_key).fetch['pupil_x'].shape[0] != 0:
                     excess_frames += 1
             else:
-                if (EyeFrame.EyeFrameDetected() & frame_key & EyeFrameDetectedSanity()).fetch['pupil_x'].shape[0] == 0:
+                if (EyeFrame.Detection() & frame_key & FilteredFrame()).fetch['pupil_x'].shape[0] == 0:
                     missed_frames += 1
                 else:
                     threshold = 1.2
                     threshold = 10
-                    if (EyeFrame.EyeFrameDetected() & frame_key).fetch1['pupil_x_std'] > threshold or \
-                                    (EyeFrame.EyeFrameDetected() & frame_key).fetch1['pupil_y_std'] > threshold:
+                    if (EyeFrame.Detection() & frame_key).fetch1['pupil_x_std'] > threshold or \
+                                    (EyeFrame.Detection() & frame_key).fetch1['pupil_y_std'] > threshold:
                         missed_frames += 1
                     else:
                         d_x = (rf.EyeFrame() & frame_key).fetch['pupil_x'][0] - \
-                              (EyeFrame.EyeFrameDetected() & frame_key).fetch['pupil_x'][0] + roi_rf[0][0][0] - 2
+                              (EyeFrame.Detection() & frame_key).fetch['pupil_x'][0] + roi_rf[0][0][0] - 2
                         d_y = (rf.EyeFrame() & frame_key).fetch['pupil_y'][0] - \
-                              (EyeFrame.EyeFrameDetected() & frame_key).fetch['pupil_y'][0] + roi_rf[0][0][2] - 2
+                              (EyeFrame.Detection() & frame_key).fetch['pupil_y'][0] + roi_rf[0][0][2] - 2
                         # r_errors[frame_key['frame']] = (rf.EyeFrame() & frame_key).fetch['pupil_r'][0] - \
-                        #                              (EyeFrame.EyeFrameDetected() & frame_key).fetch['pupil_r_major'][
+                        #                              (EyeFrame.Detection() & frame_key).fetch['pupil_r_major'][
                         #                                   0]
                         r_rf.append((rf.EyeFrame() & frame_key).fetch['pupil_r'][0])
-                        r_trk.append((EyeFrame.EyeFrameDetected() & frame_key).fetch['pupil_r_major'][0])
+                        r_trk.append((EyeFrame.Detection() & frame_key).fetch['pupil_r_major'][0])
                         pos_errors[frame_key['frame']] = pow(d_x, 2) + pow(d_y, 2)
                         if frame_key['frame'] % 1000 is 0:
                             print("Frame Computing = ", frame_key['frame'], " / ", total_frames)
@@ -309,28 +379,29 @@ class EyeFrameQuality(dj.Computed):
         key['total_frames'] = total_frames
         # embed()
         self.insert1(key)
-        show_figure = 0
-        if show_figure:
-            import matplotlib.pyplot as plt
-            fig, ax = plt.subplots(3, 1, sharex=True)
-            r_rf = (rf.EyeFrame() & key).fetch['pupil_r']
-            r_trk = (EyeFrame.EyeFrameDetected() & key).fetch['pupil_r_major']
-            ax[0].plot(r_rf)
-            ax[1].plot(r_trk)
-            ax[2].plot(r_errors)
-            fig.savefig('error_radius.png')
 
-            fig, ax = plt.subplots(3, 1, sharex=True)
-            r_rf = (rf.EyeFrame() & key).fetch['pupil_x']
-            r_trk = (EyeFrame.EyeFrameDetected() & key).fetch['pupil_x']
-            ax[0].set_ylim([np.nanmean(r_rf) - 25, np.nanmean(r_rf) + 25])
-            ax[1].set_ylim([np.nanmean(r_rf) - 25, np.nanmean(r_rf) + 25])
-            ax[2].set_ylim([0, 100])
-            ax[0].plot(r_rf)
-            ax[1].plot(r_trk - roi_rf[0][0][0])
-            ax[2].plot(pos_errors)
-            fig.savefig('error_pupil_x.png')
-            # ax[2].plot()
+    def plot_comparison(self, key):
+        pass
+        # TODO: Make this a proper plotting function
+        # fig, ax = plt.subplots(3, 1, sharex=True)
+        # r_rf = (rf.EyeFrame() & key).fetch['pupil_r']
+        # r_trk = (EyeFrame.Detection() & key).fetch['pupil_r_major']
+        # ax[0].plot(r_rf)
+        # ax[1].plot(r_trk)
+        # ax[2].plot(r_errors)
+        # fig.savefig('error_radius.png')
+        #
+        # fig, ax = plt.subplots(3, 1, sharex=True)
+        # r_rf = (rf.EyeFrame() & key).fetch['pupil_x']
+        # r_trk = (EyeFrame.Detection() & key).fetch['pupil_x']
+        # ax[0].set_ylim([np.nanmean(r_rf) - 25, np.nanmean(r_rf) + 25])
+        # ax[1].set_ylim([np.nanmean(r_rf) - 25, np.nanmean(r_rf) + 25])
+        # ax[2].set_ylim([0, 100])
+        # ax[0].plot(r_rf)
+        # ax[1].plot(r_trk - roi_rf[0][0][0])
+        # ax[2].plot(pos_errors)
+        # fig.savefig('error_pupil_x.png')
+        # # ax[2].plot()
 
 # from microns.trk import EyeFrame
 # EyeFrame().populate(restriction=dict(animal_id=2055, group_name='setup_jake'))

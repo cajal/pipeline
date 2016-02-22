@@ -1,5 +1,5 @@
 %{
-trk.EyeFrameEyeFrameDetected(computed) # eye frames with detected eye
+trk.EyeFrameDetection(computed) # eye frames with detected eye
 ->trk.EyeFrame
 ---
 pupil_x                     : float                         # pupil x position
@@ -13,7 +13,7 @@ pupil_r_minor_std           : float                         # pupil radius minor
 pupil_r_major_std           : float                         # pupil radius major axis std
 pupil_angle_std             : float                         # angle of major axis vs. horizontal axis in radians
 %}
-classdef EyeFrameEyeFrameDetected < dj.Relvar & dj.AutoPopulate
+classdef EyeFrameDetection < dj.Relvar & dj.AutoPopulate
 
     properties
         popRel  = 0;
