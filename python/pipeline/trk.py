@@ -173,7 +173,7 @@ class EyeFrame(dj.Computed):
 
 
 @schema
-class FilterProtocol(dj.Lookup):
+class SelectionProtocol(dj.Lookup):
     definition = """
     # groups of filtering steps to reject bad frames
 
@@ -188,12 +188,12 @@ class FilterProtocol(dj.Lookup):
 
     def apply(self, frames, key):
         for step in (ProtocolStep() & key).fetch.order_by('priority').as_dict():
-            frames = FrameFilter().apply(frames, step, param=step['filter_param'])
+            frames = FrameSelector().apply(frames, step, param=step['filter_param'])
         return frames
 
 
 @schema
-class FrameFilter(dj.Lookup):
+class FrameSelector(dj.Lookup):
     definition = """
     # single filters to reject frames
     filter_id           : tinyint   # id of the filter
@@ -225,8 +225,8 @@ class FrameFilter(dj.Lookup):
 class ProtocolStep(dj.Lookup):
     definition = """
     # single filter in a protocol to accept frames
-    -> FilterProtocol
-    -> FrameFilter
+    -> SelectionProtocol
+    -> FrameSelector
     priority                : int   # priority of the filter step, the low the higher the priority
     ---
     filter_param=null       : longblob # parameters that are passed to the filter
@@ -240,26 +240,26 @@ class ProtocolStep(dj.Lookup):
 
 
 @schema
-class FilteredFrame(dj.Computed):
+class SelectedFrame(dj.Computed):
     definition = """
     # This schema only contains detected frames that meet a particular quality criterion
     -> EyeFrame.Detection
-    -> FilterProtocol
+    -> SelectionProtocol
     """
 
     @property
     def populated_from(self):
-        return rf.Eye() * FilterProtocol() & EyeFrame()
+        return rf.Eye() * SelectionProtocol() & EyeFrame()
 
     def _make_tuples(self, key):
         print("Key = ", key)
 
         frames = EyeFrame.Detection() & key
         print('\tLength before filtering: {l}'.format(l=len(frames)))
-        frames = (FilterProtocol() & key).apply(frames, key)
+        frames = (SelectionProtocol() & key).apply(frames, key)
         print('\tLength after filtering: {l}'.format(l=len(frames)))
 
-        # TODO: move the filters up to FrameFilter
+        # TODO: move the filters up to FrameSelector
         # i = (EyeFrame.Detection() & key).fetch['pupil_x']
         # rejected_spikes = np.where(abs(i - np.mean(i) > 10 * np.std(i)))
 
@@ -325,7 +325,7 @@ class Quality(dj.Computed):
 
     @property
     def populated_from(self):
-        return rf.Eye().project() & EyeFrame().project() & rf.EyeFrame().project() & FilteredFrame().project()
+        return rf.Eye().project() & EyeFrame().project() & rf.EyeFrame().project() & SelectedFrame().project()
 
     def _make_tuples(self, key):
         # TODO: This function needs cleanup. Only keep relevant stuff for computing the comparisons
@@ -351,7 +351,7 @@ class Quality(dj.Computed):
                 if (EyeFrame.Detection() & frame_key).fetch['pupil_x'].shape[0] != 0:
                     excess_frames += 1
             else:
-                if (EyeFrame.Detection() & frame_key & FilteredFrame()).fetch['pupil_x'].shape[0] == 0:
+                if (EyeFrame.Detection() & frame_key & SelectedFrame()).fetch['pupil_x'].shape[0] == 0:
                     missed_frames += 1
                 else:
                     threshold = 1.2
