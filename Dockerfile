@@ -74,16 +74,13 @@ RUN \
 
 # Get pupil tracking repo
 RUN \
-  git clone https://github.com/cajal/pupil-tracking.git
+  git clone https://github.com/cajal/pupil-tracking.git && \
+  pip install -e pupil-tracking/
 
 RUN \
   pip install oct2py && \
   pip install git+https://github.com/atlab/tiffreader
 
-#RUN \
-#  apt-get install -y python-pip && \
-#  pip2 install pandas && \
-#  apt-get install -y python-scipy
 
 ENTRYPOINT ["worker"]
   
