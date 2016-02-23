@@ -2,13 +2,15 @@ import datajoint as dj
 import pandas as pd
 
 from djaddon import hdf5
+from pupil_tracking import PupilTracker
 
 schema = dj.schema('pipeline_pupiltracking', locals())
 from . import rf
 import numpy as np
 import os
+import glob
 import matplotlib.pyplot as plt
-
+from IPython import embed
 
 @schema
 class VideoGroup(dj.Lookup):
@@ -70,86 +72,35 @@ class EyeFrame(dj.Computed):
         return rf.Eye() * SVM() * VideoGroup().aggregate(SVM(), current_version='MAX(version)') & 'version=0'
 
     def _make_tuples(self, key):
-        print("Entered make tuples")
+        print("Entered make tuples with key as follows: ")
         print(key)
         svm_path = (SVM() & key).fetch1['svm_path']
         print(svm_path)
-
-        # x_roi=900
-        # y_roi=420
-        # pass
-        # roi = (rf.Eye() & key).fetch1['eye_roi']
-        # print(roi)
         patch_size = 350
-        # y_roi = (roi[0][1] + roi[0][3]) / 2 - patch_size / 2
-        # x_roi = (roi[0][0] + roi[0][2]) / 2 - patch_size / 2
-        # x_roi = 275 - patch_size / 2
-        # y_roi = 675 - patch_size / 2
         x_roi = (ROI() & key).fetch1['x_roi']
         y_roi = (ROI() & key).fetch1['y_roi']
         print("ROI used for video = ", x_roi, y_roi)
         efd = EyeFrame.Detection()
-
-        # Code to do tracking
-        from IPython import embed
-        # embed()
-
-        # print(key)
         kk = key['animal_id']
         si = key['scan_idx']
-        # svm="/media/lab/users/jagrawal/global_svm/svm_version2/svm"
-        # out = "/media/lab/users/jagrawal/global_svm/151123/m7199A9eyetracking/out"
-        video = "m" + str(kk) + "A" + str(si) + "*"
-        command = "find /media/scratch01/WholeCell/jake/* -name " + video + ".avi"
-        print(command)
-        video_path = os.popen(command).read()
-        video_path = video_path.strip(' \n\t')
-        # print("video_path=",video_path)
-        folder = video_path.split("/")[5]
-        print(folder)
+        video = "/media/scratch01/WholeCell/jake/*/" + "m" + str(kk) + "A" + str(si) + "*.avi"
+        # embed()
+        video_path = glob.glob(video)
+        print("video_path = ", video, video_path)
+        video_path = video_path[0]
         debug = 0
         if len(video_path) != 0:
-            print("Found video and going for tracking")
-            # if (os.path.exists(folder + "/" + video)) and debug == 0:
-            #     print("Data already exists for " + folder + "/" + video)
-            # else:
-            # Delete if data already present and start tracking again
-            command = "rm -rf " + folder
-            os.system(command)
-            print("Making directory: " + folder + "/" + video)
-            command = "mkdir -p " + folder + "/" + video + "/images"
-            if debug == 0:
-                os.system(command)
-
-                # if (svm_path.find('no_SVM') + 1):
-                #     # print("if")
-                # Path indicated below is for docker file
-                command = "cd " + folder + "/" + video + "; python2 /data/pupil-tracking/track_without_SVM.py " + str(
-                    int(x_roi)) + " " + str(int(y_roi)) + " " + video_path + " -P " + str(
-                    int(patch_size)) + "; cd ../.."
-            # else:
-            # print("else")
-
-            # command = "cd " + folder + "/" + video + "; python2 /data/Pupil-tracking/track.py " + out + " " + svm_path + " " + video_path + "; cd ../.."
-
-            print("Running command :", command)
-            if debug == 0:
-                # print(command)
-                os.system(command)
-
+            tr = PupilTracker()
+            trace = tr.track_without_svm(video_path, x_roi, y_roi, full_patch_size=350)
             # CODE to insert data after tracking
             print("Tracking complete... Now inserting data to datajoint")
-            df = pd.read_csv(str(folder + '/' + video + "/trace.csv"))
-            for index, data in df.iterrows():
+            for index, data in trace.iterrows():
                 key['frame'] = index + 1
                 self.insert1(key)
                 if pd.notnull(data['pupil_x']):
                     values = data.to_dict()
                     values.update(key)
                     efd.insert1(values)
-
-                    # efd.insert([e.to_dict() for _, e in df.iterrows()])
-
         else:
             print("Video not found")
 
