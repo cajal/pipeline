@@ -1,3 +1,5 @@
+from pprint import pprint
+
 import datajoint as dj
 import pandas as pd
 
@@ -69,31 +71,27 @@ class EyeFrame(dj.Computed):
     @property
     def populated_from(self):
         # return rf.Eye() * SVM() * VideoGroup().aggregate(SVM(), current_version='MAX(version)') & 'version=current_version'
-        return rf.Eye() * SVM() * VideoGroup().aggregate(SVM(), current_version='MAX(version)') & 'version=0'
+        return rf.Eye() * SVM() * VideoGroup().aggregate(SVM(), current_version='MAX(version)') & ROI()     &'version=0'
 
     def _make_tuples(self, key):
-        print("Entered make tuples with key as follows: ")
-        print(key)
+        print("Populating: ")
+        pprint(key)
         svm_path = (SVM() & key).fetch1['svm_path']
         print(svm_path)
-        patch_size = 350
-        x_roi = (ROI() & key).fetch1['x_roi']
-        y_roi = (ROI() & key).fetch1['y_roi']
+
+        x_roi, y_roi = (ROI() & key).fetch1['x_roi', 'y_roi']
         print("ROI used for video = ", x_roi, y_roi)
-        efd = EyeFrame.Detection()
-        kk = key['animal_id']
-        si = key['scan_idx']
-        video = "/media/scratch01/WholeCell/jake/*/" + "m" + str(kk) + "A" + str(si) + "*.avi"
-        # embed()
-        video_path = glob.glob(video)
-        print("video_path = ", video, video_path)
-        video_path = video_path[0]
-        debug = 0
-        if len(video_path) != 0:
+
+        p, f = (rf.Session() & key).fetch1['hd5_path', 'file_base']
+        n = (rf.Scan() & key).fetch1['file_num']
+        avi_path = r"{p}/{f}{n}eyetracking.avi".format(f=f, p=p, n=n)
+
+        if os.path.exists(avi_path):
             tr = PupilTracker()
-            trace = tr.track_without_svm(video_path, x_roi, y_roi, full_patch_size=350)
+            trace = tr.track_without_svm(avi_path, x_roi, y_roi, full_patch_size=350)
             # CODE to insert data after tracking
             print("Tracking complete... Now inserting data to datajoint")
+            efd = EyeFrame.Detection()
             for index, data in trace.iterrows():
                 key['frame'] = index + 1
                 self.insert1(key)
