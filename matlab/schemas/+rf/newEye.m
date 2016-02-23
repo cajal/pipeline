@@ -3,13 +3,14 @@ function newEye(key)
     p = fetch1(rf.Session & key,'hd5_path');
     f = fetch1(rf.Session & key,'file_base');
     n = fetch1(rf.Scan & key,'file_num');
-    f = ['C:' p '/' f  num2str(n) 'eyetracking.avi']
+    f = ['V:' p '/' f  num2str(n) 'behavior.avi']
     f = regexprep(f,{'/scratch01/','\/'},'\\');
+    
     
     dat = rf.readHD5(key);
     packetLen = 2000;
     datT = patch.utils.ts2sec(dat.ts, packetLen);
-    eyeT = patch.utils.ts2sec(dat.cam2ts, packetLen);
+    eyeT = patch.utils.ts2sec(dat.cam1ts, packetLen);
     
     totalFrames = length(eyeT);
     
