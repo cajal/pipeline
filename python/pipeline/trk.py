@@ -1,10 +1,15 @@
+import warnings
 from pprint import pprint
 
 import datajoint as dj
 import pandas as pd
 
 from djaddon import hdf5
-from pupil_tracking import PupilTracker
+try:
+    from pupil_tracking import PupilTracker
+except ImportError:
+    warnings.warn("Failed to import pupil_tacking library. You won't be able to populate trk.EyeFrame")
+
 
 schema = dj.schema('pipeline_pupiltracking', locals())
 from . import rf
