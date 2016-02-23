@@ -208,6 +208,7 @@ class FrameSelector(dj.Lookup):
     def apply(self, frames, key, param):
         """
         Apply takes a restriction of EyeFrame.Detection() and returns an even more restricted set of frames
+
         :param frames: restriction of EyeFrame.Detection()
         :param key: key that singles out a single filter
         :param param: parameters to the filter
@@ -245,6 +246,7 @@ class SelectedFrame(dj.Computed):
     # This schema only contains detected frames that meet a particular quality criterion
     -> EyeFrame.Detection
     -> SelectionProtocol
+    ---
     """
 
     @property
