@@ -112,7 +112,7 @@ classdef SegmentMask < dj.Relvar
             %  If blockSize is specified, the TIFF stack is loaded in chunks of blockSize.
             %  Default is blockSize=10000.
             %
-            reader = pre.getReader(key, '~/cache');
+            reader = pre.getReader(key);
             channel = 1;
             
             if nargin < 2

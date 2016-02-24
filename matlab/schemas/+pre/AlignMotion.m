@@ -37,7 +37,7 @@ classdef AlignMotion < dj.Relvar & dj.AutoPopulate
             
             anscombe = @(img) 2*sqrt(max(0, img-zero)/quantal_size+3/8);   % Anscombe transform
             
-            reader = pre.getReader(key, '~/cache');
+            reader = pre.getReader(key);
             fixRaster = get_fix_raster_fun(pre.AlignRaster & key);
             getFrame = @(islice, iframe) fixRaster(anscombe(double(reader(:,:,key.channel,islice,iframe))));
             sz = size(reader);
