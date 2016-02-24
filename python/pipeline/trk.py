@@ -18,6 +18,7 @@ import os
 import glob
 import matplotlib.pyplot as plt
 from IPython import embed
+import glob
 
 @schema
 class VideoGroup(dj.Lookup):
@@ -89,23 +90,21 @@ class EyeFrame(dj.Computed):
 
         p, f = (rf.Session() & key).fetch1['hd5_path', 'file_base']
         n = (rf.Scan() & key).fetch1['file_num']
-        avi_path = r"{p}/{f}{n}eyetracking.avi".format(f=f, p=p, n=n)
+        avi_path = glob.glob(r"{p}/{f}{n}*.avi".format(f=f, p=p, n=n))
 
-        if os.path.exists(avi_path):
-            tr = PupilTracker()
-            trace = tr.track_without_svm(avi_path, x_roi, y_roi, full_patch_size=350)
-            # CODE to insert data after tracking
-            print("Tracking complete... Now inserting data to datajoint")
-            efd = EyeFrame.Detection()
-            for index, data in trace.iterrows():
-                key['frame'] = index + 1
-                self.insert1(key)
-                if pd.notnull(data['pupil_x']):
-                    values = data.to_dict()
-                    values.update(key)
-                    efd.insert1(values)
-        else:
-            print("Video not found")
+        assert len(avi_path) == 1, "Found 0 or more than 1 videos: {videos}".format(videos=str(avi_path))
+        tr = PupilTracker()
+        trace = tr.track_without_svm(avi_path[0], x_roi, y_roi, full_patch_size=350)
+        # CODE to insert data after tracking
+        print("Tracking complete... Now inserting data to datajoint")
+        efd = EyeFrame.Detection()
+        for index, data in trace.iterrows():
+            key['frame'] = index + 1
+            self.insert1(key)
+            if pd.notnull(data['pupil_x']):
+                values = data.to_dict()
+                values.update(key)
+                efd.insert1(values)
 
     class Detection(dj.Part):
         definition = """
