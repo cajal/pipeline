@@ -1,8 +1,15 @@
+import warnings
+from pprint import pprint
+
 import datajoint as dj
 import pandas as pd
 
 from djaddon import hdf5
-from pupil_tracking import PupilTracker
+try:
+    from pupil_tracking import PupilTracker
+except ImportError:
+    warnings.warn("Failed to import pupil_tacking library. You won't be able to populate trk.EyeFrame")
+
 
 schema = dj.schema('pipeline_pupiltracking', locals())
 from . import rf
@@ -11,6 +18,7 @@ import os
 import glob
 import matplotlib.pyplot as plt
 from IPython import embed
+import glob
 
 @schema
 class VideoGroup(dj.Lookup):
@@ -69,40 +77,34 @@ class EyeFrame(dj.Computed):
     @property
     def populated_from(self):
         # return rf.Eye() * SVM() * VideoGroup().aggregate(SVM(), current_version='MAX(version)') & 'version=current_version'
-        return rf.Eye() * SVM() * VideoGroup().aggregate(SVM(), current_version='MAX(version)') & 'version=0'
+        return rf.Eye() * SVM() * VideoGroup().aggregate(SVM(), current_version='MAX(version)') & ROI()     &'version=0'
 
     def _make_tuples(self, key):
-        print("Entered make tuples with key as follows: ")
-        print(key)
+        print("Populating: ")
+        pprint(key)
         svm_path = (SVM() & key).fetch1['svm_path']
         print(svm_path)
-        patch_size = 350
-        x_roi = (ROI() & key).fetch1['x_roi']
-        y_roi = (ROI() & key).fetch1['y_roi']
+
+        x_roi, y_roi = (ROI() & key).fetch1['x_roi', 'y_roi']
         print("ROI used for video = ", x_roi, y_roi)
+
+        p, f = (rf.Session() & key).fetch1['hd5_path', 'file_base']
+        n = (rf.Scan() & key).fetch1['file_num']
+        avi_path = glob.glob(r"{p}/{f}{n}*.avi".format(f=f, p=p, n=n))
+
+        assert len(avi_path) == 1, "Found 0 or more than 1 videos: {videos}".format(videos=str(avi_path))
+        tr = PupilTracker()
+        trace = tr.track_without_svm(avi_path[0], x_roi, y_roi, full_patch_size=350)
+        # CODE to insert data after tracking
+        print("Tracking complete... Now inserting data to datajoint")
         efd = EyeFrame.Detection()
-        kk = key['animal_id']
-        si = key['scan_idx']
-        video = "/media/scratch01/WholeCell/jake/*/" + "m" + str(kk) + "A" + str(si) + "*.avi"
-        # embed()
-        video_path = glob.glob(video)
-        print("video_path = ", video, video_path)
-        video_path = video_path[0]
-        debug = 0
-        if len(video_path) != 0:
-            tr = PupilTracker()
-            trace = tr.track_without_svm(video_path, x_roi, y_roi, full_patch_size=350)
-            # CODE to insert data after tracking
-            print("Tracking complete... Now inserting data to datajoint")
-            for index, data in trace.iterrows():
-                key['frame'] = index + 1
-                self.insert1(key)
-                if pd.notnull(data['pupil_x']):
-                    values = data.to_dict()
-                    values.update(key)
-                    efd.insert1(values)
-        else:
-            print("Video not found")
+        for index, data in trace.iterrows():
+            key['frame'] = index + 1
+            self.insert1(key)
+            if pd.notnull(data['pupil_x']):
+                values = data.to_dict()
+                values.update(key)
+                efd.insert1(values)
 
     class Detection(dj.Part):
         definition = """
@@ -159,6 +161,7 @@ class FrameSelector(dj.Lookup):
     def apply(self, frames, key, param):
         """
         Apply takes a restriction of EyeFrame.Detection() and returns an even more restricted set of frames
+
         :param frames: restriction of EyeFrame.Detection()
         :param key: key that singles out a single filter
         :param param: parameters to the filter
@@ -196,6 +199,7 @@ class SelectedFrame(dj.Computed):
     # This schema only contains detected frames that meet a particular quality criterion
     -> EyeFrame.Detection
     -> SelectionProtocol
+    ---
     """
 
     @property

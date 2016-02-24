@@ -28,6 +28,8 @@ def post_report(comment, report, token=None, channel='#bot_planet'):
             fid.write(report)
         slack.files.upload('report.txt', filetype='text', title='Minion report', initial_comment=comment,
                            channels=channel)
+    else:
+        print(report)
         # os.remove('./report.txt')
 
 
@@ -38,8 +40,8 @@ def progress_bar(k, n, barlen=20):
     return "[%s] %.1f%% (%i/%i)" % (eq + spaces, p * 100, n - k, n)
 
 
-def running_jobs(schema, module_name, rel_name):
-    running = schema.jobs & dict(table_name=module_name + '.' + rel_name)
+def running_jobs(schema, module_name, rel_name, rel):
+    running = schema.jobs & 'table_name="{module_name}.{rel_name}" OR table_name="{table_name}"'.format(module_name=module_name, rel_name=rel_name, table_name=rel.table_name)
     error = len(running & 'status="error"')
     running = len(running) - error
     ret = "Minions: {0} working".format(running) + ", {0} in error".format(error) * (error > 0)
@@ -60,7 +62,7 @@ def generate_report(module_name):
 
         if prog[0] > 0:
             line = '{:<28}  {:<43}  {:<30}'.format(module_name + '.' + name + ': ',
-                                                   progress_bar(*prog), running_jobs(schema, module_name, name))
+                                                   progress_bar(*prog), running_jobs(schema, module_name, name, klass()))
             ret.append(line)
     return '\n'.join(ret)
 

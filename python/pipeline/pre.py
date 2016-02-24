@@ -7,6 +7,7 @@ import numpy as np
 from matplotlib import pyplot as plt
 import seaborn as sns
 from pprint import pprint
+import pandas as pd
 
 try:
     import c2s
@@ -92,51 +93,21 @@ class Segment(dj.Imported):
             ret[..., i] = mask.reshape(px_height, px_width, order='F')
         return ret
 
-    # def load_masks_with_traces(self, key):
-    #     d1, d2 = tuple(map(int, (ScanInfo() & key).fetch1['px_height', 'px_width']))
-    #
-    #     masks = np.zeros((d2, d1, len(SegmentMask() & key)))
-    #     traces = []
-    #
-    #     for i, mask_dict in enumerate((SegmentMask()*Trace() & key).fetch.as_dict()):
-    #         mask = np.zeros(d1 * d2, )
-    #         mask[mask_dict['mask_pixels'].squeeze().astype(int) - 1] = mask_dict['mask_weights'].squeeze()
-    #         masks[..., i] = mask.reshape(d2, d1, order='F')
-    #         traces.append(mask_dict['ca_trace'].squeeze())
-    #     return masks, traces
-    #
-    # def plot_masks_vs_manual(self):
-    #
-    #     sns.set_context('notebook')
-    #     y = np.arange(.2, 1, .2)
-    #     theCM = sns.blend_palette(['silver', 'steelblue', 'orange'], n_colors=len(y))  # plt.cm.RdBu_r
-    #
-    #     for key in (self.project() * SegmentMethod() - dict(
-    #             method_name='manual') & ManualSegment().project()).fetch.as_dict:
-    #         with sns.axes_style('white'):
-    #             fig, ax = plt.subplots(figsize=(8, 8))
-    #
-    #
-    #         ground_truth = bugfix_reshape((ManualSegment() & key).fetch1['mask'])   # TODO: remove bugfix_reshape once djbug #191 is fixed
-    #
-    #         template = np.stack([normalize(bugfix_reshape(t)[..., key['slice']-1].squeeze())
-    #                              for t in (ScanCheck() & key).fetch['template']], axis=2).mean(axis=2) # TODO: remove bugfix_reshape once djbug #191 is fixed
-    #
-    #         masks,_ = self.load_masks_with_traces(key)
-    #         frames = masks.shape[2]
-    #
-    #         for cell in range(frames):
-    #             ma = masks[..., cell].ravel()
-    #             ma.sort()
-    #             cdf = ma.cumsum()
-    #             cdf = cdf / cdf[-1]
-    #             th = np.interp(y, cdf, ma)
-    #             ax.contour(masks[..., cell], th, colors=theCM)
-    #
-    #         ax.imshow(template, cmap=plt.cm.gray)
-    #         ax.contour(ground_truth, [.5], colors='deeppink')
-    #         ax.set_title("animal_id {animal_id}:session {session}:scan_idx {scan_idx}:{method_name}:slice{slice}".format(**key))
-    #         fig.tight_layout()
+
+    def mask_area_hists(self, outdir='./'):
+        # TODO: plot against firing rate once traces are repopulated
+        with sns.axes_style('ticks'):
+            fig, ax = plt.subplots()
+
+        for key in (self.project() * SegmentMethod() & dict(method_name='nmf')).fetch.as_dict:
+            area_per_pixel = np.prod((ScanInfo() & key).fetch1['um_width','um_height']) / \
+                                np.prod((ScanInfo() & key).fetch1['px_width','px_height'])
+            areas = np.array([pxs*area_per_pixel for pxs in map(len, (SegmentMask() & key).fetch['mask_pixels'])])
+            ax.hist(areas, bins=20, alpha=.5, lw=0, label="A{animal_id}S{session}:{scan_idx}".format(**key))
+        ax.legend()
+        sns.despine(fig)
+        plt.show()
+
 
     def plot_single_ROIs(self, outdir='./'):
         sns.set_context('paper')
