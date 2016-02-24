@@ -8,8 +8,8 @@ function newEye(key)
     
     dat = rf.readHD5(key);
     packetLen = 2000;
-    datT = patch.utils.ts2sec(dat.ts, packetLen);
-    eyeT = patch.utils.ts2sec(dat.cam2ts, packetLen);
+    datT = pipetools.ts2sec(dat.ts, packetLen);
+    eyeT = pipetools.ts2sec(dat.cam2ts, packetLen);
     
     totalFrames = length(eyeT);
     
