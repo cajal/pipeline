@@ -86,15 +86,15 @@ switch fileV
             
             iLowPassCorners = [20 50 100 200 300 500 700 1000 1300 2000 3000 5000 8000 10000 13000 20000];
             settings.iLowPass = iLowPassCorners(unique(round(sets(:,3)))+9);
-            assert(length(settings.vGain)==1,'Current low pass filter changed during recording');
+            assert(length(settings.iLowPass)==1,'Current low pass filter changed during recording');
             
             vLowPassCorners = [20 50 100 200 300 500 700 1000 1300 2000 3000 5000 8000 10000 13000 20000];
             settings.vLowPass = vLowPassCorners(unique(round(sets(:,4)))+9);
-            assert(length(settings.vGain)==1,'Voltage low pass filter changed during recording');
+            assert(length(settings.vLowPass)==1,'Voltage low pass filter changed during recording');
             
             vHighPassCorners = [0 0.1 0.3 0.5 1 3 5 10 30 50 100 300 500 800 1000 3000];
             settings.vHighPass = vHighPassCorners(unique(round(sets(:,5)))+9);
-            assert(length(settings.vGain)==1,'Voltage high pass filter changed during recording');
+            assert(length(settings.vHighPass)==1,'Voltage high pass filter changed during recording');
         else
             % constant settings on unused NPI amp
             
