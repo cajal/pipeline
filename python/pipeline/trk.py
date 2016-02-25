@@ -92,7 +92,7 @@ class EyeFrame(dj.Computed):
     def populated_from(self):
         # return rf.Eye() * SVM() * VideoGroup().aggregate(SVM(), current_version='MAX(version)') & 'version=current_version'
         # embed()
-        return rf.Eye() * SVM() * VideoGroup().aggregate(SVM(), current_version='MAX(version)') & ROI() & 'version=0'
+        return rf.Eye() * SVM() * VideoGroup().aggregate(SVM(), current_version='MAX(version)') & 'version=0'
 
     def _make_tuples(self, key):
         print("Populating: ")
@@ -101,16 +101,16 @@ class EyeFrame(dj.Computed):
         print(svm_path)
         #embed()
 
-        if ROI() & key:
+        if Roi() & key:
             # x_roi, y_roi = (ROI() & key).fetch1['x_roi', 'y_roi']
             eye_roi = (Roi() & key).fetch1['x_roi_min', 'y_roi_min', 'x_roi_max', 'y_roi_max']
             print("Populating for trk.Roi and roi = ", eye_roi)
         else:
             roi = (rf.Eye() & key).fetch1['eye_roi']
-            x_roi_min = min(roi[0][0], roi[0][2])
-            x_roi_max = max(roi[0][0], roi[0][2])
-            y_roi_min = min(roi[0][1], roi[0][3])
-            y_roi_max = max(roi[0][1], roi[0][3])
+            x_roi_min = min(roi[0], roi[2])
+            x_roi_max = max(roi[0], roi[2])
+            y_roi_min = min(roi[1], roi[3])
+            y_roi_max = max(roi[1], roi[3])
             eye_roi = [x_roi_min, y_roi_min, x_roi_max, y_roi_max]
             print("Populating for rf.Eye[eye_roi] and roi = ", eye_roi)
 
