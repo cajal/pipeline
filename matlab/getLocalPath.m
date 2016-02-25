@@ -9,6 +9,7 @@ function p = getLocalPath(p,os)
 %       /stor01      /mnt/stor01      Y:\          /Volumes/stor01
 %       /stor02      /mnt/stor02      X:\          /Volumes/stor02
 %       /scratch01   /mnt/scratch01   V:\          /Volumes/scratch01
+%       /scratch03   /mnt/scratch03   T:\          /Volumes/scratch03
 %       /stimulation /mnt/stor01/stimulation Y:\stor01\stimulation  /Volumes/stor01/stimulation
 %       /processed   /mnt/stor01/processed   Y:\stor01\processed    /Volumes/stor01/processed
 %       /raw         /mnt/at_scratch  W:           /Volumes/at_scratch
@@ -40,6 +41,7 @@ mapping = {
     '/stor01','/mnt/stor01','Y:','/Volumes/stor01'
     '/stor02','/mnt/stor02','X:','/Volumes/stor02'
     '/scratch01','/mnt/scratch01','V:','/Volumes/scratch01'
+    '/scratch03','/mnt/scratch03','T:','/Volumes/scratch03'
     '/at_scratch','/mnt/at_scratch','W:','/Volumes/at_scratch'
     '/raw','/mnt/at_scratch','W:','/Volumes/at_scratch'
     '/2P2Drive','/mnt/2P2Drive','Q:','/Volumes/2P2Drive'
