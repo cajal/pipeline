@@ -30,5 +30,6 @@ setup(
         'scripts/worker',
         'scripts/worker-populate.py',
         'scripts/worker-report.py',
+        'scripts/worker-minion.py',
     ]
 )

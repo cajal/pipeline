@@ -81,6 +81,10 @@ RUN \
   pip install oct2py && \
   pip install git+https://github.com/atlab/tiffreader
 
+# install rabbit-mq client lib
+RUN \
+  pip install pika
+
 
 ENTRYPOINT ["worker"]
   
