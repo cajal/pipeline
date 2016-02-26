@@ -27,7 +27,7 @@ classdef Sync < dj.Relvar & dj.AutoPopulate
             if isfield(dat,'analogPacketLen')
                 packetLen = dat.analogPacketLen;
             end
-            datT = patch.utils.ts2sec(dat.ts, packetLen);
+            datT = pipetools.ts2sec(dat.ts, packetLen);
             dt = median(diff(datT));
             fs=1/dt;
             n = ceil(0.0002/dt);
