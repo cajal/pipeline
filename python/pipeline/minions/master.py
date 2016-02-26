@@ -1,8 +1,8 @@
 from contextlib import contextmanager
-
 import pika
 import pickle
 from . import SIMPLE_POPULATOR
+
 
 class Gru:
     def __init__(self, host, queue=SIMPLE_POPULATOR):
@@ -34,7 +34,6 @@ class Gru:
                                   ))
 
             if restrictions is None:
-                print(" Ordered a minion to populate %s" % (relation.__class__.__name__,))
+                print(" Ordered a minion to populate %s" % (relation,))
             else:
-                print(" Ordered a minion to populate %s with restrictions %s" % (relation.__class__.__name__,
-                                  str(restrictions)))
+                print(" Ordered a minion to populate %s with restrictions %s" % (relation, str(restrictions)))
