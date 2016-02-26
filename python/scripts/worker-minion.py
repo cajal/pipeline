@@ -9,7 +9,7 @@ import pickle
 import sys
 from argparse import ArgumentParser
 from importlib import import_module
-
+from datajoint.relational_operand import AndList
 from pipeline.minions import SIMPLE_POPULATOR, Gru
 
 
@@ -25,15 +25,17 @@ def callback(ch, method, properties, body):
         return 1
 
     try:
-        rel = getattr(mod, m)
+        rel = getattr(mod, m)()
     except AttributeError:
         print("Could not find class", m)
         return 1
 
-
     restrictions = order['restrictions']
-    rel().populate(reserve_jobs=True,restriction = restrictions)
-    print("\tCompleted order.")
+    a = AndList(rel.heading)
+    for r in restrictions:
+        a.add(r)
+    rel.populate(reserve_jobs=True, restriction = a)
+    print("Executed populateion of ", relation, ' with restrictions ', a)
     ch.basic_ack(delivery_tag = method.delivery_tag)
 
 
