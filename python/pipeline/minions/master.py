@@ -13,7 +13,7 @@ class Gru:
     def connection(self):
         try:
             connection = pika.BlockingConnection(pika.ConnectionParameters(
-                host=self.host))
+                host=self.host, heartbeat_interval=0))
             channel = connection.channel()
             channel.queue_declare(queue=self.queue, durable=True)
             yield channel

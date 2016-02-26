@@ -34,7 +34,7 @@ def callback(ch, method, properties, body):
     restrictions = order['restrictions']
     rel().populate(reserve_jobs=True,restriction = restrictions)
     print("\tCompleted order.")
-    # ch.basic_ack(delivery_tag = method.delivery_tag)
+    ch.basic_ack(delivery_tag = method.delivery_tag)
 
 
 
@@ -52,7 +52,7 @@ def main(argv):
             with master.connection() as channel:
                 print(' Minion is eagerly awaiting commands. To exit press CTRL+C to kill that minion.')
                 channel.basic_qos(prefetch_count=1)
-                channel.basic_consume(callback, queue=args.queue, no_ack=True)
+                channel.basic_consume(callback, queue=args.queue, no_ack=False)
                 channel.start_consuming()
         except:
             raise
