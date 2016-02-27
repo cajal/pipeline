@@ -35,7 +35,7 @@ def callback(ch, method, properties, body):
     for r in restrictions:
         a.add(r)
     rel.populate(reserve_jobs=True, restriction = a)
-    print("Executed populateion of ", relation, ' with restrictions ', a)
+    print("Executed populate on of ", relation, ' with restrictions ', a)
     ch.basic_ack(delivery_tag = method.delivery_tag)
 
 
@@ -49,15 +49,11 @@ def main(argv):
 
     master = Gru(host=args.host, queue=args.queue)
 
-    while True:
-        try:
-            with master.connection() as channel:
-                print(' Minion is eagerly awaiting commands. To exit press CTRL+C to kill that minion.')
-                channel.basic_qos(prefetch_count=1)
-                channel.basic_consume(callback, queue=args.queue, no_ack=False)
-                channel.start_consuming()
-        except:
-            raise
+    with master.connection() as channel:
+        print(' Minion is eagerly awaiting commands. To exit press CTRL+C to kill that minion.')
+        channel.basic_qos(prefetch_count=1)
+        channel.basic_consume(callback, queue=args.queue, no_ack=False)
+        channel.start_consuming()
 
     return 0
 
