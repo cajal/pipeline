@@ -13,7 +13,7 @@ RUN \
   apt-get install -y -q \
     autoconf \
     automake \
-    libtool \
+    libtool && \
   apt-get install -y --fix-missing octave
 
 # Build HDF5
@@ -31,6 +31,7 @@ RUN cd ; wget https://www.hdfgroup.org/ftp/HDF5/current/src/hdf5-1.8.16.tar.gz \
 
 # Install OpenCV
 RUN \
+  apt-get update && \
   apt-get install -y cmake git libgtk2.0-dev pkg-config libavcodec-dev libavformat-dev libswscale-dev && \
   apt-get install -y python-numpy libtbb2 libtbb-dev libjpeg-dev libpng-dev libtiff-dev libjasper-dev libdc1394-22-dev && \
   apt-get install -y libatlas-base-dev gfortran && \
@@ -46,7 +47,9 @@ RUN \
   make -j4 && \
   make install && \
   ldconfig && \
-  rm -rf /data/opencv /data/opencv_contrib
+  rm -rf /data/opencv /data/opencv_contrib && \
+  rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
 
 # install HDF5 reader and rabbit-mq client lib
 RUN pip install h5py && \
