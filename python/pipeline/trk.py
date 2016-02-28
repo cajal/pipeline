@@ -5,11 +5,11 @@ import datajoint as dj
 import pandas as pd
 
 from djaddon import hdf5
+
 try:
     from pupil_tracking import PupilTracker
 except ImportError:
     warnings.warn("Failed to import pupil_tacking library. You won't be able to populate trk.EyeFrame")
-
 
 schema = dj.schema('pipeline_pupiltracking', locals())
 from . import rf
@@ -19,6 +19,7 @@ import glob
 import matplotlib.pyplot as plt
 from IPython import embed
 import glob
+
 
 @schema
 class VideoGroup(dj.Lookup):
@@ -64,6 +65,19 @@ class ROI(dj.Manual):
 
 
 @schema
+class Roi(dj.Manual):
+    definition = """
+    # table that stores the correct ROI of the Eye in the video
+    ->rf.Eye
+    x_roi_min                     : int                         # x coordinate of roi
+    y_roi_min                     : int                         # y coordinate of roi
+    x_roi_max                     : int                         # x coordinate of roi
+    y_roi_max                     : int                         # y coordinate of roi
+    ---
+    """
+
+
+@schema
 class EyeFrame(dj.Computed):
     definition = """
     # eye tracking info for each frame of a movie
@@ -77,16 +91,30 @@ class EyeFrame(dj.Computed):
     @property
     def populated_from(self):
         # return rf.Eye() * SVM() * VideoGroup().aggregate(SVM(), current_version='MAX(version)') & 'version=current_version'
-        return rf.Eye() * SVM() * VideoGroup().aggregate(SVM(), current_version='MAX(version)') & ROI()     &'version=0'
+        # embed()
+        return rf.Eye() * SVM() * VideoGroup().aggregate(SVM(), current_version='MAX(version)') & 'version=0'
 
     def _make_tuples(self, key):
         print("Populating: ")
         pprint(key)
         svm_path = (SVM() & key).fetch1['svm_path']
         print(svm_path)
+        #embed()
 
-        x_roi, y_roi = (ROI() & key).fetch1['x_roi', 'y_roi']
-        print("ROI used for video = ", x_roi, y_roi)
+        if Roi() & key:
+            # x_roi, y_roi = (ROI() & key).fetch1['x_roi', 'y_roi']
+            eye_roi = (Roi() & key).fetch1['x_roi_min', 'y_roi_min', 'x_roi_max', 'y_roi_max']
+            print("Populating for trk.Roi and roi = ", eye_roi)
+        else:
+            roi = (rf.Eye() & key).fetch1['eye_roi']
+            x_roi_min = min(roi[0], roi[2])
+            x_roi_max = max(roi[0], roi[2])
+            y_roi_min = min(roi[1], roi[3])
+            y_roi_max = max(roi[1], roi[3])
+            eye_roi = [x_roi_min, y_roi_min, x_roi_max, y_roi_max]
+            print("Populating for rf.Eye[eye_roi] and roi = ", eye_roi)
+
+        # print("ROI used for video = ", x_roi, y_roi)
 
         p, f = (rf.Session() & key).fetch1['hd5_path', 'file_base']
         n = (rf.Scan() & key).fetch1['file_num']
@@ -94,7 +122,7 @@ class EyeFrame(dj.Computed):
 
         assert len(avi_path) == 1, "Found 0 or more than 1 videos: {videos}".format(videos=str(avi_path))
         tr = PupilTracker()
-        trace = tr.track_without_svm(avi_path[0], x_roi, y_roi, full_patch_size=350)
+        trace = tr.track_without_svm(avi_path[0], eye_roi)
         # CODE to insert data after tracking
         print("Tracking complete... Now inserting data to datajoint")
         efd = EyeFrame.Detection()
@@ -187,7 +215,7 @@ class ProtocolStep(dj.Lookup):
     """
 
     # define the protocols. Each protocol has one id, but can have several filters
-    contents = [ # parameter needs to be an array
+    contents = [  # parameter needs to be an array
         # protocol 0 contains only one filter and is based on intensity
         {'filter_protocol_id': 0, 'filter_id': 0, 'priority': 50, 'filter_param': np.array(50)},
     ]
