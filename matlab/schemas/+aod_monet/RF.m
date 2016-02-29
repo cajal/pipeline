@@ -13,7 +13,7 @@ map             : longblob                      # receptive field map
 classdef RF < dj.Relvar & dj.AutoPopulate
     
     properties
-        popRel  = aodpre.Sync & psy.MovingNoise
+        popRel  = aodpre.ExtractSpikes*(aodpre.Sync & psy.MovingNoise)
     end
     
     
