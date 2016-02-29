@@ -3,6 +3,8 @@ import pika
 import pickle
 from . import SIMPLE_POPULATOR
 import inspect
+import os
+from getpass import getpass
 
 class Gru:
     def __init__(self, host, queue=SIMPLE_POPULATOR):
@@ -12,8 +14,15 @@ class Gru:
     @contextmanager
     def connection(self):
         try:
+            user = os.getenv('RABBITMQ_DEFAULT_USER')
+            if user is None:
+                user =  input('RabbitMQ server user: ')
+            pwd = os.getenv('RABBITMQ_DEFAULT_PASS')
+            if pwd is None:
+                 pwd = getpass('password: ')
+            credentials = pika.PlainCredentials(user, pwd)
             connection = pika.BlockingConnection(pika.ConnectionParameters(
-                host=self.host, heartbeat_interval=0))
+                host=self.host, heartbeat_interval=0, credentials=credentials))
             channel = connection.channel()
             channel.queue_declare(queue=self.queue, durable=True)
             yield channel
