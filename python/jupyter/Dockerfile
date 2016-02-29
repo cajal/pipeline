@@ -1,5 +1,4 @@
-#FROM at-docker:5000/pipeline:latest
-FROM pipeline
+FROM at-docker:5000/pipeline:latest
 
 MAINTAINER Fabian Sinz <sinz@bcm.edu>
 
