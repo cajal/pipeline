@@ -10,11 +10,12 @@ RUN \
   apt-get install -y -q \
     build-essential && \
   apt-get update && \
-  apt-get install -y -q \
+  apt-get install  --fix-missing -y -q \
     autoconf \
     automake \
-    libtool && \
-  apt-get install -y --fix-missing octave
+    libtool \
+    octave
+
 
 # Build HDF5
 RUN cd ; wget https://www.hdfgroup.org/ftp/HDF5/current/src/hdf5-1.8.16.tar.gz \
