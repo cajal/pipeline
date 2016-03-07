@@ -6,7 +6,7 @@ while true
     parpopulate(pre.AlignRaster, r)
     parpopulate(pre.AlignMotion)
     parpopulate(pre.AverageFrame)
-    parpopulate(pre.Segment, 'segment_method=1')
+    parpopulate(pre.Segment)
     parpopulate(pre.ExtractTraces)
     pause(1000)
 end
