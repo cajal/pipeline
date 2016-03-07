@@ -64,14 +64,14 @@ classdef AlignMotion < dj.Relvar & dj.AutoPopulate
                 else
                     c = 1 - 0.5*(islice - 1)/length(slices);
                     for iframe=1:size(m,4)
-                        m(:,:,:,iframe) = hsv2rgb(bsxfun(@times, rgb2hsv(m(:,:,:,frame)), cat(3, 1, c, c)));
+                        m(:,:,:,iframe) = hsv2rgb(bsxfun(@times, rgb2hsv(m(:,:,:,iframe)), cat(3, 1, c, c)));
                     end
                     r = r + m;
                 end
-                r = r/length(slices);
             end
+            r = r/max(r(:));
             
-            filename = '~/Desktop/camovie';
+            filename = sprintf('~/Desktop/camovie%05d-%03d', keys(1).animal_id, keys(1).scan_idx);
             v = VideoWriter(filename, 'MPEG-4');
             v.FrameRate = fps;
             v.Quality = 100;
