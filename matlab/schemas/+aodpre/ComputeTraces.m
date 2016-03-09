@@ -33,6 +33,7 @@ classdef ComputeTraces < dj.Relvar & dj.AutoPopulate
                     for i=1:length(keys)
                         tuple = keys(i);
                         tuple.trace = single(X(:,i));
+                        insert(aodpre.Trace,tuple);
                     end
                     
                 otherwise

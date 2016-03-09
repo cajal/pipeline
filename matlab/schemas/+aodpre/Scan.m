@@ -16,9 +16,9 @@ classdef Scan < dj.Relvar & dj.AutoPopulate
         function makeTuples(self, key)
             [~,name] = fetch1(vis2p.Experiments*vis2p.Scans & key, 'directory','file_name' );
             dirs = dir(fullfile(getLocalPath('M:\Mouse\'), [name(1:10) '*']));
-            names = vertcat(dirs.name);
             % find the session that started immediatelly before the recording
-            timediff = str2double(names(:,[12 13 15 16 18 19]))- str2double(name([12 13 15 16 18 19]));
+            names = datenum(vertcat(dirs.name),'yyyy-mm-dd_HH-MM-SS');
+            timediff = names-datenum(name,'yyyy-mm-dd_HH-MM-SS');
             timeind = find(timediff<0);
             [~,i] = max(timediff(timeind));
             itime = timeind(i);
