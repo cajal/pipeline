@@ -137,6 +137,7 @@ class SelectionProtocol(dj.Lookup):
 
     contents = [
         {'filter_protocol_id': 0, 'protocol_name': 'frame_intensity'},
+        {'filter_protocol_id': 1, 'protocol_name': 'intensity_ransac'},
     ]
 
     def apply(self, frames, key):
@@ -156,6 +157,7 @@ class FrameSelector(dj.Lookup):
 
     contents = [
         {'filter_id': 0, 'filter_name': 'intensity_filter'},
+        {'filter_id': 1, 'filter_name': 'ransac_position'},
     ]
 
     def apply(self, frames, key, param):
@@ -190,6 +192,9 @@ class ProtocolStep(dj.Lookup):
     contents = [ # parameter needs to be an array
         # protocol 0 contains only one filter and is based on intensity
         {'filter_protocol_id': 0, 'filter_id': 0, 'priority': 50, 'filter_param': np.array(50)},
+        #---
+        {'filter_protocol_id': 1, 'filter_id': 0, 'priority': 0, 'filter_param': np.array(50)},
+        {'filter_protocol_id': 1, 'filter_id': 1, 'priority': 50, 'filter_param': np.array(50)},
     ]
 
 
