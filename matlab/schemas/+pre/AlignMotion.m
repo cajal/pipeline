@@ -23,6 +23,62 @@ classdef AlignMotion < dj.Relvar & dj.AutoPopulate
             xy = self.fetch1('motion_xy');
             fun = @(frame, i) ne7.ip.correctMotion(frame, xy(:,i));
         end
+        
+        function saveMovie(self, start_time, duration, speedup, fps)
+            keys = self.fetch;
+            assert(count(pre.ScanInfo & keys) == 1, 'One scan at a time please')
+            fixRaster = get_fix_raster_fun(pre.AlignRaster & keys);
+            fixMotion = arrayfun(@(key) get_fix_motion_fun(pre.AlignMotion & key), keys, 'uni', false);
+            [nframes, caFps] = fetch1(pre.ScanInfo & keys, 'nframes', 'fps');
+            reader = pre.getReader(keys(1));
+            frames = max(1, min(nframes, round(start_time*caFps + (1:duration*caFps))));
+            slices = [keys.slice];
+            movie = double(reader(:,:,:,slices,frames));
+            for i = 1:length(frames)
+                for ichannel = 1:reader.nchannels
+                    for islice = 1:length(slices)
+                        movie(:,:,ichannel,islice,i) = ...
+                            fixMotion{islice}(fixRaster(movie(:,:,ichannel,islice,i)), frames(i));
+                    end
+                end
+            end
+            movie = sqrt(max(0,movie));
+            for islice = 1:length(slices)
+                for ichannel = 1:reader.nchannels
+                    q = movie(:,:,ichannel,islice,:);
+                    q = min(1,q/quantile(q(:),0.999));
+                    sz = size(q);
+                    q = reshape(q,[],sz(end));
+                    q = resample(q', round(fps), round(caFps*speedup))';
+                    q = reshape(q,sz(1),sz(2),1,[]);
+                    if ichannel==1
+                        m = q;
+                    else
+                        m = cat(3,q,m);
+                    end
+                end
+                m(:,:,3,:)=0;   % make 3D
+                m = max(0, min(1, m));
+                if islice==1
+                    r = m;
+                else
+                    c = 1 - 0.5*(islice - 1)/length(slices);
+                    for iframe=1:size(m,4)
+                        m(:,:,:,iframe) = hsv2rgb(bsxfun(@times, rgb2hsv(m(:,:,:,iframe)), cat(3, 1, c, c)));
+                    end
+                    r = r + m;
+                end
+            end
+            r = r/max(r(:));
+            
+            filename = sprintf('~/Desktop/camovie%05d-%03d', keys(1).animal_id, keys(1).scan_idx);
+            v = VideoWriter(filename, 'MPEG-4');
+            v.FrameRate = fps;
+            v.Quality = 100;
+            open(v)
+            writeVideo(v, uint8(r*255));
+            close(v)            
+        end
     end
     
     methods(Access=protected)
