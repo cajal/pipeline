@@ -169,7 +169,8 @@ class SelectionProtocol(dj.Lookup):
         {'filter_protocol_id': 1, 'protocol_name': 'int_and_ran_pupil_x_50_2'},
         {'filter_protocol_id': 2, 'protocol_name': 'int_and_ran_pupil_x_75_2'},
         {'filter_protocol_id': 3, 'protocol_name': 'int_and_ran_pupil_x_25_2'},
-        {'filter_protocol_id': 4, 'protocol_name': 'int_and_ran_pupil_pos'}
+        {'filter_protocol_id': 4, 'protocol_name': 'int_and_ran_pupil_pos'},
+        {'filter_protocol_id': 5, 'protocol_name': 'int_and_ran_pupil_pos_spikes_removed'}
     ]
 
     def apply(self, frames, key):
@@ -194,7 +195,8 @@ class FrameSelector(dj.Lookup):
     contents = [
         {'filter_id': 0, 'filter_name': 'intensity_filter'},
         {'filter_id': 1, 'filter_name': 'ran_pupil_x_th'},
-        {'filter_id': 2, 'filter_name': 'ran_pupil_pos'}
+        {'filter_id': 2, 'filter_name': 'ran_pupil_pos'},
+        {'filter_id': 3, 'filter_name': 'spike_filter'}
     ]
 
     def apply(self, frames, key, param1, param2):
@@ -222,10 +224,19 @@ class FrameSelector(dj.Lookup):
         if which == 'ran_pupil_pos':
             i = frames.fetch['pupil_x_std']
             j = frames.fetch['pupil_y_std']
-            embed()
             pos = i*i + j*j
             th = np.percentile(pos, param1)
             return frames & '(pupil_x_std*pupil_x_std + pupil_y_std*pupil_y_std)<{threshold}*{param2}'.format(threshold=th, param2=param2)
+
+        if which == 'spike_filter':
+            ra = frames.fetch.order_by('frame')['pupil_r_minor']
+            fr = frames.fetch.order_by('frame')['frame']
+            slope_coll = []
+            for i in range(1,ra.size):
+                slope_coll.append((ra[i] - ra[i-1])/ (fr[i] - fr[i-1]))
+            slope_coll1 = abs(np.asarray(slope_coll))
+            frames_rej = [dict(frame=k) for k in fr[np.where(slope_coll1 > param1)]]
+            return frames - frames_rej
 
 @schema
 class ProtocolStep(dj.Lookup):
@@ -255,15 +266,22 @@ class ProtocolStep(dj.Lookup):
          'filter_param2': np.array(2)},
         {'filter_protocol_id': 2, 'filter_id': 1, 'priority': 40, 'filter_param1': np.array(75),
          'filter_param2': np.array(2)},
-        # protocol 2 = intensity filter + ransac(25,2)
+        # protocol 3 = intensity filter + ransac(25,2)
         {'filter_protocol_id': 3, 'filter_id': 0, 'priority': 10, 'filter_param1': np.array(50),
          'filter_param2': np.array(2)},
         {'filter_protocol_id': 3, 'filter_id': 1, 'priority': 40, 'filter_param1': np.array(25),
          'filter_param2': np.array(2)},
-        # protocol 3 = intensity filter + ransac x2+y2
+        # protocol 4 = intensity filter + ransac x2+y2
         {'filter_protocol_id': 4, 'filter_id': 0, 'priority': 10, 'filter_param1': np.array(50),
          'filter_param2': np.array(2)},
         {'filter_protocol_id': 4, 'filter_id': 2, 'priority': 40, 'filter_param1': np.array(97),
+         'filter_param2': np.array(2)},
+        # protocol 5 = intensity filter + ransac x2+y2 + spike filter
+        {'filter_protocol_id': 5, 'filter_id': 0, 'priority': 10, 'filter_param1': np.array(50),
+         'filter_param2': np.array(2)},
+        {'filter_protocol_id': 5, 'filter_id': 2, 'priority': 40, 'filter_param1': np.array(97),
+         'filter_param2': np.array(2)},
+        {'filter_protocol_id': 5, 'filter_id': 3, 'priority': 50, 'filter_param1': np.array(50),
          'filter_param2': np.array(2)},
     ]
 
