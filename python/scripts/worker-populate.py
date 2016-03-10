@@ -15,7 +15,7 @@ import numpy as np
 def main(argv):
     parser = ArgumentParser(argv[0], description=__doc__)
     parser.add_argument('relations', type=str, help="List of full import names of relations that need to be populated (comma separated list).")
-    parser.add_argument('--daemon', '-d', type=bool, help="Run in daemon mode, repeatedly checking.", default=False)
+    parser.add_argument('--daemon', '-d', action='store_true', help="Run in daemon mode, repeatedly checking.")
     parser.add_argument('--t_min', type=int, help="Minimal waiting time for daemon in sec.", default=5*60)
     parser.add_argument('--t_max', type=int, help="Maximal waiting time for daemon in sec.", default=15*60)
 
