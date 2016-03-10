@@ -240,10 +240,8 @@ class FrameSelector(dj.Lookup):
             return frames - frames_rej
 
         if which == 'spike_filter2':
-            #embed()
             ra = frames.fetch.order_by('frame')['pupil_r_minor']
             fr = frames.fetch.order_by('frame')['frame']
-            slope_coll = []
             fr_rej=[]
             for i in range(2, ra.size-2):
                 avg = (ra[i-2] + ra[i-1] + ra[i+1] + ra[i+2]) / 4
@@ -361,7 +359,7 @@ class Quality(dj.Computed):
             # print("Debug 2")
             # embed()
             if np.isnan((rf.EyeFrame() & frame_key).fetch['pupil_x']):
-                # if (EyeFrame.Detection() & frame_key).fetch['pupil_x'].shape[0] != 0:
+                # cant use fetch1 here as it might error out !!
                 if (EyeFrame.Detection() & (SelectedFrame() & key) & frame_key).fetch['pupil_x'].shape[0] != 0:
                     excess_frames += 1
                     efi.append(frame_key['frame'])
@@ -372,12 +370,13 @@ class Quality(dj.Computed):
                     miss.append(frame_key['frame'])
 
                 else:
-                    d_x = (rf.EyeFrame() & frame_key).fetch['pupil_x'][0] - \
-                          (EyeFrame.Detection() & frame_key).fetch['pupil_x'][0] + roi_rf[0][0][0] - 1
-                    d_y = (rf.EyeFrame() & frame_key).fetch['pupil_y'][0] - \
-                          (EyeFrame.Detection() & frame_key).fetch['pupil_y'][0] + roi_rf[0][0][2] - 1
-                    r_rf.append((rf.EyeFrame() & frame_key).fetch['pupil_r'][0])
-                    r_trk.append((EyeFrame.Detection() & frame_key).fetch['pupil_r_major'][0])
+                    rx, ry = (rf.EyeFrame() & frame_key).fetch1['pupil_x','pupil_y']
+                    tx, ty = (EyeFrame.Detection() & frame_key).fetch1['pupil_x','pupil_y']
+
+                    d_x = rx - tx + roi_rf[0][0][0] - 1
+                    d_y = ry - ty + roi_rf[0][0][2] - 1
+                    r_rf.append((rf.EyeFrame() & frame_key).fetch1['pupil_r'])
+                    r_trk.append((EyeFrame.Detection() & frame_key).fetch1['pupil_r_major'])
                     pos_errors[frame_key['frame']] = pow(d_x, 2) + pow(d_y, 2)
                     indexes.append(frame_key['frame'])
                     p_err.append(pow(d_x, 2) + pow(d_y, 2))
