@@ -1,6 +1,6 @@
 %{
-pre.StackInfo (imported) # header information
--> rf.Stack
+stk.StackInfo (imported) # header information
+-> stk.Stack
 ---
 nchannels                   : tinyint                       # number of recorded channels
 nslices                     : int                           # number of slices (hStackManager_numSlices)
@@ -13,7 +13,18 @@ um_height                   : float                         # height in microns
 slice_pitch                 : float                         # (um) distance between slices (hStackManager_stackZStepSize)
 %}
 
-classdef StackInfo < dj.Relvar 
+classdef StackInfo < dj.Relvar & dj.AutoPopulate
 
+	properties
+		popRel  % !!! update the populate relation
+	end
+
+	methods(Access=protected)
+
+		function makeTuples(self, key)
+		%!!! compute missing fields for key here
+% 			self.insert(key)
+		end
+	end
 
 end

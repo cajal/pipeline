@@ -3,3 +3,4 @@ scipy
 matplotlib
 seaborn
 sklearn
+h5py

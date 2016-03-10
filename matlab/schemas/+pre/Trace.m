@@ -28,10 +28,11 @@ classdef Trace < dj.Relvar
             fixRaster = get_fix_raster_fun(pre.AlignRaster & key);
             fixMotion = get_fix_motion_fun(pre.AlignMotion & key);
             
-            [pixels, weights, maskKeys] = fetchn(pre.SegmentMask & key, 'mask_pixels', 'mask_weights');
+            [pixels, weights, maskKeys] = fetchn(pre.SegmentMask & key, ...
+                'mask_pixels', 'mask_weights');
             ntraces = length(pixels);
             
-            reader = pre.getReader(key, '~/cache');
+            reader = pre.getReader(key);
             nframes = reader.nframes;
             traces = nan(nframes, ntraces, 'single');
             for iframe=1:nframes

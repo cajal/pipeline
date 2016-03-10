@@ -1,4 +1,4 @@
-FROM datajoint/datajoint-dev
+FROM datajoint/datajoint
 
 MAINTAINER Edgar Y. Walker <edgar.walker@gmail.com>
 
@@ -10,25 +10,29 @@ RUN \
   apt-get install -y -q \
     build-essential && \
   apt-get update && \
-  apt-get install -y -q \
+  apt-get install  --fix-missing -y -q \
     autoconf \
     automake \
-    libtool
+    libtool \
+    octave
 
-# Install Lucas
-RUN \
-  git clone https://github.com/lucastheis/cmt.git && \
-  cd ./cmt/code/liblbfgs && \
-  ./autogen.sh && \
-  ./configure --enable-sse2 && \
-  make CFLAGS="-fPIC" && \
-  cd ../..  && \
-  python setup.py build && \
-  python setup.py install
 
+# Build HDF5
+RUN cd ; wget https://www.hdfgroup.org/ftp/HDF5/current/src/hdf5-1.8.16.tar.gz \
+    && tar zxf hdf5-1.8.16.tar.gz \
+    && mv hdf5-1.8.16 hdf5-setup \
+    &&  cd hdf5-setup \
+    && ./configure --prefix=/usr/local/ \
+    &&  make -j 12 && make install \
+    && cd  \
+    && rm -rf hdf5-setup \
+    && apt-get -yq autoremove \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 # Install OpenCV
 RUN \
+  apt-get update && \
   apt-get install -y cmake git libgtk2.0-dev pkg-config libavcodec-dev libavformat-dev libswscale-dev && \
   apt-get install -y python-numpy libtbb2 libtbb-dev libjpeg-dev libpng-dev libtiff-dev libjasper-dev libdc1394-22-dev && \
   apt-get install -y libatlas-base-dev gfortran && \
@@ -44,32 +48,43 @@ RUN \
   make -j4 && \
   make install && \
   ldconfig && \
-  rm -rf /data/opencv /data/opencv_contrib
+  rm -rf /data/opencv /data/opencv_contrib && \
+  rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
+
+# install HDF5 reader and rabbit-mq client lib
+RUN pip install h5py && \
+    pip install pika
+
+# Install Lucas
 RUN \
-  apt-get update && \
-  apt-get install -y --fix-missing octave 
-
+  git clone https://github.com/lucastheis/cmt.git && \
+  cd ./cmt/code/liblbfgs && \
+  ./autogen.sh && \
+  ./configure --enable-sse2 && \
+  make CFLAGS="-fPIC" && \
+  cd ../..  && \
+  python setup.py build && \
+  python setup.py install
 
 RUN \
   pip install git+https://github.com/cajal/c2s.git
 
+
+# Install pipeline
 COPY . /data/pipeline
 RUN \
   pip install -e pipeline/python/
 
 # Get pupil tracking repo
 RUN \
-  git clone https://github.com/cajal/pupil-tracking.git
+  git clone https://github.com/cajal/pupil-tracking.git && \
+  pip install -e pupil-tracking/
 
 RUN \
   pip install oct2py && \
   pip install git+https://github.com/atlab/tiffreader
 
-#RUN \
-#  apt-get install -y python-pip && \
-#  pip2 install pandas && \
-#  apt-get install -y python-scipy
 
 ENTRYPOINT ["worker"]
   
