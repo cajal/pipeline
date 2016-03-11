@@ -14,54 +14,9 @@ except ImportError:
 schema = dj.schema('pipeline_pupiltracking', locals())
 from . import rf
 import numpy as np
-import os
-import glob
 import matplotlib.pyplot as plt
 from IPython import embed
 import glob
-
-
-@schema
-class VideoGroup(dj.Lookup):
-    definition = """
-    # table that groups videos into groups that can be tracked by the same SVM
-    videogroup_id       : tinyint # id of the video group
-    ---
-    group_name          : char(20) # name of the group
-    """
-
-    contents = [  # these contents will be automatically inserted into the database
-        (1, 'setup_S505')
-    ]
-
-
-@schema
-class SVM(dj.Lookup):
-    definition = """
-    # table that stores the paths for the SVMs for each VideoGroup
-    ->VideoGroup
-    version         : int   # version of the SVM
-    ---
-    svm_path        : varchar(200) # path to the SVM file
-    """
-
-    contents = [
-        (1, 0, 'no_SVM'),
-        (1, 1, '/media/lab/users/jagrawal/global_svm/svm_version1/svm'),
-        (1, 2, '/media/lab/users/jagrawal/global_svm/svm_version2/svm'),
-        (1, 3, '/media/lab/users/jagrawal/global_svm/svm_version3/svm'),
-    ]
-
-
-@schema
-class ROI(dj.Manual):
-    definition = """
-    # table that stores the correct ROI of the Eye in the video
-    ->rf.Eye
-    x_roi                     : int                         # x coordinate of roi
-    y_roi                     : int                         # y coordinate of roi
-    ---
-    """
 
 
 @schema
@@ -81,8 +36,7 @@ class Roi(dj.Manual):
 class EyeFrame(dj.Computed):
     definition = """
     # eye tracking info for each frame of a movie
-    -> rf.Eye
-    -> SVM
+    -> Roi
     frame                       : int                           # frame number in movie
     ---
     eye_frame_ts=CURRENT_TIMESTAMP    : timestamp               # automatic
@@ -90,44 +44,26 @@ class EyeFrame(dj.Computed):
 
     @property
     def populated_from(self):
-        # return rf.Eye() * SVM() * VideoGroup().aggregate(SVM(), current_version='MAX(version)') & 'version=current_version'
-        # embed()
-        return rf.Eye() * SVM() * VideoGroup().aggregate(SVM(), current_version='MAX(version)') & 'version=0'
+        return Roi()
 
     def _make_tuples(self, key):
         print("Populating: ")
         pprint(key)
-        svm_path = (SVM() & key).fetch1['svm_path']
-        print(svm_path)
-        # embed()
-
-        if Roi() & key:
-            # x_roi, y_roi = (ROI() & key).fetch1['x_roi', 'y_roi']
-            eye_roi = (Roi() & key).fetch1['x_roi_min', 'y_roi_min', 'x_roi_max', 'y_roi_max']
-            print("Populating for trk.Roi and roi = ", eye_roi)
-        else:
-            roi = (rf.Eye() & key).fetch1['eye_roi']
-            x_roi_min = min(roi[0], roi[2])
-            x_roi_max = max(roi[0], roi[2])
-            y_roi_min = min(roi[1], roi[3])
-            y_roi_max = max(roi[1], roi[3])
-            eye_roi = [x_roi_min, y_roi_min, x_roi_max, y_roi_max]
-            print("Populating for rf.Eye[eye_roi] and roi = ", eye_roi)
-
-        # print("ROI used for video = ", x_roi, y_roi)
-
+        #embed()
+        eye_roi = (Roi() & key).fetch1['x_roi_min', 'y_roi_min', 'x_roi_max', 'y_roi_max']
+        print("Populating for trk.Roi and roi = ", eye_roi)
         p, f = (rf.Session() & key).fetch1['hd5_path', 'file_base']
         n = (rf.Scan() & key).fetch1['file_num']
         avi_path = glob.glob(r"{p}/{f}{n}*.avi".format(f=f, p=p, n=n))
-
         assert len(avi_path) == 1, "Found 0 or more than 1 videos: {videos}".format(videos=str(avi_path))
         tr = PupilTracker()
         trace = tr.track_without_svm(avi_path[0], eye_roi)
+
         # CODE to insert data after tracking
         print("Tracking complete... Now inserting data to datajoint")
+        # embed()
         efd = EyeFrame.Detection()
         for index, data in trace.iterrows():
-            # embed()
             key['frame'] = index
             self.insert1(key)
             if pd.notnull(data['pupil_x']):
@@ -468,27 +404,3 @@ class Quality(dj.Computed):
         ax[1].set_xlim((0, 1.05))
         fig.tight_layout()
         fig.savefig('err_pup_x_with_fil_pr.png')
-
-
-        # fig, ax = plt.subplots(3, 1, sharex=True)
-        # r_rf = (rf.EyeFrame() & key).fetch['pupil_r']
-        # r_trk = (EyeFrame.Detection() & key).fetch['pupil_r_major']
-        # ax[0].plot(r_rf)
-        # ax[1].plot(r_trk)
-        # ax[2].plot(r_errors)
-        # fig.savefig('error_radius.png')
-        #
-        # fig, ax = plt.subplots(3, 1, sharex=True)
-        # r_rf = (rf.EyeFrame() & key).fetch['pupil_x']
-        # r_trk = (EyeFrame.Detection() & key).fetch['pupil_x']
-        # ax[0].set_ylim([np.nanmean(r_rf) - 25, np.nanmean(r_rf) + 25])
-        # ax[1].set_ylim([np.nanmean(r_rf) - 25, np.nanmean(r_rf) + 25])
-        # ax[2].set_ylim([0, 100])
-        # ax[0].plot(r_rf)
-        # ax[1].plot(r_trk - roi_rf[0][0][0])
-        # ax[2].plot(pos_errors)
-        # fig.savefig('error_pupil_x.png')
-        # # ax[2].plot()
-
-# from microns.trk import EyeFrame
-# EyeFrame().populate(restriction=dict(animal_id=2055, group_name='setup_jake'))
