@@ -23,9 +23,9 @@ classdef ComputeTraces < dj.Relvar & dj.AutoPopulate
                     [X, keys] = fetchn(aodpre.Timeseries*aodpre.PreprocessMethod & key & 'channel=1', 'trace');
                     keys = rmfield(keys, 'channel');
                     X = double([X{:}]);
-                    M = mean(X);
+
                     % subtract 1 principal component  (not including means)
-                    [U,D,V] = svds(bsxfun(@minus, X, M), 1);
+                    [U,D,V] = svds(bsxfun(@minus, X, mean(X)), 1);
                     X = X - U*D*V';
                  
                     for i=1:length(keys)
@@ -34,7 +34,7 @@ classdef ComputeTraces < dj.Relvar & dj.AutoPopulate
                         insert(aodpre.Trace,tuple);
                     end
                     
-                case 'manolis'
+                case 'high-passed'
                     [X, keys] = fetchn(aodpre.Timeseries*aodpre.PreprocessMethod & key & 'channel=1', 'trace');
                     keys = rmfield(keys, 'channel');
                     fps = fetch1(aodpre.Set & key,'sampling_rate');
@@ -50,9 +50,9 @@ classdef ComputeTraces < dj.Relvar & dj.AutoPopulate
                     traces = traces./convmirr(traces,k)-1;
                     traces(isnan(traces)) = 0;
                     
-                    % remove 1pc
-                    [c, p] = princomp(traces);
-                    traces = p(:,2:end)*c(:,2:end)';
+                    % subtract 1 principal component  (not including means)
+                    [U,D,V] = svds(bsxfun(@minus, traces, mean(traces)), 1);
+                    traces = traces - U*D*V';
                     
                     for i=1:length(keys)
                         tuple = keys(i);
@@ -60,7 +60,7 @@ classdef ComputeTraces < dj.Relvar & dj.AutoPopulate
                         insert(aodpre.Trace,tuple);
                     end
                     
-                case 'manolis_LP'
+                case 'band-passed'
                     [X, keys] = fetchn(aodpre.Timeseries*aodpre.PreprocessMethod & key & 'channel=1', 'trace');
                     keys = rmfield(keys, 'channel');
                     fps = fetch1(aodpre.Set & key,'sampling_rate');
@@ -81,9 +81,9 @@ classdef ComputeTraces < dj.Relvar & dj.AutoPopulate
                     k = k/sum(k);
                     traces = convmirr(traces,k);
                     
-                    % remove 1pc
-                    [c, p] = princomp(traces);
-                    traces = p(:,2:end)*c(:,2:end)';
+                    % subtract 1 principal component  (not including means)
+                    [U,D,V] = svds(bsxfun(@minus, traces, mean(traces)), 1);
+                    traces = traces - U*D*V';
                     
                     for i=1:length(keys)
                         tuple = keys(i);
