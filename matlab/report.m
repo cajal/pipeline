@@ -19,6 +19,8 @@ progress(monet.DriftTrialSet, r)
 progress(monet.DriftResponseSet, r)
 progress(monet.VonMises, r)
 progress(monet.RF, r)
+progress(monet.CleanRF, r)
+progress(monet.Fit, r)
 
 fprintf '\nAOD pipeline:\n'
 r = fetch(vis2p.Experiments &  'exp_date>"2016-02"', '(mouse_id)->animal_id');
