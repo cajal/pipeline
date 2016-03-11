@@ -106,7 +106,7 @@ classdef RF < dj.Relvar & dj.AutoPopulate
                 tuple.bin_size = bin_width;
                 tuple.degrees_x = degSize(1);
                 tuple.degrees_y = degSize(2);
-                tuple.map = maps(:,:,:,itrace);
+                tuple.map = single(maps(:,:,:,itrace));
                 self.insert(tuple)
             end
             
