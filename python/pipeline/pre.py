@@ -1,3 +1,4 @@
+import sh
 from scipy import ndimage
 from warnings import warn
 from sklearn.metrics import roc_curve
@@ -8,6 +9,7 @@ from matplotlib import pyplot as plt
 import seaborn as sns
 from pprint import pprint
 import pandas as pd
+import os
 
 try:
     import c2s
@@ -109,13 +111,12 @@ class Segment(dj.Imported):
         plt.show()
 
 
-    def plot_single_ROIs(self, outdir='./'):
+    def plot_NMF_ROIs(self, outdir='./'):
         sns.set_context('paper')
         theCM = sns.blend_palette(['lime', 'gold', 'deeppink'], n_colors=10)  # plt.cm.RdBu_r
 
-        for key in ((self.project() * SegmentMethod()*SpikeInference() & dict(short_name='stm'))
-                        - dict(method_name='manual') & ManualSegment().project()).fetch.as_dict:
-            mask_px, mask_w, ca, sp = (SegmentMask()*Trace()*Spikes() & key).fetch['mask_pixels', 'mask_weights', 'ca_trace', 'spike_trace']
+        for key in (self.project() * SegmentMethod()*SpikeInference() & dict(short_name='stm', method_name='nmf')).fetch.as_dict:
+            mask_px, mask_w, ca, sp = (SegmentMask()*Trace()*Spikes() & key).fetch.order_by('mask_id')['mask_pixels', 'mask_weights', 'ca_trace', 'spike_trace']
 
             template = np.stack([normalize(bugfix_reshape(t)[..., key['slice']-1].squeeze())
                                  for t in (ScanCheck() & key).fetch['template']], axis=2).mean(axis=2) # TODO: remove bugfix_reshape once djbug #191 is fixed
@@ -123,9 +124,13 @@ class Segment(dj.Imported):
             d1, d2 = tuple(map(int, (ScanInfo() & key).fetch1['px_height', 'px_width']))
             masks = Segment.reshape_masks(mask_px, mask_w, d1, d2)
             gs = plt.GridSpec(6,1)
+            try:
+                sh.mkdir('-p', os.path.expanduser(outdir) + '/scan_idx{scan_idx}/slice{slice}'.format(**key))
+            except:
+                pass
             for cell, (ca_trace, sp_trace) in enumerate(zip(ca, sp)):
                 with sns.axes_style('white'):
-                    fig = plt.figure(figsize=(4,6))
+                    fig = plt.figure(figsize=(6,8))
                     ax_image = fig.add_subplot(gs[2:,:])
 
                 with sns.axes_style('ticks'):
@@ -140,9 +145,10 @@ class Segment(dj.Imported):
                 sns.despine(ax=ax_sp)
                 ax_ca.axis('tight')
                 ax_sp.axis('tight')
-                fig.suptitle("animal_id {animal_id}:session {session}:scan_idx {scan_idx}:{method_name}:slice{slice}".format(**key))
+                fig.suptitle("animal_id {animal_id}:session {session}:scan_idx {scan_idx}:{method_name}:slice{slice}:cell{cell}".format(cell=cell+1, **key))
                 fig.tight_layout()
-                plt.savefig(outdir + "/" + "cell{cell}_animal_id_{animal_id}_session_{session}_scan_idx_{scan_idx}_{method_name}_slice_{slice}.pdf".format(cell=cell, **key))
+
+                plt.savefig(outdir + "/scan_idx{scan_idx}/slice{slice}/cell{cell:03d}_animal_id_{animal_id}_session_{session}.png".format(cell=cell+1, **key))
                 plt.close(fig)
 
 
