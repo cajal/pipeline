@@ -18,7 +18,7 @@ setup(
     url='https://github.com/cajal/pipeline',
     keywords='database organization',
     packages=find_packages(exclude=['contrib', 'docs', 'tests*']),
-    install_requires=['numpy','slacker'],
+    install_requires=['numpy','slacker','sh'],
     classifiers=[
         'Development Status :: 1 - Beta',
         'Intended Audience :: Science/Research',
