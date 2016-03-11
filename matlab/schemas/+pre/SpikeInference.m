@@ -26,7 +26,7 @@ classdef SpikeInference < dj.Relvar
                     X = X.*(X>2);
                 case 'fastoopsi'
                     for i=1:size(X,2)
-                        X(:,i) = fast_oopsi(double(X(:,i)),struct('dt',dt),struct('lambda',.01));
+                        X(:,i) = fast_oopsi(double(X(:,i)),struct('dt',dt),struct('lambda',.3)); % changed lamda from .01 
                     end
                 case 'stm'
                     error 'This deconvolution is called from python'
