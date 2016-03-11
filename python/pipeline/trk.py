@@ -49,7 +49,7 @@ class EyeFrame(dj.Computed):
     def _make_tuples(self, key):
         print("Populating: ")
         pprint(key)
-        embed()
+        #embed()
         eye_roi = (Roi() & key).fetch1['x_roi_min', 'y_roi_min', 'x_roi_max', 'y_roi_max']
         print("Populating for trk.Roi and roi = ", eye_roi)
         p, f = (rf.Session() & key).fetch1['hd5_path', 'file_base']
