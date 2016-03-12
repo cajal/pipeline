@@ -26,7 +26,7 @@ plot([1 1]*0.4, ylim, 'r-')
 hold off
 
 set(gcf,'PaperSize',[5 2.5], 'PaperPosition', [0 0 5 2.5])
-print -dpdf ~/Desktop/quality-tuning
+print('-dpdf',getLocalPath('~/Desktop/quality-tuning'))
 
 
 plot(bins, 100-100*bsxfun(@rdivide, h, h(:,end))', 'LineWidth', 1);
@@ -43,7 +43,7 @@ plot([1 1]*0.4, ylim, 'r-')
 hold off
 
 set(gcf,'PaperSize',[5 2.5], 'PaperPosition', [0 0 5 2.5])
-print -dpdf ~/Desktop/quality-tuning-percent
+print('-dpdf',getLocalPath('~/Desktop/quality-tuning-percent'))
 
 
 end
