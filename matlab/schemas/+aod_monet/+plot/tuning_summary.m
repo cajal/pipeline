@@ -1,8 +1,8 @@
 function tuning_summary
 % summarizes the quality of mice
 set(groot,'defaultAxesColorOrder', parula(4)*0.7, 'defaultAxesLineStyleOrder', '-|--|:')
-von = monet.VonMises & 'segment_method=2' & 'spike_inference=2';
-keys = fetch(pro(common.Animal, rf.Session, 'max(session_date)->sess_date') & monet.VonMises, 'sess_date', 'ORDER BY sess_date DESC');
+von = aod_monet.VonMises & 'preprocess_id=3' & 'spike_inference=2';
+keys = fetch(vis2p.Experiments & aod_monet.VonMises, 'exp_date', 'ORDER BY exp_date DESC');
 scores = arrayfun(@(key) fetch(von & key, 'von_base->w1','von_amp1->w2','von_amp2->w3','exp(-von_sharp)->r'), keys, 'uni', false);
 scores = cellfun(@(s) osifun(s), scores, 'uni', false);
 mx = max(cellfun(@(s)  quantile(s, 0.98), scores));
@@ -18,7 +18,7 @@ title 'number of "cells" above OSI'
 grid on 
 box off
 xlim([mn mx])
-legend(arrayfun(@(key) sprintf('%d  (%s)',key.animal_id, key.sess_date), keys, 'uni', false))
+legend(arrayfun(@(key) sprintf('%d  (%s)',key.mouse_id, key.exp_date), keys, 'uni', false))
 legend Location EastOutside
 legend boxoff
 hold on
@@ -35,7 +35,7 @@ title 'percent "cells" above OSI'
 grid on 
 box off
 xlim([mn mx])
-legend(arrayfun(@(key) sprintf('%d (%s)',key.animal_id, key.sess_date), keys, 'uni', false))
+legend(arrayfun(@(key) sprintf('%d (%s)',key.mouse_id, key.exp_date), keys, 'uni', false))
 legend Location EastOutside
 legend boxoff
 hold on
@@ -44,7 +44,6 @@ hold off
 
 set(gcf,'PaperSize',[5 2.5], 'PaperPosition', [0 0 5 2.5])
 print('-dpdf',getLocalPath('~/Desktop/quality-tuning-percent'))
-
 
 end
 
