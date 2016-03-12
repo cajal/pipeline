@@ -1,8 +1,8 @@
 %{
-aodpre.PreprocessMethod (lookup) # trace preprocessing 
-preprocess_id : tinyint  # pre
------
-preprocess_name : char(8)   # brief description to be used in switch statements, etc
+aodpre.PreprocessMethod (lookup) # trace preprocessing
+preprocess_id   : tinyint                # pre
+---
+preprocess_name             : char(8)                       # brief description to be used in switch statements, etc
 %}
 
 classdef PreprocessMethod < dj.Relvar
