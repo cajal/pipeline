@@ -57,7 +57,7 @@ class EyeFrame(dj.Computed):
         avi_path = glob.glob(r"{p}/{f}{n}*.avi".format(f=f, p=p, n=n))
         assert len(avi_path) == 1, "Found 0 or more than 1 videos: {videos}".format(videos=str(avi_path))
         tr = PupilTracker()
-        trace = tr.track_without_svm(avi_path[0], eye_roi)
+        trace = tr.track_without_svm(avi_path[0], eye_roi, setup=1)
 
         # CODE to insert data after tracking
         print("Tracking complete... Now inserting data to datajoint")
