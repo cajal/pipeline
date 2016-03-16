@@ -50,6 +50,7 @@ switch lower(os)
 end
 
 % mapping table
+home = '';
 mapping = {
     '/stimulation','/mnt/stor01/stimulation','Y:/stimulation','/Volumes/stor01/stimulation'
     '/processed','/mnt/stor01/processed','Y:/processed','/Volumes/stor01/processed'
