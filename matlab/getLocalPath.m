@@ -35,6 +35,7 @@ p = strrep(p,'/stor02/hammer','/at_scratch/hammer');
 p = strrep(p,'hammer/ben','hammer/Ben');
 
 % local os' column
+home = '~';
 switch lower(os)
     case 'glo'
         local = 1;
@@ -62,7 +63,7 @@ mapping = {
     '/raw','/mnt/at_scratch','W:','/Volumes/at_scratch'
     '/2P2Drive','/mnt/2P2Drive','Q:','/Volumes/2P2Drive'
     '/manolism','/mnt/manolism','M:','/Volumes/M'
-    '~','~',home,'~'
+    home,home,home,home
     };
 
 % convert path
