@@ -13,7 +13,38 @@ classdef SliceAlignment < dj.Relvar & dj.AutoPopulate
 
 	properties
 		popRel = pro(rf.Scan) * pro(rf.Stack) * pre.Channel & pre.AverageFrame;
-	end
+    end
+    
+    methods
+        function plotSlices(self, channel)
+            if nargin == 2
+                cond = sprintf('channel = %d', channel);
+            else
+                cond = [];
+            end
+
+            session = fetch(rf.Session & self);
+            assert(length(session) == 1, 'This can only plot a single session at a time');
+            scans = fetch(rf.Scan & session);
+            cvals = lines(length(scans));
+            
+            figure;
+            hold on;
+            for idxScan = 1:length(scans)
+                cbase = cvals(idxScan, :);
+                slices = fetch(pre.SliceAlignment & scans(idxScan) & cond, '*');
+                for idxSlice = 1:length(slices)
+                    slice = slices(idxSlice);
+
+                    c = max(cbase - (idxSlice - 1) * 0.05 * [1,1,1],0);
+                    
+                    plot([0, 1], [1, 1] * slice.depth, 'color', c);
+                    text(0.1, slice.depth + 1, sprintf('Depth: %dum (animal %d session %d scan %d slice %d)', ...
+                        slice.depth, slice.animal_id, slice.session, slice.scan_idx, slice.slice));
+                end
+            end
+        end 
+    end
 
 	methods(Access=protected)
 		function makeTuples(self, key)
