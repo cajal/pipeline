@@ -35,7 +35,7 @@ p = strrep(p,'/stor02/hammer','/at_scratch/hammer');
 p = strrep(p,'hammer/ben','hammer/Ben');
 
 % local os' column
-home = '';
+home = 'no place like home';
 switch lower(os)
     case 'glo'
         local = 1;
@@ -63,7 +63,7 @@ mapping = {
     '/raw','/mnt/at_scratch','W:','/Volumes/at_scratch'
     '/2P2Drive','/mnt/2P2Drive','Q:','/Volumes/2P2Drive'
     '/manolism','/mnt/manolism','M:','/Volumes/M'
-    '/dataCache','/media/Data','',''
+    '/dataCache','/media/Data','not yet','not yet'
     '~','~',home,'~'
     };
 
