@@ -50,3 +50,52 @@ class TrackInfo(dj.Imported):
         self.insert1(key)
 
 
+@schema
+class Roi(dj.Manual):
+    definition = """
+    # table that stores the correct ROI of the Eye in the video
+    ->TrackInfo
+    ---
+    x_roi_min                     : int                         # x coordinate of roi
+    y_roi_min                     : int                         # y coordinate of roi
+    x_roi_max                     : int                         # x coordinate of roi
+    y_roi_max                     : int                         # y coordinate of roi
+    """
+
+
+@schema
+class ParamEyeFrame(dj.Lookup):
+    definition = """
+    # table that stores the paths for the params for pupil_tracker
+    param_id                      : int            # id for param collection
+    ---
+    th1 = Null                 : int        # parameter for tracking
+    th2 = Null                 : int        # parameter for tracking
+    p1 = Null                 : int        # parameter for tracking
+    p2 = Null                 : int        # parameter for tracking
+    """
+
+    contents = [
+        {'param_id': 0, 'th1': 0.5, 'th2': 0.5, 'p1': 99, 'p2': 1},
+        {'param_id': 1, 'th1': 0.75, 'th2': 0.25, 'p1': 97, 'p2': 3},
+    ]
+
+
+@schema
+class EyeFrame(dj.Computed):
+    definition = """
+    # eye tracking info for each frame of a movie
+    -> Roi
+    -> ParamEyeFrame
+    frame                       : int                           # frame number in movie
+    ---
+    eye_frame_ts=CURRENT_TIMESTAMP    : timestamp               # automatic
+    """
+
+    @property
+    def populated_from(self):
+        return Roi()
+
+    def _make_tuples(self, key):
+        pass
+
