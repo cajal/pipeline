@@ -33,10 +33,40 @@ class Roi(dj.Manual):
 
 
 @schema
+class ParamEyeFrame(dj.Lookup):
+    definition = """
+    # table that stores the paths for the params for pupil_tracker
+    param_id                      : int            # id for param collection
+    ---
+    weight_thres_high = Null                 : float        # parameter for tracking
+    weight_thres_low = Null                 : float        # parameter for tracking
+    thres_per_high = Null                 : float        # parameter for tracking
+    thres_per_low = Null                 : float        # parameter for tracking
+        pupil_left_limit = Null                 : float        # parameter for tracking
+    pupil_right_limit = Null                 : float        # parameter for tracking
+    min_radius = Null                 : float        # parameter for tracking
+    max_radius = Null                   : float       # parameter for tracking
+    centre_dislocation_penalty             : float     # parameter for tracking
+    distance_sq_pow                         : float       # parameter for tracking
+
+    """
+
+    contents = [
+        {'param_id': 0, 'weight_thres_high': 0.5,  'weight_thres_low': 0.5,  'thres_per_high': 99, 'distance_sq_pow': 1,
+            'thres_per_low': 1, 'pupil_left_limit': 0.2, 'pupil_right_limit': 0.8, 'min_radius': 5, 'max_radius': 180,
+            'centre_dislocation_penalty': 0.001},
+        {'param_id': 1, 'weight_thres_high': 0.5, 'weight_thres_low': 0.5, 'thres_per_high': 98, 'distance_sq_pow': 0.5,
+            'thres_per_low': 2, 'pupil_left_limit': 0.2, 'pupil_right_limit': 0.8, 'min_radius': 5, 'max_radius': 180,
+            'centre_dislocation_penalty': 0.05}
+    ]
+
+
+@schema
 class EyeFrame(dj.Computed):
     definition = """
     # eye tracking info for each frame of a movie
     -> Roi
+    -> ParamEyeFrame
     frame                       : int                           # frame number in movie
     ---
     eye_frame_ts=CURRENT_TIMESTAMP    : timestamp               # automatic
@@ -48,16 +78,19 @@ class EyeFrame(dj.Computed):
 
     def _make_tuples(self, key):
         print("Populating: ")
+        # embed()
+        param = (ParamEyeFrame() & 'param_id=1').fetch.as_dict()[0]
+        key.update(param)
         pprint(key)
-        #embed()
         eye_roi = (Roi() & key).fetch1['x_roi_min', 'y_roi_min', 'x_roi_max', 'y_roi_max']
         print("Populating for trk.Roi and roi = ", eye_roi)
         p, f = (rf.Session() & key).fetch1['hd5_path', 'file_base']
         n = (rf.Scan() & key).fetch1['file_num']
         avi_path = glob.glob(r"{p}/{f}{n}*.avi".format(f=f, p=p, n=n))
         assert len(avi_path) == 1, "Found 0 or more than 1 videos: {videos}".format(videos=str(avi_path))
-        tr = PupilTracker()
-        trace = tr.track_without_svm(avi_path[0], eye_roi, setup=1)
+
+        tr = PupilTracker(param)
+        trace = tr.track_without_svm(avi_path[0], eye_roi)
 
         # CODE to insert data after tracking
         print("Tracking complete... Now inserting data to datajoint")
