@@ -30,9 +30,12 @@ class TrackInfo(dj.Imported):
         print("key = ", key)
         # embed()
         path = (aodpre.Scan() & key).fetch1['hdf5_file']
-        words = path.split('\\')
-        if len(words) == 1:
-            words = words[0].split('/')
+        path.replace('\\','/')
+
+        # words = path.split('\\')
+        # if len(words) == 1:
+
+        words = words[0].split('/')
         i = words.index('Mouse')
         ymd = words[i+3].split('_')[0]
         hms = words[i+3].split('_')[1].replace("-", ":")
@@ -95,27 +98,27 @@ class Roi(dj.Manual):
 class ParamEyeFrame(dj.Lookup):
     definition = """
     # table that stores the paths for the params for pupil_tracker
-    param_id                      : int            # id for param collection
+    pupil_tracker_param_id                      : int            # id for param collection
     ---
-    weight_thres_high = Null                 : float        # parameter for tracking
-    weight_thres_low = Null                 : float        # parameter for tracking
-    thres_per_high = Null                 : float        # parameter for tracking
-    thres_per_low = Null                 : float        # parameter for tracking
-        pupil_left_limit = Null                 : float        # parameter for tracking
-    pupil_right_limit = Null                 : float        # parameter for tracking
-    min_radius = Null                 : float        # parameter for tracking
-    max_radius = Null                   : float       # parameter for tracking
-    centre_dislocation_penalty             : float     # parameter for tracking
-    distance_sq_pow                         : float       # parameter for tracking
+    convex_weight_high = Null                : float        # parameter for weighting higher pixel intensity value to decide threshold. condition = if (maxr < radius1 - p * (pow(pow((center1[0] - full_patch_size / 2), 2) + pow((center1[1] - full_patch_size / 2), 2), po)) and (center1[1] > ll * full_patch_size) and (center1[1] < rl * full_patch_size) and (center1[0] > ll * full_patch_size) and (center1[0] < rl * full_patch_size) and (radius1 > mir) and (radius1 < mar) and len(contours1[j]) >= 5):
+    convex_weight_low = Null                 : float        # parameter for weighting lower pixel intensity for threshold
+    thres_perc_high = Null                   : float        # percentile parameter to pick most bright pixel value
+    thres_perc_low = Null                    : float        # percentile parameter to pick least bright pixel value
+    pupil_left_limit = Null                  : float        # parameter in percentage to restrict pupil centre in roi
+    pupil_right_limit = Null                 : float        # parameter in percentage to restrict pupil centre in roi
+    min_radius = Null                        : float        # parameter to restrict pupil radius while selecting pupil from multiple contours
+    max_radius = Null                        : float        # parameter to restrict pupil radius while selecting pupil from multiple contours
+    centre_dislocation_penalty               : float        # parameter for penalty as to force selection of contour which is in the centre as pupil
+    distance_sq_pow                          : float        # parameter for selecting method of calculating distance for penalty
 
     """
 
     contents = [
-        {'param_id': 0, 'weight_thres_high': 0.5,  'weight_thres_low': 0.5,  'thres_per_high': 99, 'distance_sq_pow': 1,
-            'thres_per_low': 1, 'pupil_left_limit': 0.2, 'pupil_right_limit': 0.8, 'min_radius': 5, 'max_radius': 180,
+        {'pupil_tracker_param_id': 0, 'convex_weight_high': 0.5,  'convex_weight_low': 0.5,  'thres_perc_high': 99, 'distance_sq_pow': 1,
+            'thres_perc_low': 1, 'pupil_left_limit': 0.2, 'pupil_right_limit': 0.8, 'min_radius': 5, 'max_radius': 180,
             'centre_dislocation_penalty': 0.001},
-        {'param_id': 1, 'weight_thres_high': 0.75, 'weight_thres_low': 0.25, 'thres_per_high': 97, 'distance_sq_pow': 0.5,
-            'thres_per_low': 3, 'pupil_left_limit': 0.2, 'pupil_right_limit': 0.8, 'min_radius': 5, 'max_radius': 180,
+        {'pupil_tracker_param_id': 1, 'convex_weight_high': 0.75, 'convex_weight_low': 0.25, 'thres_perc_high': 97, 'distance_sq_pow': 0.5,
+            'thres_perc_low': 3, 'pupil_left_limit': 0.2, 'pupil_right_limit': 0.8, 'min_radius': 5, 'max_radius': 180,
             'centre_dislocation_penalty': 0.05}
     ]
 
@@ -137,8 +140,8 @@ class EyeFrame(dj.Computed):
 
     def _make_tuples(self, key):
         # embed()
-        param = (ParamEyeFrame() & 'param_id=0').fetch.as_dict()[0]
-        key['param_id'] = param['param_id']
+        param = (ParamEyeFrame() & 'pupil_tracker_param_id=0').fetch.as_dict()[0]
+        key['pupil_tracker_param_id'] = param['pupil_tracker_param_id']
         video_path = (TrackInfo() & key).fetch1['base_video_path']
         eye_roi = (Roi() & key).fetch1['x_roi_min', 'y_roi_min', 'x_roi_max', 'y_roi_max']
         param['centre_dislocation_penalty'] = 0.001
