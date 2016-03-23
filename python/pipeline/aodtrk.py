@@ -7,14 +7,15 @@ import glob
 import numpy as np
 import dateutil.parser
 from . import utils
-
-
+import cv2
+import os,shutil
 try:
     from pupil_tracking.pupil_tracker_aod import PupilTracker
 except ImportError:
     warnings.warn("Failed to import pupil_tacking library. You won't be able to populate trk.EyeFrame")
 
 schema = dj.schema('pipeline_aod_pupiltracking', locals())
+
 
 @schema
 class TrackInfo(dj.Imported):
@@ -30,21 +31,20 @@ class TrackInfo(dj.Imported):
         print("key = ", key)
         # embed()
         path = (aodpre.Scan() & key).fetch1['hdf5_file']
-        path.replace('\\','/')
+        path.replace('\\', '/')
 
         # words = path.split('\\')
         # if len(words) == 1:
 
         words = words[0].split('/')
         i = words.index('Mouse')
-        ymd = words[i+3].split('_')[0]
-        hms = words[i+3].split('_')[1].replace("-", ":")
-        time_hdf5 = dateutil.parser.parse("{ymd} {hms}".format(ymd=ymd,hms=hms))
-
+        ymd = words[i + 3].split('_')[0]
+        hms = words[i + 3].split('_')[1].replace("-", ":")
+        time_hdf5 = dateutil.parser.parse("{ymd} {hms}".format(ymd=ymd, hms=hms))
 
         # time_str = words[i+3].split('_')[1].split('-')
         # time_hdf5 = int(time_str[0])*10000 + int(time_str[1])*100 + int(time_str[2])
-        folders = glob.glob(r"/m/Mouse/{f1}/20*".format(f1=words[i+1]))
+        folders = glob.glob(r"/m/Mouse/{f1}/20*".format(f1=words[i + 1]))
         time_coll = []
         time_diff = []
         for name in folders:
@@ -52,7 +52,7 @@ class TrackInfo(dj.Imported):
             hms = name.split('/')[4].split('_')[1].replace("-", ":")
             # t = name.split('/')[-1].split('_')[1].split('-')
             # time = int(t[0])*10000 + int(t[1])*100 + int(t[2])
-            time = dateutil.parser.parse("{ymd} {hms}".format(ymd=ymd,hms=hms))
+            time = dateutil.parser.parse("{ymd} {hms}".format(ymd=ymd, hms=hms))
             time_coll.append(time)
             diff = abs((time_hdf5 - time).total_seconds())
             time_diff.append(diff)
@@ -77,8 +77,6 @@ class TrackInfo(dj.Imported):
             if fr_count == 1000:
                 return frame
 
-        # data = utils.read_video_hdf5(hdf_path)
-
 
 @schema
 class Roi(dj.Manual):
@@ -92,7 +90,66 @@ class Roi(dj.Manual):
     y_roi_max                     : int                         # y coordinate of roi
     """
 
-# embed()
+    def dump_video(self):
+        print("Entered dump")
+        vid_coll = self.fetch.as_dict()
+        for video in vid_coll:
+            video_path = (TrackInfo() & video).fetch1['base_video_path']
+            if not (EyeFrame() & video):
+                print("EyeFrame for (mouse_id,scan_idx)= (", video['mouse_id'], video['scan_idx'],
+                      ") not found. Please populate EyeFrame before dumping video")
+            else:
+                print("Dumping video for parameters (mouse_id,scan_idx) = (", video['mouse_id'], video['scan_idx'], ")")
+                try:
+                    shutil.rmtree("temp_images")
+                except:
+                    pass
+                # print("Debug2")
+                os.makedirs("temp_images")
+                cap = cv2.VideoCapture(video_path)
+                length_video = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                fr_count = 0
+                # print("Debug 1")
+                while cap.isOpened():
+                    ret, frame = cap.read()
+                    fr_count += 1
+                    # print("Debug 3")
+                    if fr_count % 1000 == 0:
+                        print("Processing frame = ", fr_count, "/", length_video)
+                        # break
+                    if fr_count % 6 == 0:
+                        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                        if fr_count >= (length_video):
+                            print("Video: ", video_path, " is over")
+                            break
+
+                        data = (EyeFrame.Detection() & video & dict(frame=fr_count)).fetch.as_dict()
+                        if data:
+                            data = data[0]
+                            ellipse = ((int(data['pupil_x']),int(data['pupil_y'])),(int(data['pupil_r_minor']),int(data['pupil_r_major'])),
+                                       int(data['pupil_angle']))
+                            _ = cv2.ellipse(gray, ellipse, (0, 0, 255), 2)
+                        name = "temp_images/img%06d.png" % (fr_count,)
+                        cv2.imwrite(name, gray)
+                print("Dumped images for parameters (mouse_id,scan_idx) = (", video['mouse_id'], video['scan_idx'], ")")
+                print("Stitching images into a video")
+                file_name = "video_%s_%s.mp4" % (video['mouse_id'], video['scan_idx'])
+                try:
+                    os.remove(file_name)
+                except:
+                    pass
+                command = "ffmpeg -f image2 -pattern_type glob -i 'temp_images/*.png' "+file_name
+                # command = "ffmpeg -framerate 5 -i temp_images\%06d.png -c:v libx264 -r 5 -pix_fmt yuv420p "+file_name
+                os.system(command)
+
+                # embed()
+                try:
+                    shutil.rmtree("temp_images")
+                except:
+                    pass
+
+
+
 
 @schema
 class ParamEyeFrame(dj.Lookup):
@@ -114,12 +171,14 @@ class ParamEyeFrame(dj.Lookup):
     """
 
     contents = [
-        {'pupil_tracker_param_id': 0, 'convex_weight_high': 0.5,  'convex_weight_low': 0.5,  'thres_perc_high': 99, 'distance_sq_pow': 1,
-            'thres_perc_low': 1, 'pupil_left_limit': 0.2, 'pupil_right_limit': 0.8, 'min_radius': 5, 'max_radius': 180,
-            'centre_dislocation_penalty': 0.001},
-        {'pupil_tracker_param_id': 1, 'convex_weight_high': 0.75, 'convex_weight_low': 0.25, 'thres_perc_high': 97, 'distance_sq_pow': 0.5,
-            'thres_perc_low': 3, 'pupil_left_limit': 0.2, 'pupil_right_limit': 0.8, 'min_radius': 5, 'max_radius': 180,
-            'centre_dislocation_penalty': 0.05}
+        {'pupil_tracker_param_id': 0, 'convex_weight_high': 0.5, 'convex_weight_low': 0.5, 'thres_perc_high': 99,
+         'distance_sq_pow': 1,
+         'thres_perc_low': 1, 'pupil_left_limit': 0.2, 'pupil_right_limit': 0.8, 'min_radius': 5, 'max_radius': 180,
+         'centre_dislocation_penalty': 0.001},
+        {'pupil_tracker_param_id': 1, 'convex_weight_high': 0.75, 'convex_weight_low': 0.25, 'thres_perc_high': 97,
+         'distance_sq_pow': 0.5,
+         'thres_perc_low': 3, 'pupil_left_limit': 0.2, 'pupil_right_limit': 0.8, 'min_radius': 5, 'max_radius': 180,
+         'centre_dislocation_penalty': 0.05}
     ]
 
 
@@ -180,6 +239,3 @@ class EyeFrame(dj.Computed):
         pupil_angle_std             : float                         # angle of major axis vs. horizontal axis in radians
         intensity_std               : float                         # standard deviation of the ROI pixel values
         """
-
-
-
