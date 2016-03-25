@@ -119,7 +119,7 @@ class Roi(dj.Manual):
                         # break
                     if fr_count % 6 == 0:
                         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                        if fr_count >= (length_video):
+                        if fr_count >= (length_video-10):
                             print("Video: ", video_path, " is over")
                             break
 
