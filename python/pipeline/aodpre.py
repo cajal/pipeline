@@ -1,7 +1,7 @@
 
 from warnings import warn
 import numpy as np
-from . import pre
+from . import pre_old
 
 import datajoint as dj
 schema = dj.schema('pipeline_aod_preprocessing', locals())
@@ -23,7 +23,7 @@ class Spikes(dj.Computed):
         dt = 1/(Set() & key).fetch1['sampling_rate']
         X = (Trace() & key).project('trace').fetch.as_dict()
         for x in X:
-            x = (pre.SpikeInference() & key).infer_spikes([x], dt, trace_name='trace')
+            x = (pre_old.SpikeInference() & key).infer_spikes([x], dt, trace_name='trace')
             self.insert1(dict(key, **x[0]))
 
 
@@ -34,7 +34,7 @@ class ExtractSpikes(dj.Computed):
     @property
     def populated_from(self):
         # Segment and SpikeInference will be in the workspace if they are in the database
-        return  ComputeTraces() * pre.SpikeInference() & 'language="python"'
+        return ComputeTraces() * pre_old.SpikeInference() & 'language="python"'
 
     def _make_tuples(self, key):
         self.insert1(key)
