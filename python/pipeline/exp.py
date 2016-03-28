@@ -12,6 +12,14 @@ schema = dj.schema('pipeline_experimental_data', locals())
 # * what about rf.FlashMAp
 
 
+@schema
+class Fluorophore(dj.Lookup):
+    definition = """
+    # calcium-sensitive indicators
+    fluorophore  : char(10)   # fluorophore short name
+    -----
+    notes = ''  :  varchar(2048)
+    """
 
 @schema
 class Lens(dj.Lookup):
@@ -131,4 +139,13 @@ class Sync(dj.Imported):
     frame_times                 : longblob                      # times of frames and slices
     sync_ts=CURRENT_TIMESTAMP   : timestamp                     # automatic
 
+    """
+
+@schema
+class Channel(dj.Manual):
+    definition = """
+    # two-photon channels
+    channel: tinyint # channel number 1=green, 2=red'
+    ---
+    ->Fluorophore
     """
