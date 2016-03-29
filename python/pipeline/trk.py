@@ -31,18 +31,19 @@ class Roi(dj.Manual):
     y_roi_max                     : int                         # y coordinate of roi
     """
 
+# embed()
 
 @schema
 class ParamEyeFrame(dj.Lookup):
     definition = """
     # table that stores the paths for the params for pupil_tracker
-    param_id                      : int            # id for param collection
+    pupil_tracker_param_id                      : int            # id for param collection
     ---
-    weight_thres_high = Null                 : float        # parameter for tracking
-    weight_thres_low = Null                 : float        # parameter for tracking
-    thres_per_high = Null                 : float        # parameter for tracking
-    thres_per_low = Null                 : float        # parameter for tracking
-        pupil_left_limit = Null                 : float        # parameter for tracking
+    convex_weight_high = Null                 : float        # parameter for tracking
+    convex_weight_low = Null                 : float        # parameter for tracking
+    thres_perc_high = Null                 : float        # parameter for tracking
+    thres_perc_low = Null                 : float        # parameter for tracking
+    pupil_left_limit = Null                 : float        # parameter for tracking
     pupil_right_limit = Null                 : float        # parameter for tracking
     min_radius = Null                 : float        # parameter for tracking
     max_radius = Null                   : float       # parameter for tracking
@@ -52,11 +53,11 @@ class ParamEyeFrame(dj.Lookup):
     """
 
     contents = [
-        {'param_id': 0, 'weight_thres_high': 0.5,  'weight_thres_low': 0.5,  'thres_per_high': 99, 'distance_sq_pow': 1,
-            'thres_per_low': 1, 'pupil_left_limit': 0.2, 'pupil_right_limit': 0.8, 'min_radius': 5, 'max_radius': 180,
+        {'pupil_tracker_param_id': 0, 'convex_weight_high': 0.5,  'convex_weight_low': 0.5,  'thres_perc_high': 99, 'distance_sq_pow': 1,
+            'thres_perc_low': 1, 'pupil_left_limit': 0.2, 'pupil_right_limit': 0.8, 'min_radius': 5, 'max_radius': 180,
             'centre_dislocation_penalty': 0.001},
-        {'param_id': 1, 'weight_thres_high': 0.5, 'weight_thres_low': 0.5, 'thres_per_high': 98, 'distance_sq_pow': 0.5,
-            'thres_per_low': 2, 'pupil_left_limit': 0.2, 'pupil_right_limit': 0.8, 'min_radius': 5, 'max_radius': 180,
+        {'pupil_tracker_param_id': 1, 'convex_weight_high': 0.5, 'convex_weight_low': 0.5, 'thres_perc_high': 98, 'distance_sq_pow': 0.5,
+            'thres_perc_low': 2, 'pupil_left_limit': 0.2, 'pupil_right_limit': 0.8, 'min_radius': 5, 'max_radius': 180,
             'centre_dislocation_penalty': 0.05}
     ]
 
@@ -79,14 +80,17 @@ class EyeFrame(dj.Computed):
     def _make_tuples(self, key):
         print("Populating: ")
         # embed()
-        param = (ParamEyeFrame() & 'param_id=1').fetch.as_dict()[0]
-        key.update(param)
+        param = (ParamEyeFrame() & 'pupil_tracker_param_id=1').fetch.as_dict()[0]
+        # key.update(param)
+        key['pupil_tracker_param_id'] = param['pupil_tracker_param_id']
         pprint(key)
         eye_roi = (Roi() & key).fetch1['x_roi_min', 'y_roi_min', 'x_roi_max', 'y_roi_max']
         print("Populating for trk.Roi and roi = ", eye_roi)
         p, f = (rf.Session() & key).fetch1['hd5_path', 'file_base']
         n = (rf.Scan() & key).fetch1['file_num']
         avi_path = glob.glob(r"{p}/{f}{n}*.avi".format(f=f, p=p, n=n))
+        # print(avi_path)
+        # embed()
         assert len(avi_path) == 1, "Found 0 or more than 1 videos: {videos}".format(videos=str(avi_path))
 
         tr = PupilTracker(param)
