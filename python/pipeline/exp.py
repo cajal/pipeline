@@ -1,6 +1,7 @@
 import datajoint as dj
-from commons import mice
+
 schema = dj.schema('pipeline_experimental_data', locals())
+
 
 # TODO:
 # * should fluorophore move from Session to Channel?
@@ -13,13 +14,14 @@ schema = dj.schema('pipeline_experimental_data', locals())
 
 
 @schema
-class Fluorophore(dj.Lookup):
+class Dye(dj.Lookup):
     definition = """
     # calcium-sensitive indicators
-    fluorophore  : char(10)   # fluorophore short name
+    dye                   : char(10)   # fluorophore short name
     -----
-    notes = ''  :  varchar(2048)
+    dye_description = ''  : varchar(2048)
     """
+
 
 @schema
 class Lens(dj.Lookup):
@@ -31,19 +33,56 @@ class Lens(dj.Lookup):
 
     """
 
+
 @schema
 class FOV(dj.Lookup):
     definition = """
     # field-of-view sizes for all lenses and magnifications
     -> rf.Lens
-    mag             : decimal(5,2)           # ScanImage zoom factor
+    mag                         : decimal(5,2)                  # ScanImage zoom factor
+    fov_ts                      : datetime                      # fov measurement date and time
     ---
     height                      : decimal(5,1)                  # measured width of field of view along axis of pipette (medial/lateral on mouse)
     width                       : decimal(5,1)                  # measured width of field of view perpendicular to pipette (rostral/caudal on mouse)
-    take=1                      : tinyint                       #
-    fov_date                    : date                          # fov measurement date
-    INDEX(lens)
     """
+
+
+@schema
+class Anesthesia(dj.Lookup):
+    definition = """
+    # different anesthesia
+
+    anesthesia                     : char(20) # anesthesia short name
+    ---
+    anesthesia_description=''      : varchar(255) # longer description
+    """
+
+    contents = [
+        ('isoflurane', ''),
+        ('fentanyl', ''),
+        ('awake', '')
+    ]
+
+@schema
+class Person(dj.Lookup):
+    definition = """
+    # person information
+
+    username      : char(12)
+    ---
+    full_name     : varchar(255)
+    """
+    contents = [
+        ('manolis', 'Emmanouil Froudarakis'),
+        ('dimitri', 'Dimitri Yatsenko'),
+        ('shan', 'Shan Shen'),
+        ('jake', 'Jacob Reimer (Overlord)'),
+        ('fabee', 'Fabian Sinz'),
+        ('edgar', 'Edgar Y. Walker'),
+        ('cathryn', 'Cathryn Rene Cadwell'),
+        ('shuang', 'Shuang Li'),
+        ('xiaolong', 'Xiaolong Jiang (Patchgrandmaster)'),
+    ]
 
 @schema
 class Session(dj.Manual):
@@ -51,29 +90,47 @@ class Session(dj.Manual):
     # session
 
     -> mice.Mice
-    session         : smallint               # session index
+    session                       : smallint                      # session index
     ---
-    -> rf.Fluorophore
-    -> rf.Lens
-    session_date                : date                          # date
-    scan_path                   : varchar(255)                  # file path for TIFF stacks
-    hd5_path                    : varchar(255)                  # file path for HD5 files
-    file_base                   : varchar(255)                  # file base name
-    anesthesia="awake"          : enum('isoflurane','fentanyl','awake') # per protocol
-    craniotomy_notes            : varchar(4095)                 # free-text notes
-    session_notes               : varchar(4095)                 # free-text notes
-    session_ts=CURRENT_TIMESTAMP: timestamp                     # automatic
-    INDEX(lens)
+    -> Anesthesia
+    session_date                  : date                          # date
+    scan_path                     : varchar(255)                  # file path for TIFF stacks
+    craniotomy_notes              : varchar(4095)                 # free-text notes
+    session_notes                 : varchar(4095)                 # free-text notes
+    session_ts=CURRENT_TIMESTAMP  : timestamp                     # automatic
     """
+
 
 @schema
-class Site(dj.Manual):
+class CorticalArea(dj.Lookup):
     definition = """
-    # sites grouping several scans
-
-    site: smallint  # site number
-    -----
+    cortical_area       : char(12)     # short name for cortical area
+    ---
+    area_description    : varchar(255)
     """
+    contents = [
+        ('other', '')
+        ('unknown', '')
+        ('V1', '')
+        ('LM', '')
+        ('AL', '')
+        ('PM', '')
+    ]
+
+@schema
+class Software(dj.Lookup):
+    definition = """
+    # recording software information
+    software        : varchar(20) # name of the software
+    version         : char(10)    # version
+    ---
+    """
+    contents = [
+        ('scanimage','3.8'),
+        ('scanimage','4.0'),
+        ('aod','2.0'),
+        ('imager','1.0'),
+    ]
 
 @schema
 class Scan(dj.Manual):
@@ -82,70 +139,36 @@ class Scan(dj.Manual):
     -> Session
     scan_idx        : smallint               # number of TIFF stack file
     ---
-    -> Site
-    file_num                    : smallint                      # number of HD5 file
-    depth=0                     : int                           # manual depth measurement
+    -> Lens
+    -> CorticalArea
     laser_wavelength            : float                         # (nm)
     laser_power                 : float                         # (mW) to brain
-    cortical_area="unknown"     : enum('other','unknown','V1','LM','AL','PM') # Location of scan
+    filename                    : varchar(255)                  # file base name
     scan_notes                  : varchar(4095)                 # free-notes
+    structural=False            : boolean                       # was the scan structural or not
+    surf_z=0                    : int                           # manual depth measurement
+    site_number=0               : tinyint                       # site number
+    -> Software
     scan_ts=CURRENT_TIMESTAMP   : timestamp                     # don't edit
     """
 
+
 @schema
-class Stack(dj.Manual):
+class SessionDye(dj.Manual):
     definition = """
-    # scanimage scan info for structural stacks
+    # Dye used in session
     -> Session
-    stack_idx: smallint  # number of TIFF stack file
+    -> Dye
     ---
-    -> Site
-    bottom_z: int  # z location at bottom of the stack
-    surf_z: int  # z location of surface
-    laser_wavelength: int  # (nm)
-    laser_power: int  # (mW) to brain
-    stack_notes: varchar(4095)  # free-notes
-    scan_ts = CURRENT_TIMESTAMP: timestamp  # don't edit
+    notes           : varchar(255) # additional information
     """
 
-@schema
-class StackInfo(dj.Imported):
-    definition = """
-    # header information
-    -> Stack
-    ---
-    nchannels                   : tinyint                       # number of recorded channels
-    nslices                     : int                           # number of slices (hStackManager_numSlices)
-    frames_per_slice            : int                           # number of frames per slice (hStackManager_framesPerSlice)
-    px_width                    : smallint                      # pixels per line
-    px_height                   : smallint                      # lines per frame
-    zoom                        : decimal(4,1)                  # zoom factor
-    um_width                    : float                         # width in microns
-    um_height                   : float                         # height in microns
-    slice_pitch                 : float                         # (um) distance between slices (hStackManager_stackZStepSize)
-
-    """
-
-@schema
-class Sync(dj.Imported):
-    definition = """
-    # mapping of h5,ca imaging, and vis stim clocks
-    -> Scan
-    ---
-    -> psy.Session
-    first_trial                 : int                           # first trial in recording
-    last_trial                  : int                           # last trial in recording
-    vis_time                    : longblob                      # h5 patch data sample times on visual stimulus (Mac Pro) clock
-    frame_times                 : longblob                      # times of frames and slices
-    sync_ts=CURRENT_TIMESTAMP   : timestamp                     # automatic
-
-    """
 
 @schema
 class Channel(dj.Manual):
     definition = """
     # two-photon channels
-    channel: tinyint # channel number 1=green, 2=red'
+    channel                 : tinyint      # channel number 1=green, 2=red'
     ---
-    ->Fluorophore
+    optical_filter          : varchar(255) # transmissions spectrum
     """
