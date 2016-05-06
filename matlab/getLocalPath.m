@@ -35,7 +35,7 @@ p = strrep(p,'/stor02/hammer','/at_scratch/hammer');
 p = strrep(p,'hammer/ben','hammer/Ben');
 
 % local os' column
-home = '';
+winHome = 'Windows Home';
 switch lower(os)
     case 'glo'
         local = 1;
@@ -43,7 +43,7 @@ switch lower(os)
         local = 2;
     case {'win','pcw'}
         local = 3;
-        home = [getenv('HOMEDRIVE') getenv('HOMEPATH')];
+        winHome = [getenv('HOMEDRIVE') getenv('HOMEPATH')];
     case 'mac'
         local = 4;
     otherwise
@@ -64,7 +64,7 @@ mapping = {
     '/2P2Drive','/mnt/2P2Drive','Q:','/Volumes/2P2Drive'
     '/manolism','/mnt/manolism','M:','/Volumes/M'
     '/dataCache','/media/Data','xx','xx'
-    '~','~',home,'~'
+    '~','~',winHome,'~'
     };
 
 % convert path
@@ -72,7 +72,7 @@ sz = size(mapping);
 for i = 1:sz(1)
     for j = 1:sz(2)
         n = length(mapping{i,j});
-        if j ~= local && strncmpi(p,mapping{i,j},n)
+        if j ~= local && ~isempty(mapping{i,j}) && strncmpi(p,mapping{i,j},n)
             p = fullfile(mapping{i,local},p(n+2:end));
             break;
         end
