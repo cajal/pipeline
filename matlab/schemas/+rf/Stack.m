@@ -1,9 +1,9 @@
 %{
-stk.Stack (manual) # scanimage scan info
+rf.Stack (manual) # scanimage scan info
 -> rf.Session
 stack_idx        : smallint               # number of TIFF stack file
 ---
--> stk.Site
+-> rf.Site
 bottom_z                    : int                           # z location at bottom of the stack
 surf_z                      : int                           # z location of surface
 laser_wavelength            : int                           # (nm)

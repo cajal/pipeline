@@ -11,7 +11,7 @@ segment_ts=CURRENT_TIMESTAMP: timestamp                     # automatic
 classdef ManualSegment < dj.Relvar & dj.AutoPopulate
     
     properties
-        popRel  = pre.AlignMotion & pre.AverageFrame
+        popRel  = pre.AlignMotion & pro(pre.AverageFrame)
     end
     
     methods(Access=protected)
