@@ -13,6 +13,7 @@ function p = getLocalPath(p,os)
 %       /stimulation /mnt/stor01/stimulation Y:\stor01\stimulation  /Volumes/stor01/stimulation
 %       /processed   /mnt/stor01/processed   Y:\stor01\processed    /Volumes/stor01/processed
 %       /raw         /mnt/at_scratch  W:           /Volumes/at_scratch
+%       ~            ~                %homepath%   ~
 %
 %    localPath = getLocalPath(inputPath,OS) will return the path in the format
 %    of the operating system specified in OS ('global' | 'linux' |'win' | 'mac')
@@ -33,6 +34,22 @@ p = strrep(p,'/stor01/hammer','/at_scratch/hammer');
 p = strrep(p,'/stor02/hammer','/at_scratch/hammer');
 p = strrep(p,'hammer/ben','hammer/Ben');
 
+% local os' column
+home = '';
+switch lower(os)
+    case 'glo'
+        local = 1;
+    case {'lin','gln'}
+        local = 2;
+    case {'win','pcw'}
+        local = 3;
+        home = [getenv('HOMEDRIVE') getenv('HOMEPATH')];
+    case 'mac'
+        local = 4;
+    otherwise
+        error('unknown OS');
+end
+
 % mapping table
 mapping = {
     '/stimulation','/mnt/stor01/stimulation','Y:/stimulation','/Volumes/stor01/stimulation'
@@ -46,21 +63,9 @@ mapping = {
     '/raw','/mnt/at_scratch','W:','/Volumes/at_scratch'
     '/2P2Drive','/mnt/2P2Drive','Q:','/Volumes/2P2Drive'
     '/manolism','/mnt/manolism','M:','/Volumes/M'
+    '/dataCache','/media/Data','xx','xx'
+    '~','~',home,'~'
     };
-
-% local os' column
-switch lower(os)
-    case 'glo'
-        local = 1;
-    case {'lin','gln'}
-        local = 2;
-    case {'win','pcw'}
-        local = 3;
-    case 'mac'
-        local = 4;
-    otherwise
-        error('unknown OS');
-end
 
 % convert path
 sz = size(mapping);
