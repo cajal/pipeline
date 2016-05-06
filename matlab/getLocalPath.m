@@ -72,7 +72,7 @@ sz = size(mapping);
 for i = 1:sz(1)
     for j = 1:sz(2)
         n = length(mapping{i,j});
-        if j ~= local && ~isempty(mapping{i,j}) && strncmpi(p,mapping{i,j},n)
+        if j ~= local && strncmpi(p,mapping{i,j},n)
             p = fullfile(mapping{i,local},p(n+2:end));
             break;
         end

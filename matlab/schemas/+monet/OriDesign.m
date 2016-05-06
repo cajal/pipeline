@@ -41,10 +41,10 @@ classdef OriDesign < dj.Relvar & dj.AutoPopulate
             alpha = @(x,a) (x>0).*x/a/a.*exp(-x/a);  % response shape
             
             % relevant trials
-            if ~isstruct(trials)
-                trials = fetch(trials, 'direction', 'flip_times');
-            end
-            [~,~,condIdx] = unique([trials.direction]);
+            [directions,~,condIdx] = unique([trials.direction]);
+            assert(directions(1) == 0 && length(directions) >= 8 && ...
+                all(diff(directions))==diff(directions(1:2)), ...
+                'motion directions must be uninformly distributed around the circle')
             
             G = zeros(length(times), length(unique(condIdx)), 'single');
             for iTrial = 1:length(trials)

@@ -21,14 +21,13 @@ classdef OriMap < dj.Relvar & dj.AutoPopulate
             tic
             disp 'loading design...'
             designMatrix = fetch1(monet.OriDesign & key, 'design_matrix');
+                       
+            disp 'loading movie...'
             fixRaster = get_fix_raster_fun(pre.AlignRaster & key);
             fixMotion = get_fix_motion_fun(pre.AlignMotion & key);
             [height, width, nslices] = fetch1(pre.ScanInfo & key, 'px_height', 'px_width', 'nslices');
             designMatrix = designMatrix(key.slice:nslices:end,:);
             designMatrix = bsxfun(@minus, designMatrix, mean(designMatrix));
-           
-            
-            disp 'loading movie...'
             reader = pre.getReader(key);
             nframes = reader.nframes;
             assert(size(designMatrix,1)==nframes, 'movie reads incorrectly')
