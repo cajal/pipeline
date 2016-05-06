@@ -5,5 +5,5 @@ function reader = getReader(key)
 
 fprintf('Loading from %s\n', path);
 path = getLocalPath(fullfile(path, sprintf('%s_*%03u_*.tif', basename, scanIdx)));
-reader = ne7.scanimage.Reader4(path);
+reader = ne7.scanimage.Reader5(path);
 end

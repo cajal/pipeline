@@ -25,7 +25,7 @@ classdef CleanRF < dj.Relvar & dj.AutoPopulate
             if nmaps > 5
                 % subtract the first principal component if it has the same
                 % signs in the cell space.
-                maps = reshape(maps, [], nmaps);            
+                maps = double(reshape(maps, [], nmaps));            
                 disp 'removing effects of population spikes...'
                 [U,D,V] = svds(bsxfun(@minus, maps, mean(maps)), 1); 
                 if all(sign(V)==sign(V(1)))
