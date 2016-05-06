@@ -5,7 +5,6 @@ rf.Sync (imported) # mapping of h5,ca imaging, and vis stim clocks
 -> psy.Session
 first_trial                 : int                           # first trial in recording
 last_trial                  : int                           # last trial in recording
-vis_time                    : longblob                      # h5 patch data sample times on visual stimulus (Mac Pro) clock
 frame_times                 : longblob                      # times of frames and slices
 sync_ts=CURRENT_TIMESTAMP   : timestamp                     # automatic
 %}
