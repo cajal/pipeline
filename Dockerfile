@@ -70,6 +70,11 @@ RUN \
 RUN \
   pip install git+https://github.com/cajal/c2s.git
 
+# Install commons
+RUN \
+  git clone https://github.com/atlab/commons.git && \
+  pip install -e commons/python/
+
 
 # Install pipeline
 COPY . /data/pipeline
