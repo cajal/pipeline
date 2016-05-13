@@ -17,7 +17,7 @@ classdef Fit < dj.Relvar & dj.AutoPopulate
     end
     
     methods(Access=protected)
-        
+                
         function makeTuples(self, key)
             [width,height] = fetch1(monet.RF & key, 'degrees_x', 'degrees_y');
             map = fetch1(monet.CleanRF & key, 'clean_map');
