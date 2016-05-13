@@ -5,7 +5,6 @@ rf.Sync (imported) # mapping of h5,ca imaging, and vis stim clocks
 -> psy.Session
 first_trial                 : int                           # first trial in recording
 last_trial                  : int                           # last trial in recording
-vis_time                    : longblob                      # h5 patch data sample times on visual stimulus (Mac Pro) clock
 frame_times                 : longblob                      # times of frames and slices
 sync_ts=CURRENT_TIMESTAMP   : timestamp                     # automatic
 %}
@@ -100,7 +99,7 @@ classdef Sync < dj.Relvar & dj.AutoPopulate
             % store the first and last trial
             tuple.first_trial = trialIds(1);
             tuple.last_trial = trialIds(end);
-            tuple.vis_time = visTime;
+    
             %figure;plot(visFlipTime - visTime(pDiodeFlipInd))
             if quantile(abs(visFlipTime - visTime(pDiodeFlipInd)),0.9) > .01
                 warning('Incorrectly detected flips (%f), skipping...',...
