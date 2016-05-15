@@ -130,7 +130,6 @@ classdef AlignMotion < dj.Relvar & dj.AutoPopulate
                 xy = bsxfun(@minus, xy, mean(xy,2));  % subtract mean
                 d = sqrt(sum(xy.^2));   % distance from average position
                 key.motion_rms = sqrt(mean(d.^2));   % root mean squared distance
-                key.avg_frame=avgFrame;
                 
                 self.insert(key)
             end
