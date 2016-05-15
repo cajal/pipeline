@@ -45,7 +45,6 @@ classdef OriDesign < dj.Relvar & dj.AutoPopulate
             assert(directions(1) == 0 && length(directions) >= 8 && ...
                 all(diff(directions))==diff(directions(1:2)), ...
                 'motion directions must be uninformly distributed around the circle')
-            
             G = zeros(length(times), length(unique(condIdx)), 'single');
             for iTrial = 1:length(trials)
                 trial = trials(iTrial);
