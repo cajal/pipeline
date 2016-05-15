@@ -63,13 +63,8 @@ mapping = {
     '/raw','/mnt/at_scratch','W:','/Volumes/at_scratch'
     '/2P2Drive','/mnt/2P2Drive','Q:','/Volumes/2P2Drive'
     '/manolism','/mnt/manolism','M:','/Volumes/M'
-<<<<<<< HEAD
-    '/dataCache','/media/Data','Q:','not yet'
-    '~','~',home,'~'
-=======
     '/dataCache','/media/Data','xx','xx'
     '~','~',winHome,'~'
->>>>>>> origin/master
     };
 
 % convert path

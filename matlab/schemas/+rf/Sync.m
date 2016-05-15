@@ -99,10 +99,7 @@ classdef Sync < dj.Relvar & dj.AutoPopulate
             % store the first and last trial
             tuple.first_trial = trialIds(1);
             tuple.last_trial = trialIds(end);
-<<<<<<< HEAD
-=======
-    
->>>>>>> refs/remotes/origin/master
+
             %figure;plot(visFlipTime - visTime(pDiodeFlipInd))
             if quantile(abs(visFlipTime - visTime(pDiodeFlipInd)),0.9) > .01
                 warning('Incorrectly detected flips (%f), skipping...',...
