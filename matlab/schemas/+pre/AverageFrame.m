@@ -1,10 +1,9 @@
 %{
 pre.AverageFrame (imported) # my newest table
 -> pre.AlignMotion
--> pre.Slice
 -> pre.Channel
----
-frame                       : longblob                      # motion aligned and computed as q-norm to approximate maximum projection
+-----
+frame  :  longblob    #  motion aligned and computed as q-norm to approximate maximum projection
 %}
 
 classdef AverageFrame < dj.Relvar & dj.AutoPopulate

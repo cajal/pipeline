@@ -53,15 +53,11 @@ classdef Cos2Map < dj.Relvar & dj.AutoPopulate
     methods
         function plot(self)
             for key = self.fetch()'
-%                 try 
-%                     g = fetch1(pre.AverageFrame & key & 'channel=1', 'frame');
-%                 catch
-%                     g = fetch1(pre.AverageFrame & key & 'channel=2', 'frame');
-%                 end
-%                 g = double(g);
-%                 g = g - 0.8*imfilter(g,fspecial('gaussian',201,70));
-%                 g = max(0,g-quantile(g(:),0.005));
-%                 g = min(1,g/quantile(g(:),0.99));
+                g = fetch1(pre.AlignMotion & key, 'avg_frame');
+                g = double(g);
+                g = g - 0.8*imfilter(g,fspecial('gaussian',201,70));
+                g = max(0,g-quantile(g(:),0.005));
+                g = min(1,g/quantile(g(:),0.99));
                 [amp, r2, ori, ~] = fetch1(monet.Cos2Map & key, ...
                     'cos2_amp', 'cos2_r2', 'pref_ori', 'cos2_fp');
                 amp = min(1,amp/quantile(amp(:),0.999)).^(0.7);
