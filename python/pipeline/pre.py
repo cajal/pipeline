@@ -1,191 +1,176 @@
+import sh
+from scipy import ndimage
+from warnings import warn
+from sklearn.metrics import roc_curve
 import datajoint as dj
-from pipeline.exp import schema
-from . import exp
-schema = dj.schema('pipeline_unified_preprocessing', locals())
+from . import rf, trippy
+import numpy as np
+from matplotlib import pyplot as plt
+import seaborn as sns
+from pprint import pprint
+import pandas as pd
+import os
 
-# TODO:
-# * where does ScanInfo go?
-# * where does Channel go? AlignMotion needs that.
-# * include Sync
+try:
+    import c2s
+except:
+    warn("c2s was not found. You won't be able to populate ExtracSpikes")
 
+schema = dj.schema('pipeline_preprocessing', locals())
 
-# TODO: define parameters here
-@schema
-class AODImportParams(dj.Imported):
-    definition = """
-    # cell segmentation method
-    segment_method         : tinyint # id of the method
-    -----
-    method_name            : char(8) # name of the method for switch statements
+def normalize(img):
+    return (img - img.min())/(img.max()-img.min())
 
-    """
-
-    contents = [
-        (1, 'manual'), (2, 'nmf')
-    ]
+def bugfix_reshape(a):
+    return a.ravel(order='C').reshape(a.shape, order='F')
 
 @schema
-class SegmentMethod(dj.Lookup):
-    definition = """
+class SpikeInference(dj.Lookup):
+    definition = ...
 
-    """
+    def infer_spikes(self, X, dt, trace_name='ca_trace'):
+        assert self.fetch1['language'] == 'python', "This tuple cannot be computed in python."
+        fps = 1 / dt
+        spike_rates = []
+        N = len(X)
+        for i, trace in enumerate(X):
+            print('Predicting trace %i/%i' % (i+1,N))
+            trace['calcium'] = trace.pop(trace_name).T
+            trace['fps'] = fps
 
-@schema
-class ExtractRaw(dj.Imported):
-    definition = """
-    # grouping table for extracted traces from AOD and Reso Scans
-    ->exp.Scan
-    ---
-    """
-
-    class ResoScanInfo(dj.Part):
-        definition = """
-        # header information for Reso Scans
-        -> ExtractRaw
-        ---
-        nframes_requested           : int                           # number of valumes (from header)
-        nframes                     : int                           # frames recorded
-        px_width                    : smallint                      # pixels per line
-        px_height                   : smallint                      # lines per frame
-        um_width                    : float                         # width in microns
-        um_height                   : float                         # height in microns
-        bidirectional               : tinyint                       # 1=bidirectional scanning
-        fps                         : float                         # (Hz) frames per second
-        zoom                        : decimal(4,1)                  # zoom factor
-        dwell_time                  : float                         # (us) microseconds per pixel per frame
-        nchannels                   : tinyint                       # number of recorded channels
-        nslices                     : tinyint                       # number of slices
-        slice_pitch                 : float                         # (um) distance between slices
-        fill_fraction               : float                         # raster scan fill fraction (see scanimage)
-        """
-
-    class Segment(dj.Part):
-        definition = """
-        -> AlignMotion
-        -> SegmentMethod
-        ---
-        segment_ts=CURRENT_TIMESTAMP: timestamp                     # automatic
-
-        """
-
-    class Unit(dj.Part):
-        definition = """
-        ->ExtractRaw
-        """
-
-    class RawTrace(dj.Part):
-        definition = """
-        ->ExtractRaw.Unit
-        raw_trace_id        : int
-        """
-
-    class ImportAOD(dj.Part):
-        definition = """
-        ->ExtractRaw
-        ->AODImportParams
-        """
-
-    class Points(dj.Part):
-        definition = """
-        ->ExtractRaw.ImportAOD
-        """
-
-@schema
-class AlignRaster(dj.Computed):
-    definition = """
-    -> ExtractRaw.ScanInfo
-    ---
-    raster_phase                : float                         # shift of odd vs even raster lines
-    """
+            data = c2s.preprocess([trace], fps=fps)
+            data = c2s.predict(data, verbosity=0)
+            data[0]['spike_trace'] = data[0].pop('predictions').T
+            data[0].pop('calcium')
+            data[0].pop('fps')
+            spike_rates.append(data[0])
+        return spike_rates
 
 
 @schema
-class AlignMotion(dj.Computed):
-    definition = """
-    # motion correction
-    -> AlignRaster
-    -> exp.Slice
-    ---
-    -> exp.Channel
-    motion_xy                   : longblob                      # (pixels) y,x motion correction offsets
-    motion_rms                  : float                         # (um) stdev of motion
-    align_times=CURRENT_TIMESTAMP: timestamp                    # automatic
-    avg_frame=null              : longblob                      # averaged aligned frame
-    INDEX(animal_id,session,scan_idx,channel)
-    """
+class Spikes(dj.Computed):
+    definition = ...
 
-@schema
-class ScanROI(dj.Computed):
-    definition = """
-    # mask of a segmented cell
-    -> ExtractRaw.Segment
-    scan_roi_id                 : smallint # id of the mask
-    -----
-    roi_pixels                  : longblob # indices into the image in column major (Fortran) order
-    roi_weights                 : longblob # weights of the mask at the indices above
-    """
+    def _make_tuples(self, key):
+        raise NotImplementedError("""This is an old style part table inherited from matlab.
+        call populate on dj.ExtracSpikes. This will call make_tuples on this class. Do not
+        call make_tuples in pre.Spikes!
+        """)
 
-@schema
-class ComputeTraces(dj.Computed):
-    definition = """
-    ->ExtractRaw
-
-    """
-
-    class Trace(dj.Part):
-        definition = """
-        ->ComputeTraces
-        ->ExtractRaw.Unit
-        """
+    def make_tuples(self, key):
+        dt = 1/(ScanInfo() & key).fetch1['fps']
+        X = (Trace() & key).project('ca_trace').fetch.as_dict()
+        X = (SpikeInference() & key).infer_spikes(X, dt)
+        for x in X:
+            self.insert1(dict(key, **x))
 
 
 @schema
-class Stack(dj.Manual):
-    definition = """
-    # scanimage scan info for structural stacks
-    -> Session
-    stack_idx: smallint  # number of TIFF stack file
-    ---
-    -> Site
-    bottom_z: int  # z location at bottom of the stack
-    surf_z: int  # z location of surface
-    laser_wavelength: int  # (nm)
-    laser_power: int  # (mW) to brain
-    stack_notes: varchar(4095)  # free-notes
-    scan_ts = CURRENT_TIMESTAMP: timestamp  # don't edit
-    """
+class ExtractSpikes(dj.Computed):
+    definition = ...
+
+    @property
+    def populated_from(self):
+        # Segment and SpikeInference will be in the workspace if they are in the database
+        return ExtractTraces() * SpikeInference() & dict(language='python')
+
+    def _make_tuples(self, key):
+        self.insert1(key)
+        Spikes().make_tuples(key)
 
 
 @schema
-class StackInfo(dj.Imported):
-    definition = """
-    # header information
-    -> Stack
-    ---
-    nchannels                   : tinyint                       # number of recorded channels
-    nslices                     : int                           # number of slices (hStackManager_numSlices)
-    frames_per_slice            : int                           # number of frames per slice (hStackManager_framesPerSlice)
-    px_width                    : smallint                      # pixels per line
-    px_height                   : smallint                      # lines per frame
-    zoom                        : decimal(4,1)                  # zoom factor
-    um_width                    : float                         # width in microns
-    um_height                   : float                         # height in microns
-    slice_pitch                 : float                         # (um) distance between slices (hStackManager_stackZStepSize)
+class Segment(dj.Imported):
+    definition = ...
 
-    """
+    def _make_tuples(self, key):
+        raise NotImplementedError('This table is populated from matlab')
+
+    @staticmethod
+    def reshape_masks(mask_pixels, mask_weights, px_height, px_width):
+        ret = np.zeros((px_height, px_width, len(mask_pixels)))
+        for i, (mp, mw)  in enumerate(zip(mask_pixels, mask_weights)):
+            mask = np.zeros(px_height * px_width)
+            mask[mp.squeeze().astype(int) - 1] = mw.squeeze()
+            ret[..., i] = mask.reshape(px_height, px_width, order='F')
+        return ret
 
 
-@schema
-class Sync(dj.Imported):
-    definition = """
-    # mapping of h5,ca imaging, and vis stim clocks
-    -> Scan
-    ---
-    -> psy.Session
-    first_trial                 : int                           # first trial in recording
-    last_trial                  : int                           # last trial in recording
-    vis_time                    : longblob                      # h5 patch data sample times on visual stimulus (Mac Pro) clock
-    frame_times                 : longblob                      # times of frames and slices
-    sync_ts=CURRENT_TIMESTAMP   : timestamp                     # automatic
+    def mask_area_hists(self, outdir='./'):
+        # TODO: plot against firing rate once traces are repopulated
+        with sns.axes_style('ticks'):
+            fig, ax = plt.subplots()
 
-    """
+        for key in (self.project() * SegmentMethod() & dict(method_name='nmf')).fetch.as_dict:
+            area_per_pixel = np.prod((ScanInfo() & key).fetch1['um_width','um_height']) / \
+                                np.prod((ScanInfo() & key).fetch1['px_width','px_height'])
+            areas = np.array([pxs*area_per_pixel for pxs in map(len, (SegmentMask() & key).fetch['mask_pixels'])])
+            ax.hist(areas, bins=20, alpha=.5, lw=0, label="A{animal_id}S{session}:{scan_idx}".format(**key))
+        ax.legend()
+        sns.despine(fig)
+        plt.show()
+
+
+    def plot_NMF_ROIs(self, outdir='./'):
+        sns.set_context('paper')
+        theCM = sns.blend_palette(['lime', 'gold', 'deeppink'], n_colors=10)  # plt.cm.RdBu_r
+
+        for key in (self.project() * SegmentMethod()*SpikeInference() & dict(short_name='stm', method_name='nmf')).fetch.as_dict:
+            mask_px, mask_w, ca, sp = (SegmentMask()*Trace()*Spikes() & key).fetch.order_by('mask_id')['mask_pixels', 'mask_weights', 'ca_trace', 'spike_trace']
+
+            template = np.stack([normalize(bugfix_reshape(t)[..., key['slice']-1].squeeze())
+                                 for t in (ScanCheck() & key).fetch['template']], axis=2).mean(axis=2) # TODO: remove bugfix_reshape once djbug #191 is fixed
+
+            d1, d2 = tuple(map(int, (ScanInfo() & key).fetch1['px_height', 'px_width']))
+            masks = Segment.reshape_masks(mask_px, mask_w, d1, d2)
+            gs = plt.GridSpec(6,1)
+            try:
+                sh.mkdir('-p', os.path.expanduser(outdir) + '/scan_idx{scan_idx}/slice{slice}'.format(**key))
+            except:
+                pass
+            for cell, (ca_trace, sp_trace) in enumerate(zip(ca, sp)):
+                with sns.axes_style('white'):
+                    fig = plt.figure(figsize=(6,8))
+                    ax_image = fig.add_subplot(gs[2:,:])
+
+                with sns.axes_style('ticks'):
+                    ax_ca = fig.add_subplot(gs[0,:])
+                    ax_sp = fig.add_subplot(gs[1,:], sharex=ax_ca)
+                ax_ca.plot(ca_trace,'green', lw=1)
+                ax_sp.plot(sp_trace,'k',lw=1)
+
+                ax_image.imshow(template, cmap=plt.cm.gray)
+                ax_image.contour(masks[..., cell], colors=theCM, zorder=10    )
+                sns.despine(ax=ax_ca)
+                sns.despine(ax=ax_sp)
+                ax_ca.axis('tight')
+                ax_sp.axis('tight')
+                fig.suptitle("animal_id {animal_id}:session {session}:scan_idx {scan_idx}:{method_name}:slice{slice}:cell{cell}".format(cell=cell+1, **key))
+                fig.tight_layout()
+
+                plt.savefig(outdir + "/scan_idx{scan_idx}/slice{slice}/cell{cell:03d}_animal_id_{animal_id}_session_{session}.png".format(cell=cell+1, **key))
+                plt.close(fig)
+
+
+    # def plot_ROC_curves(self):
+    #     """
+    #     Takes all masks from an NMF segmentation, L1 normalizes them, computes a MAX image from it and uses that to
+    #     plot and ROC curve using the manual segmentations as ground truth.
+    #     """
+    #
+    #     sns.set_context('notebook')
+    #
+    #     with sns.axes_style('whitegrid'):
+    #         fig, ax = plt.subplots(figsize=(8, 8))
+    #     for key in (self.project() * SegmentMethod() - dict(
+    #             method_name='manual') & ManualSegment().project()).fetch.as_dict:
+    #         ground_truth = bugfix_reshape((ManualSegment() & key).fetch1['mask'])   # TODO: remove bugfix_reshape once djbug #191 is fixed
+    #         masks, _ = self.load_masks_with_traces(key)
+    #         masks /= masks.sum(axis=0).sum(axis=0)[None, None, :]
+    #         masks = masks.max(axis=2)
+    #         fpr, tpr, _ = roc_curve(ground_truth.ravel(), masks.ravel())
+    #         ax.plot(fpr, tpr,
+    #                 label="animal_id {animal_id}:session {session}:scan_idx {scan_idx}:{method_name}:slice{slice}".format(**key))
+    #         ax.set_xlabel('false positives rate')
+    #         ax.set_ylabel('true positives rate')
+    #         ax.legend(loc='lower right')
