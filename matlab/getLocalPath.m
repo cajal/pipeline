@@ -63,7 +63,7 @@ mapping = {
     '/raw','/mnt/at_scratch','W:','/Volumes/at_scratch'
     '/2P2Drive','/mnt/2P2Drive','Q:','/Volumes/2P2Drive'
     '/manolism','/mnt/manolism','M:','/Volumes/M'
-    '/dataCache','/media/Data','xx','xx'
+    '/dataCache','/media/Data','S:','xx'
     '~','~',winHome,'~'
     };
 

@@ -17,7 +17,7 @@ classdef ManualSegment < dj.Relvar & dj.AutoPopulate
     methods(Access=protected)
         
         function makeTuples(self, key)
-            images = fetchn(pre.AverageFrame & key, 'frame', 'ORDER BY channel');
+            images = fetchn(pre.AverageFrame & key & 'channel=1', 'frame', 'ORDER BY channel');
             assert(ismember(numel(images), [1 2]))
             bw = pre.ManualSegment.outlineCells(images);
             assert(~isempty(bw), 'user aborted segmentation')
