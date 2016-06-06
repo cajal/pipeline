@@ -50,7 +50,7 @@ switch lower(os)
         error('unknown OS');
 end
 
-% mapping table
+% mapping table [INPUT LINUX WINDOWS MAC]
 mapping = {
     '/stimulation','/mnt/stor01/stimulation','Y:/stimulation','/Volumes/stor01/stimulation'
     '/processed','/mnt/stor01/processed','Y:/processed','/Volumes/stor01/processed'
@@ -64,7 +64,7 @@ mapping = {
     '/2P2Drive','/mnt/2P2Drive','Q:','/Volumes/2P2Drive'
     '/manolism','/mnt/manolism','M:','/Volumes/M'
     '/dataCache','/media/Data','S:','xx'
-    '~','~',winHome,'~'
+    '$HOME','~',winHome,'~'
     };
 
 % convert path
