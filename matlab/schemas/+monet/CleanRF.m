@@ -40,6 +40,12 @@ classdef CleanRF < dj.Relvar & dj.AutoPopulate
             nslices = fetch1(pre.ScanInfo & key, 'nslices');
             caTimes = caTimes(key.slice:nslices:end);
             X = [X{:}];
+            lenDif = length(caTimes)-size(X,1);
+            assert(lenDif==1 | lenDif==0,'Unequal traces & times!')
+            if lenDif==1 % don't know why this happens - needs fixing!
+                warning('Unequal vectors, equilizing caTimes...')
+                caTimes = caTimes(1:end-1);
+            end
             X = @(t) interp1(caTimes-caTimes(1), X, t, 'linear', nan);  % traces indexed by time
             trials = pro(rf.Sync*psy.Trial & key & 'trial_idx between first_trial and last_trial', 'cond_idx', 'flip_times');
             trials = fetch(trials*psy.MovingNoise*psy.MovingNoiseLookup, 'flip_times', 'ORDER BY trial_idx');
