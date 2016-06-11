@@ -58,7 +58,7 @@ classdef RF < dj.Relvar & dj.AutoPopulate
             [X, traceKeys] = fetchn(pre.Spikes & key, 'spike_trace');
             X = [X{:}];
             lenDif = length(caTimes)-size(X,1);
-            assert(lenDif>1 | lenDif<0,'Unequal traces & times!')
+            assert(lenDif==1 | lenDif==0,'Unequal traces & times!')
             if lenDif==1 % don't know why this happens - needs fixing!
                 warning('Unequal vectors, equilizing caTimes...')
                 caTimes = caTimes(1:end-1);
