@@ -16,7 +16,7 @@ classdef DriftTrialSet < dj.Relvar & dj.AutoPopulate
         function makeTuples(self, key)
             self.insert(key)
             iTrial = 0;
-            for key = fetch(psy.Trial * rf.Sync & key)'
+            for key = fetch(psy.Trial * rf.Sync & psy.MovingNoise & key)'
                 iTrial = makeTuples(monet.DriftTrial, key, iTrial);
             end
         end
