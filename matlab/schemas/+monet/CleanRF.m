@@ -41,10 +41,11 @@ classdef CleanRF < dj.Relvar & dj.AutoPopulate
             caTimes = caTimes(key.slice:nslices:end);
             X = [X{:}];
             lenDif = length(caTimes)-size(X,1);
-            assert(lenDif==1 | lenDif==0,'Unequal traces & times!')
-            if lenDif==1 % don't know why this happens - needs fixing!
+            if lenDif<nslices && lenDif>0 % aborted scans can give rise to unequal ca traces!
                 warning('Unequal vectors, equilizing caTimes...')
-                caTimes = caTimes(1:end-1);
+                caTimes = caTimes(1:end-lenDif);
+            else
+                error('CaTrace & time vectors have significantly different sizes!');
             end
             X = @(t) interp1(caTimes-caTimes(1), X, t, 'linear', nan);  % traces indexed by time
             trials = pro(rf.Sync*psy.Trial & key & 'trial_idx between first_trial and last_trial', 'cond_idx', 'flip_times');
