@@ -22,10 +22,10 @@ classdef RF < dj.Relvar & dj.AutoPopulate
             path = '/Volumes/scratch01/RF-party';
             for key = self.fetch'
                 disp(key)
-                fullpath = fullfile(path, ...
+                fullpath = getLocalPath(fullfile(path, ...
                     sprintf('%05d-%s-%s',key.animal_id, ...
                     fetch1(pre.SegmentMethod & key, 'method_name'),...
-                    fetch1(pre.SpikeInference & key, 'short_name')));
+                    fetch1(pre.SpikeInference & key, 'short_name'))));
                 if ~exist(fullpath, 'dir')
                     mkdir(fullpath);
                 end
@@ -57,6 +57,13 @@ classdef RF < dj.Relvar & dj.AutoPopulate
             caTimes = caTimes(key.slice:nslices:end);
             [X, traceKeys] = fetchn(pre.Spikes & key, 'spike_trace');
             X = [X{:}];
+            lenDif = length(caTimes)-size(X,1);
+            if lenDif<nslices && lenDif>0 % aborted scans can give rise to unequal ca traces!
+                warning('Unequal vectors, equilizing caTimes...')
+                caTimes = caTimes(1:end-lenDif);
+            else
+                error('Ca traces & stimulus vector significantly different!');
+            end
             X = @(t) interp1(caTimes-caTimes(1), X, t, 'linear', nan);  % traces indexed by time
             ntraces = length(traceKeys);
             
