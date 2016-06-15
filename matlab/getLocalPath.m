@@ -35,7 +35,7 @@ p = strrep(p,'/stor02/hammer','/at_scratch/hammer');
 p = strrep(p,'hammer/ben','hammer/Ben');
 
 % local os' column
-home = 'no place like home';
+winHome = 'Windows Home';
 switch lower(os)
     case 'glo'
         local = 1;
@@ -43,14 +43,14 @@ switch lower(os)
         local = 2;
     case {'win','pcw'}
         local = 3;
-        home = [getenv('HOMEDRIVE') getenv('HOMEPATH')];
+        winHome = [getenv('HOMEDRIVE') getenv('HOMEPATH')];
     case 'mac'
         local = 4;
     otherwise
         error('unknown OS');
 end
 
-% mapping table
+% mapping table [INPUT LINUX WINDOWS MAC]
 mapping = {
     '/stimulation','/mnt/stor01/stimulation','Y:/stimulation','/Volumes/stor01/stimulation'
     '/processed','/mnt/stor01/processed','Y:/processed','/Volumes/stor01/processed'
@@ -63,8 +63,8 @@ mapping = {
     '/raw','/mnt/at_scratch','W:','/Volumes/at_scratch'
     '/2P2Drive','/mnt/2P2Drive','Q:','/Volumes/2P2Drive'
     '/manolism','/mnt/manolism','M:','/Volumes/M'
-    '/dataCache','/media/Data','not yet','not yet'
-    '~','~',home,'~'
+    '/dataCache','/media/Data','S:','xx'
+    '$HOME','~',winHome,'~'
     };
 
 % convert path

@@ -7,7 +7,6 @@ pre.AlignMotion (imported) # motion correction
 motion_xy                   : longblob                      # (pixels) y,x motion correction offsets
 motion_rms                  : float                         # (um) stdev of motion
 align_times=CURRENT_TIMESTAMP: timestamp                    # automatic
-avg_frame=null              : longblob                      # averaged aligned frame
 INDEX(animal_id,session,scan_idx,channel)
 %}
 
@@ -131,7 +130,6 @@ classdef AlignMotion < dj.Relvar & dj.AutoPopulate
                 xy = bsxfun(@minus, xy, mean(xy,2));  % subtract mean
                 d = sqrt(sum(xy.^2));   % distance from average position
                 key.motion_rms = sqrt(mean(d.^2));   % root mean squared distance
-                key.avg_frame=avgFrame;
                 
                 self.insert(key)
             end

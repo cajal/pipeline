@@ -11,13 +11,13 @@ segment_ts=CURRENT_TIMESTAMP: timestamp                     # automatic
 classdef ManualSegment < dj.Relvar & dj.AutoPopulate
     
     properties
-        popRel  = pre.AlignMotion & pre.AverageFrame
+        popRel  = pre.AlignMotion & pro(pre.AverageFrame)
     end
     
     methods(Access=protected)
         
         function makeTuples(self, key)
-            images = fetchn(pre.AverageFrame & key, 'frame', 'ORDER BY channel');
+            images = fetchn(pre.AverageFrame & key & 'channel=1', 'frame', 'ORDER BY channel');
             assert(ismember(numel(images), [1 2]))
             bw = pre.ManualSegment.outlineCells(images);
             assert(~isempty(bw), 'user aborted segmentation')
