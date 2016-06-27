@@ -102,8 +102,7 @@ class Parameters(dj.Lookup):
 
     @property
     def contents(self):
-        # for i, (q, l, p) in enumerate(itertools.product([4, 8, 12], [4, 8, 12], ['LH', 'L'])):
-        for i, (q, l, p) in enumerate(itertools.product([4], [4, 8], ['LH'])):
+        for i, (q, l, p) in enumerate(itertools.product([4, 8, 12], [4, 8, 12], ['LH', 'L'])):
             yield i, q, l, p
 
 
@@ -119,7 +118,7 @@ class Chunksize(dj.Lookup):
 
     @property
     def contents(self):
-        yield [1, 2]
+        yield [1, 3]
 
 
 @schema_cf
