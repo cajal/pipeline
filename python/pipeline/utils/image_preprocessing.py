@@ -32,10 +32,10 @@ def local_standardize(X, kernelsize=(17, 17)):
 
 
 class App:
-    def __init__(self, Ave_frame, Mon_frame, count, old_data_list, fig = None, ax = None):
+    def __init__(self, ave_frame, mon_frame, old_data_list, fig = None, ax = None):
         # The constructor.
-        self.Ave_frame = Ave_frame
-        self.Mon_frame = Mon_frame
+        self.Ave_frame = ave_frame
+        self.Mon_frame = mon_frame
         if fig is None:
             self.fig, self.ax = plt.subplots()
         else:
@@ -45,8 +45,9 @@ class App:
         self.redraw()
         self.fig.canvas.mpl_connect('button_press_event',self.on_press)
         self.fig.canvas.mpl_connect('key_press_event', self.on_key)
-        self.count = count
         self.data_list = old_data_list
+        plt.ion()
+        plt.show()
 
     def on_press(self, event):
         x, y = event.xdata, event.ydata
@@ -54,23 +55,19 @@ class App:
         if event.button == 1:
             if x >= 0 and x <= 250 and y >= 0 and y <= 250:
                 self.ax.scatter(x, y, c='r')
-                self.data_list.append([x, y, self.count])
+                self.data_list.append((x, y))
                 plt.pause(0.001)
-                self.count += 1
             else:
                 print('point out of bound')
         if event.button == 3:
             self.data_list = filter(lambda i: (i[0] < x - 2 or i[0] > x + 2) or (i[1] < y - 2 or i[1] > y + 2), self.data_list)
-            temp = list(map(lambda x:[x[0], x[1]], self.data_list))
+            temp = list(self.data_list)
             x_array, y_array = zip(*temp)
             self.ax.clear()
             self.redraw()
             self.ax.scatter(list(x_array), list(y_array), c = 'r')
             plt.draw()
 
-            for i in temp:
-                i.append(temp.index(i) + 1)
-            self.count = len(temp) + 1
             self.data_list = temp
         plt.ioff()
 

@@ -151,7 +151,7 @@ class Segment(dj.Imported):
                 plt.savefig(outdir + "/scan_idx{scan_idx}/slice{slice}/cell{cell:03d}_animal_id_{animal_id}_session_{session}.png".format(cell=cell+1, **key))
                 plt.close(fig)
 
-
+schema.spawn_missing_classes()
     # def plot_ROC_curves(self):
     #     """
     #     Takes all masks from an NMF segmentation, L1 normalizes them, computes a MAX image from it and uses that to

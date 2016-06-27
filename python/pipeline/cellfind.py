@@ -11,10 +11,10 @@ from pipeline.utils.image_preprocessing import local_standardize, histeq
 from sklearn.cross_validation import KFold
 from .utils import image_preprocessing, bernoulli_process
 
-schema = dj.schema('wenbo_celldetection', locals())
-schema_cf = dj.schema('wenbo_cellfinder', locals())
+schema_cf = dj.schema('wenbo_cellfinder_test', locals())
 
-@schema
+
+@schema_cf
 class CellLocations(dj.Imported):
     definition = """
     -> pre.AverageFrame
@@ -34,34 +34,32 @@ class CellLocations(dj.Imported):
         self.update_cell_locations(key)
 
     @property
-    def populated_from(self):
-        return pre.AverageFrame() & dict(channel = 1)
+    def key_source(self):
+        return pre.AverageFrame() & dict(channel=1)
 
     # you should first click pts, the n enter yes to delete data
     def update_cell_locations(self, key):
         # Fetch frame
-        assert pre.AverageFrame() & key, "key {0} is not in the table".format(str(key))
+        assert pre.AverageFrame() & key, "key {0} is not in the AverageFrame table".format(str(key))
+        assert monet.Cos2Map() & key & 'ca_kinetics = 1', "key {0} is not in the Cos2Map table".format(str(key))
         ave_frame = (pre.AverageFrame() & key).fetch1['frame']
         mon_frame = (monet.Cos2Map() & key & 'ca_kinetics = 1').fetch1['cos2_amp']
 
         # Fetch existing points
-        count = 1
         old_points = []
         fig, ax = None, None
         if self & key:
-            x, y, count_array, fig, ax= self.mark_all(key)
-            count = len(x) + 1
-            old_points = np.c_[x,y, count_array].tolist()
+            x, y, fig, ax = self.mark_all(key)
+            old_points = list(zip(x, y))
 
         # Get new points
-        new_point = image_preprocessing.mark.App(ave_frame, mon_frame, count, old_points, fig, ax)
+        new_point = image_preprocessing.App(ave_frame, mon_frame, old_points, fig, ax)
 
         # Update cell locations information
         (self & key).delete()
-        plt.show()
-        plt.ioff()
         if not self & key:
             self.insert1(key)
+        new_point.data_list = [n + (i,) for i, n in enumerate(new_point.data_list, start=1)]
         for entry in new_point.data_list:
             key['cell_id'], key['x'], key['y'] = entry[2], entry[0], entry[1]
             CellLocations.Location().insert1(key)
@@ -76,7 +74,7 @@ class CellLocations(dj.Imported):
 
         # Fetch the unmarked frame and cell locations in that frame
         frame = (pre.AverageFrame() & key).fetch1['frame']
-        x_array, y_array, count_array =  (self.Location() & key).fetch['x','y', 'cell_id']
+        x_array, y_array = (self.Location() & key).fetch['x', 'y']
 
         # Plot
         plot_params = dict(cmap=plt.cm.get_cmap('bwr'))
@@ -86,11 +84,8 @@ class CellLocations(dj.Imported):
         ax.scatter(x_array, y_array, c='red')
         ax.set_ylim((0, frame.shape[0]))
         ax.set_xlim((0, frame.shape[1]))
-        plt.ion()
-        plt.show()
 
-        return x_array, y_array, count_array, fig, ax
-
+        return x_array, y_array, fig, ax
 
 
 @schema_cf
@@ -107,10 +102,40 @@ class Parameters(dj.Lookup):
 
     @property
     def contents(self):
-        for i, (q, l, p) in enumerate(itertools.product([4, 8, 12], [4, 8, 12], ['LH', 'L'])):
-        # for i, (q, l, p) in enumerate(itertools.product([12], [12], ['LH', 'L'])):
-
+        # for i, (q, l, p) in enumerate(itertools.product([4, 8, 12], [4, 8, 12], ['LH', 'L'])):
+        for i, (q, l, p) in enumerate(itertools.product([4], [4, 8], ['LH'])):
             yield i, q, l, p
+
+
+@schema_cf
+class Chunksize(dj.Lookup):
+    definition = """
+    # chunksize for model selections
+
+    chunk_id       : tinyint # chunksize id
+    ---
+    chunk_size     : tinyint # chunksize
+    """
+
+    @property
+    def contents(self):
+        yield [1, 2]
+
+
+@schema_cf
+class Filtersize(dj.Lookup):
+    definition = """
+    # filtersize for model selections
+
+    filtersize_id       : tinyint # filtersize id
+    ---
+    filter_size     : tinyint # filtersize
+    """
+
+    @property
+    def contents(self):
+        yield [1, 9]
+
 
 @schema_cf
 class TestSplit(dj.Computed):
@@ -122,27 +147,23 @@ class TestSplit(dj.Computed):
     """
 
     @property
-    def populated_from(self):
-        return (rf.Session() & CellLocations()).project()
+    def key_source(self):
+        return (rf.Session() & CellLocations()).proj()
 
     def _make_tuples(self, key):
-        all_cell = np.array((CellLocations() & key).project().fetch.as_dict())
-        chunksize = 3
-        count = 1       # Accumulator for  split_id
+        all_cell = np.array((CellLocations() & key).proj().fetch.as_dict()[:6])
+        chunksize = Chunksize().fetch1()['chunk_size']
 
-        kf = KFold(len(all_cell), n_folds=len(all_cell) // chunksize)
-        for train, test in kf:
+        numfold = len(all_cell) // chunksize
+        assert numfold != 1, "number of folds can not equal to 1"
+
+        for count, (train, test) in enumerate(KFold(len(all_cell), n_folds=numfold), start=1):
             key['split_id'] = count
             self.insert1(key)
             for test_set in all_cell[test]:
-                self.TestFrame().insert1(self.add_split_id(test_set, count))
+                self.TestFrame().insert1(dict(test_set, split_id=count))
             for train_set in all_cell[train]:
-                self.TrainingFrame().insert1(self.add_split_id(train_set, count))
-            count += 1
-
-    def add_split_id(self, set, id):
-        set['split_id'] = id
-        return set
+                self.TrainingFrame().insert1(dict(train_set, split_id=count))
 
     class TestFrame(dj.Part):
         definition = """
@@ -160,7 +181,7 @@ class TestSplit(dj.Computed):
 
 
 @schema_cf
-class ModelSelection(dj.Computed):
+class ModelSelection2(dj.Computed):
     definition = """
     -> TestSplit
     ---
@@ -172,7 +193,7 @@ class ModelSelection(dj.Computed):
         definition = """
         # parameters of best model
 
-        ->ModelSelection
+        ->ModelSelection2
         ---
         u_xy        : longblob  # quadratic filters
         w_xy        : longblob  # linear filters
@@ -183,45 +204,49 @@ class ModelSelection(dj.Computed):
 
     class ParametersScore(dj.Part):
         definition = """
-        #score for each parameter for every split
+        # Keep record of all scores for each parameter combination for every split
 
-        -> ModelSelection
+        -> ModelSelection2
         -> Parameters
         ---
         score       : float # score for each parameter
         """
 
     def _make_tuples(self, key):
-        print("up to date now new new before leave")
         best_score_dict = dict()
-        chunksize, filter_size = 3, 9
-        score_key = copy.deepcopy(key)
-        self.fetch_frame(key)
+        chunksize = Chunksize().fetch1()['chunk_size']
+        filter_size = Filtersize().fetch1()['filter_size']
+        score_key = dict(key)
+        f_test_frame, f_train_frame, f_test_loc, f_train_loc = self.fetch_frame(key)
         conn = dj.conn()
 
         # For a specific split combination, we iterate through every parameter combination on it.
         for param in Parameters().fetch.as_dict:
             param_score = []
-            kf = KFold(len(self.train_frame), n_folds=len(self.train_frame) // chunksize)
+
+            numfold = len(f_train_frame) // chunksize
+            assert numfold != 1, "number of folds can not equal to 1"
 
             # Get the score for each parameter.
-            for train, val in kf:
-                validation_stack, validation_loc = self.train_frame[val], self.train_loc[val]
-                train_stack, train_loc = self.train_frame[train], self.train_loc[train]
-                val_result, _ = self.train_fuc(validation_stack, train_stack, validation_loc, train_loc, param, filter_size)
+            for train, val in KFold(len(f_train_frame), n_folds=numfold):
+                validation_stack, validation_loc = f_train_frame[val], f_train_loc[val]
+                train_stack, train_loc = f_train_frame[train], f_train_loc[train]
+                val_result, _ = self.train_function(validation_stack, train_stack, validation_loc, train_loc, param,
+                                                    filter_size)
                 param_score.append(val_result)
-                print('connected : {}'.format(conn.is_connected))
-            param_result = reduce(lambda x, y: x + y, param_score) / float(len(param_score))
+                conn.is_connected
+            param_result = np.mean(param_score)
             best_score_dict[param['param_id']] = param_result
             print("key : {}, param_id : {}, score : {}".format(key, param['param_id'], param_result))
 
         # Find out the parameter that gives best score.
-        best_param_id = max(best_score_dict, key = (lambda key : best_score_dict[key]))
+        best_param_id = max(best_score_dict, key=lambda key: best_score_dict[key])
         print("best param id : {}".format(best_param_id))
-        best_comb = (Parameters() & dict(param_id = best_param_id)).fetch.as_dict()[0]
+        best_comb = (Parameters() & dict(param_id=best_param_id)).fetch1()
         # Use the best parameter to test the test_set
-        f_r, tdbinstance = self.train_fuc(self.test_frame, self.train_frame, self.test_loc, self.train_loc, best_comb, filter_size)
-        key['param_id'], key['test_score']= best_param_id, f_r
+        f_r, tdbinstance = self.train_function(f_test_frame, f_train_frame, f_test_loc, f_train_loc, best_comb,
+                                               filter_size)
+        key['param_id'], key['test_score'] = best_param_id, f_r
         self.insert1(key)
 
         # Record the score of each parameter for a specific split id.
@@ -230,12 +255,9 @@ class ModelSelection(dj.Computed):
             self.ParametersScore().insert1(score_key)
 
         # Record the value of the best parameter.
-        subkey = dict()
-        subkey['animal_id'], subkey['session'], subkey['split_id'], subkey['u_xy'], subkey['w_xy'], subkey['beta'], \
-        subkey['gamma'], subkey['b'] = key['animal_id'], key['session'], key['split_id'], tdbinstance.parameters[
-            'u_xy'], tdbinstance.parameters['w_xy'], tdbinstance.parameters['beta'], tdbinstance.parameters['gamma'], \
-                                       tdbinstance.parameters['b']
-        self.ModelParameters().insert1(subkey)
+        del key['param_id'], key['test_score']
+        key.update(tdbinstance.parameters)
+        self.ModelParameters().insert1(key)
 
     def fetch_frame(self, key):
         '''
@@ -245,19 +267,15 @@ class ModelSelection(dj.Computed):
         '''
 
         # Build frame lists
-        self.test_frame = ((TestSplit().TestFrame() & key) * pre.AverageFrame()).fetch['frame']
-        self.train_frame = ((TestSplit().TrainingFrame() & key) * pre.AverageFrame()).fetch['frame']
+        test_frame = ((TestSplit().TestFrame() * pre.AverageFrame()) & key).fetch['frame']
+        train_frame = ((TestSplit().TrainingFrame() * pre.AverageFrame()) & key).fetch['frame']
 
         # Build cell_locations list.
-        self.test_loc, self.train_loc = [], []
-        for testkey in (TestSplit().TestFrame() & key).fetch.as_dict():
-            gene_cell_loc(testkey, self.test_loc)
-        self.test_loc = np.array(self.test_loc)
-        for trainkey in (TestSplit().TrainingFrame() & key).fetch.as_dict():
-            gene_cell_loc(trainkey, self.train_loc)
-        self.train_loc = np.array(self.train_loc)
+        test_loc = generate_cell_loc((TestSplit().TestFrame() & key).fetch.as_dict())
+        train_loc = generate_cell_loc((TestSplit().TrainingFrame() & key).fetch.as_dict())
+        return test_frame, train_frame, test_loc, train_loc
 
-    def train_fuc(self, v_stack, t_stack, v_loc, t_loc, param, filter_size):
+    def train_function(self, v_stack, t_stack, v_loc, t_loc, param, filter_size):
         '''
          Given training and testing sets, train the data and test on the test set.
          Return the average score of the test set and the tdb instance.
@@ -271,38 +289,38 @@ class ModelSelection(dj.Computed):
 
         # Build the input train and test stacks from train and test sets.
         for validation_idx in range(len(v_stack)):
-            v_stack[validation_idx] = gene_stack((filter_size, filter_size), v_stack[validation_idx], param['preprocessing'])
+            v_stack[validation_idx] = generate_stack((filter_size, filter_size), v_stack[validation_idx],
+                                                     param['preprocessing'])
         for train_idx in range(len(t_stack)):
-            t_stack[train_idx] = gene_stack((filter_size, filter_size), t_stack[train_idx], param['preprocessing'])
+            t_stack[train_idx] = generate_stack((filter_size, filter_size), t_stack[train_idx], param['preprocessing'])
 
         # Initialize the tdb instance and train on the training set.
-        c = bernoulli_process.RDBP((filter_size, filter_size), linear_channels=param['linear'], exponentials=min(param['linear'], param['quadratic']), quadratic_channels=param['quadratic'])
+        c = bernoulli_process.RDBP((filter_size, filter_size), linear_channels=param['linear'],
+                                   exponentials=min(param['linear'], param['quadratic']),
+                                   quadratic_channels=param['quadratic'])
         c.fit(list(t_stack), list(t_loc))
 
         # Test on the testing sets and return the average score
         result_list = []
         for entry in zip(v_stack, v_loc):
             result_list.append(c.auc(entry[0], entry[1]))
-        mean = reduce(lambda x, y: x + y, result_list) / float(len(result_list))
+        mean = np.mean(result_list)
         return mean, c
-
 
     def to_num(self, key):
         return tuple(key.values())
 
 
-def gene_cell_loc(key, cell_list):
-    '''
-    :param key: a valid key for CellLocations().Location()
-    :param cell_list: a list holding all the cell locations for a stack
-    '''
-
-    locs = (CellLocations().Location() & key).fetch['x', 'y']
-    cell_location = np.array(list(zip(locs[0], locs[1]))).astype(int)
-    cell_list.append(cell_location)
+def generate_cell_loc(iterdict):
+    loc_list = []
+    for key in iterdict:
+        locs = (CellLocations().Location() & key).fetch['x', 'y']
+        cell_location = np.array(list(zip(locs[0], locs[1]))).astype(int)
+        loc_list.append(cell_location)
+    return np.array(loc_list)
 
 
-def gene_stack(filtersize, frame, preoption):
+def generate_stack(filtersize, frame, preoption):
     '''
 
     :param filtersize:
@@ -315,7 +333,7 @@ def gene_stack(filtersize, frame, preoption):
     if preoption == 'L':
         frame = local_standardize(frame)
 
-    newframe_shape = tuple(i + j -1 for i,j in zip(frame.shape, filtersize))
+    newframe_shape = tuple(i + j - 1 for i, j in zip(frame.shape, filtersize))
     newframe = np.ones(newframe_shape)
 
     i, j = [(i - j + 1) // 2 for i, j in zip(newframe.shape, frame.shape)]
