@@ -1,16 +1,10 @@
 import datajoint as dj
+from . import mice
 
 from distutils.version import StrictVersion
 assert StrictVersion(dj.__version__) >= StrictVersion('0.2.5')
 
-schema = dj.schema('unipipe_experiment', locals())
-
-
-@schema
-class Animal(dj.Manual):
-    definition = """
-    animal_id : int
-    """
+schema = dj.schema('pipeline_experiment', locals())
 
 
 @schema
@@ -89,7 +83,7 @@ class Session(dj.Manual):
     definition = """
     # session
 
-    -> Animal
+    -> mice.Mice
     session                       : smallint                      # session index
     ---
     -> Anesthesia
@@ -186,3 +180,6 @@ class PMTChannel(dj.Manual):
     -> PMTFilter
     notes           : varchar(255) # additional information
     """
+
+
+schema.spawn_missing_classes()

@@ -1,3 +1,7 @@
+"""
+This is a legacy schema that is no longer used in the unified pipeline.
+"""
+
 import warnings
 import datajoint as dj
 from pipeline.utils import ROIGrabber
@@ -68,3 +72,6 @@ class Eye(dj.Imported):
 
     def _make_tuples(self, key):
         pass
+
+
+schema.spawn_missing_classes()
