@@ -1,17 +1,15 @@
-import copy
 import datajoint as dj
 import itertools
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 
-from functools import reduce
 from pipeline import rf, pre, monet
 from pipeline.utils.image_preprocessing import local_standardize, histeq
 from sklearn.cross_validation import KFold
 from .utils import image_preprocessing, bernoulli_process
 
-schema_cf = dj.schema('wenbo_cellfinder_test', locals())
+schema_cf = dj.schema('wenbo_cellfinder', locals())
 
 
 @schema_cf
@@ -59,9 +57,8 @@ class CellLocations(dj.Imported):
         (self & key).delete()
         if not self & key:
             self.insert1(key)
-        new_point.data_list = [n + (i,) for i, n in enumerate(new_point.data_list, start=1)]
-        for entry in new_point.data_list:
-            key['cell_id'], key['x'], key['y'] = entry[2], entry[0], entry[1]
+
+        for key['cell_id'], (key['x'], key['y']) in enumerate(new_point.data_list, start=1):
             CellLocations.Location().insert1(key)
 
     def mark_all(self, key):
@@ -107,33 +104,29 @@ class Parameters(dj.Lookup):
 
 
 @schema_cf
-class Chunksize(dj.Lookup):
+class ChunkSize(dj.Lookup):
     definition = """
-    # chunksize for model selections
-
-    chunk_id       : tinyint # chunksize id
+    # chunk size for model selections
+    chunk_size     : tinyint # chunk size
     ---
-    chunk_size     : tinyint # chunksize
     """
 
     @property
     def contents(self):
-        yield [1, 3]
+        yield [3]
 
 
 @schema_cf
-class Filtersize(dj.Lookup):
+class FilterSize(dj.Lookup):
     definition = """
-    # filtersize for model selections
-
-    filtersize_id       : tinyint # filtersize id
+    # filter size for model selections
+    filter_size     : tinyint # filter size
     ---
-    filter_size     : tinyint # filtersize
     """
 
     @property
     def contents(self):
-        yield [1, 9]
+        yield [9]
 
 
 @schema_cf
@@ -150,9 +143,8 @@ class TestSplit(dj.Computed):
         return (rf.Session() & CellLocations()).proj()
 
     def _make_tuples(self, key):
-        all_cell = np.array((CellLocations() & key).proj().fetch.as_dict()[:6])
-        chunksize = Chunksize().fetch1()['chunk_size']
-
+        all_cell = np.array((CellLocations() & key).proj().fetch.as_dict())
+        chunksize = ChunkSize().fetch1()['chunk_size']
         numfold = len(all_cell) // chunksize
         assert numfold != 1, "number of folds can not equal to 1"
 
@@ -180,11 +172,13 @@ class TestSplit(dj.Computed):
 
 
 @schema_cf
-class ModelSelection2(dj.Computed):
+class ModelSelection(dj.Computed):
     definition = """
     -> TestSplit
     ---
     -> Parameters
+    -> ChunkSize
+    -> FilterSize
     test_score  : float # average test score over test splits
     """
 
@@ -192,7 +186,7 @@ class ModelSelection2(dj.Computed):
         definition = """
         # parameters of best model
 
-        ->ModelSelection2
+        ->ModelSelection
         ---
         u_xy        : longblob  # quadratic filters
         w_xy        : longblob  # linear filters
@@ -205,7 +199,7 @@ class ModelSelection2(dj.Computed):
         definition = """
         # Keep record of all scores for each parameter combination for every split
 
-        -> ModelSelection2
+        -> ModelSelection
         -> Parameters
         ---
         score       : float # score for each parameter
@@ -213,8 +207,8 @@ class ModelSelection2(dj.Computed):
 
     def _make_tuples(self, key):
         best_score_dict = dict()
-        chunksize = Chunksize().fetch1()['chunk_size']
-        filter_size = Filtersize().fetch1()['filter_size']
+        chunk_size = (ChunkSize() & key).fetch1['chunk_size']
+        filter_size = (FilterSize() & key).fetch1['filter_size']
         score_key = dict(key)
         f_test_frame, f_train_frame, f_test_loc, f_train_loc = self.fetch_frame(key)
         conn = dj.conn()
@@ -222,8 +216,7 @@ class ModelSelection2(dj.Computed):
         # For a specific split combination, we iterate through every parameter combination on it.
         for param in Parameters().fetch.as_dict:
             param_score = []
-
-            numfold = len(f_train_frame) // chunksize
+            numfold = len(f_train_frame) // chunk_size
             assert numfold != 1, "number of folds can not equal to 1"
 
             # Get the score for each parameter.
@@ -233,10 +226,9 @@ class ModelSelection2(dj.Computed):
                 val_result, _ = self.train_function(validation_stack, train_stack, validation_loc, train_loc, param,
                                                     filter_size)
                 param_score.append(val_result)
-                conn.is_connected
-            param_result = np.mean(param_score)
-            best_score_dict[param['param_id']] = param_result
-            print("key : {}, param_id : {}, score : {}".format(key, param['param_id'], param_result))
+                conn.is_connected  # ping the database to keep the database connected.
+            best_score_dict[param['param_id']] = np.mean(param_score)
+            print("key : {}, param_id : {}, score : {}".format(key, param['param_id'], np.mean(param_score)))
 
         # Find out the parameter that gives best score.
         best_param_id = max(best_score_dict, key=lambda key: best_score_dict[key])
@@ -264,7 +256,6 @@ class ModelSelection2(dj.Computed):
         Build training set's frame and cell locations for a given split combination.
         :param key: a valid key for TestSplit() Table
         '''
-
         # Build frame lists
         test_frame = ((TestSplit().TestFrame() * pre.AverageFrame()) & key).fetch['frame']
         train_frame = ((TestSplit().TrainingFrame() * pre.AverageFrame()) & key).fetch['frame']
@@ -303,11 +294,7 @@ class ModelSelection2(dj.Computed):
         result_list = []
         for entry in zip(v_stack, v_loc):
             result_list.append(c.auc(entry[0], entry[1]))
-        mean = np.mean(result_list)
-        return mean, c
-
-    def to_num(self, key):
-        return tuple(key.values())
+        return np.mean(result_list), c
 
 
 def generate_cell_loc(iterdict):
@@ -321,7 +308,6 @@ def generate_cell_loc(iterdict):
 
 def generate_stack(filtersize, frame, preoption):
     '''
-
     :param filtersize:
     :param frame:
     :param preoption:

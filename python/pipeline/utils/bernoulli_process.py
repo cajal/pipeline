@@ -1,15 +1,12 @@
 import numpy as np
-from scipy.optimize import minimize
 import theano as th
-import datajoint as dj
 from collections import OrderedDict
-
-floatX = th.config.floatX
+from scipy.optimize import minimize
 T = th.tensor
 import theano.tensor.nnet.conv3d2d
 from sklearn.metrics import roc_auc_score
-
-tensor5 = theano.tensor.TensorType('float64', 5 * [False])  # 5-dimension tensor?
+th.config.floatX = 'float32'
+floatX = th.config.floatX
 
 
 class BP:
@@ -36,8 +33,8 @@ class BP:
         return Y
 
     def _single_cross_entropy(self, data_shape):
-        X_ = T.dmatrix('stack')  # th.shared(np.require(Y, dtype=floatX), borrow=True, name='cells')
-        Y_ = T.dmatrix('cells')  # th.shared(np.require(Y, dtype=floatX), borrow=True, name='cells')
+        X_ = T.fmatrix('stack')  # th.shared(np.require(Y, dtype=floatX), borrow=True, name='cells')
+        Y_ = T.fmatrix('cells')  # th.shared(np.require(Y, dtype=floatX), borrow=True, name='cells')
         p_, parameters_ = self._build_probability_map(X_, data_shape)
 
         loglik_ = Y_ * T.log(p_) + (1 - Y_) * T.log(1 - p_)
@@ -45,13 +42,13 @@ class BP:
 
         dcross_entropy_ = T.grad(cross_entropy_, parameters_)
 
-        return th.function((X_, Y_) + parameters_, cross_entropy_), \
-               th.function((X_, Y_) + parameters_, dcross_entropy_)
+        return th.function((X_, Y_) + parameters_, cross_entropy_, allow_input_downcast=True), \
+               th.function((X_, Y_) + parameters_, dcross_entropy_, allow_input_downcast=True)
 
     def P(self, X):
-        X_ = T.dmatrix('stack')  # th.shared(np.require(Y, dtype=floatX), borrow=True, name='cells')
+        X_ = T.fmatrix('stack')  # th.shared(np.require(Y, dtype=floatX), borrow=True, name='cells')
         p_, params_ = self._build_probability_map(X_, X.shape)
-        p = th.function((X_,) + params_, p_)
+        p = th.function((X_,) + params_, p_, allow_input_downcast=True)
         P = p(*((X,) + tuple(self.parameters.values())))
 
         return P
@@ -129,7 +126,7 @@ class RDBP(BP):
 
         self.parameters['beta'] = np.random.randn(exponentials, quadratic_channels)  # Beta for quadratic
         self.parameters['gamma'] = np.random.randn(exponentials, linear_channels)  # Gamma for linear
-        self.parameters['b'] = np.random.randn(exponentials)  # The constant
+        self.parameters['b'] = np.random.randn(exponentials)
 
     def _build_separable_convolution(self, no_of_filters, X_, data_shape):
         """
@@ -151,7 +148,7 @@ class RDBP(BP):
             # expects nb filters, channels, nb row, nb col
             filters=Vxy_.dimshuffle(0, 'x', 1, 2),
             filter_shape=(no_of_filters, in_channels, flt_row, flt_col),
-            image_shape=(batchsize, in_channels, in_width, in_height),
+            input_shape=(batchsize, in_channels, in_width, in_height),
             border_mode='valid'
         ).dimshuffle(1, 2, 3)
         return xy_, Vxy_
@@ -170,8 +167,8 @@ class RDBP(BP):
         quadratic_filter_, Uxy_ = self._build_separable_convolution(quadratic_channels, X_, data_shape)
         linear_filter_, Wxy_ = self._build_separable_convolution(linear_channels, X_, data_shape)
         b_ = T.dvector()
-        beta_ = T.dmatrix()
-        gamma_ = T.dmatrix()
+        beta_ = T.fmatrix()
+        gamma_ = T.fmatrix()
 
         quadr_filter_ = T.tensordot(beta_, quadratic_filter_ ** 2, (1, 0))
         lin_filter_ = T.tensordot(gamma_, linear_filter_, (1, 0))
