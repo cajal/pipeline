@@ -6,6 +6,7 @@ assert StrictVersion(dj.__version__) >= StrictVersion('0.2.5')
 
 schema = dj.schema('pipeline_experiment', locals())
 
+
 @schema
 class Dye(dj.Lookup):
     definition = """
@@ -60,7 +61,7 @@ class Anesthesia(dj.Lookup):
 class Person(dj.Lookup):
     definition = """
     # person information
-    username      : char(12)
+    username      : char(12)   # lab member
     ---
     full_name     : varchar(255)
     """
@@ -81,9 +82,8 @@ class Person(dj.Lookup):
 class Session(dj.Manual):
     definition = """
     # session
-
     -> mice.Mice
-    session                       : smallint                      # session index
+    session                       : smallint                      # session index for the mouse
     ---
     -> Anesthesia
     -> Person
@@ -128,9 +128,20 @@ class Software(dj.Lookup):
 
 
 @schema
+class Aim(dj.Lookup):
+    definition = """  # what is being imaged: somas, axons, etc.
+    aim : varchar(40)   # short description of what is being imaged
+    """
+    contents = [
+        ['functional: somas'],
+        ['functional: axons'],
+        ['functional: axons, somas'],
+        ['structural']]
+
+
+@schema
 class Scan(dj.Manual):
-    definition = """
-    # scanimage scan info
+    definition = """    # scanimage scan info
     -> Session
     scan_idx        : smallint               # number of TIFF stack file
     ---
@@ -139,9 +150,9 @@ class Scan(dj.Manual):
     laser_wavelength            : float                         # (nm)
     laser_power                 : float                         # (mW) to brain
     filename                    : varchar(255)                  # file base name
-    scan_notes                  : varchar(4095)                 # free-notes
-    structural=0                : boolean                       # was the scan structural or not
+    -> Aim
     surf_z=0                    : int                           # manual depth measurement
+    scan_notes                  : varchar(4095)                 # free-notes
     site_number=0               : tinyint                       # site number
     -> Software
     scan_ts=CURRENT_TIMESTAMP   : timestamp                     # don't edit
@@ -185,4 +196,4 @@ schema.spawn_missing_classes()
 
 def migrate():
     from . import common, rf, psy
-    mice = common.Animal() & (rf.Session() & '')
+    mice = common.Animal() & (rf.Session() & 'session_date > "2016-02-01"')
