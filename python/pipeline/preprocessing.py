@@ -4,7 +4,9 @@ import psy
 
 from distutils.version import StrictVersion
 assert StrictVersion(dj.__version__) >= StrictVersion('0.2.5')
-schema = dj.schema('unipipe_preprocessing', locals())
+
+schema = dj.schema('pipeline_uni_preprocessing', locals())
+
 
 @schema
 class Slice(dj.Lookup):
@@ -12,6 +14,7 @@ class Slice(dj.Lookup):
     slice  : tinyint  # slice in scan
     """
     contents = ((i,) for i in range(12))
+
 
 @schema
 class AodImportParam(dj.Lookup):

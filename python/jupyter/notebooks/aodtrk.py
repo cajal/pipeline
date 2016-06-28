@@ -16,11 +16,12 @@ except ImportError:
 
 schema = dj.schema('pipeline_aod_pupiltracking', locals())
 
+
 @schema
 class TrackInfo(dj.Imported):
     definition = """
     # machine independent path of eye videos
-    
+
     ->aodpre.Scan
     ---
     base_video_path: varchar(100) # base path of the video
