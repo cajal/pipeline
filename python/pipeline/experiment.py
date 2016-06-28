@@ -197,3 +197,5 @@ schema.spawn_missing_classes()
 def migrate():
     from . import common, rf, psy
     mice = common.Animal() & (rf.Session() & 'session_date > "2016-02-01"')
+
+schema.spawn_missing_classes()
