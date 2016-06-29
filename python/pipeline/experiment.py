@@ -21,7 +21,8 @@ class Fluorophore(dj.Lookup):
         ['Twitch2B', ''],
         ['mRuby', ''],
         ['mCherry', ''],
-        ['tdTomato', '']]
+        ['tdTomato', ''],
+        ['OGB', '']]
 
 
 @schema
@@ -38,7 +39,7 @@ class Lens(dj.Lookup):
 @schema
 class Rig(dj.Lookup):
     definition = """
-    setup : char(4)    # multiphoton imaging setup
+    rig : char(4)    # multiphoton imaging setup
     ---
     """
     contents = [['2P2'], ['2P3']]
@@ -81,7 +82,8 @@ class Person(dj.Lookup):
     full_name     : varchar(255)
     """
     contents = [
-        ('incognito', ''),
+        ('unknown', 'placeholder'),
+        ('jiakun', 'Jiakun Fu'),
         ('manolis', 'Emmanouil Froudarakis'),
         ('dimitri', 'Dimitri Yatsenko'),
         ('shan', 'Shan Shen'),
@@ -90,14 +92,14 @@ class Person(dj.Lookup):
         ('edgar', 'Edgar Y. Walker'),
         ('cathryn', 'Cathryn Rene Cadwell'),
         ('shuang', 'Shuang Li'),
-        ('xiaolong', 'Xiaolong Jiang'),
+        ('xiaolong', 'Xiaolong Jiang')
     ]
 
 
 @schema
 class BrainArea(dj.Lookup):
     definition = """
-    cortical_area       : char(12)     # short name for cortical area
+    brain_area       : char(12)     # short name for cortical area
     ---
     area_description    : varchar(255)
     """
@@ -107,8 +109,11 @@ class BrainArea(dj.Lookup):
         ('unknown', ''),
         ('V1', ''),
         ('LM', ''),
+        ('LI', ''),
         ('AL', ''),
         ('PM', ''),
+        ('POR', ''),
+        ('RL', '')
      ]
 
 
@@ -134,14 +139,16 @@ class Software(dj.Lookup):
 
 @schema
 class Aim(dj.Lookup):
-    definition = """  # what is being imaged: somas, axons, etc.
-    aim : varchar(40)   # short description of what is being imaged
+    definition = """  # what is being imaged (e.g. somas, axon) and why
+    aim : varchar(40)   # short description of what is imaged and why
     """
     contents = [
         ['unset'],
         ['functional: somas'],
         ['functional: axons'],
         ['functional: axons, somas'],
+        ['functional: axons-green, somas-red'],
+        ['functional: axons-red, somas-green'],
         ['structural']]
 
 
@@ -189,8 +196,8 @@ class Session(dj.Manual):
     -> Anesthesia
     -> PMTFilterSet
     scan_path                     : varchar(255)                  # file path for TIFF stacks
-    craniotomy_notes              : varchar(4095)                 # free-text notes
-    session_notes                 : varchar(4095)                 # free-text notes
+    craniotomy_notes=""           : varchar(4095)                 # free-text notes
+    session_notes=""               : varchar(4095)                 # free-text notes
     session_ts=CURRENT_TIMESTAMP  : timestamp                     # automatic
     """
 
@@ -200,7 +207,7 @@ class Session(dj.Manual):
         -> Session
         -> Fluorophore
         ---
-        notes           : varchar(255) # additional information
+        notes=""          : varchar(255) # additional information about fluorophore in this scan
         """
 
 
@@ -216,7 +223,7 @@ class Scan(dj.Manual):
     laser_power                 : float                         # (mW) to brain
     filename                    : varchar(255)                  # file base name
     -> Aim
-    surf_z=0                    : int                           # manual depth measurement
+    depth=0                    : int                           # manual depth measurement
     scan_notes                  : varchar(4095)                 # free-notes
     site_number=0               : tinyint                       # site number
     -> Software
@@ -228,11 +235,47 @@ schema.spawn_missing_classes()
 
 
 def migrate_reso_pipeline():
+    """
+    migration from the old schema
+    :return:
+    """
     from . import common, rf, psy
     # migrate FOV calibration
-    FOV().insert(rf.FOV().proj('width', 'height', fov_ts="fov_date").fetch(), skip_duplicates=True)
+    FOV().insert(rf.FOV().proj('width', 'height', rig="setup", fov_ts="fov_date").fetch(), skip_duplicates=True)
 
     # migrate Session
-    sessions_to_migrate = rf.Session()*common.Animal() & 'session_date > "2016-02-01"' & 'animal_id>0'
+    sessions_to_migrate = rf.Session()*common.Animal()
+    restriction = dj.AndList(['session_date>"2016-02"', 'animal_id>0'])
+    w = sessions_to_migrate.proj(
+        'session_date',
+        'anesthesia',
+        'session_ts',
+        'scan_path',
+        rig='setup',
+        username='lcase(owner)',
+        pmt_filter_set='"2P3 red-green A"',
+        session_notes="concat(session_notes,';;', animal_notes)") & restriction
+    Session().insert(w.fetch(), skip_duplicates=True)
 
-schema.spawn_missing_classes()
+    # migrate fluorophore
+    Session.Fluorophore().insert((sessions_to_migrate & Session()).proj('fluorophore').fetch())
+
+    assert len(Session()) == len(Session.Fluorophore())
+
+    # migrate scans
+
+    scans = rf.Session().proj('lens')*rf.Scan().proj(
+        'laser_wavelength',
+        'laser_power',
+        'scan_notes',
+        'scan_ts',
+        'depth',
+        software="'scanimage'",
+        version="5.1",
+        site_number='site',
+        filename="concat('scan', LPAD(file_num, 3, '0'))",
+        brain_area='cortical_area',
+        aim="'unset'"
+    ) & Session()
+
+    Scan().insert(scans.fetch(as_dict=True), skip_duplicates=True)
