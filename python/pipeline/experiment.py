@@ -2,19 +2,26 @@ import datajoint as dj
 from . import mice
 
 from distutils.version import StrictVersion
-assert StrictVersion(dj.__version__) >= StrictVersion('0.2.5')
+assert StrictVersion(dj.__version__) >= StrictVersion('0.2.7')
 
 schema = dj.schema('pipeline_experiment', locals())
 
 
 @schema
-class Dye(dj.Lookup):
+class Fluorophore(dj.Lookup):
     definition = """
     # calcium-sensitive indicators
-    dye                   : char(10)   # fluorophore short name
+    fluorophore          : char(10)   # fluorophore short name
     -----
     dye_description = ''  : varchar(2048)
     """
+    contents = [
+        ['GCaMP6s', ''],
+        ['GCaMP6f', ''],
+        ['Twitch2B', ''],
+        ['mRuby', ''],
+        ['mCherry', ''],
+        ['tdTomato', '']]
 
 
 @schema
@@ -25,12 +32,22 @@ class Lens(dj.Lookup):
     ---
     """
 
+    contents = [['16x'], ['25x']]
+
+
+@schema
+class Rig(dj.Lookup):
+    definition = """
+    setup : char(4)    # multiphoton imaging setup
+    ---
+    """
+    contents = [['2P2'], ['2P3']]
+
 
 @schema
 class FOV(dj.Lookup):
-    definition = """
-    # field-of-view sizes for all lenses and magnifications
-    setup           : char(4)                # two-photon setup
+    definition = """  # field-of-view sizes for all lenses and magnifications
+    -> Rig
     -> Lens
     mag                         : decimal(5,2)                  # ScanImage zoom factor
     fov_ts                      : datetime                      # fov measurement date and time
@@ -42,9 +59,7 @@ class FOV(dj.Lookup):
 
 @schema
 class Anesthesia(dj.Lookup):
-    definition = """
-    # different anesthesia
-
+    definition = """   #  anesthesia states
     anesthesia                     : char(20) # anesthesia short name
     ---
     anesthesia_description=''      : varchar(255) # longer description
@@ -66,33 +81,17 @@ class Person(dj.Lookup):
     full_name     : varchar(255)
     """
     contents = [
+        ('incognito', ''),
         ('manolis', 'Emmanouil Froudarakis'),
         ('dimitri', 'Dimitri Yatsenko'),
         ('shan', 'Shan Shen'),
-        ('jake', 'Jacob Reimer (Overlord)'),
+        ('jake', 'Jacob Reimer'),
         ('fabee', 'Fabian Sinz'),
         ('edgar', 'Edgar Y. Walker'),
         ('cathryn', 'Cathryn Rene Cadwell'),
         ('shuang', 'Shuang Li'),
-        ('xiaolong', 'Xiaolong Jiang (Patchgrandmaster)'),
+        ('xiaolong', 'Xiaolong Jiang'),
     ]
-
-
-@schema
-class Session(dj.Manual):
-    definition = """
-    # session
-    -> mice.Mice
-    session                       : smallint                      # session index for the mouse
-    ---
-    -> Anesthesia
-    -> Person
-    session_date                  : date                          # date
-    scan_path                     : varchar(255)                  # file path for TIFF stacks
-    craniotomy_notes              : varchar(4095)                 # free-text notes
-    session_notes                 : varchar(4095)                 # free-text notes
-    session_ts=CURRENT_TIMESTAMP  : timestamp                     # automatic
-    """
 
 
 @schema
@@ -104,6 +103,7 @@ class BrainArea(dj.Lookup):
     """
     contents = [
         ('other', ''),
+        ('unset', ''),
         ('unknown', ''),
         ('V1', ''),
         ('LM', ''),
@@ -121,8 +121,13 @@ class Software(dj.Lookup):
     ---
     """
     contents = [
+        ('unset', '0.0'),
         ('scanimage', '3.8'),
         ('scanimage', '4.0'),
+        ('scanimage', '4.2'),
+        ('scanimage', '4.2pr1'),
+        ('scanimage', '5.1'),
+        ('scanimage', '5.2'),
         ('aod', '2.0'),
         ('imager', '1.0')]
 
@@ -133,10 +138,70 @@ class Aim(dj.Lookup):
     aim : varchar(40)   # short description of what is being imaged
     """
     contents = [
+        ['unset'],
         ['functional: somas'],
         ['functional: axons'],
         ['functional: axons, somas'],
         ['structural']]
+
+
+@schema
+class PMTFilterSet(dj.Lookup):
+    definition = """  #  microscope filter sets: dichroic and PMT Filters
+    pmt_filter_set : varchar(16)    # short name of microscope filter set
+    ----
+    primary_dichroic      :  varchar(255)    #  passes the laser  (excitation/emission separation)
+    secondary_dichroic    :  varchar(255)    #  splits emission spectrum
+    filter_set_description :  varchar(4096)     #   A detailed description of the filter set
+    """
+    contents = [
+        ['2P3 red-green A', '680 nm long-pass?', '562 nm long-pass', 'purchased with Thorlabs microscope'],
+        ['2P3 blue-green A', '680 nm long-pass?', '506 nm long-pass', 'purchased with Thorlabs microscope']]
+
+    class Channel(dj.Part):
+        definition = """  #  PMT description including dichroic and filter
+        -> PMTFilterSet
+        pmt_channel : tinyint   #  pmt_channel
+        ---
+        color      : enum('green', 'red', 'blue')
+        pmt_serial_number :  varchar(40)   #
+        spectrum_center     :  smallint  unsigned  #  (nm) overall pass spectrum of all upstream filters
+        spectrum_bandwidth  :  smallint  unsigned  #  (nm) overall pass spectrum of all upstream filters
+        pmt_filter_details :varchar(255)  #  more details, spectrum, pre-amp gain, pre-amp ADC filter
+        """
+        contents = [
+            ['2P3 red-green A', 1, 'green', 'AC7438 Thor', 525, 50, ''],
+            ['2P3 red-green A', 2, 'red', 'AC7753 Thor', 625, 90, ''],
+            ['2P3 blue-green A', 1, 'blue', 'AC7438 Thor', 475, 50, ''],
+            ['2P3 blue-green A', 2, 'green', 'AC7753 Thor', 540, 50, '']
+        ]
+
+
+@schema
+class Session(dj.Manual):
+    definition = """ # imaging session
+    -> mice.Mice
+    session                       : smallint                      # session index for the mouse
+    ---
+    -> Rig
+    session_date                  : date                          # date
+    -> Person
+    -> Anesthesia
+    -> PMTFilterSet
+    scan_path                     : varchar(255)                  # file path for TIFF stacks
+    craniotomy_notes              : varchar(4095)                 # free-text notes
+    session_notes                 : varchar(4095)                 # free-text notes
+    session_ts=CURRENT_TIMESTAMP  : timestamp                     # automatic
+    """
+
+    class Fluorophore(dj.Part):
+        definition = """
+        # Fluorophores expressed in prep for the imaging session
+        -> Session
+        -> Fluorophore
+        ---
+        notes           : varchar(255) # additional information
+        """
 
 
 @schema
@@ -159,43 +224,15 @@ class Scan(dj.Manual):
     """
 
 
-@schema
-class SessionDye(dj.Manual):
-    definition = """
-    # Dye used in session
-    -> Session
-    -> Dye
-    ---
-    notes           : varchar(255) # additional information
-    """
-
-
-@schema
-class PMTFilter(dj.Lookup):
-    definition = """
-    # filter in the filter cube
-    pmt_filter :char(12)   # PMT filter_description
-    ---
-    pmt_filter_details :varchar(255)  #  more details, spectrum
-    """
-
-
-@schema
-class PMTChannel(dj.Manual):
-    definition = """
-    # microscope acquisition channel
-    -> Session
-    pmt_channel : tinyint  #  two-photon channel
-    ---
-    -> PMTFilter
-    notes           : varchar(255) # additional information
-    """
-
 schema.spawn_missing_classes()
 
 
-def migrate():
+def migrate_reso_pipeline():
     from . import common, rf, psy
-    mice = common.Animal() & (rf.Session() & 'session_date > "2016-02-01"')
+    # migrate FOV calibration
+    FOV().insert(rf.FOV().proj('width', 'height', fov_ts="fov_date").fetch(), skip_duplicates=True)
+
+    # migrate Session
+    sessions_to_migrate = rf.Session()*common.Animal() & 'session_date > "2016-02-01"' & 'animal_id>0'
 
 schema.spawn_missing_classes()
