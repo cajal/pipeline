@@ -174,3 +174,6 @@ class Segment(dj.Imported):
     #         ax.set_xlabel('false positives rate')
     #         ax.set_ylabel('true positives rate')
     #         ax.legend(loc='lower right')
+
+
+schema.spawn_missing_classes()
