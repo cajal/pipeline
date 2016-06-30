@@ -7,6 +7,11 @@ assert StrictVersion(dj.__version__) >= StrictVersion('0.2.8')
 schema = dj.schema('pipeline_preprocess', locals())
 
 
+def erd():
+    """a shortcut for convenience"""
+    dj.ERD(schema).draw(prefix=False)
+
+
 @schema
 class Slice(dj.Lookup):
     definition = """  # slices in resonant scanner scans
@@ -112,6 +117,7 @@ class ExtractRaw(dj.Imported):
     class GalvoSegmentation(dj.Part):
         definition = """  # segmentation of galvo movies
         -> ExtractRaw
+        -> Gather.GalvoMotion
         -> SegmentMethod
         ---
         segmentation_mask=null  :  longblob
@@ -163,4 +169,7 @@ class Sync(dj.Imported):
     frame_times = null          : longblob                      # times of frames and slices
     sync_ts=CURRENT_TIMESTAMP   : timestamp                     # automatic
     """
+
+
+schema.spawn_missing_classes()
 
