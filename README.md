@@ -19,5 +19,5 @@
 The code in this repository is licensed under the [Creative Commons Attribution-NonCommercial-ShareAlike 3.0 Unported License](http://creativecommons.org/licenses/by-nc-sa/3.0/). 
 
 # Notebooks
-1.  [DataJoint demo](demo.ipynb)
-2.  [Unified pipeline](unified_pipeline.ipynb)
+1.  [DataJoint demo](python/jupyter/notebooks/demo.ipynb)
+2.  [Unified pipeline](python/jupyter/notebooks/unified_pipeline.ipynb)
