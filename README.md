@@ -20,4 +20,5 @@ The code in this repository is licensed under the [Creative Commons Attribution-
 
 # Notebooks
 1.  [DataJoint demo](python/jupyter/notebooks/demo.ipynb)
-2.  [Unified pipeline](python/jupyter/notebooks/unified_pipeline.ipynb)
+2.  [Pipeline: experiment](python/jupyter/notebooks/pipeline_experiment.ipynb)
+3.  [Pipeline: preprocess](python/jupyter/notebooks/pipeline_preprocess.ipynb)
