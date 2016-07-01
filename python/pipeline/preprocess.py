@@ -39,14 +39,14 @@ class SegmentMethod(dj.Lookup):
 
 
 @schema
-class Gather(dj.Imported):
+class Prepare(dj.Imported):
     definition = """  # master table that gathers data about the scans of different types, prepares for trace extraction
     -> experiment.Scan
     """
 
     class Galvo(dj.Part):
         definition = """    # basic information about resonant microscope scans, raster correction
-        -> Gather
+        -> Prepare
         ---
         nframes_requested       : int               # number of valumes (from header)
         nframes                 : int               # frames recorded
@@ -71,7 +71,7 @@ class Gather(dj.Imported):
 
     class GalvoMotion(dj.Part):
         definition = """   # motion correction for galvo scans
-        -> Gather.Galvo
+        -> Prepare.Galvo
         -> Slice
         ---
         -> experiment.PMTFilterSet.Channel
@@ -82,14 +82,14 @@ class Gather(dj.Imported):
 
     class Aod(dj.Part):
         definition = """   # information about AOD scans
-        -> Gather
+        -> Prepare
         ---
         -> AodImportParam
         """
 
     class AodPoint(dj.Part):
         definition = """
-        -> Gather.Aod
+        -> Prepare.Aod
         point_id : smallint    # id of a scan point
         ---
         x: float   # (um)
@@ -101,7 +101,7 @@ class Gather(dj.Imported):
 @schema
 class ExtractRaw(dj.Imported):
     definition = """  # pre-processing of a twp-photon scan
-    -> Gather
+    -> Prepare
     ----
     """
 
@@ -117,7 +117,7 @@ class ExtractRaw(dj.Imported):
     class GalvoSegmentation(dj.Part):
         definition = """  # segmentation of galvo movies
         -> ExtractRaw
-        -> Gather.GalvoMotion
+        -> Prepare.GalvoMotion
         -> SegmentMethod
         ---
         segmentation_mask=null  :  longblob
@@ -159,7 +159,7 @@ class ComputeTraces(dj.Computed):
 @schema
 class Sync(dj.Imported):
     definition = """
-    -> Gather
+    -> Prepare
     ---
     -> psy.Session
     first_trial                 : int                           # first trial index from psy.Trial overlapping recording
