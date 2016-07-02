@@ -7,6 +7,11 @@ assert StrictVersion(dj.__version__) >= StrictVersion('0.2.7')
 schema = dj.schema('pipeline_experiment', locals())
 
 
+def erd():
+    """for convenience"""
+    dj.ERD(schema).draw()
+
+
 @schema
 class Fluorophore(dj.Lookup):
     definition = """
@@ -244,8 +249,7 @@ def migrate_reso_pipeline():
     FOV().insert(rf.FOV().proj('width', 'height', rig="setup", fov_ts="fov_date").fetch(), skip_duplicates=True)
 
     # migrate Session
-    sessions_to_migrate = rf.Session()*common.Animal()
-    restriction = dj.AndList(['session_date>"2016-02"', 'animal_id>0'])
+    sessions_to_migrate = rf.Session()*common.Animal() & 'session_date>"2016-02"' & 'animal_id>0'
     w = sessions_to_migrate.proj(
         'session_date',
         'anesthesia',
@@ -254,17 +258,18 @@ def migrate_reso_pipeline():
         rig='setup',
         username='lcase(owner)',
         pmt_filter_set='"2P3 red-green A"',
-        session_notes="concat(session_notes,';;', animal_notes)") & restriction
+        session_notes="concat(session_notes,';;', animal_notes)")
     Session().insert(w.fetch(), skip_duplicates=True)
 
     # migrate fluorophore
-    Session.Fluorophore().insert((sessions_to_migrate & Session()).proj('fluorophore').fetch())
+    Session.Fluorophore().insert(sessions_to_migrate.proj('fluorophore').fetch(), skip_duplicates=True)
 
     assert len(Session()) == len(Session.Fluorophore())
 
     # migrate scans
 
-    scans = rf.Session().proj('lens')*rf.Scan().proj(
+    scans = (rf.Session().proj('lens', 'file_base')*rf.Scan()).proj(
+        'lens',
         'laser_wavelength',
         'laser_power',
         'scan_notes',
@@ -273,7 +278,7 @@ def migrate_reso_pipeline():
         software="'scanimage'",
         version="5.1",
         site_number='site',
-        filename="concat('scan', LPAD(file_num, 3, '0'))",
+        filename="concat(file_base, '_', LPAD(file_num, 5, '0'))",
         brain_area='cortical_area',
         aim="'unset'"
     ) & Session()
