@@ -151,28 +151,4 @@ class Segment(dj.Imported):
                 plt.savefig(outdir + "/scan_idx{scan_idx}/slice{slice}/cell{cell:03d}_animal_id_{animal_id}_session_{session}.png".format(cell=cell+1, **key))
                 plt.close(fig)
 
-
-    # def plot_ROC_curves(self):
-    #     """
-    #     Takes all masks from an NMF segmentation, L1 normalizes them, computes a MAX image from it and uses that to
-    #     plot and ROC curve using the manual segmentations as ground truth.
-    #     """
-    #
-    #     sns.set_context('notebook')
-    #
-    #     with sns.axes_style('whitegrid'):
-    #         fig, ax = plt.subplots(figsize=(8, 8))
-    #     for key in (self.project() * SegmentMethod() - dict(
-    #             method_name='manual') & ManualSegment().project()).fetch.as_dict:
-    #         ground_truth = bugfix_reshape((ManualSegment() & key).fetch1['mask'])   # TODO: remove bugfix_reshape once djbug #191 is fixed
-    #         masks, _ = self.load_masks_with_traces(key)
-    #         masks /= masks.sum(axis=0).sum(axis=0)[None, None, :]
-    #         masks = masks.max(axis=2)
-    #         fpr, tpr, _ = roc_curve(ground_truth.ravel(), masks.ravel())
-    #         ax.plot(fpr, tpr,
-    #                 label="animal_id {animal_id}:session {session}:scan_idx {scan_idx}:{method_name}:slice{slice}".format(**key))
-    #         ax.set_xlabel('false positives rate')
-    #         ax.set_ylabel('true positives rate')
-    #         ax.legend(loc='lower right')
-
 schema.spawn_missing_classes()
