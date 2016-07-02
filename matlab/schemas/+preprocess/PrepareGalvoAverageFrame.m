@@ -12,8 +12,6 @@ classdef PrepareGalvoAverageFrame < dj.Relvar
 
 		function makeTuples(self, key, reader)
             q = 6;
-            tic
-            fixMotion = get_fix_motion_fun(preprocess.PrepareGalvoMotion & key);
             [nframes, nslices, nchannels] = fetch1(preprocess.PrepareGalvo, ...
                 'nframes', 'nslices', 'nchannels');
             % average frame
@@ -22,7 +20,11 @@ classdef PrepareGalvoAverageFrame < dj.Relvar
                 fixRaster = get_fix_raster_fun(preprocess.PrepareGalvo & key);
                 tuple = key;
                 for ichannel = 1:nchannels
+                    tic
+                    key.channel = ichannel;
+                    print('Averaging slice %d/%d channel %d\n', islice, nslices, ichannel) 
                     tuple.channel = ichannel;
+                    fixMotion = get_fix_motion_fun(preprocess.PrepareGalvoMotion & key);
                     frame = 0;
                     for iframe = 1:nframes
                         frame = frame + (fixMotion(fixRaster(reader(:,:,ichannel, islice, iframe)), iframe)).^q;
