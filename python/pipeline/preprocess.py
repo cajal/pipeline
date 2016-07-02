@@ -20,22 +20,13 @@ class Slice(dj.Lookup):
     contents = ((i,) for i in range(12))
 
 
-@schema
-class AodImportParam(dj.Lookup):
-    definition = """ # options for importing AOD scans
-    aod_param_opt: tinyint
-    ---
-    """
-
 
 @schema
-class SegmentMethod(dj.Lookup):
-    definition = """
-    segment_method : tinyint  # calcium image segmentation method
-    ---
-    segment_method_name : varchar(30)    #
+class Channel(dj.Lookup):
+    definition = """  # recording channel, directly related to experiment.PMTFilterSet.Channel
+    channel : tinyint
     """
-    contents = [[1, 'manual'], [2, 'nmf']]
+    contents = [[1], [2], [3], [4]]
 
 
 @schema
@@ -62,11 +53,8 @@ class Prepare(dj.Imported):
         nslices                 : tinyint           # number of slices
         slice_pitch             : float             # (um) distance between slices
         fill_fraction           : float             # raster scan fill fraction (see scanimage)
+        preview_frame           : longblob          # raw average frame from channel 1 from an early fragment of the movie
         raster_phase            : float             # shift of odd vs even raster lines
-        avg_frame               : longblob          # raw average frame
-        min_intensity           : int               # min value in movie
-        max_intensity           : int               # max value in movie
-        mean_diff_squared_hist  : longblob          # measured frame-to-frame variance for each intensity bin
         """
 
     class GalvoMotion(dj.Part):
@@ -74,21 +62,28 @@ class Prepare(dj.Imported):
         -> Prepare.Galvo
         -> Slice
         ---
-        -> experiment.PMTFilterSet.Channel
+        -> Channel
+        template                    : longblob       # stack that was used as alignment template
         motion_xy                   : longblob       # (pixels) y,x motion correction offsets
         motion_rms                  : float          # (um) stdev of motion
         align_times=CURRENT_TIMESTAMP: timestamp     # automatic
         """
 
+    class GalvoAverageFrame(dj.Part):
+        definition = """   # average frame for each slice and channel after corrections
+        -> Prepare.GalvoMotion
+        -> Channel
+        ---
+        frame  : longblob     # average frame ater Anscombe, max-weighting,
+        """
+
     class Aod(dj.Part):
         definition = """   # information about AOD scans
         -> Prepare
-        ---
-        -> AodImportParam
         """
 
     class AodPoint(dj.Part):
-        definition = """
+        definition = """  # points in 3D space in coordinates of an AOD scan
         -> Prepare.Aod
         point_id : smallint    # id of a scan point
         ---
@@ -99,16 +94,54 @@ class Prepare(dj.Imported):
 
 
 @schema
+class Method(dj.Lookup):
+    definition = """  #  methods for extraction from raw data for either AOD or Galvo data
+    extract_method :  tinyint
+    """
+    contents = [[1], [2], [3], [4]]
+
+    class Aod(dj.Part):
+        definition = """
+        -> Method
+        ---
+        description  : varchar(60)
+        high_pass_stop=null : float   # (Hz)
+        low_pass_stop=null  : float   # (Hz)
+        subtracted_princ_comps :  tinyint  # number of principal components to subtract
+        """
+        contents = [
+            [1, 'raw traces', None, None, 0],
+            [2, 'band pass, -1 princ comp', 0.02, 20, -1],
+        ]
+
+    class Galvo(dj.Part):
+        definition = """  # extraction methods for galvo
+        -> Method
+        ---
+        segmentation  :  varchar(16)   #
+        """
+        contents = [
+            [1, 'manual'],
+            [2, 'nmf']
+        ]
+
+
+@schema
 class ExtractRaw(dj.Imported):
     definition = """  # pre-processing of a twp-photon scan
     -> Prepare
-    ----
+    -> Method
     """
+
+    @property
+    def key_source(self):
+        return Prepare()*Method().proj() & \
+               dj.OrList(Prepare.Aod()*Method.Aod(), Prepare.Galvo()*Method.Galvo())
 
     class Trace(dj.Part):
         definition = """  # raw trace, common to Galvo
         -> ExtractRaw
-        -> experiment.PMTFilterSet.Channel
+        -> Channel
         trace_id  : smallint
         ---
         raw_trace : longblob     # unprocessed calcium trace
@@ -118,7 +151,6 @@ class ExtractRaw(dj.Imported):
         definition = """  # segmentation of galvo movies
         -> ExtractRaw
         -> Prepare.GalvoMotion
-        -> SegmentMethod
         ---
         segmentation_mask=null  :  longblob
         """
