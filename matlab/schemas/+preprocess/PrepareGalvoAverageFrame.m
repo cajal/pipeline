@@ -12,7 +12,7 @@ classdef PrepareGalvoAverageFrame < dj.Relvar
 
 		function makeTuples(self, key, reader)
             q = 6;
-            [nframes, nslices, nchannels] = fetch1(preprocess.PrepareGalvo, ...
+            [nframes, nslices, nchannels] = fetch1(preprocess.PrepareGalvo & key, ...
                 'nframes', 'nslices', 'nchannels');
             % average frame
             fixRaster = get_fix_raster_fun(preprocess.PrepareGalvo & key);
