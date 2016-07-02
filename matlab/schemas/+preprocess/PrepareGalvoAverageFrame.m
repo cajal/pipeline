@@ -15,16 +15,15 @@ classdef PrepareGalvoAverageFrame < dj.Relvar
             [nframes, nslices, nchannels] = fetch1(preprocess.PrepareGalvo, ...
                 'nframes', 'nslices', 'nchannels');
             % average frame
+            fixRaster = get_fix_raster_fun(preprocess.PrepareGalvo & key);
             for islice = 1:nslices
                 key.slice = islice;
-                fixRaster = get_fix_raster_fun(preprocess.PrepareGalvo & key);
-                tuple = key;
+                fixMotion = get_fix_motion_fun(preprocess.PrepareGalvoMotion & key);
                 for ichannel = 1:nchannels
                     tic
-                    key.channel = ichannel;
-                    fprintf('Averaging slice %d/%d channel %d\n', islice, nslices, ichannel) 
+                    tuple = key;
                     tuple.channel = ichannel;
-                    fixMotion = get_fix_motion_fun(preprocess.PrepareGalvoMotion & key);
+                    fprintf('Averaging slice %d/%d channel %d\n', islice, nslices, ichannel) 
                     frame = 0;
                     for iframe = 1:nframes
                         frame = frame + max(0,fixMotion(fixRaster(reader(:,:,ichannel, islice, iframe)), iframe)).^q;
