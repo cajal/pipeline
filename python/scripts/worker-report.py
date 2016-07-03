@@ -30,7 +30,6 @@ def post_report(comment, report, token=None, channel='#bot_planet'):
                            channels=channel)
     else:
         print(report)
-        # os.remove('./report.txt')
 
 
 def progress_bar(k, n, barlen=20):

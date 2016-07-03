@@ -147,14 +147,15 @@ class Aim(dj.Lookup):
     definition = """  # what is being imaged (e.g. somas, axon) and why
     aim : varchar(40)   # short description of what is imaged and why
     """
-    contents = [
-        ['unset'],
-        ['functional: somas'],
-        ['functional: axons'],
-        ['functional: axons, somas'],
-        ['functional: axons-green, somas-red'],
-        ['functional: axons-red, somas-green'],
-        ['structural']]
+
+    contents = tuple(zip(['unset',
+                          'functional: somas',
+                          'functional: axons',
+                          'functional: axons, somas',
+                          'functional: axons-green, somas-red',
+                          'functional: axons-red, somas-green',
+                          'structural']
+                         ))
 
 
 @schema
