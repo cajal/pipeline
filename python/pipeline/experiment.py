@@ -148,13 +148,14 @@ class Aim(dj.Lookup):
     aim : varchar(40)   # short description of what is imaged and why
     """
 
-    contents = tuple(zip(('unset',
+    contents = tuple(zip(['unset',
                           'functional: somas',
                           'functional: axons',
                           'functional: axons, somas',
                           'functional: axons-green, somas-red',
                           'functional: axons-red, somas-green',
-                          'structural')))
+                          'structural']
+                         ))
 
 
 @schema
