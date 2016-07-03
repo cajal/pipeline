@@ -1,30 +1,27 @@
 %{
-monet.OriDesign (computed) # design matrix
--> monet.DriftTrialSet
--> monet.CaKinetics
------
-ndirections     : tinyint    # number of directions
-design_matrix   : longblob   # times x nConds
-regressor_cov   : longblob   # regressor covariance matrix,  nConds x nConds
+fields.OriDesignMatrix (computed) # design matrix for directional response
+-> fields.Directional
+-> fields.CaKernel
+---
+design_matrix               : longblob                      # times x nConds
+regressor_cov               : longblob                      # regressor covariance matrix,  nConds x nConds
 %}
 
-classdef OriDesign < dj.Relvar & dj.AutoPopulate
-    
-    properties
-        popRel = (monet.DriftTrialSet * monet.CaKinetics) & (rf.Sync*psy.MovingNoise)
-    end
-    
-    
-    methods(Access=protected)
-        
-        function makeTuples(self, key)
-            caTimes = fetch1(rf.Sync & key, 'frame_times');
-            trials = fetch(monet.DriftTrial & key, 'onset', 'offset', 'direction');
-            opt = fetch(monet.CaKinetics & key, '*');
+
+classdef OriDesignMatrix < dj.Relvar & dj.AutoPopulate
+
+	properties
+		popRel = fields.Directional*fields.CaKernel
+	end
+
+	methods(Access=protected)
+
+		function makeTuples(self, key)
+            caTimes = fetch1(preprocess.Sync & key, 'frame_times');
+            trials = fetch(fields.DirectionalTrial & key, 'onset', 'offset', 'direction');
+            opt = fetch(fields.CaKernel & key, '*');
             disp 'constructing design matrix...'
-            G = monet.OriDesign.makeDesignMatrix(caTimes, trials, opt);
-            
-            key.ndirections = size(G,2);
+            G = fields.OriDesignMatrix.makeDesignMatrix(caTimes, trials, opt);            
             key.design_matrix = single(G);
             key.regressor_cov = single(G'*G);
             self.insert(key)
@@ -43,7 +40,7 @@ classdef OriDesign < dj.Relvar & dj.AutoPopulate
             % relevant trials
             [directions,~,condIdx] = unique([trials.direction]);
             assert(directions(1) == 0 && length(directions) >= 8 && ...
-                all(diff(directions)==diff(directions(1:2))), ...
+                all(abs(diff(diff(directions)))<1e-6), ...
                 'motion directions must be uninformly distributed around the circle')
             
             G = zeros(length(times), length(unique(condIdx)), 'single');
