@@ -18,7 +18,7 @@ classdef ExtractRaw < dj.Relvar & dj.AutoPopulate
         
         function makeTuples(self, key)
             %% !!! compute missing fields for key here
-            if ~isempty(preprocess.PrepareGalvo & key)
+            if ~count(preprocess.PrepareGalvo & key)
                 
                 
                 [d2, d1, um_width, um_height, nslices] = fetch1(preprocess.PrepareGalvo & key, ...
@@ -96,7 +96,7 @@ classdef ExtractRaw < dj.Relvar & dj.AutoPopulate
                 end
 
                 %% extract AOD
-            elseif ~isempty(preprocess.PrepareAod & key)
+            elseif ~count(preprocess.PrepareAod & key)
                 error('AOD trace extraction not implemented.')
             else
                 error('Cannot match scan to neither Galvo nor AOD.')
