@@ -150,7 +150,7 @@ class ExtractRaw(dj.Imported):
     class GalvoSegmentation(dj.Part):
         definition = """  # segmentation of galvo movies
         -> ExtractRaw
-        -> Prepare.GalvoMotion
+        -> Slice
         ---
         segmentation_mask=null  :  longblob
         """
@@ -163,6 +163,15 @@ class ExtractRaw(dj.Imported):
         mask_pixels          :longblob      # indices into the image in column major (Fortran) order
         mask_weights = null  :longblob      # weights of the mask at the indices above
         """
+
+    class SpikeRate(dj.Part):
+        definition = """
+        # spike trace extracted while segmentation
+        -> ExtractRaw.Trace
+        ---
+        spike_trace :longblob
+        """
+
 
     def _make_tuples(self, key):
         """ implemented in matlab """
