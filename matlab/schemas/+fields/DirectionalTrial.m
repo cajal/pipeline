@@ -11,12 +11,4 @@ offset                      : double                        # (s) offset time in
 
 
 classdef DirectionalTrial < dj.Relvar
-	methods
-
-		function makeTuples(self, key)
-		%!!! compute missing fields for key here
-			self.insert(key)
-		end
-	end
-
 end
