@@ -1,7 +1,8 @@
 %{
 fields.OriMap (imported) # pixelwise responses to full-field directional stimuli
 -> fields.OriDesignMatrix
--> preprocess.PrepareGalvoMotion
+-> preprocess.PrepareGalvo
+-> preprocess.Slice
 ---
 regr_coef_maps              : longblob                      # regression coefficients, width x height x nConds
 r2_map                      : longblob                      # pixelwise r-squared after gaussinization
@@ -12,7 +13,7 @@ dof_map                     : longblob                      # degrees of in orig
 classdef OriMap < dj.Relvar & dj.AutoPopulate
 
 	properties
-		popRel = fields.OriDesignMatrix*preprocess.PrepareGalvoMotion
+		popRel = fields.OriDesignMatrix*preprocess.PrepareGalvo*preprocess.Slice & 'slice>=1 and slice<=nslices'
 	end
 
 	methods(Access=protected)
@@ -24,11 +25,16 @@ classdef OriMap < dj.Relvar & dj.AutoPopulate
                        
             disp 'loading movie...'
             fixRaster = get_fix_raster_fun(preprocess.PrepareGalvo & key);
-            fixMotion = get_fix_motion_fun(preprocess.PrepareGalvoMotion & key);
-            [height, width, nslices] = fetch1(pre.ScanInfo & key, 'px_height', 'px_width', 'nslices');
+            if exists(preprocess.PrepareGalvoMotion & key)
+                fixMotion = get_fix_motion_fun(preprocess.PrepareGalvoMotion & key);
+            else
+                % no motion correction
+                fixMotion = @(img, i) img;
+            end
+            [height, width, nslices] = fetch1(preprocess.PrepareGalvo & key, 'px_height', 'px_width', 'nslices');
             designMatrix = designMatrix(key.slice:nslices:end,:);
             designMatrix = bsxfun(@minus, designMatrix, mean(designMatrix));
-            reader = pre.getReader(key);
+            reader = preprocess.getGalvoReader(key);
             nframes = reader.nframes;
             assert(size(designMatrix,1)==nframes, 'movie reads incorrectly')
             frames = any(designMatrix, 2);
