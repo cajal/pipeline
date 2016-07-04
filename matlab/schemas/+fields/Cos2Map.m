@@ -54,11 +54,11 @@ classdef Cos2Map < dj.Relvar & dj.AutoPopulate
     methods
         function plot(self)
             for key = self.fetch()'
-                g = fetch1(pre.AlignMotion & key, 'avg_frame');
-                g = double(g);
-                g = g - 0.8*imfilter(g,fspecial('gaussian',201,70));
-                g = max(0,g-quantile(g(:),0.005));
-                g = min(1,g/quantile(g(:),0.99));
+%                 g = fetch1(preprocess.PrepareGalvoAverageFrame & key & 'channel=1', 'frame');
+%                 g = double(g);
+%                 g = g - 0.8*imfilter(g,fspecial('gaussian',201,70));
+%                 g = max(0,g-quantile(g(:),0.005));
+%                 g = min(1,g/quantile(g(:),0.99));
                 [amp, r2, ori, ~] = fetch1(fields.Cos2Map & key, ...
                     'cos2_amp', 'cos2_r2', 'pref_ori', 'cos2_fp');
                 amp = min(1,amp/quantile(amp(:),0.999)).^(0.7);
@@ -69,10 +69,10 @@ classdef Cos2Map < dj.Relvar & dj.AutoPopulate
                 image(img)
                 axis image
                 axis off
-                                 
-                 f = sprintf('~/Desktop/orimaps/cos2map-%05d-%03d-slice%u-%02d.png', ...
-                     key.animal_id, key.scan_idx, key.slice, key.ca_kinetics);
-                 imwrite(img,f,'png')
+                f = sprintf('cos2map-%05d-%03d-slice%u-%02d.png', ...
+                    key.animal_id, key.scan_idx, key.slice, key.kernel);
+                disp(['saving ' f])
+                imwrite(img,f,'png')
             end
         end
     end
