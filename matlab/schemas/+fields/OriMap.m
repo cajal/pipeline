@@ -34,11 +34,7 @@ classdef OriMap < dj.Relvar & dj.AutoPopulate
             frames = any(designMatrix, 2);
             frames = find(frames, 1, 'first'):find(frames, 1, 'last');
             designMatrix = designMatrix(frames,:);
-            X = zeros(length(frames), height*width, 'single');
-            M = mean(X);
-            X = bsxfun(@minus, X, M);
-            X = bsxfun(@rdivide, X, M);
-            
+            X = zeros(length(frames), height*width, 'single');            
             for iframe=1:length(frames)
                 if ismember(iframe,[1 10 100 500 1000 5000 nframes]) || mod(iframe,10000)==0
                     fprintf('Frame %5d/%d  %4.1fs\n', iframe, nframes, toc);
@@ -46,6 +42,12 @@ classdef OriMap < dj.Relvar & dj.AutoPopulate
                 frame = fixMotion(fixRaster(double(reader(:,:,1,key.slice,frames(iframe)))), frames(iframe));
                 X(iframe,:) = frame(:);
             end
+            ix = any(isnan(X),2);
+            X(ix,:) = [];
+            designMatrix(ix,:) = [];
+            M = mean(X);
+            X = bsxfun(@minus, X, M);
+            X = bsxfun(@rdivide, X, M);
             
             disp inverting..
             [B, R2, ~, DoF] = ne7.stats.regress(X, designMatrix, 0);
