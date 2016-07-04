@@ -2,6 +2,7 @@ import datajoint as dj
 from . import mice
 
 from distutils.version import StrictVersion
+
 assert StrictVersion(dj.__version__) >= StrictVersion('0.2.7')
 
 schema = dj.schema('pipeline_experiment', locals())
@@ -119,7 +120,7 @@ class BrainArea(dj.Lookup):
         ('PM', ''),
         ('POR', ''),
         ('RL', '')
-     ]
+    ]
 
 
 @schema
@@ -147,14 +148,14 @@ class Aim(dj.Lookup):
     definition = """  # what is being imaged (e.g. somas, axon) and why
     aim : varchar(40)   # short description of what is imaged and why
     """
-    contents = [
-        ['unset'],
-        ['functional: somas'],
-        ['functional: axons'],
-        ['functional: axons, somas'],
-        ['functional: axons-green, somas-red'],
-        ['functional: axons-red, somas-green'],
-        ['structural']]
+
+    contents = [['unset'],
+                ['functional: somas'],
+                ['functional: axons'],
+                ['functional: axons, somas'],
+                ['functional: axons-green, somas-red'],
+                ['functional: axons-red, somas-green'],
+                ['structural']]
 
 
 @schema
@@ -249,7 +250,7 @@ def migrate_reso_pipeline():
     FOV().insert(rf.FOV().proj('width', 'height', rig="setup", fov_ts="fov_date").fetch(), skip_duplicates=True)
 
     # migrate Session
-    sessions_to_migrate = rf.Session()*common.Animal() & 'session_date>"2016-02"' & 'animal_id>0'
+    sessions_to_migrate = rf.Session() * common.Animal() & 'session_date>"2016-02"' & 'animal_id>0'
     w = sessions_to_migrate.proj(
         'session_date',
         'anesthesia',
@@ -268,7 +269,7 @@ def migrate_reso_pipeline():
 
     # migrate scans
 
-    scans = (rf.Session().proj('lens', 'file_base')*rf.Scan()).proj(
+    scans = (rf.Session().proj('lens', 'file_base') * rf.Scan()).proj(
         'lens',
         'laser_wavelength',
         'laser_power',

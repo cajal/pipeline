@@ -73,5 +73,4 @@ class Eye(dj.Imported):
     def _make_tuples(self, key):
         pass
 
-
 schema.spawn_missing_classes()
