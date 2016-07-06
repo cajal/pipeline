@@ -68,8 +68,12 @@ classdef PrepareGalvo < dj.Relvar
             skipFrames = max(0, min(2000, key.nframes-5000));
             accumFrames = min(3000, key.nframes-skipFrames);
             movie = reader(:,:,1,ceil(end/2),skipFrames+(1:accumFrames));
-            mean_value =  squeeze(mean(mean(movie,1),2));
-            if accumFrames < 500 || median(mean_value) < 10 || quantile(mean_value,0.5) < 0.5*quantile(mean_value,0.95)
+            meanFrameValue =  squeeze(mean(mean(movie,1),2));
+            % TODO: darkAxons is a hack -- update this 
+            darkAxons = strcmp(fetch1(experiment.Scan & key, 'aim'), 'functional: axons') && key.nchannels==1;
+            if ~darkAxons && (...
+                    daraccumFrames < 500 || median(meanFrameValue) < 10 || ...
+                    quantile(meanFrameValue,0.5) < 0.5*quantile(meanFrameValue,0.95))
                 warning 'recording did not record properly, aborting preprocessing....'
                 ret = false;
                 return                
@@ -78,7 +82,7 @@ classdef PrepareGalvo < dj.Relvar
             clear movie
             
             % raster correction
-            if key.bidirectional     % disabled raster correction temporarily
+            if key.bidirectional && ~darkAxons    % disabled raster correction temporarily
                 taper = 10;  % the larger the number the thinner the taper
                 sz = size(key.preview_frame);
                 mask = atan(taper*hanning(sz(2)))'/atan(taper);
@@ -88,7 +92,7 @@ classdef PrepareGalvo < dj.Relvar
                 key.raster_phase = 0;
             end
             self.insert(key)
-            ret = true;
+            ret = ~darkAxons;
         end
         
     end

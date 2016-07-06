@@ -11,7 +11,7 @@ regressor_cov               : longblob                      # regressor covarian
 classdef OriDesignMatrix < dj.Relvar & dj.AutoPopulate
 
 	properties
-		popRel = fields.Directional*fields.CaKernel
+		popRel = fields.Directional*fields.CaKernel & 'kernel=0'
 	end
 
 	methods(Access=protected)

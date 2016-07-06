@@ -18,7 +18,7 @@ classdef Directional < dj.Relvar & dj.AutoPopulate
             iTrial = 0;
             trialTuples = [];
             for trialKey = fetch(psy.Trial * preprocess.Sync & psy.MovingNoise & key)'
-                frameTimes = fetch1(rf.Sync & trialKey, 'frame_times');
+                frameTimes = fetch1(preprocess.Sync & trialKey, 'frame_times');
                 [params, flips] = fetch1(...
                     psy.MovingNoise*psy.MovingNoiseLookup*psy.Trial & trialKey, ...
                     'params', 'flip_times');
