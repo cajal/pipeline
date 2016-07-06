@@ -61,14 +61,11 @@ classdef Cos2Map < dj.Relvar & dj.AutoPopulate
 %                 g = min(1,g/quantile(g(:),0.99));
                 [amp, r2, ori, ~] = fetch1(fields.Cos2Map & key, ...
                     'cos2_amp', 'cos2_r2', 'pref_ori', 'cos2_fp');
-                amp = min(1,amp/quantile(amp(:),0.999)).^(0.7);
+                amp = min(1,amp/quantile(amp(:),0.999)).^(0.8);
                 h = mod(ori,pi)/pi;   % orientation is represented as hue
                 s = max(0, min(1, amp/0.1));   % only significantly tuned pixels are shown in color
-                v = sqrt(max(0,r2))/0.15;  % brightness is proportional to variance explained, scaled between 0 and 10 %
+                v = ((max(0,r2)+0.002).^.2-0.002^.2)/0.3;  % brightness is proportional to variance explained, scaled between 0 and 10 %
                 img = hsv2rgb(cat(3, h, s, max(0,min(v,1))));
-                image(img)
-                axis image
-                axis off
                 f = sprintf('cos2map-%05d-%03d-slice%u-%02d.png', ...
                     key.animal_id, key.scan_idx, key.slice, key.kernel);
                 disp(['saving ' f])

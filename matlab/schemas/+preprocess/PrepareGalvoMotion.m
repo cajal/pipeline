@@ -80,8 +80,8 @@ classdef PrepareGalvoMotion < dj.Relvar
             tic
             fprintf('Motion alignment: ')
             % prepare
-            [nframes, nslices] = fetch1(preprocess.PrepareGalvo & key, ...
-                'nframes', 'nslices');
+            [nframes, nslices, nchannels] = fetch1(preprocess.PrepareGalvo & key, ...
+                'nframes', 'nslices', 'nchannels');
             [dx,dy] = fetch1(preprocess.PrepareGalvo & key, ...
                 'um_width/px_width->dx', 'um_height/px_height->dy');
             zero = 0;
@@ -93,7 +93,8 @@ classdef PrepareGalvoMotion < dj.Relvar
             sz = size(reader);
             k = gausswin(41); k=k/sum(k);
             sharpen = @(im) im-imfilter(imfilter(im,k,'symmetric'),k','symmetric');
-            taper = 40;  % the larger the number the thinner the taper
+            smoothen = @(im) imfilter(im, [1 2 1]'/4, 'symmetric');
+            taper = 20;  % the larger the number the thinner the taper
             mask = atan(taper*hanning(sz(1)))*atan(taper*hanning(sz(2)))'/atan(taper)^2;
             
             skipFrames = max(0, min(2000, nframes-5000));
@@ -105,22 +106,22 @@ classdef PrepareGalvoMotion < dj.Relvar
                 fprintf 'Creating template... '
                 movie = getFrames(islice, skipFrames+(1:accumFrames));
                 rms = @(img) sqrt(sum(sum(img.^2,1),2));
-                template = mean(movie, 5);
+                template = smoothen(mean(movie, 5)); 
                 for i=1:4
                     corr = bsxfun(@rdivide, mean(mean(bsxfun(@times, movie, template), 1), 2)./rms(movie),rms(template));
                     select = bsxfun(@gt, corr, quantile(corr, 0.75, 5));
-                    template = bsxfun(@rdivide, sum(bsxfun(@times, movie, select),5), sum(select, 5));
+                    template = smoothen(bsxfun(@rdivide, sum(bsxfun(@times, movie, select),5), sum(select, 5)));
                 end
                 key.template = single(template);
-                clear movie               
                 
                 templateMean = mean(template(:));
-                template = sharpen(mask.*(template - templateMean));
+                template = mask.*sharpen(mask.*(template - templateMean));
                 ftemplate = conj(fft2(double(template)));
                 nframes = reader.nframes;
                 xy = nan(2,nframes);
 
                 disp 'Aligning...'
+                avgFrame = 0;
                 for iframe = 1:nframes
                     if ismember(iframe,[1 10 100 500 1000 5000 nframes]) || mod(iframe,10000)==0
                         fprintf('Frame %5d/%d  %4.1fs\n', iframe, nframes, toc);
@@ -134,6 +135,9 @@ classdef PrepareGalvoMotion < dj.Relvar
                         [x, y] = ne7.ip.measureShift(fft2(frame).*ftemplate);
                     end
                     xy(:,iframe) = [x;y];
+                    if ~isnan(x) && ~isnan(y) 
+                        avgFrame = avgFrame + ne7.ip.correctMotion(frame, [x;y])/nframes;
+                    end
                 end
                 key.motion_xy = xy;
                 
