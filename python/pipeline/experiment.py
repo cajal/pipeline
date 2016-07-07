@@ -239,6 +239,13 @@ class Scan(dj.Manual):
     """
 
 
+@schema
+class ScanIgnored(dj.Manual):
+    definition = """  # scans to ignore
+    -> Scan
+    """
+
+
 schema.spawn_missing_classes()
 
 
