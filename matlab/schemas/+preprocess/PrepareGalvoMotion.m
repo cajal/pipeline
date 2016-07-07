@@ -76,7 +76,7 @@ classdef PrepareGalvoMotion < dj.Relvar
 %     end
     
         
-        function makeTuples(self, key, reader)
+        function makeTuples(self, key, reader, movie)
             tic
             fprintf('Motion alignment: ')
             % prepare
@@ -89,8 +89,8 @@ classdef PrepareGalvoMotion < dj.Relvar
             quantal_size = 50;  % from prior experience
             anscombe = @(img) 2*sqrt(max(0, img-zero)/quantal_size+3/8);   % Anscombe transform
             fixRaster = get_fix_raster_fun(preprocess.PrepareGalvo & key);
-            getFrames = @(islice, iframe) fixRaster(anscombe(double(reader(:,:,key.channel,islice,iframe))));
-            sz = size(reader);
+            getFrames = @(islice, iframe) fixRaster(anscombe(double(movie(:,:,key.channel,islice,iframe))));
+            sz = size(movie);
             k = gausswin(41); k=k/sum(k);
             sharpen = @(im) im-imfilter(imfilter(im,k,'symmetric'),k','symmetric');
             smoothen = @(im) imfilter(im, [1 2 1]'/4, 'symmetric');
