@@ -19,6 +19,7 @@ classdef Prepare < dj.Relvar & dj.AutoPopulate
             switch software
                 case 'scanimage'
                     reader = preprocess.getGalvoReader(key);
+                    makeTuples(preprocess.PrepareGalvo, reader)
                     makeTuples(preprocess.PrepareGalvoMotion, key, reader)
                     makeTuples(preprocess.PrepareGalvoAverageFrame, key, reader)
                 otherwise
