@@ -179,6 +179,22 @@ class ExtractRaw(dj.Imported):
 
 
 @schema
+class Sync(dj.Imported):
+    definition = """
+    -> Prepare
+    ---
+    -> psy.Session
+    first_trial                 : int                           # first trial index from psy.Trial overlapping recording
+    last_trial                  : int                           # last trial index from psy.Trial overlapping recording
+    signal_start_time           : double                        # (s) signal start time on stimulus clock
+    signal_duration             : double                        # (s) signal duration on stimulus time
+    frame_times = null          : longblob                      # times of frames and slices
+    sync_ts=CURRENT_TIMESTAMP   : timestamp                     # automatic
+    """
+
+
+
+@schema
 class ComputeTraces(dj.Computed):
     definition = """   # compute traces
     -> ExtractRaw
@@ -197,19 +213,41 @@ class ComputeTraces(dj.Computed):
         raise NotImplementedError
 
 
+
 @schema
-class Sync(dj.Imported):
+class SpikeMethod(dj.Lookup):
     definition = """
-    -> Prepare
+    spike_method   :  smallint   # spike inference method
     ---
-    -> psy.Session
-    first_trial                 : int                           # first trial index from psy.Trial overlapping recording
-    last_trial                  : int                           # last trial index from psy.Trial overlapping recording
-    signal_start_time           : double                        # (s) signal start time on stimulus clock
-    signal_duration             : double                        # (s) signal duration on stimulus time
-    frame_times = null          : longblob                      # times of frames and slices
-    sync_ts=CURRENT_TIMESTAMP   : timestamp                     # automatic
+    spike_method_name     : varchar(16)   #  short name to identify the spike inference method
+    spike_method_details  : varchar(255)  #  more details about
+    language :  enum('matlab','python')   #  implementation language
     """
+
+    contents = [
+        [2, "fastoopsi", "nonnegative sparse deconvolution from Vogelstein (2010)", "matlab"],
+        [3, "stm", "spike triggered mixture model from Theis et al. (2016)",  "python"],
+        [4, "improved oopsi", "", "matlab"]
+    ]
+
+
+@schema
+class Spikes(dj.Computed):
+    definition = """  # infer spikes from calcium traces
+    -> ComputeTraces
+    -> SpikeMethod
+    """
+
+    class RateTrace(dj.Part):
+        definition = """  # Inferred
+        -> Spikes
+        -> ComputeTraces.Trace
+        ---
+        rate_trace = null  : longblob     # leave null same as ExtractRaw.Trace
+        """
+
+    def _make_tuples(self, key):
+        raise NotImplementedError
 
 
 schema.spawn_missing_classes()
