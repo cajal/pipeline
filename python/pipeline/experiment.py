@@ -202,8 +202,9 @@ class Session(dj.Manual):
     -> Anesthesia
     -> PMTFilterSet
     scan_path                     : varchar(255)                  # file path for TIFF stacks
+    behavior_path =""             : varchar(255)   # pupil movies, whisking, locomotion, etc.
     craniotomy_notes=""           : varchar(4095)                 # free-text notes
-    session_notes=""               : varchar(4095)                 # free-text notes
+    session_notes=""              : varchar(4095)                 # free-text notes
     session_ts=CURRENT_TIMESTAMP  : timestamp                     # automatic
     """
 
@@ -228,8 +229,9 @@ class Scan(dj.Manual):
     laser_wavelength            : float                         # (nm)
     laser_power                 : float                         # (mW) to brain
     filename                    : varchar(255)                  # file base name
+    behavior_filename=""        : varchar(255)   # pupil movies, whisking, locomotion, etc.
     -> Aim
-    depth=0                    : int                           # manual depth measurement
+    depth=0                     : int                           # manual depth measurement
     scan_notes                  : varchar(4095)                 # free-notes
     site_number=0               : tinyint                       # site number
     -> Software
