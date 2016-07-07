@@ -21,10 +21,12 @@ classdef Prepare < dj.Relvar & dj.AutoPopulate
                 case 'scanimage'
                     reader = preprocess.getGalvoReader(key);
                     if STORE_IN_MEMORY
-                        disp 'reading entire movie'
+                        fprintf 'reading entire movie.. '
+                        tic
                         movie = reader(:,:,:,:,:);
+                        fprint('%f4.1s\n', toc)
                     else
-                        movie = preprocess.getGalvoReader(key);
+                        movie = reader;
                     end
                     makeTuples(preprocess.PrepareGalvo, key, reader, movie)
                     makeTuples(preprocess.PrepareGalvoMotion, key, reader, movie)
