@@ -24,7 +24,7 @@ classdef Prepare < dj.Relvar & dj.AutoPopulate
                         fprintf 'reading entire movie.. '
                         tic
                         movie = reader(:,:,:,:,:);
-                        fprint('%f4.1s\n', toc)
+                        fprintf('%f4.1s\n', toc)
                     else
                         movie = reader;
                     end
