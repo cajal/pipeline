@@ -88,3 +88,5 @@ class Cos2Map(dj.Computed):
     cos2_fp    : longblob   # p-value of F-test (after gaussinization)
     pref_ori   : longblob   # (radians) preferred direction
     """
+
+schema.spawn_missing_classes()
