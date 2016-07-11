@@ -1,5 +1,10 @@
 import datajoint as dj
 from . import experiment, psy
+from warnings import warn
+try:
+    import c2s
+except:
+    warn("c2s was not found. You won't be able to populate ExtracSpikes")
 
 from distutils.version import StrictVersion
 assert StrictVersion(dj.__version__) >= StrictVersion('0.2.8')
@@ -210,7 +215,11 @@ class ComputeTraces(dj.Computed):
         """
 
     def _make_tuples(self, key):
-        raise NotImplementedError
+        if (experiment.Session.Fluorophore()& key).fetch1['fluorophore'] != 'Twitch2B' and (ExtractRaw.Trace() & key):
+            print('Populating', key)
+            self.insert1(key)
+            self.Trace().insert((ExtractRaw.Trace() & key).proj(trace='raw_trace').fetch())
+
 
 
 
@@ -231,6 +240,24 @@ class SpikeMethod(dj.Lookup):
     ]
 
 
+    def infer_spikes(self, X, dt, trace_name='trace'):
+        assert self.fetch1['language'] == 'python', "This tuple cannot be computed in python."
+        fps = 1 / dt
+        spike_rates = []
+        N = len(X)
+        for i, trace in enumerate(X):
+            print('Predicting trace %i/%i' % (i + 1, N))
+            trace['calcium'] = trace.pop(trace_name).T
+            trace['fps'] = fps
+
+            data = c2s.preprocess([trace], fps=fps)
+            data = c2s.predict(data, verbosity=0)
+            data[0]['spike_trace'] = data[0].pop('predictions').T
+            data[0].pop('calcium')
+            data[0].pop('fps')
+            spike_rates.append(data[0])
+        return spike_rates
+
 @schema
 class Spikes(dj.Computed):
     definition = """  # infer spikes from calcium traces
@@ -247,8 +274,11 @@ class Spikes(dj.Computed):
         """
 
     def _make_tuples(self, key):
-        raise NotImplementedError
-
+        dt = 1 / (Prepare() & key).fetch1['fps']
+        X = (ComputeTraces() & key).project('trace').fetch.as_dict()
+        X = (SpikeMethod() & key).infer_spikes(X, dt)
+        for x in X:
+            self.insert1(dict(key, **x))
 
 schema.spawn_missing_classes()
 
