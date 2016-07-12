@@ -1,6 +1,7 @@
 import datajoint as dj
 from . import experiment, psy
 from warnings import warn
+import numpy as np
 try:
     import c2s
 except:
@@ -10,6 +11,12 @@ from distutils.version import StrictVersion
 assert StrictVersion(dj.__version__) >= StrictVersion('0.2.8')
 
 schema = dj.schema('pipeline_preprocess', locals())
+
+
+def notnan(x, start=0, increment=1):
+    while np.isnan(x[start]) and start < len(x) and start >= 0:
+        start += increment
+    return start
 
 
 def erd():
@@ -240,23 +247,28 @@ class SpikeMethod(dj.Lookup):
     ]
 
 
-    def infer_spikes(self, X, dt, trace_name='trace'):
+    def spike_traces(self, X, fps):
         assert self.fetch1['language'] == 'python', "This tuple cannot be computed in python."
-        fps = 1 / dt
-        spike_rates = []
-        N = len(X)
-        for i, trace in enumerate(X):
-            print('Predicting trace %i/%i' % (i + 1, N))
-            trace['calcium'] = trace.pop(trace_name).T
-            trace['fps'] = fps
+        if self.fetch1['spike_method'] == 3:
+            spike_rates = []
+            N = len(X)
+            for i, trace in enumerate(X):
+                print('Predicting trace %i/%i' % (i + 1, N))
+                tr0 = np.array(trace.pop('trace').squeeze())
+                start = notnan(tr0)
+                end = notnan(tr0,len(tr0)-1, increment=-1)
+                trace['calcium'] = np.atleast_2d(tr0[start:end+1])
 
-            data = c2s.preprocess([trace], fps=fps)
-            data = c2s.predict(data, verbosity=0)
-            data[0]['spike_trace'] = data[0].pop('predictions').T
-            data[0].pop('calcium')
-            data[0].pop('fps')
-            spike_rates.append(data[0])
-        return spike_rates
+                trace['fps'] = fps
+                data = c2s.preprocess([trace], fps=fps)
+                data = c2s.predict(data, verbosity=0)
+
+                tr0[start:end+1] = data[0].pop('predictions').squeeze()
+                data[0]['rate_trace'] = tr0
+                data[0].pop('calcium')
+                data[0].pop('fps')
+
+                yield data[0]
 
 @schema
 class Spikes(dj.Computed):
@@ -264,6 +276,10 @@ class Spikes(dj.Computed):
     -> ComputeTraces
     -> SpikeMethod
     """
+
+    @property
+    def key_source(self):
+        return (ComputeTraces() * SpikeMethod() & dict(spike_method_name='stm')).proj()
 
     class RateTrace(dj.Part):
         definition = """  # Inferred
@@ -274,11 +290,12 @@ class Spikes(dj.Computed):
         """
 
     def _make_tuples(self, key):
-        dt = 1 / (Prepare() & key).fetch1['fps']
-        X = (ComputeTraces() & key).project('trace').fetch.as_dict()
-        X = (SpikeMethod() & key).infer_spikes(X, dt)
-        for x in X:
-            self.insert1(dict(key, **x))
+        prep = (Prepare() * Prepare.Aod() & key) or (Prepare() * Prepare.Galvo() & key)
+        fps = prep.fetch1['fps']
+        X = (ComputeTraces.Trace() & key).proj('trace').fetch.as_dict()
+        self.insert1(key)
+        for x in (SpikeMethod() & key).spike_traces(X, fps):
+            self.RateTrace().insert1(dict(key, **x))
 
 schema.spawn_missing_classes()
 
