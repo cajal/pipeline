@@ -30,41 +30,56 @@ classdef ExtractRaw < dj.Relvar & dj.AutoPopulate
                 segmentation_method = fetch1(preprocess.Method*preprocess.MethodGalvo & key, 'segmentation');
                 switch segmentation_method
                     case 'nmf'
-                        fprintf('NMF segmentation for Gavlo scan\n')
+                        fprintf('NMF segmentation for Galvo scan\n')
                         [d2, d1, nslices, nframes] = fetch1(preprocess.PrepareGalvo & key, 'px_width', 'px_height','nslices','nframes');
                         self.set_nmf_parameters(key);
                         
-                        channel = 1;  % TODO: change to more flexible choice
-                        trace_id = 1;
+                        
                         fprintf('\tInitializing reader\n');
-                        reader = preprocess.getGalvoReader(key);
+                        [loader, channel] = experiment.create_loader(key);
                         
                         self.insert(key);
+                        trace_id = 1;
+                        
                         for islice = 1:nslices
                             fprintf('\tLoading data %i:%i for slice %i\n', self.mask_range(1), self.mask_range(end), ...
                                 islice);
-                            Y = squeeze(self.load_galvo_scan(key, islice, channel, self.mask_range, reader));
+                            
+                            
+                            Y = loader(islice, self.mask_range);
+                            if ~preprocess.check_nans(Y)
+                                error('Too many NaNs in frames for mask inference');
+                            end
                             
                             fprintf('\tInferring masks\n');
-                            try 
+                            try
                                 [A, b] = self.run_nmf(Y);
                             catch ME
                                 if strcmp(ME.identifier,'MATLAB:imresize:expectedNonempty')
-                                    fprintf('\tCaught non-empty exception. No neuron found!\n');
-                                    return 
+                                    fprintf('\tCaught non-empty exception. No neuron found! Continuing to next slice. \n');
+                                    continue
                                 end
                             end
+                            
                             fprintf('\tMasks inferred successfully. Inferring spikes\n');
                             traces = zeros(size(A,2), nframes);
                             S = 0*traces;
                             for start = 1:self.batchsize:nframes
-                                idx = start:min(nframes, start + self.batchsize - 1);
-                                fprintf('\t\tInferring spikes for frames %i:%i\n', idx(1), idx(end));
-                                Y = squeeze(self.load_galvo_scan(key, islice, channel, idx));
-                                traces(:, idx) = A'*reshape(Y,d1*d2,size(Y,3));
-                                S(:,idx) = self.nmf_spikes(A, b, Y);
+                                batch = start:min(nframes, start + self.batchsize - 1);
+                                
+                                fprintf('\t\tInferring spikes for frames %i:%i\n', batch(1), batch(end));
+                                Y = loader(islice, batch);
+                                [ok, nans] = preprocess.check_nans(Y,[], (start == 1) - (batch(end) == nframes));
+                                if ~ok
+                                    error('Too many Nans in frames');
+                                elseif ok < 0
+                                    Y = Y(:,:,~nans);
+                                    traces(:,batch(nans)) = NaN;
+                                    S(:,batch(nans)) = NaN;
+                                end
+                                traces(:, batch(~nans)) = A'*reshape(Y,d1*d2,size(Y,3));
+                                S(:,batch(~nans)) = self.nmf_spikes(A, b, Y);
                             end
-                            S(isnan(traces)) = nan;
                             
                             fprintf('\tInserting masks, traces, and spikes\n');
                             self.insert_traces(key, traces, channel, trace_id);
@@ -167,36 +182,10 @@ classdef ExtractRaw < dj.Relvar & dj.AutoPopulate
     
     methods(Static)
         
+        
+        
         %%------------------------------------------------------------
-        function scan = load_galvo_scan(key, islice, ichannel, frames, reader)
-            
-            if nargin < 5
-                reader = preprocess.getGalvoReader(key);
-            end
-            
-            %             nframes = fetch1(preprocess.PrepareGalvo & key, 'nframes');
-            
-            if nargin < 4
-                frames = 1:reader.nframes;
-            end
-            
-            [r,c] = fetch1(preprocess.PrepareGalvo & key, 'px_height', 'px_width');
-            
-            fixRaster = get_fix_raster_fun(preprocess.PrepareGalvo & key);
-            key.slice = islice;
-            fixMotion = get_fix_motion_fun(preprocess.PrepareGalvoMotion & key);
-            fprintf('\tLoading slice %d channel %d\n', islice, ichannel)
-            scan = zeros(r,c, 1, length(frames));
-            N = length(frames);
-            
-            for iframe = frames
-                if mod(iframe, 1000) == 0
-                    fprintf('\r\t\tloading frame %i (%i/%i)', iframe, iframe - frames(1) + 1, N);
-                end
-                scan(:, :, 1, iframe - frames(1) + 1) = fixMotion(fixRaster(reader(:,:,ichannel, islice, iframe)), iframe);
-            end
-            fprintf('\n');
-        end
+        
         
         %%
         function trace_id = insert_traces(key, traces, channel, trace_id)
