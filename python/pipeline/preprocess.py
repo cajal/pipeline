@@ -2,6 +2,11 @@ import datajoint as dj
 from . import experiment, psy
 from warnings import warn
 import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+import sh
+import os
+
 try:
     import c2s
 except:
@@ -17,6 +22,9 @@ def notnan(x, start=0, increment=1):
     while np.isnan(x[start]) and start < len(x) and start >= 0:
         start += increment
     return start
+
+def normalize(img):
+    return (img - img.min())/(img.max()-img.min())
 
 
 def erd():
@@ -176,6 +184,15 @@ class ExtractRaw(dj.Imported):
         mask_weights = null  :longblob      # weights of the mask at the indices above
         """
 
+        @staticmethod
+        def reshape_masks(mask_pixels, mask_weights, px_height, px_width):
+            ret = np.zeros((px_height, px_width, len(mask_pixels)))
+            for i, (mp, mw) in enumerate(zip(mask_pixels, mask_weights)):
+                mask = np.zeros(px_height * px_width)
+                mask[mp.squeeze().astype(int) - 1] = mw.squeeze()
+                ret[..., i] = mask.reshape(px_height, px_width, order='F')
+            return ret
+
     class SpikeRate(dj.Part):
         definition = """
         # spike trace extracted while segmentation
@@ -184,6 +201,50 @@ class ExtractRaw(dj.Imported):
         spike_trace :longblob
         """
 
+
+    def plot_galvo_ROIs(self, outdir='./'):
+        sns.set_context('paper')
+        theCM = sns.blend_palette(['lime', 'gold', 'deeppink'], n_colors=10)  # plt.cm.RdBu_r
+        # theCM = plt.cm.get_cmap('viridis')
+
+        for key in (self.GalvoSegmentation().proj() *  Method.Galvo() & dict(segmentation='nmf')).fetch.as_dict:
+            mask_px, mask_w, spikes = (self.GalvoROI() * self.SpikeRate() & key).fetch.order_by('trace_id')['mask_pixels', 'mask_weights', 'spike_trace']
+
+            template = np.stack([normalize(t) for t in (Prepare.GalvoAverageFrame() & key).fetch['frame']], axis=2).max(axis=2)
+
+            d1, d2 = tuple(map(int, (Prepare.Galvo() & key).fetch1['px_height', 'px_width']))
+            masks = self.GalvoROI.reshape_masks(mask_px, mask_w, d1, d2)
+            try:
+                sh.mkdir('-p', os.path.expanduser(outdir) + '/scan_idx{scan_idx}/slice{slice}'.format(**key))
+            except:
+                pass
+            gs = plt.GridSpec(6,1)
+
+            for cell, sp_trace in enumerate(spikes):
+                with sns.axes_style('white'):
+                    fig = plt.figure(figsize=(6, 8))
+                    ax_image = fig.add_subplot(gs[:-2, :])
+
+
+                with sns.axes_style('ticks'):
+                    ax_sp = fig.add_subplot(gs[-1, :])
+
+                ax_sp.plot(sp_trace.squeeze(), 'k', lw=1)
+
+                ax_image.imshow(template, cmap=plt.cm.gray)
+                ax_image.contour(masks[..., cell], colors=theCM, zorder=10)
+
+                fig.suptitle(
+                    "animal_id {animal_id}:session {session}:scan_idx {scan_idx}:{segmentation}:slice{slice}:cell{cell}".format(
+                        cell=cell + 1, **key))
+
+                sns.despine(ax=ax_sp)
+                ax_sp.axis('tight')
+
+                plt.savefig(
+                    outdir + "/scan_idx{scan_idx}/slice{slice}/cell{cell:03d}_animal_id_{animal_id}_session_{session}.png".format(
+                        cell=cell + 1, **key))
+                plt.close(fig)
 
     def _make_tuples(self, key):
         """ implemented in matlab """
