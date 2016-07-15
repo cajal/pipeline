@@ -26,7 +26,7 @@ classdef PrepareGalvoAverageFrame < dj.Relvar
             end
         end
 
-		function makeTuples(self, key, reader)
+		function makeTuples(self, key, movie)
             q = 6;
             [nframes, nslices, nchannels] = fetch1(preprocess.PrepareGalvo & key, ...
                 'nframes', 'nslices', 'nchannels');
@@ -42,7 +42,7 @@ classdef PrepareGalvoAverageFrame < dj.Relvar
                     fprintf('Averaging slice %d/%d channel %d\n', islice, nslices, ichannel) 
                     frame = 0;
                     for iframe = 1:nframes
-                        frame = frame + max(0,fixMotion(fixRaster(reader(:,:,ichannel, islice, iframe)), iframe)).^q;
+                        frame = frame + max(0,fixMotion(fixRaster(movie(:,:,ichannel, islice, iframe)), iframe)).^q;
                         if ismember(iframe,[1 10 100 500 1000 5000 nframes]) || mod(iframe,10000)==0
                             fprintf('Frame %5d/%d  %4.1fs\n', iframe, nframes, toc);
                         end

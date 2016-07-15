@@ -36,7 +36,7 @@ classdef PrepareGalvo < dj.Relvar
         end
 
         
-        function makeTuples(self, key, reader)
+        function makeTuples(self, key, reader, movie)
             
             key.nframes_requested = reader.requested_frames;
             key.nframes = reader.nframes;
@@ -67,7 +67,7 @@ classdef PrepareGalvo < dj.Relvar
             % average initial frames from channel 1
             skipFrames = max(0, min(2000, key.nframes-5000));
             accumFrames = min(3000, key.nframes-skipFrames);
-            movie = reader(:,:,1,ceil(end/2),skipFrames+(1:accumFrames));
+            movie = movie(:,:,1,ceil(end/2),skipFrames+(1:accumFrames));
             meanFrameValue =  squeeze(mean(mean(movie,1),2));
             if accumFrames < 500 || median(meanFrameValue) < 10 || ...
                     quantile(meanFrameValue,0.5) < 0.5*quantile(meanFrameValue,0.95)
