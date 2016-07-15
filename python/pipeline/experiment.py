@@ -221,21 +221,21 @@ class Session(dj.Manual):
 @schema
 class Scan(dj.Manual):
     definition = """    # scanimage scan info
+    animal_id            : int(11)                      # id number
     -> Session
-    scan_idx        : smallint               # number of TIFF stack file
+    scan_idx             : smallint(6)                  # number of TIFF stack file
     ---
     -> Lens
     -> BrainArea
-    laser_wavelength            : float                         # (nm)
-    laser_power                 : float                         # (mW) to brain
-    filename                    : varchar(255)                  # file base name
-    behavior_filename=""        : varchar(255)   # pupil movies, whisking, locomotion, etc.
-    -> Aim
-    depth=0                     : int                           # manual depth measurement
-    scan_notes                  : varchar(4095)                 # free-notes
-    site_number=0               : tinyint                       # site number
+    laser_wavelength     : float                        # (nm)
+    laser_power          : float                        # (mW) to brain
+    filename             : varchar(255)                 # file base name
+    depth="0"            : int(11)                      # manual depth measurement
+    scan_notes           : varchar(4095)                # free-notes
+    site_number="0"      : tinyint(4)                   # site number
+    software             : varchar(20)                  # name of the software
     -> Software
-    scan_ts=CURRENT_TIMESTAMP   : timestamp                     # don't edit
+    scan_ts="CURRENT_TIMESTAMP" : timestamp                    # don't edit
     """
 
 

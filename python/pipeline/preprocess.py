@@ -20,7 +20,6 @@ class Slice(dj.Lookup):
     contents = ((i,) for i in range(12))
 
 
-
 @schema
 class Channel(dj.Lookup):
     definition = """  # recording channel, directly related to experiment.PMTFilterSet.Channel
@@ -172,7 +171,6 @@ class ExtractRaw(dj.Imported):
         spike_trace :longblob
         """
 
-
     def _make_tuples(self, key):
         """ implemented in matlab """
         raise NotImplementedError
@@ -193,7 +191,6 @@ class Sync(dj.Imported):
     """
 
 
-
 @schema
 class ComputeTraces(dj.Computed):
     definition = """   # compute traces
@@ -211,7 +208,6 @@ class ComputeTraces(dj.Computed):
 
     def _make_tuples(self, key):
         raise NotImplementedError
-
 
 
 @schema
@@ -251,4 +247,3 @@ class Spikes(dj.Computed):
 
 
 schema.spawn_missing_classes()
-
