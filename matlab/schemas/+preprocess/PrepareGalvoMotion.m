@@ -104,13 +104,13 @@ classdef PrepareGalvoMotion < dj.Relvar
 
                 fprintf('Slice %d of %d\n', islice, nslices)
                 fprintf 'Creating template... '
-                movie = getFrames(islice, skipFrames+(1:accumFrames));
+                snippet = getFrames(islice, skipFrames+(1:accumFrames));
                 rms = @(img) sqrt(sum(sum(img.^2,1),2));
-                template = smoothen(mean(movie, 5)); 
+                template = smoothen(mean(snippet, 5)); 
                 for i=1:4
-                    corr = bsxfun(@rdivide, mean(mean(bsxfun(@times, movie, template), 1), 2)./rms(movie),rms(template));
+                    corr = bsxfun(@rdivide, mean(mean(bsxfun(@times, snippet, template), 1), 2)./rms(snippet),rms(template));
                     select = bsxfun(@gt, corr, quantile(corr, 0.75, 5));
-                    template = smoothen(bsxfun(@rdivide, sum(bsxfun(@times, movie, select),5), sum(select, 5)));
+                    template = smoothen(bsxfun(@rdivide, sum(bsxfun(@times, snippet, select),5), sum(select, 5)));
                 end
                 key.template = single(template);
                 
@@ -151,10 +151,4 @@ classdef PrepareGalvoMotion < dj.Relvar
         end
     end
     
-end
-
-
-
-function j = argmax(r)
-[~,j] = max(r);
 end
