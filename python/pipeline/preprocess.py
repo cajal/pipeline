@@ -1,16 +1,9 @@
 import datajoint as dj
-from . import experiment, psy
+from . import experiment, vis
 from warnings import warn
 import numpy as np
-import seaborn as sns
-import matplotlib.pyplot as plt
 import sh
 import os
-
-try:
-    import c2s
-except:
-    warn("c2s was not found. You won't be able to populate ExtracSpikes")
 
 from distutils.version import StrictVersion
 
@@ -203,6 +196,9 @@ class ExtractRaw(dj.Imported):
         """
 
     def plot_galvo_ROIs(self, outdir='./'):
+        import seaborn as sns
+        import matplotlib.pyplot as plt
+
         sns.set_context('paper')
         theCM = sns.blend_palette(['lime', 'gold', 'deeppink'], n_colors=10)  # plt.cm.RdBu_r
         # theCM = plt.cm.get_cmap('viridis')
@@ -258,9 +254,9 @@ class Sync(dj.Imported):
     definition = """
     -> Prepare
     ---
-    -> psy.Session
-    first_trial                 : int                           # first trial index from psy.Trial overlapping recording
-    last_trial                  : int                           # last trial index from psy.Trial overlapping recording
+    -> vis.Session
+    first_trial                 : int                           # first trial index from vis.Trial overlapping recording
+    last_trial                  : int                           # last trial index from vis.Trial overlapping recording
     signal_start_time           : double                        # (s) signal start time on stimulus clock
     signal_duration             : double                        # (s) signal duration on stimulus time
     frame_times = null          : longblob                      # times of frames and slices
@@ -296,6 +292,7 @@ class ComputeTraces(dj.Computed):
             self.Trace().insert(
                 [remove_channel(x) for x in (ExtractRaw.Trace() & key).proj(trace='raw_trace').fetch.as_dict])
 
+
 @schema
 class SpikeMethod(dj.Lookup):
     definition = """
@@ -314,6 +311,10 @@ class SpikeMethod(dj.Lookup):
     ]
 
     def spike_traces(self, X, fps):
+        try:
+            import c2s
+        except:
+            warn("c2s was not found. You won't be able to populate ExtracSpikes")
         assert self.fetch1['language'] == 'python', "This tuple cannot be computed in python."
         if self.fetch1['spike_method'] == 3:
             N = len(X)
