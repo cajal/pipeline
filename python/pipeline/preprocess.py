@@ -201,12 +201,13 @@ class ComputeTraces(dj.Computed):
     class Trace(dj.Part):
         definition = """  # final calcium trace but before spike extraction or filtering
         -> ComputeTraces
-        -> ExtractRaw.Trace
+        trace_id             : smallint                     #
         ---
-        trace = null  : longblob     # leave null same as ExtractRaw.Trace
+        trace = null         : longblob                     # leave null same as ExtractRaw.Trace
         """
 
     def _make_tuples(self, key):
+        """populated from MATLAB"""
         raise NotImplementedError
 
 

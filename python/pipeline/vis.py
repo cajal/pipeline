@@ -1,0 +1,198 @@
+"""
+This schema copies recent data from common_psy for uploaded to the cloud
+"""
+import datajoint as dj
+from . import common
+
+
+schema = dj.schema('pipeline_vis', locals())
+
+
+@schema
+class Session(dj.Manual):
+    definition = """  # Visual stimulus session, populated by the stimulus program.
+    -> common.Animal
+    psy_id               : smallint unsigned            # unique psy session number
+    ---
+    stimulus="grating"   : varchar(255)                 # experiment type
+    monitor_distance     : float                        # (cm) eye-to-monitor distance
+    monitor_size=19      : float                        # (inches) size diagonal dimension
+    monitor_aspect=1.25  : float                        # physical aspect ratio of monitor
+    resolution_x=1280    : smallint                     # (pixels)
+    resolution_y=1024    : smallint                     # display resolution along y
+    psy_ts=CURRENT_TIMESTAMP : timestamp                    # automatic
+    """
+
+
+@schema
+class Condition(dj.Manual):
+    definition = """  # trial condition -- one condition per trial. All stimulus conditions refer to Condition.
+    -> Session
+    cond_idx             : smallint unsigned            # condition index
+    """
+
+
+@schema
+class Trial(dj.Manual):
+    definition = """  #  visual stimulus trial
+    -> Session
+    trial_idx            : int                          # trial index within sessions
+    ---
+    -> Condition
+    flip_times           : mediumblob                   # (s) row array of flip times
+    last_flip_count      : int unsigned                 # the last flip number in this trial
+    trial_ts=CURRENT_TIMESTAMP : timestamp                    # automatic
+    """
+
+
+@schema
+class Movie(dj.Lookup):
+    definition = """   # movies used for generating clips and stills
+    movie_name           : char(8)                      # short movie title
+    ---
+    path                 : varchar(255)                 #
+    movie_class          : enum('mousecam','object3d','madmax') #
+    original_file        : varchar(255)                 #
+    file_template        : varchar(255)                 # filename template with full path
+    file_duration        : float                        # (s) duration of each file (must be equal)
+    codec="-c:v libx264 -preset slow -crf 5" : varchar(255)                 #
+    movie_description    : varchar(255)                 # full movie title
+    """
+
+    class Still(dj.Part):
+        definition = """  #cached still frames from the movie
+        -> Movie
+        still_id             : int                          # ids of still images from the movie
+        ---
+        still_frame          : longblob                     # uint8 grayscale movie
+        """
+
+    class Clip(dj.Part):
+        definition = """  # clips from movies
+        -> Movie
+        clip_number          : int                          # clip index
+        ---
+        file_name            : varchar(255)                 # full file name
+        clip                 : longblob                     #
+        """
+
+
+@schema
+class MovieSeqCond(dj.Manual):
+    definition = """  # random sequences of still frames
+    -> Condition
+    ---
+    -> Movie
+    rng_seed             : int                          # random number generator seed
+    pre_blank_period     : float                        # (s)
+    duration             : float                        # (s) of each still
+    seq_length           : smallint                     # number of frames in the sequence
+    movie_still_ids      : blob                         # sequence of stills
+    """
+
+
+
+
+@schema
+class MovieStillCond(dj.Manual):
+    definition = """
+    # a still frame condition
+    -> Condition
+    ---
+    -> Movie.Still
+    pre_blank_period     : float                        # (s)
+    duration             : float                        # (s)
+    """
+
+@schema
+class MovieClipCond(dj.Manual):
+    definition = """  # movie clip conditions
+    -> Condition
+    ---
+    -> Movie.Clip
+    cut_after            : float                        # (s) cuts off after this duration
+    """
+
+
+@schema
+class MonetLookup(dj.Lookup):
+    definition = """  # cached noise maps to save computation time
+    moving_noise_version : smallint                     # algorithm version; increment when code changes
+    moving_noise_paramhash : char(10)                     # hash of the lookup parameters
+    ---
+    params               : blob                         # cell array of params
+    cached_movie         : longblob                     # [y,x,frames]
+    moving_noise_lookup_ts=CURRENT_TIMESTAMP : timestamp     # automatic
+    """
+
+
+@schema
+class Monet(dj.Manual):
+    definition = """  # pink noise with periods of motion and orientation$
+    -> Condition
+    ---
+    -> MonetLookup
+    rng_seed             : double                       # random number generate seed
+    luminance            : float                        # (cd/m^2)
+    contrast             : float                        # michelson contrast
+    tex_ydim             : smallint                     # (pixels) texture dimension
+    tex_xdim             : smallint                     # (pixels) texture dimension
+    spatial_freq_half    : float                        # (cy/deg) spatial frequency modulated to 50 percent
+    spatial_freq_stop    : float                        # (cy/deg), spatial lowpass cutoff
+    temp_bandwidth       : float                        # (Hz) temporal bandwidth of the stimulus
+    ori_on_secs          : float                        # seconds of movement and orientation
+    ori_off_secs         : float                        # seconds without movement
+    n_dirs               : smallint                     # number of directions
+    ori_bands            : tinyint                      # orientation width expressed in units of 2*pi/n_dirs
+    ori_modulation       : float                        # mixin-coefficient of orientation biased noise
+    speed                : float                        # (degrees/s)
+    frame_downsample     : tinyint                      # 1=60 fps, 2=30 fps, 3=20 fps, 4=15 fps, etc
+    """
+
+
+@schema
+class Trippy(dj.Manual):
+    definition = """
+    # randomized curvy dynamic gratings
+    -> Condition
+    ---
+    version              : tinyint                      # trippy version
+    rng_seed             : double                       # random number generate seed
+    packed_phase_movie   : longblob                     # phase movie before spatial and temporal interpolation
+    luminance            : float                        # (cd/m^2)
+    contrast             : float                        # michelson contrast
+    tex_ydim             : smallint                     # (pixels) texture dimension
+    tex_xdim             : smallint                     # (pixels) texture dimension
+    duration             : float                        # (s) trial duration
+    frame_downsample     : tinyint                      # 1=60 fps, 2=30 fps, 3=20 fps, 4=15 fps, etc
+    xnodes               : tinyint                      # x dimension of low-res phase movie
+    ynodes               : tinyint                      # y dimension of low-res phase movie
+    up_factor            : tinyint                      # spatial upscale factor
+    temp_freq            : float                        # (Hz) temporal frequency if the phase pattern were static
+    temp_kernel_length   : smallint                     # length of Hanning kernel used for temporal filter. Controls the rate of change of the phase pattern.
+    spatial_freq         : float                        # (cy/degree) approximate max. The actual frequencies may be higher.
+    """
+
+
+def migrate():
+    from . import psy, experiment
+
+    # copy basic structure: Session, Condition, Trial
+    sessions = psy.Session() & (experiment.Session() & 'session_date>"2016-02-02"' & 'animal_id>1000')
+    trial = psy.Trial() & sessions
+    condition = psy.Condition() & sessions
+    Session().insert(sessions-Session())
+    Condition().insert(condition-Condition())
+    Trial().insert(trial-Trial())
+
+    # copy Monet
+    monet = psy.MovingNoise() & sessions
+    monetLookup = psy.MovingNoiseLookup() & monet
+    MonetLookup().insert(monetLookup - MonetLookup())
+    Monet().insert(monet - Monet())
+
+    # copy Trippy
+    trippy = psy.Trippy() & sessions
+    Trippy().insert(trippy - Trippy())
+
+    # copy MovieClip and MovieStill
