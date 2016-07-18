@@ -1,10 +1,32 @@
 import datajoint as dj
 from . import experiment, psy
+from warnings import warn
+import numpy as np
+import seaborn as sns
+import matplotlib.pyplot as plt
+import sh
+import os
+
+try:
+    import c2s
+except:
+    warn("c2s was not found. You won't be able to populate ExtracSpikes")
 
 from distutils.version import StrictVersion
+
 assert StrictVersion(dj.__version__) >= StrictVersion('0.2.8')
 
 schema = dj.schema('pipeline_preprocess', locals())
+
+
+def notnan(x, start=0, increment=1):
+    while np.isnan(x[start]) and start < len(x) and start >= 0:
+        start += increment
+    return start
+
+
+def normalize(img):
+    return (img - img.min()) / (img.max() - img.min())
 
 
 def erd():
@@ -134,8 +156,8 @@ class ExtractRaw(dj.Imported):
 
     @property
     def key_source(self):
-        return Prepare()*Method().proj() & \
-               dj.OrList(Prepare.Aod()*Method.Aod(), Prepare.Galvo()*Method.Galvo())
+        return Prepare() * Method().proj() & \
+               dj.OrList(Prepare.Aod() * Method.Aod(), Prepare.Galvo() * Method.Galvo())
 
     class Trace(dj.Part):
         definition = """  # raw trace, common to Galvo
@@ -163,6 +185,15 @@ class ExtractRaw(dj.Imported):
         mask_weights = null  :longblob      # weights of the mask at the indices above
         """
 
+        @staticmethod
+        def reshape_masks(mask_pixels, mask_weights, px_height, px_width):
+            ret = np.zeros((px_height, px_width, len(mask_pixels)))
+            for i, (mp, mw) in enumerate(zip(mask_pixels, mask_weights)):
+                mask = np.zeros(px_height * px_width)
+                mask[mp.squeeze().astype(int) - 1] = mw.squeeze()
+                ret[..., i] = mask.reshape(px_height, px_width, order='F')
+            return ret
+
     class SpikeRate(dj.Part):
         definition = """
         # spike trace extracted while segmentation
@@ -170,6 +201,52 @@ class ExtractRaw(dj.Imported):
         ---
         spike_trace :longblob
         """
+
+    def plot_galvo_ROIs(self, outdir='./'):
+        sns.set_context('paper')
+        theCM = sns.blend_palette(['lime', 'gold', 'deeppink'], n_colors=10)  # plt.cm.RdBu_r
+        # theCM = plt.cm.get_cmap('viridis')
+
+        for key in (self.GalvoSegmentation().proj() * Method.Galvo() & dict(segmentation='nmf')).fetch.as_dict:
+            mask_px, mask_w, spikes = \
+            (self.GalvoROI() * self.SpikeRate() & key & dict(segmentation=2)).fetch.order_by('trace_id')[
+                'mask_pixels', 'mask_weights', 'spike_trace']
+
+            template = np.stack([normalize(t) for t in (Prepare.GalvoAverageFrame() & key).fetch['frame']], axis=2).max(
+                axis=2)
+
+            d1, d2 = tuple(map(int, (Prepare.Galvo() & key).fetch1['px_height', 'px_width']))
+            masks = self.GalvoROI.reshape_masks(mask_px, mask_w, d1, d2)
+            try:
+                sh.mkdir('-p', os.path.expanduser(outdir) + '/scan_idx{scan_idx}/slice{slice}'.format(**key))
+            except:
+                pass
+            gs = plt.GridSpec(6, 1)
+
+            for cell, sp_trace in enumerate(spikes):
+                with sns.axes_style('white'):
+                    fig = plt.figure(figsize=(6, 8))
+                    ax_image = fig.add_subplot(gs[:-2, :])
+
+                with sns.axes_style('ticks'):
+                    ax_sp = fig.add_subplot(gs[-1, :])
+
+                ax_sp.plot(sp_trace.squeeze(), 'k', lw=1)
+
+                ax_image.imshow(template, cmap=plt.cm.gray)
+                ax_image.contour(masks[..., cell], colors=theCM, zorder=10)
+
+                fig.suptitle(
+                    "animal_id {animal_id}:session {session}:scan_idx {scan_idx}:{segmentation}:slice{slice}:cell{cell}".format(
+                        cell=cell + 1, **key))
+
+                sns.despine(ax=ax_sp)
+                ax_sp.axis('tight')
+
+                plt.savefig(
+                    outdir + "/scan_idx{scan_idx}/slice{slice}/cell{cell:03d}_animal_id_{animal_id}_session_{session}.png".format(
+                        cell=cell + 1, **key))
+                plt.close(fig)
 
     def _make_tuples(self, key):
         """ implemented in matlab """
@@ -202,14 +279,22 @@ class ComputeTraces(dj.Computed):
         definition = """  # final calcium trace but before spike extraction or filtering
         -> ComputeTraces
         trace_id             : smallint                     #
+        trace_id  : smallint
         ---
         trace = null         : longblob                     # leave null same as ExtractRaw.Trace
         """
 
     def _make_tuples(self, key):
-        """populated from MATLAB"""
-        raise NotImplementedError
+        if (experiment.Session.Fluorophore() & key).fetch1['fluorophore'] != 'Twitch2B' and (ExtractRaw.Trace() & key):
+            print('Populating', key)
 
+            def remove_channel(x):
+                x.pop('channel')
+                return x
+
+            self.insert1(key)
+            self.Trace().insert(
+                [remove_channel(x) for x in (ExtractRaw.Trace() & key).proj(trace='raw_trace').fetch.as_dict])
 
 @schema
 class SpikeMethod(dj.Lookup):
@@ -223,9 +308,32 @@ class SpikeMethod(dj.Lookup):
 
     contents = [
         [2, "fastoopsi", "nonnegative sparse deconvolution from Vogelstein (2010)", "matlab"],
-        [3, "stm", "spike triggered mixture model from Theis et al. (2016)",  "python"],
-        [4, "improved oopsi", "", "matlab"]
+        [3, "stm", "spike triggered mixture model from Theis et al. (2016)", "python"],
+        [4, "improved oopsi", "", "matlab"],
+        [5, "nmf", "", "matlab"]
     ]
+
+    def spike_traces(self, X, fps):
+        assert self.fetch1['language'] == 'python', "This tuple cannot be computed in python."
+        if self.fetch1['spike_method'] == 3:
+            N = len(X)
+            for i, trace in enumerate(X):
+                print('Predicting trace %i/%i' % (i + 1, N))
+                tr0 = np.array(trace.pop('trace').squeeze())
+                start = notnan(tr0)
+                end = notnan(tr0, len(tr0) - 1, increment=-1)
+                trace['calcium'] = np.atleast_2d(tr0[start:end + 1])
+
+                trace['fps'] = fps
+                data = c2s.preprocess([trace], fps=fps)
+                data = c2s.predict(data, verbosity=0)
+
+                tr0[start:end + 1] = data[0].pop('predictions').squeeze()
+                data[0]['rate_trace'] = tr0
+                data[0].pop('calcium')
+                data[0].pop('fps')
+
+                yield data[0]
 
 
 @schema
@@ -235,16 +343,36 @@ class Spikes(dj.Computed):
     -> SpikeMethod
     """
 
+    @property
+    def key_source(self):
+        return (ComputeTraces() * SpikeMethod() & [dict(spike_method_name='stm'), dict(spike_method_name='nmf')]).proj()
+
     class RateTrace(dj.Part):
         definition = """  # Inferred
         -> Spikes
-        -> ComputeTraces.Trace
+        -> ExtractRaw
+        trace_id  : smallint
         ---
         rate_trace = null  : longblob     # leave null same as ExtractRaw.Trace
         """
 
     def _make_tuples(self, key):
-        raise NotImplementedError
+        print('Populating', key)
+        if (SpikeMethod() & key).fetch1['spike_method_name'] == 'stm':
+            prep = (Prepare() * Prepare.Aod() & key) or (Prepare() * Prepare.Galvo() & key)
+            fps = prep.fetch1['fps']
+            X = (ComputeTraces.Trace() & key).proj('trace').fetch.as_dict()
+            self.insert1(key)
+            for x in (SpikeMethod() & key).spike_traces(X, fps):
+                self.RateTrace().insert1(dict(key, **x))
+        elif (SpikeMethod() & key).fetch1['spike_method_name'] == 'nmf':
+            self.insert1(key)
+            for x in (ExtractRaw.SpikeRate() & key).fetch.as_dict:
+                x['rate_trace'] = x.pop('spike_trace')
+                x.pop('channel')
+                self.RateTrace().insert1(dict(key, **x))
+        else:
+            raise NotImplementedError('Method {spike_method} not implemented.'.format(**key))
 
 
 schema.spawn_missing_classes()
