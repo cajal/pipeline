@@ -278,9 +278,10 @@ class ComputeTraces(dj.Computed):
     class Trace(dj.Part):
         definition = """  # final calcium trace but before spike extraction or filtering
         -> ComputeTraces
+        trace_id             : smallint                     #
         trace_id  : smallint
         ---
-        trace = null  : longblob     # leave null same as ExtractRaw.Trace
+        trace = null         : longblob                     # leave null same as ExtractRaw.Trace
         """
 
     def _make_tuples(self, key):
@@ -294,7 +295,6 @@ class ComputeTraces(dj.Computed):
             self.insert1(key)
             self.Trace().insert(
                 [remove_channel(x) for x in (ExtractRaw.Trace() & key).proj(trace='raw_trace').fetch.as_dict])
-
 
 @schema
 class SpikeMethod(dj.Lookup):
@@ -316,7 +316,6 @@ class SpikeMethod(dj.Lookup):
     def spike_traces(self, X, fps):
         assert self.fetch1['language'] == 'python', "This tuple cannot be computed in python."
         if self.fetch1['spike_method'] == 3:
-            spike_rates = []
             N = len(X)
             for i, trace in enumerate(X):
                 print('Predicting trace %i/%i' % (i + 1, N))
