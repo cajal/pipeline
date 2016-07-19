@@ -87,6 +87,35 @@ classdef ExtractRaw < dj.Relvar & dj.AutoPopulate
                             trace_id = self.insert_spikes(key, S, channel,trace_id);
                             
                         end
+                    case 'manual'
+                        [d2, d1, nslices] = fetch1(preprocess.PrepareGalvo & key, 'px_width', 'px_height','nslices');
+                        channel = 1;    % TODO: change to more flexible choice
+                        self.insert(key)
+                        for islice = 1:nslices
+                            Y = squeeze(self.load_galvo_scan(key, islice, channel));
+                            key.slice = islice;
+                            insert(preprocess.ExtractRawGalvoSegmentation, key);
+                            mask_image = fetch1(preprocess.ManualSegment & key, 'mask');
+                            regions = regionprops(bwlabel(mask_image, 4),'PixelIdxList'); %#ok<MRPBW>
+                            mask_pixels = {regions(:).PixelIdxList};
+                            for imask = 1:length(mask_pixels)
+                                trace_key = rmfield(key,'slice');
+                                trace_key.channel = channel;
+                                trace_key.trace_id = imask;
+                                [x,y] = ind2sub([d1 d2],mask_pixels{imask});
+                                trace_key.raw_trace = squeeze(nanmean(nanmean(Y(x,y,:))));
+                                insert(preprocess.ExtractRawTrace, trace_key);
+                                
+                                mask_key = key;
+                                mask_key.channel = channel;
+                                mask_key.trace_id =  imask;
+                                mask_key.mask_pixels = mask_pixels{imask};
+                                mask_key.mask_weights = ones(size(mask_pixels{imask}));
+                                insert(preprocess.ExtractRawGalvoROI, mask_key);
+                                
+                                self.insert(tuples)
+                            end
+                        end
                     otherwise
                         disp(['Not performing ' segmentation_method ' segmentation']);
                         return
