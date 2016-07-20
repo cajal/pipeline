@@ -1,3 +1,4 @@
+datajoint
 numpy
 scipy
 matplotlib

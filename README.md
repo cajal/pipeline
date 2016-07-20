@@ -19,6 +19,7 @@
 The code in this repository is licensed under the [Creative Commons Attribution-NonCommercial-ShareAlike 3.0 Unported License](http://creativecommons.org/licenses/by-nc-sa/3.0/). 
 
 # Notebooks
-1.  [DataJoint demo](python/jupyter/notebooks/demo.ipynb)
-2.  [Pipeline: experiment](python/jupyter/notebooks/pipeline_experiment.ipynb)
-3.  [Pipeline: preprocess](python/jupyter/notebooks/pipeline_preprocess.ipynb)
+1.  [Pipeline: intro](jupyter/notebooks/pipeline_intro.ipynb)
+1.  [Pipeline: experiment](jupyter/notebooks/pipeline_experiment.ipynb)
+1.  [Pipeline: preprocess](jupyter/notebooks/pipeline_preprocess.ipynb)
+1.  [Pipeline: vis](jupyter/notebooks/pipeline_preprocess.ipynb)

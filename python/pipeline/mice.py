@@ -1,8 +1,8 @@
+"""
+The `common_mice` schema is maintained by another package and is included here for ease of reference.
+DO NOT create new tables here.
+"""
+
 import datajoint as dj
-
-from distutils.version import StrictVersion
-assert StrictVersion(dj.__version__) >= StrictVersion('0.2.5')
-
 schema = dj.schema('common_mice', locals())
-
 schema.spawn_missing_classes()
