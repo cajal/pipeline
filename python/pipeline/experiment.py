@@ -30,6 +30,16 @@ class Fluorophore(dj.Lookup):
         ['tdTomato', ''],
         ['OGB', '']]
 
+    class EmissionSpectrum(dj.Part):
+        definition = """
+        # spectra of fluorophores in Ca++ loaded and Ca++ free state
+        -> Fluorophore
+        loaded: tinyint  # whether the spectrum is for Ca++ loaded or free state
+        ---
+        wavelength: longblob  # wavelength in nm
+        fluorescence: longblob  # fluorescence in arbitrary units
+        """
+
 
 @schema
 class Lens(dj.Lookup):
@@ -141,21 +151,6 @@ class Software(dj.Lookup):
         ('scanimage', '5.2'),
         ('aod', '2.0'),
         ('imager', '1.0')]
-
-
-@schema
-class Aim(dj.Lookup):
-    definition = """  # what is being imaged (e.g. somas, axon) and why
-    aim : varchar(40)   # short description of what is imaged and why
-    """
-
-    contents = [['unset'],
-                ['functional: somas'],
-                ['functional: axons'],
-                ['functional: axons, somas'],
-                ['functional: axons-green, somas-red'],
-                ['functional: axons-red, somas-green'],
-                ['structural']]
 
 
 @schema
@@ -294,3 +289,6 @@ def migrate_reso_pipeline():
     ) & Session()
 
     Scan().insert(scans.fetch(as_dict=True), skip_duplicates=True)
+
+
+schema.spawn_missing_classes()
