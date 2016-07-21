@@ -1,7 +1,7 @@
 %{
-fields.OriDesignMatrix (computed) # design matrix for directional response
--> fields.Directional
--> fields.CaKernel
+tuning.OriDesignMatrix (computed) # design matrix for directional response
+-> tuning.Directional
+-> tuning.CaKernel
 ---
 design_matrix               : longblob                      # times x nConds
 regressor_cov               : longblob                      # regressor covariance matrix,  nConds x nConds
@@ -11,17 +11,17 @@ regressor_cov               : longblob                      # regressor covarian
 classdef OriDesignMatrix < dj.Relvar & dj.AutoPopulate
 
 	properties
-		popRel = fields.Directional*fields.CaKernel & 'kernel=0'
+		popRel = tuning.Directional*tuning.CaKernel & 'kernel=0'
 	end
 
 	methods(Access=protected)
 
 		function makeTuples(self, key)
             caTimes = fetch1(preprocess.Sync & key, 'frame_times');
-            trials = fetch(fields.DirectionalTrial & key, 'onset', 'offset', 'direction');
-            opt = fetch(fields.CaKernel & key, '*');
+            trials = fetch(tuning.DirectionalTrial & key, 'onset', 'offset', 'direction');
+            opt = fetch(tuning.CaKernel & key, '*');
             disp 'constructing design matrix...'
-            G = fields.OriDesignMatrix.makeDesignMatrix(caTimes, trials, opt);            
+            G = tuning.OriDesignMatrix.makeDesignMatrix(caTimes, trials, opt);            
             key.design_matrix = single(G);
             key.regressor_cov = single(G'*G);
             self.insert(key)

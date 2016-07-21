@@ -1,6 +1,6 @@
 %{
-fields.OriMap (imported) # pixelwise responses to full-field directional stimuli
--> fields.OriDesignMatrix
+tuning.OriMap (imported) # pixelwise responses to full-field directional stimuli
+-> tuning.OriDesignMatrix
 -> preprocess.PrepareGalvo
 -> preprocess.Slice
 ---
@@ -13,7 +13,7 @@ dof_map                     : longblob                      # degrees of in orig
 classdef OriMap < dj.Relvar & dj.AutoPopulate
 
 	properties
-		popRel = fields.OriDesignMatrix*preprocess.PrepareGalvo*preprocess.Slice & 'slice>=1 and slice<=nslices'
+		popRel = tuning.OriDesignMatrix*preprocess.PrepareGalvo*preprocess.Slice & 'slice>=1 and slice<=nslices'
 	end
 
 	methods(Access=protected)
@@ -21,7 +21,7 @@ classdef OriMap < dj.Relvar & dj.AutoPopulate
 		function makeTuples(self, key)
             tic
             disp 'loading design...'
-            designMatrix = fetch1(fields.OriDesignMatrix & key, 'design_matrix');
+            designMatrix = fetch1(tuning.OriDesignMatrix & key, 'design_matrix');
                        
             disp 'loading movie...'
             fixRaster = get_fix_raster_fun(preprocess.PrepareGalvo & key);

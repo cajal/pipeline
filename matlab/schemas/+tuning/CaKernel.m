@@ -1,5 +1,5 @@
 %{
-fields.CaKernel (lookup) # options for calcium response kinetics.
+tuning.CaKernel (lookup) # options for calcium response kinetics.
 kernel          : tinyint                # calcium option number
 ---
 transient_shape             : enum('exp','onAlpha')         # calcium transient shape
