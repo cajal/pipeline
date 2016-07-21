@@ -209,8 +209,8 @@ class ExtractRaw(dj.Imported):
 
         for key in (self.GalvoSegmentation().proj() * Method.Galvo() & dict(segmentation='nmf')).fetch.as_dict:
             mask_px, mask_w, spikes = \
-            (self.GalvoROI() * self.SpikeRate() & key & dict(segmentation=2)).fetch.order_by('trace_id')[
-                'mask_pixels', 'mask_weights', 'spike_trace']
+                (self.GalvoROI() * self.SpikeRate() & key & dict(segmentation=2)).fetch.order_by('trace_id')[
+                    'mask_pixels', 'mask_weights', 'spike_trace']
 
             template = np.stack([normalize(t) for t in (Prepare.GalvoAverageFrame() & key).fetch['frame']], axis=2).max(
                 axis=2)
@@ -284,16 +284,33 @@ class ComputeTraces(dj.Computed):
         """
 
     def _make_tuples(self, key):
-        if (experiment.Session.Fluorophore() & key).fetch1['fluorophore'] != 'Twitch2B' and (ExtractRaw.Trace() & key):
-            print('Populating', key)
+        if ExtractRaw.Trace() & key:
+            fluorophore = (experiment.Session.Fluorophore() & key).fetch1['fluorophore']
+            if fluorophore != 'Twitch2B':
+                print('Populating', key)
 
-            def remove_channel(x):
-                x.pop('channel')
-                return x
+                def remove_channel(x):
+                    x.pop('channel')
+                    return x
 
-            self.insert1(key)
-            self.Trace().insert(
-                [remove_channel(x) for x in (ExtractRaw.Trace() & key).proj(trace='raw_trace').fetch.as_dict])
+                self.insert1(key)
+                self.Trace().insert(
+                    [remove_channel(x) for x in (ExtractRaw.Trace() & key).proj(trace='raw_trace').fetch.as_dict])
+            elif fluorophore == 'Twitch2B':
+                filters = experiment.PMTFilterSet() * experiment.PMTFilterSet.Channel() \
+                          & dict(pmt_filter_set='2P3 blue-green A')
+                green = (filters & dict(color='green')).fetch1['pmt_channel']
+                blue = (filters & dict(color='blue')).fetch1['pmt_channel']
+                green_traces, blue_traces, trace_ids = \
+                    ((ExtractRaw.Trace() & key & dict(channel=green)).proj(green_channel='channel',
+                                                                           green_trace='raw_trace') * \
+                     (ExtractRaw.Trace() & key & dict(channel=blue)).proj(blue_channel='channel',
+                                                                          blue_trace='raw_trace') \
+                     ).fetch['green_trace', 'blue_trace', 'trace_id']
+                self.insert1(key)
+                for tr_gr, tr_bl in zip(green_traces, blue_traces):
+                    sub_key = dict(key, )
+
 
 
 @schema

@@ -1,7 +1,11 @@
 import datajoint as dj
+import pandas as pd
 from . import mice
-
+import numpy as np
 from distutils.version import StrictVersion
+import numpy as np
+import inspect
+import os
 
 assert StrictVersion(dj.__version__) >= StrictVersion('0.2.7')
 
@@ -29,6 +33,29 @@ class Fluorophore(dj.Lookup):
         ['mCherry', ''],
         ['tdTomato', ''],
         ['OGB', '']]
+
+    class EmissionSpectrum(dj.Part):
+        definition = """
+        # spectra of fluorophores in Ca++ loaded and Ca++ free state
+        ->Fluorophore
+        loaded          : bool # whether the spectrum is for Ca++ loaded or free state
+        ---
+        wavelength      : longblob # wavelength in nm
+        fluorescence    : longblob # fluorescence in arbitrary units
+        """
+
+        @property
+        def contents(self):
+            # yield Twitch2B spectra
+            if len(self & dict(fluorophore='Twitch2B')) < 2:
+                path = '/'.join(os.path.realpath(__file__).split('/')[:-1])
+                loaded = pd.read_csv(path + '/data/twitch2B_loaded.csv')
+                free = pd.read_csv(path + '/data/twitch2B_free.csv')
+                x = np.linspace(np.min(free.wavelength), np.max(free.wavelength), 100)
+                y_loaded = np.interp(x, loaded.wavelength, loaded.fluorescence)
+                y_free = np.interp(x, free.wavelength, free.fluorescence)
+                yield ('Twitch2B', True, x, y_loaded)
+                yield ('Twitch2B', False, x, y_free)
 
 
 @schema

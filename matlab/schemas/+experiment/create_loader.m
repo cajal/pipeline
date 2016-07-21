@@ -2,10 +2,9 @@ function [loader, channel] = create_loader(key)
 reader = preprocess.getGalvoReader(key);
 switch fetch1(experiment.SessionFluorophore & key,'fluorophore')
     case 'Twitch2B'
-        error('Twitch data is not supported at the moment.');
         channel= 0;
         loader = @(islice, mask_range)(twitch_loader(key, islice, mask_range, reader));
-            %);
+            
     otherwise
         channel = 1;  % TODO: change to more flexible choice
         loader = @(islice, mask_range)(squeeze(load_galvo_scan(key, islice, channel, mask_range, reader)));
@@ -47,9 +46,28 @@ end
 function Y = twitch_loader(key, islice, mask_range, reader)
     Y1 = squeeze(load_galvo_scan(key, islice, 1, mask_range, reader));
     Y2 = squeeze(load_galvo_scan(key, islice, 2, mask_range, reader));
-    Y1(Y1 < 1) = 1;
-    Y2(Y2 < 1) = 1;
-    sn = get_noise_fft(Y1);
-    Y = Y2./bsxfun(@plus,Y1,sn);
+%     stride = 4;
+%     hs = hamming(2*stride+1);
+%     hs = hs./sum(hs);
+    
+    fps = fetch1(preprocess.PrepareGalvo & key, 'fps');
+    ht = hamming(2*floor(fps/4)+1);
+    ht = ht./sum(ht);
+    
+%     y1 = imfilter(imfilter(Y1, hs, 'symmetric'), hs','symmetric');
+%     y2 = imfilter(imfilter(Y2, hs, 'symmetric'), hs','symmetric');
+%     y1 = y1(1:stride:end,1:stride:end,:);
+%     y2 = y2(1:stride:end,1:stride:end,:);
+    [d1,d2,fr] = size(Y1);
+    y1 = ne7.dsp.convmirr(reshape(Y1,[d1*d2,fr])',ht);
+    y2 = ne7.dsp.convmirr(reshape(Y2,[d1*d2,fr])',ht);
+    R = y2./y1;
+    q = quantile(R, 0.01, 1);
+    b_free = 2716.16;
+    b_loaded = 616.00;
+    g_free = 2172.93;
+    g_loaded = 3738.65;
+    gamma = q./g_free*b_free;
+    keyboard
     
 end

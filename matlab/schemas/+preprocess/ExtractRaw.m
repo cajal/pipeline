@@ -19,6 +19,8 @@ classdef ExtractRaw < dj.Relvar & dj.AutoPopulate
         nmf_options = 0;
         mask_range = 0;
         batchsize = 0;
+        min_block_size = 0;
+        nan_tol = 0;
     end
     
     methods(Access=protected)
@@ -31,7 +33,7 @@ classdef ExtractRaw < dj.Relvar & dj.AutoPopulate
                 switch segmentation_method
                     case 'nmf'
                         fprintf('NMF segmentation for Galvo scan\n')
-                        [d2, d1, nslices, nframes] = fetch1(preprocess.PrepareGalvo & key, 'px_width', 'px_height','nslices','nframes');
+                        [d2, d1, nslices, nframes, fps] = fetch1(preprocess.PrepareGalvo & key, 'px_width', 'px_height','nslices','nframes','fps');
                         self.set_nmf_parameters(key);
                         
                         
@@ -47,13 +49,15 @@ classdef ExtractRaw < dj.Relvar & dj.AutoPopulate
                             
                             
                             Y = loader(islice, self.mask_range);
-                            if ~preprocess.check_nans(Y)
+                            notnan = getblocks(squeeze(any(any(~isnan(Y), 1),2)), round(length(self.mask_range)/2), self.nan_tol);
+                            
+                            if length(notnan) ~= 1
                                 error('Too many NaNs in frames for mask inference');
                             end
                             
                             fprintf('\tInferring masks\n');
                             try
-                                [A, b] = self.run_nmf(Y);
+                                [A, b] = self.run_nmf(Y(:,:,notnan));
                             catch ME
                                 if strcmp(ME.identifier,'MATLAB:imresize:expectedNonempty')
                                     fprintf('\tCaught non-empty exception. No neuron found! Continuing to next slice. \n');
@@ -62,23 +66,19 @@ classdef ExtractRaw < dj.Relvar & dj.AutoPopulate
                             end
                             
                             fprintf('\tMasks inferred successfully. Inferring spikes\n');
-                            traces = zeros(size(A,2), nframes);
-                            S = 0*traces;
+                            traces = zeros(size(A,2), nframes)*NaN;
+                            S = 0*traces*NaN;
                             for start = 1:self.batchsize:nframes
                                 batch = start:min(nframes, start + self.batchsize - 1);
                                 
                                 fprintf('\t\tInferring spikes for frames %i:%i\n', batch(1), batch(end));
                                 Y = loader(islice, batch);
-                                [ok, nans] = preprocess.check_nans(Y,[], (start == 1) - (batch(end) == nframes));
-                                if ~ok
-                                    error('Too many Nans in frames');
-                                elseif ok < 0
-                                    Y = Y(:,:,~nans);
-                                    traces(:,batch(nans)) = NaN;
-                                    S(:,batch(nans)) = NaN;
+                                notnan = getblocks(squeeze(any(any(~isnan(Y), 1),2)), self.min_block_size, self.nan_tol);
+                               
+                                for blk = notnan
+                                    traces(:, batch(blk)) = A'*reshape(Y(:,:,blk),d1*d2,length(blk));
+                                    S(:,batch(blk)) = self.nmf_spikes(A, b, Y(:,:,blk));
                                 end
-                                traces(:, batch(~nans)) = A'*reshape(Y,d1*d2,size(Y,3));
-                                S(:,batch(~nans)) = self.nmf_spikes(A, b, Y);
                             end
                             
                             fprintf('\tInserting masks, traces, and spikes\n');
@@ -113,6 +113,9 @@ classdef ExtractRaw < dj.Relvar & dj.AutoPopulate
             self.max_iter = 2;
             downsample_to = 4;
             fps = fetch1(preprocess.PrepareGalvo & key, 'fps');
+            self.min_block_size = round(fps*5); % minimum block size for spike inference
+            self.nan_tol = round(fps/10); % maximal stretch of nans to tolerate
+            
             self.nmf_options = CNMFSetParms(...
                 'd1',d1,'d2',d2,...                         % dimensions of datasets
                 'search_method','ellipse','dist',3,...      % search locations when updating spatial components
