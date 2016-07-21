@@ -11,11 +11,6 @@ assert StrictVersion(dj.__version__) >= StrictVersion('0.2.8')
 schema = dj.schema('pipeline_fields', locals())
 
 
-def erd():
-    """for convenience"""
-    dj.ERD(schema).draw(prefix=False)
-
-
 @schema
 class CaKernel(dj.Lookup):
     definition = """  # options for calcium response kinetics.
