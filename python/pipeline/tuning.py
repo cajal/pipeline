@@ -3,17 +3,12 @@ Analysis of visual responses: receptive fields, tuning curves, pixelwise maps
 """
 
 import datajoint as dj
-from . import preprocess, psy
+from . import preprocess, vis
 
 from distutils.version import StrictVersion
 assert StrictVersion(dj.__version__) >= StrictVersion('0.2.8')
 
-schema = dj.schema('pipeline_fields', locals())
-
-
-def erd():
-    """for convenience"""
-    dj.ERD(schema).draw(prefix=False)
+schema = dj.schema('pipeline_tuning', locals())
 
 
 @schema
@@ -48,7 +43,7 @@ class Directional(dj.Computed):
         -> Directional
         drift_trial     : smallint               # trial index
         ---
-        -> psy.Trial
+        -> vis.Trial
         direction                   : float                         # (degrees) direction of drift
         onset                       : double                        # (s) onset time in rf.Sync times
         offset                      : double                        # (s) offset time in rf.Sync times

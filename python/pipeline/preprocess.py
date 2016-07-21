@@ -203,32 +203,59 @@ class ExtractRaw(dj.Imported):
         theCM = sns.blend_palette(['lime', 'gold', 'deeppink'], n_colors=10)  # plt.cm.RdBu_r
         # theCM = plt.cm.get_cmap('viridis')
 
-        for key in (self.GalvoSegmentation().proj() * Method.Galvo() & dict(segmentation='nmf')).fetch.as_dict:
-            mask_px, mask_w, spikes = \
-                (self.GalvoROI() * self.SpikeRate() & key & dict(segmentation=2)).fetch.order_by('trace_id')[
-                    'mask_pixels', 'mask_weights', 'spike_trace']
+        for key in (self * self.GalvoSegmentation().proj() * Method.Galvo() & dict(segmentation='nmf')).fetch.as_dict:
+            mask_px, mask_w, spikes, traces = \
+                (self.GalvoROI() * \
+                 self.SpikeRate() * ComputeTraces().Trace() & key & \
+                 dict(segmentation=2)).fetch.order_by('trace_id')['mask_pixels', 'mask_weights', 'spike_trace', 'trace']
 
-            template = np.stack([normalize(t) for t in (Prepare.GalvoAverageFrame() & key).fetch['frame']], axis=2).max(
-                axis=2)
+            template = np.stack([normalize(t)
+                                 for t in (Prepare.GalvoAverageFrame() & key).fetch['frame']], axis=2).max(axis=2)
 
-            d1, d2 = tuple(map(int, (Prepare.Galvo() & key).fetch1['px_height', 'px_width']))
+            d1, d2, fps = tuple(map(int, (Prepare.Galvo() & key).fetch1['px_height', 'px_width', 'fps']))
+            hs = int(np.round(fps * 60))
             masks = self.GalvoROI.reshape_masks(mask_px, mask_w, d1, d2)
             try:
                 sh.mkdir('-p', os.path.expanduser(outdir) + '/scan_idx{scan_idx}/slice{slice}'.format(**key))
             except:
                 pass
-            gs = plt.GridSpec(6, 1)
+            gs = plt.GridSpec(6, 2)
 
-            for cell, sp_trace in enumerate(spikes):
+            N = len(spikes)
+            for cell, (sp_trace, ca_trace) in enumerate(zip(spikes, traces)):
+                print("{cell:03d}/{N}: animal_id {animal_id}\tsession {session}\tscan_idx {scan_idx:02d}\t{segmentation}\tslice {slice}".format(
+                        cell=cell + 1, N=N, **key))
+                sp_trace = sp_trace.squeeze()
+                ca_trace = ca_trace.squeeze()
                 with sns.axes_style('white'):
                     fig = plt.figure(figsize=(6, 8))
-                    ax_image = fig.add_subplot(gs[:-2, :])
+                    ax_image = fig.add_subplot(gs[:-2, 0])
 
                 with sns.axes_style('ticks'):
+                    ax_small_tr = fig.add_subplot(gs[1, 1])
+                    ax_small_ca = fig.add_subplot(gs[2, 1], sharex=ax_small_tr)
                     ax_sp = fig.add_subplot(gs[-1, :])
+                    ax_tr = fig.add_subplot(gs[-2, :], sharex=ax_sp)
 
-                ax_sp.plot(sp_trace.squeeze(), 'k', lw=1)
+                # --- plot zoom in
+                n = len(sp_trace)
+                tmp = np.array(sp_trace)
+                tmp[np.isnan(tmp)] = 0
+                loc = np.argmax(np.convolve(tmp, np.ones(hs) / hs, mode='same'))
+                loc = max(loc - hs // 2, 0)
+                loc = n - hs if loc > n - hs else loc
 
+                ax_small_tr.plot(sp_trace[loc:loc + hs], 'k', lw=1)
+                ax_small_ca.plot(ca_trace[loc:loc + hs], 'k', lw=1)
+
+                # --- plot traces
+                ax_sp.plot(sp_trace, 'k', lw=1)
+
+                ax_sp.fill_between([loc, loc + hs], np.zeros(2), np.ones(2) * np.nanmax(sp_trace),
+                                   color='steelblue', alpha=0.5)
+                ax_tr.plot(ca_trace, 'k', lw=1)
+                ax_tr.fill_between([loc, loc + hs], np.zeros(2), np.ones(2) * np.nanmax(ca_trace),
+                                   color='steelblue', alpha=0.5)
                 ax_image.imshow(template, cmap=plt.cm.gray)
                 ax_image.contour(masks[..., cell], colors=theCM, zorder=10)
 
@@ -236,9 +263,18 @@ class ExtractRaw(dj.Imported):
                     "animal_id {animal_id}:session {session}:scan_idx {scan_idx}:{segmentation}:slice{slice}:cell{cell}".format(
                         cell=cell + 1, **key))
 
-                sns.despine(ax=ax_sp)
+                sns.despine(fig)
+                ax_sp.set_title('NMF spike trace', fontweight='bold')
+                ax_tr.set_title('Raw trace', fontweight='bold')
+                ax_small_tr.set_title('NMF spike trace', fontweight='bold')
+                ax_small_ca.set_title('Raw trace', fontweight='bold')
                 ax_sp.axis('tight')
-
+                for a in [ax_small_ca, ax_small_tr, ax_sp, ax_tr]:
+                    a.set_xticks([])
+                    a.set_yticks([])
+                    sns.despine(ax=a, left=True)
+                ax_sp.set_xlabel('time')
+                fig.tight_layout()
                 plt.savefig(
                     outdir + "/scan_idx{scan_idx}/slice{slice}/cell{cell:03d}_animal_id_{animal_id}_session_{session}.png".format(
                         cell=cell + 1, **key))
@@ -309,7 +345,6 @@ class ComputeTraces(dj.Computed):
                     sub_key = dict(key, )
 
 
-
 @schema
 class SpikeMethod(dj.Lookup):
     definition = """
@@ -363,7 +398,7 @@ class Spikes(dj.Computed):
 
     @property
     def key_source(self):
-        #return (ComputeTraces() * SpikeMethod() & [dict(spike_method_name='stm'), dict(spike_method_name='nmf')]).proj()
+        # return (ComputeTraces() * SpikeMethod() & [dict(spike_method_name='stm'), dict(spike_method_name='nmf')]).proj()
         return (ComputeTraces() * SpikeMethod() & dict(spike_method_name='nmf')).proj()
 
     class RateTrace(dj.Part):

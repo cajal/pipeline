@@ -1,5 +1,5 @@
 %{
-fields.Directional (computed) # all directional drift trials for the scan
+tuning.Directional (computed) # all directional drift trials for the scan
 -> preprocess.Sync
 ---
 ndirections                 : tinyint                       # number of directions
@@ -9,7 +9,7 @@ ndirections                 : tinyint                       # number of directio
 classdef Directional < dj.Relvar & dj.AutoPopulate
 
     properties
-        popRel = preprocess.Sync  & (psy.MovingNoise & 'speed>0');
+        popRel = preprocess.Sync  & (vis.MovingNoise & 'speed>0');
     end
     
     methods(Access=protected)
@@ -17,10 +17,10 @@ classdef Directional < dj.Relvar & dj.AutoPopulate
         function makeTuples(self, key)
             iTrial = 0;
             trialTuples = [];
-            for trialKey = fetch(psy.Trial * preprocess.Sync & psy.MovingNoise & key)'
+            for trialKey = fetch(vis.Trial * preprocess.Sync & vis.MovingNoise & key)'
                 frameTimes = fetch1(preprocess.Sync & trialKey, 'frame_times');
                 [params, flips] = fetch1(...
-                    psy.MovingNoise*psy.MovingNoiseLookup*psy.Trial & trialKey, ...
+                    vis.MovingNoise*vis.MovingNoiseLookup*vis.Trial & trialKey, ...
                     'params', 'flip_times');
                 frametimes = params{4}.frametimes;
                 directions = params{4}.direction;
@@ -45,7 +45,7 @@ classdef Directional < dj.Relvar & dj.AutoPopulate
             key.ndirections = length(directions);
             assert(key.ndirections>=8 && all(diff(diff(directions)) < 1e-7), 'directions must be uniform')
             self.insert(key)
-            insert(fields.DirectionalTrial, trialTuples)
+            insert(tuning.DirectionalTrial, trialTuples)
         end
         
     end
