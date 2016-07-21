@@ -26,3 +26,4 @@ The code in this repository is licensed under the [Creative Commons Attribution-
 1.  [pipeline.preprocess](jupyter/notebooks/pipeline_preprocess.ipynb)
 1.  [Synchronization](jupyter/notebooks/pipeline_synchronization.ipynb)
 1.  [pipeline.tuning](jupyter/notebooks/pipeline_tuning.ipynb)
+1.  [Common Queries](jupyter/notebooks/common_queries.ipynb)
