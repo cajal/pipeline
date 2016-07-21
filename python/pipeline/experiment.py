@@ -1,5 +1,5 @@
 import datajoint as dj
-from . import mice
+from . import mice     # needed for referencing
 
 from distutils.version import StrictVersion
 

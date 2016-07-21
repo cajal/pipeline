@@ -19,7 +19,10 @@
 The code in this repository is licensed under the [Creative Commons Attribution-NonCommercial-ShareAlike 3.0 Unported License](http://creativecommons.org/licenses/by-nc-sa/3.0/). 
 
 # Notebooks
-1.  [Pipeline: intro](jupyter/notebooks/pipeline_intro.ipynb)
-1.  [Pipeline: experiment](jupyter/notebooks/pipeline_experiment.ipynb)
-1.  [Pipeline: preprocess](jupyter/notebooks/pipeline_preprocess.ipynb)
-1.  [Pipeline: vis](jupyter/notebooks/pipeline_preprocess.ipynb)
+1.  [Intro](jupyter/notebooks/pipeline_intro.ipynb)
+1.  [Big Picture](jupyter/notebooks/pipeline_intro.ipynb)
+1.  [pipeline.experiment](jupyter/notebooks/pipeline_experiment.ipynb)
+1.  [pipeline.vis](jupyter/notebooks/pipeline_preprocess.ipynb)
+1.  [pipeline.preprocess](jupyter/notebooks/pipeline_preprocess.ipynb)
+1.  [Synchronization](jupyter/notebooks/pipeline_synchronization.ipynb)
+1.  [pipeline.tuning](jupyter/notebooks/pipeline_tuning.ipynb)
