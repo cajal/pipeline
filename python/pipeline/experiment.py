@@ -1,6 +1,6 @@
 import datajoint as dj
 import pandas as pd
-from . import mice
+from . import mice # needed for referencing
 import numpy as np
 from distutils.version import StrictVersion
 import numpy as np
@@ -171,21 +171,6 @@ class Software(dj.Lookup):
 
 
 @schema
-class Aim(dj.Lookup):
-    definition = """  # what is being imaged (e.g. somas, axon) and why
-    aim : varchar(40)   # short description of what is imaged and why
-    """
-
-    contents = [['unset'],
-                ['functional: somas'],
-                ['functional: axons'],
-                ['functional: axons, somas'],
-                ['functional: axons-green, somas-red'],
-                ['functional: axons-red, somas-green'],
-                ['structural']]
-
-
-@schema
 class PMTFilterSet(dj.Lookup):
     definition = """  #  microscope filter sets: dichroic and PMT Filters
     pmt_filter_set : varchar(16)    # short name of microscope filter set
@@ -248,21 +233,21 @@ class Session(dj.Manual):
 @schema
 class Scan(dj.Manual):
     definition = """    # scanimage scan info
+    animal_id            : int(11)                      # id number
     -> Session
-    scan_idx        : smallint               # number of TIFF stack file
+    scan_idx             : smallint(6)                  # number of TIFF stack file
     ---
     -> Lens
     -> BrainArea
-    laser_wavelength            : float                         # (nm)
-    laser_power                 : float                         # (mW) to brain
-    filename                    : varchar(255)                  # file base name
-    behavior_filename=""        : varchar(255)   # pupil movies, whisking, locomotion, etc.
-    -> Aim
-    depth=0                     : int                           # manual depth measurement
-    scan_notes                  : varchar(4095)                 # free-notes
-    site_number=0               : tinyint                       # site number
+    laser_wavelength     : float                        # (nm)
+    laser_power          : float                        # (mW) to brain
+    filename             : varchar(255)                 # file base name
+    depth="0"            : int(11)                      # manual depth measurement
+    scan_notes           : varchar(4095)                # free-notes
+    site_number="0"      : tinyint(4)                   # site number
+    software             : varchar(20)                  # name of the software
     -> Software
-    scan_ts=CURRENT_TIMESTAMP   : timestamp                     # don't edit
+    scan_ts="CURRENT_TIMESTAMP" : timestamp                    # don't edit
     """
 
 
@@ -321,3 +306,6 @@ def migrate_reso_pipeline():
     ) & Session()
 
     Scan().insert(scans.fetch(as_dict=True), skip_duplicates=True)
+
+
+schema.spawn_missing_classes()

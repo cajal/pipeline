@@ -1,5 +1,5 @@
 import datajoint as dj
-
+from . import common
 from distutils.version import StrictVersion
 assert StrictVersion(dj.__version__) >= StrictVersion('0.2.5')
 

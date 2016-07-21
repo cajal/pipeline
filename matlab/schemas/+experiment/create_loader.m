@@ -49,7 +49,7 @@ function Y = twitch_loader(key, islice, mask_range, reader)
 %     stride = 4;
 %     hs = hamming(2*stride+1);
 %     hs = hs./sum(hs);
-    
+%     
     fps = fetch1(preprocess.PrepareGalvo & key, 'fps');
     ht = hamming(2*floor(fps/4)+1);
     ht = ht./sum(ht);
@@ -61,13 +61,17 @@ function Y = twitch_loader(key, islice, mask_range, reader)
     [d1,d2,fr] = size(Y1);
     y1 = ne7.dsp.convmirr(reshape(Y1,[d1*d2,fr])',ht);
     y2 = ne7.dsp.convmirr(reshape(Y2,[d1*d2,fr])',ht);
-    R = y2./y1;
+    R = y2./(y1+y2 + 1);
     q = quantile(R, 0.01, 1);
     b_free = 2716.16;
     b_loaded = 616.00;
     g_free = 2172.93;
     g_loaded = 3738.65;
-    gamma = q./g_free*b_free;
-    keyboard
+    dg = g_loaded - g_free;
+    db = b_loaded - b_free;
     
-end
+    gamma = -b_free/g_free*q./(q-1);
+    keyboard;
+    gamma = median(gamma);
+    x = (g_free*gamma - R*(b_free + gamma*g_free))./(-dg*gamma + R*(db + gamma*dg));
+    end
