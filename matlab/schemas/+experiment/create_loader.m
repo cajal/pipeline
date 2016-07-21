@@ -7,22 +7,25 @@ switch fetch1(experiment.SessionFluorophore & key,'fluorophore')
             
     otherwise
         channel = 1;  % TODO: change to more flexible choice
-        loader = @(islice, mask_range)(squeeze(load_galvo_scan(key, islice, channel, mask_range, reader)));
+        loader = @(islice, varargin)(squeeze(load_galvo_scan(key, islice, channel, reader, varargin{:})));
 end
 
 
 end
 
-function scan = load_galvo_scan(key, islice, ichannel, frames, reader)
+
+function scan = load_galvo_scan(key, islice, ichannel, reader, frames)
 key.slice = islice;
 fixMotion = get_fix_motion_fun(preprocess.PrepareGalvoMotion & key);
 fixRaster = get_fix_raster_fun(preprocess.PrepareGalvo & key);
-if nargin < 5
+
+if nargin < 4
     reader = preprocess.getGalvoReader(key);
 end
 
 
-if nargin < 4
+if nargin < 5
+    fprintf('\tLoading all frames\n');
     frames = 1:reader.nframes;
 end
 

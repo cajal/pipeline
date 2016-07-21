@@ -89,13 +89,12 @@ classdef ExtractRaw < dj.Relvar & dj.AutoPopulate
                             
                         end
                     case 'manual'
-                     disp('fix later')
-                     return
                         [d2, d1, nslices] = fetch1(preprocess.PrepareGalvo & key, 'px_width', 'px_height','nslices');
-                        channel = 1;    % TODO: change to more flexible choice
+                        [loader, channel] = experiment.create_loader(key);
+                        
                         self.insert(key)
                         for islice = 1:nslices
-                            Y = squeeze(self.load_galvo_scan(key, islice, channel));
+                            Y = loader(islice);
                             key.slice = islice;
                             insert(preprocess.ExtractRawGalvoSegmentation, key);
                             mask_image = fetch1(preprocess.ManualSegment & key, 'mask');
