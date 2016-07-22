@@ -1,3 +1,6 @@
+# License
+This software is published under the [LGPLv3 license](LICENSE.txt).
+
 # Dependencies
 **Matlab and Python**
 * [DataJoint](http://datajoint.github.com/)
