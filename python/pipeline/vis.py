@@ -174,8 +174,49 @@ class Trippy(dj.Manual):
     """
 
 
+@schema
+class FlashingBar(dj.Manual):
+    definition = """  # flashing bar
+    -> Condition
+    ---
+    pre_blank            : float                        # (s) blank period preceding trials
+    luminance            : float                        # (cd/m^2) mid-value luminance
+    contrast             : float                        # (0-1) Michelson contrast of values 0..255
+    bg_color             : tinyint unsigned             # background color 1-254
+    orientation          : decimal(4,1)                 # (degrees) 0=horizontal,  90=vertical
+    offset               : float                        # normalized by half-diagonal
+    width                : float                        # normalized by half-diagonal
+    trial_duration       : float                        # (s) ON time of flashing bar
+    pattern_frequency    : float                        # (Hz) will be rounded to the nearest fraction of fps
+    """
+
+@schema
+class Grating(dj.Manual):
+    definition = """  # drifting gratings with apertures
+    -> Condition
+    ---
+    direction            : decimal(4,1)                 # 0-360 degrees
+    spatial_freq         : decimal(4,2)                 # cycles/degree
+    temp_freq            : decimal(4,2)                 # Hz
+    pre_blank = 0        : float                        # (s) blank period preceding trials
+    luminance            : float                        # cd/m^2 mean
+    contrast             : float                        # Michelson contrast 0-1
+    aperture_radius = 0  : float                        # in units of half-diagonal, 0=no aperture
+    aperture_x = 0       : float                        # aperture x coordinate, in units of half-diagonal, 0 = center
+    aperture_y = 0       : float                        # aperture y coordinate, in units of half-diagonal, 0 = center
+    grating              : enum('sqr','sin')            # sinusoidal or square, etc.
+    init_phase           : float                        # 0..1
+    trial_duration       : float                        # s, does not include pre_blank duration
+    phase2_fraction = 0  : float                        # fraction of trial spent in phase 2
+    phase2_temp_freq = 0 : float                        # (Hz)
+    second_photodiode = 0 : tinyint                      # 1=paint a photodiode patch in the upper right corner
+    second_photodiode_time = 0.0 : decimal(4,1)                 # time delay of the second photodiode relative to the stimulus onset
+    """
+
+
 def migrate():
-    from . import psy, experiment
+    from .legacy import psy
+    from . import experiment
 
     # copy basic structure: Session, Condition, Trial
     sessions = psy.Session() & (experiment.Session() & 'session_date>"2016-02-02"' & 'animal_id>1000')
@@ -196,3 +237,17 @@ def migrate():
     Trippy().insert(trippy - Trippy())
 
     # copy MovieClip and MovieStill
+    Movie().insert(psy.MovieInfo())
+    Movie.Clip().insert(psy.MovieClipStore())
+    Movie.Still().insert(psy.MovieStill())
+    MovieClipCond().insert(psy.MovieClipCond() & Condition())
+    MovieStillCond().insert(psy.MovieStillCond() & Condition())
+    MovieClipCond().insert(
+        psy.MadMax().proj('clip_number', 'cut_after', movie_name="'MadMax'") & Condition() - MovieClipCond())
+    MovieSeqCond().insert(psy.MovieSeqCond() & Condition())
+    FlashingBar().insert(psy.FlashingBar() & Condition())
+    Grating().insert(psy.Grating() & Condition())
+
+    orphan_conditions = (
+        Condition() - Monet() - Trippy() - MovieClipCond() -
+        MovieStillCond() - MovieSeqCond() - FlashingBar() - Grating())

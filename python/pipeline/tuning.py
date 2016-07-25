@@ -3,7 +3,7 @@ Analysis of visual responses: receptive fields, tuning curves, pixelwise maps
 """
 
 import datajoint as dj
-from . import preprocess, vis
+from . import preprocess, vis   # needed for foreign keys
 
 from distutils.version import StrictVersion
 assert StrictVersion(dj.__version__) >= StrictVersion('0.2.8')

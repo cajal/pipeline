@@ -9,7 +9,7 @@ ndirections                 : tinyint                       # number of directio
 classdef Directional < dj.Relvar & dj.AutoPopulate
 
     properties
-        popRel = preprocess.Sync  & (vis.MovingNoise & 'speed>0');
+        popRel = preprocess.Sync  & (vis.Monet & 'speed>0');
     end
     
     methods(Access=protected)
@@ -17,10 +17,10 @@ classdef Directional < dj.Relvar & dj.AutoPopulate
         function makeTuples(self, key)
             iTrial = 0;
             trialTuples = [];
-            for trialKey = fetch(vis.Trial * preprocess.Sync & vis.MovingNoise & key)'
+            for trialKey = fetch(vis.Trial * preprocess.Sync & vis.Monet & key)'
                 frameTimes = fetch1(preprocess.Sync & trialKey, 'frame_times');
                 [params, flips] = fetch1(...
-                    vis.MovingNoise*vis.MovingNoiseLookup*vis.Trial & trialKey, ...
+                    vis.Monet*vis.MonetLookup*vis.Trial & trialKey, ...
                     'params', 'flip_times');
                 frametimes = params{4}.frametimes;
                 directions = params{4}.direction;
