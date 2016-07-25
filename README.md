@@ -1,3 +1,6 @@
+# License
+This software is published under the [LGPLv3 license](LICENSE.txt).
+
 # Dependencies
 **Matlab and Python**
 * [DataJoint](http://datajoint.github.com/)
@@ -20,9 +23,10 @@ The code in this repository is licensed under the [Creative Commons Attribution-
 
 # Notebooks
 1.  [Intro](jupyter/notebooks/pipeline_intro.ipynb)
-1.  [Big Picture](jupyter/notebooks/pipeline_intro.ipynb)
+1.  [Big Picture](jupyter/notebooks/big_picture.ipynb)
 1.  [pipeline.experiment](jupyter/notebooks/pipeline_experiment.ipynb)
-1.  [pipeline.vis](jupyter/notebooks/pipeline_preprocess.ipynb)
+1.  [pipeline.vis](jupyter/notebooks/pipeline_vis.ipynb)
 1.  [pipeline.preprocess](jupyter/notebooks/pipeline_preprocess.ipynb)
 1.  [Synchronization](jupyter/notebooks/pipeline_synchronization.ipynb)
 1.  [pipeline.tuning](jupyter/notebooks/pipeline_tuning.ipynb)
+1.  [Common Queries](jupyter/notebooks/common_queries.ipynb)

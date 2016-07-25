@@ -149,8 +149,8 @@ class ExtractRaw(dj.Imported):
 
     @property
     def key_source(self):
-        return Prepare() * Method().proj() & \
-               dj.OrList(Prepare.Aod() * Method.Aod(), Prepare.Galvo() * Method.Galvo())
+        return Prepare() * Method().proj() & dj.OrList(
+            Prepare.Aod() * Method.Aod(), Prepare.Galvo() * Method.Galvo())
 
     class Trace(dj.Part):
         definition = """  # raw trace, common to Galvo
@@ -204,8 +204,8 @@ class ExtractRaw(dj.Imported):
         # theCM = plt.cm.get_cmap('viridis')
 
         for key in (self.GalvoSegmentation().proj() * Method.Galvo() & dict(segmentation='nmf')).fetch.as_dict:
-            mask_px, mask_w, spikes = \
-            (self.GalvoROI() * self.SpikeRate() & key & dict(segmentation=2)).fetch.order_by('trace_id')[
+            mask_px, mask_w, spikes = (self.GalvoROI() * self.SpikeRate() & key & dict(segmentation=2)
+                                       ).fetch.order_by('trace_id')[
                 'mask_pixels', 'mask_weights', 'spike_trace']
 
             template = np.stack([normalize(t) for t in (Prepare.GalvoAverageFrame() & key).fetch['frame']], axis=2).max(

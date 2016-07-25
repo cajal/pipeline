@@ -1,6 +1,6 @@
 %{
-fields.Cos2Map (computed) # pixelwise cosine fit to directional responses
--> fields.OriMap
+tuning.Cos2Map (computed) # pixelwise cosine fit to directional responses
+-> tuning.OriMap
 ---
 cos2_amp                    : longblob                      # dF/F at preferred direction
 cos2_r2                     : longblob                      # fraction of variance explained (after gaussinization)
@@ -12,17 +12,17 @@ pref_ori                    : longblob                      # (radians) preferre
 classdef Cos2Map < dj.Relvar & dj.AutoPopulate
 
 	properties
-		popRel = fields.OriMap  % !!! update the populate relation
+		popRel = tuning.OriMap 
 	end
 
 	methods(Access=protected)        
 
 		function makeTuples(self, key)
             % check that angles are uniformly sampled
-            [ndirs, C] = fetch1(fields.Directional*fields.OriDesignMatrix & key, ...
+            [ndirs, C] = fetch1(tuning.Directional*tuning.OriDesignMatrix & key, ...
                 'ndirections', 'regressor_cov');
             phi = (0:ndirs-1)'/ndirs*360;            
-            [B, R2, dof] = fetch1(fields.OriMap & key, ...
+            [B, R2, dof] = fetch1(tuning.OriMap & key, ...
                 'regr_coef_maps', 'r2_map', 'dof_map');
             assert(size(B,3) == length(phi), 'OriMap regression coeff dimension mismatch')
             sz = size(R2);
@@ -59,7 +59,7 @@ classdef Cos2Map < dj.Relvar & dj.AutoPopulate
 %                 g = g - 0.8*imfilter(g,fspecial('gaussian',201,70));
 %                 g = max(0,g-quantile(g(:),0.005));
 %                 g = min(1,g/quantile(g(:),0.99));
-                [amp, r2, ori, ~] = fetch1(fields.Cos2Map & key, ...
+                [amp, r2, ori, ~] = fetch1(tuning.Cos2Map & key, ...
                     'cos2_amp', 'cos2_r2', 'pref_ori', 'cos2_fp');
                 amp = min(1,amp/quantile(amp(:),0.999)).^(0.8);
                 h = mod(ori,pi)/pi;   % orientation is represented as hue
