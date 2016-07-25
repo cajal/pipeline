@@ -149,8 +149,8 @@ class ExtractRaw(dj.Imported):
 
     @property
     def key_source(self):
-        return Prepare() * Method().proj() & \
-               dj.OrList(Prepare.Aod() * Method.Aod(), Prepare.Galvo() * Method.Galvo())
+        return Prepare() * Method().proj() & dj.OrList(
+            Prepare.Aod() * Method.Aod(), Prepare.Galvo() * Method.Galvo())
 
     class Trace(dj.Part):
         definition = """  # raw trace, common to Galvo

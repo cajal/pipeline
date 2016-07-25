@@ -1,8 +1,8 @@
 %{
-preprocess.Sync (imported) #
+preprocess.Sync (imported) # 
 -> preprocess.Prepare
 ---
--> psy.Session
+-> vis.Session
 first_trial                 : int                           # first trial index from psy.Trial overlapping recording
 last_trial                  : int                           # last trial index from psy.Trial overlapping recording
 signal_start_time           : double                        # (s) signal start time on stimulus clock
@@ -24,7 +24,7 @@ classdef Sync < dj.Relvar & dj.AutoPopulate
             assert(numel(key)==1)
             
             % read photodiode signal
-            dat = rf.readHD5(key);
+            dat = preprocess.readHD5(key);
             packetLen = 2000;
             if isfield(dat,'analogPacketLen')
                 packetLen = dat.analogPacketLen;
