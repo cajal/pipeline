@@ -169,6 +169,18 @@ class Software(dj.Lookup):
         ('aod', '2.0'),
         ('imager', '1.0')]
 
+@schema
+class Compartment(dj.Lookup):
+    definition = """
+    # cell compartments that can be imaged
+    compartment         : char(16)
+    ---
+    """
+
+    contents = [
+        ('axon',),
+        ('soma',),
+    ]
 
 @schema
 class PMTFilterSet(dj.Lookup):
@@ -229,6 +241,15 @@ class Session(dj.Manual):
         notes=""          : varchar(255) # additional information about fluorophore in this scan
         """
 
+    class TargetStructure(dj.Part):
+        definition = """
+        # specifies which neuronal structure was imaged
+
+        -> Session
+        -> Fluorophore
+        -> Compartment
+        ---
+        """
 
 @schema
 class Scan(dj.Manual):

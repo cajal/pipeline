@@ -4,6 +4,10 @@ from warnings import warn
 import numpy as np
 import sh
 import os
+from scipy import integrate as integr
+from .utils.dsp import mirrconv
+from scipy import signal
+from scipy import stats
 
 from distutils.version import StrictVersion
 
@@ -223,7 +227,8 @@ class ExtractRaw(dj.Imported):
 
             N = len(spikes)
             for cell, (sp_trace, ca_trace) in enumerate(zip(spikes, traces)):
-                print("{cell:03d}/{N}: animal_id {animal_id}\tsession {session}\tscan_idx {scan_idx:02d}\t{segmentation}\tslice {slice}".format(
+                print(
+                    "{cell:03d}/{N}: animal_id {animal_id}\tsession {session}\tscan_idx {scan_idx:02d}\t{segmentation}\tslice {slice}".format(
                         cell=cell + 1, N=N, **key))
                 sp_trace = sp_trace.squeeze()
                 ca_trace = ca_trace.squeeze()
@@ -282,7 +287,7 @@ class ExtractRaw(dj.Imported):
 
     def _make_tuples(self, key):
         """ implemented in matlab """
-        raise NotImplementedError
+        raise NotImplementedError("Implemented in Matlab")
 
 
 @schema
@@ -311,10 +316,39 @@ class ComputeTraces(dj.Computed):
         definition = """  # final calcium trace but before spike extraction or filtering
         -> ComputeTraces
         trace_id             : smallint                     #
-        trace_id  : smallint
         ---
         trace = null         : longblob                     # leave null same as ExtractRaw.Trace
         """
+
+    @staticmethod
+    def get_band_emission(fluorophore, center, band_width):
+        pass_band = (center - band_width / 2, center + band_width / 2)
+        nu_loaded, s_loaded = (experiment.Fluorophore.EmissionSpectrum()
+                               & dict(fluorophore=fluorophore, loaded=1)).fetch1['wavelength', 'fluorescence']
+
+        nu_free, s_free = (experiment.Fluorophore.EmissionSpectrum()
+                           & dict(fluorophore=fluorophore, loaded=0)).fetch1['wavelength', 'fluorescence']
+
+        f_loaded = lambda xx: np.interp(xx, nu_loaded, s_loaded)
+        f_free = lambda xx: np.interp(xx, nu_free, s_free)
+        return integr.quad(f_free, *pass_band)[0], integr.quad(f_loaded, *pass_band)[0]
+
+    @staticmethod
+    def estimate_twitch_ratio(x, y, fps, df1, df2):
+        # low pass filter for unsharp masking
+        hh = signal.hamming(2 * np.round(fps / 0.03) + 1)
+        hh /= hh.sum()
+
+        # high pass filter for heavy denoising
+        hl = signal.hamming(2 * np.round(fps / 8) + 1)
+        hl /= hl.sum()
+
+        x = mirrconv(x - mirrconv(x, hh), hl)
+        y = mirrconv(y - mirrconv(y, hh), hl)
+
+        slope, intercept, _, p, _ = stats.linregress(x, y)
+        slope = -1 if slope >= 0 else slope
+        return df2 / df1 / slope
 
     def _make_tuples(self, key):
         if ExtractRaw.Trace() & key:
@@ -330,19 +364,44 @@ class ComputeTraces(dj.Computed):
                 self.Trace().insert(
                     [remove_channel(x) for x in (ExtractRaw.Trace() & key).proj(trace='raw_trace').fetch.as_dict])
             elif fluorophore == 'Twitch2B':
+                # --- get channel indices and filter passbands for twitch settings
                 filters = experiment.PMTFilterSet() * experiment.PMTFilterSet.Channel() \
                           & dict(pmt_filter_set='2P3 blue-green A')
-                green = (filters & dict(color='green')).fetch1['pmt_channel']
-                blue = (filters & dict(color='blue')).fetch1['pmt_channel']
-                green_traces, blue_traces, trace_ids = \
-                    ((ExtractRaw.Trace() & key & dict(channel=green)).proj(green_channel='channel',
-                                                                           green_trace='raw_trace') * \
-                     (ExtractRaw.Trace() & key & dict(channel=blue)).proj(blue_channel='channel',
-                                                                          blue_trace='raw_trace') \
-                     ).fetch['green_trace', 'blue_trace', 'trace_id']
+                fps = (Prepare.Galvo() & key).fetch1['fps']
+                green_idx, green_center, green_pb = \
+                    (filters & dict(color='green')).fetch1['pmt_channel', 'spectrum_center', 'spectrum_bandwidth']
+                blue_idx, blue_center, blue_pb = \
+                    (filters & dict(color='blue')).fetch1['pmt_channel', 'spectrum_center', 'spectrum_bandwidth']
+
+                # --- compute theoretical emission over filter spectra
+                g_free, g_loaded = self.get_band_emission(fluorophore, green_center, green_pb)
+                b_free, b_loaded = self.get_band_emission(fluorophore, blue_center, blue_pb)
+                dg = g_loaded - g_free
+                db = b_loaded - b_free
+
+                green = (ExtractRaw.Trace() & dict(key, channel=green_idx)).proj(green='channel',
+                                                                                 green_trace='raw_trace')
+                blue = (ExtractRaw.Trace() & dict(key, channel=blue_idx)).proj(blue='channel',
+                                                                               blue_trace='raw_trace')
+
                 self.insert1(key)
-                for tr_gr, tr_bl in zip(green_traces, blue_traces):
-                    sub_key = dict(key, )
+                for trace_id, gt, bt in zip(*(green * blue).fetch['trace_id', 'green_trace', 'blue_trace']):
+                    print(
+                        '\tProcessing animal_id: {animal_id}\t session: {session}\t scan_idx: {scan_idx}\ttrace: {trace_id}'.format(
+                            trace_id=trace_id, **key))
+                    gt, bt = gt.squeeze(), bt.squeeze()
+                    start = notnan(gt * bt)
+                    end = notnan(gt * bt, len(gt) - 1, increment=-1)
+                    gamma = self.estimate_twitch_ratio(gt[start:end], bt[start:end], fps, dg, db)
+
+                    x = np.zeros_like(gt) * np.NaN
+                    gt, bt = gt[start:end], bt[start:end]
+                    r = (gt - bt) / (gt + bt)
+                    x[start:end] = (-b_free + g_free * gamma - r * (b_free + g_free * gamma)) / \
+                                   (db - dg * gamma + r * (db + dg * gamma))
+
+                    trace_key = dict(key, trace_id=trace_id, trace=x.astype(np.float32))
+                    self.Trace().insert1(trace_key)
 
 
 @schema
@@ -398,8 +457,8 @@ class Spikes(dj.Computed):
 
     @property
     def key_source(self):
-        # return (ComputeTraces() * SpikeMethod() & [dict(spike_method_name='stm'), dict(spike_method_name='nmf')]).proj()
-        return (ComputeTraces() * SpikeMethod() & dict(spike_method_name='nmf')).proj()
+        return (ComputeTraces() * SpikeMethod() & [dict(spike_method_name='stm'), dict(spike_method_name='nmf')]).proj()
+        # return (ComputeTraces() * SpikeMethod() & dict(spike_method_name='nmf')).proj()
 
     class RateTrace(dj.Part):
         definition = """  # Inferred
@@ -409,6 +468,61 @@ class Spikes(dj.Computed):
         ---
         rate_trace = null  : longblob     # leave null same as ExtractRaw.Trace
         """
+
+    def plot_traces(self, outdir='./'):
+
+        import matplotlib.pyplot as plt
+        import seaborn as sns
+        gs = plt.GridSpec(2, 5)
+        for key in (ComputeTraces.Trace() & self).fetch.keys():
+            print('Processing', key)
+            fps = (Prepare.Galvo() & key).fetch1['fps']
+
+            hs = int(np.round(fps * 30))
+
+            fig = plt.figure(figsize=(10, 4))
+            ax_ca = fig.add_subplot(gs[0, :3])
+            ax_sp = fig.add_subplot(gs[1, :3], sharex=ax_ca)
+
+            ax_cas = fig.add_subplot(gs[0, 3:], sharey=ax_ca)
+            ax_sps = fig.add_subplot(gs[1, 3:], sharex=ax_cas, sharey=ax_sp)
+
+            ca = (ComputeTraces.Trace() & key).fetch1['trace'].squeeze()
+            t = np.arange(len(ca)) / fps
+            ax_ca.plot(t, ca, 'k')
+            loc = None
+            for sp, meth in zip(*(self.RateTrace() * SpikeMethod() & key).fetch['rate_trace', 'spike_method_name']):
+                ax_sp.plot(t, sp, label=meth)
+                # --- plot zoom in
+                if loc is None:
+                    n = len(sp)
+                    tmp = np.array(sp)
+                    tmp[np.isnan(tmp)] = 0
+                    loc = np.argmax(np.convolve(tmp, np.ones(hs) / hs, mode='same'))
+                    loc = max(loc - hs // 2, 0)
+                    loc = n - hs if loc > n - hs else loc
+                    ax_cas.plot(t[loc:loc + hs], ca[loc:loc + hs], 'k')
+                    ax_ca.fill_between([t[loc], t[loc + hs - 1]], np.nanmin(ca) * np.ones(2),
+                                       np.nanmax(ca) * np.ones(2),
+                                       color='dodgerblue', zorder=-10)
+                ax_sps.plot(t[loc:loc + hs], sp[loc:loc + hs], label=meth)
+
+            ax_sp.set_xlabel('time [s]')
+            ax_sps.set_xlabel('time [s]')
+
+            ax_sp.legend()
+            ax_sps.legend()
+
+            try:
+                sh.mkdir('-p', os.path.expanduser(outdir) + '/session{session}/scan_idx{scan_idx}/'.format(**key))
+            except:
+                pass
+
+            fig.tight_layout()
+            plt.savefig(outdir \
+                        + "/session{session}/scan_idx{scan_idx}/trace{trace_id:03d}_animal_id_{animal_id}.png".format(
+                **key))
+            plt.close(fig)
 
     def _make_tuples(self, key):
         print('Populating', key)
@@ -420,11 +534,12 @@ class Spikes(dj.Computed):
             for x in (SpikeMethod() & key).spike_traces(X, fps):
                 self.RateTrace().insert1(dict(key, **x))
         elif (SpikeMethod() & key).fetch1['spike_method_name'] == 'nmf':
-            self.insert1(key)
-            for x in (ExtractRaw.SpikeRate() & key).fetch.as_dict:
-                x['rate_trace'] = x.pop('spike_trace')
-                x.pop('channel')
-                self.RateTrace().insert1(dict(key, **x))
+            if ExtractRaw.SpikeRate() & key:
+                self.insert1(key)
+                for x in (ExtractRaw.SpikeRate() & key).fetch.as_dict:
+                    x['rate_trace'] = x.pop('spike_trace')
+                    x.pop('channel')
+                    self.RateTrace().insert1(dict(key, **x))
         else:
             raise NotImplementedError('Method {spike_method} not implemented.'.format(**key))
 
