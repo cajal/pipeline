@@ -52,8 +52,7 @@ classdef ExtractRaw < dj.Relvar & dj.AutoPopulate
                             Y = loader(islice, self.mask_range);
                             notnan = preprocess.getblocks(squeeze(any(any(~isnan(Y), 1),2)), round(length(self.mask_range)/2), self.nan_tol);
                             
-                            if length(notnan) ~= 1                        nframes = 10;
-
+                            if length(notnan) ~= 1                       
                                 error('Too many NaNs in frames for mask inference');
                             end
                             
@@ -266,7 +265,7 @@ classdef ExtractRaw < dj.Relvar & dj.AutoPopulate
                 trace_key = struct(key);
                 trace_key.channel = channel;
                 trace_key.trace_id = trace_id;
-                trace_key.raw_trace = traces(itrace, :);
+                trace_key.raw_trace = single(traces(itrace, :))'; % convert to single and make a column vector, see issue #115
                 insert(preprocess.ExtractRawTrace, trace_key);
                 trace_id = trace_id + 1;
             end
@@ -299,7 +298,7 @@ classdef ExtractRaw < dj.Relvar & dj.AutoPopulate
                 spike_key = struct(key);
                 spike_key.channel = channel;
                 spike_key.trace_id = trace_id;
-                spike_key.spike_trace = S(itrace, :);
+                spike_key.spike_trace = single(S(itrace, :))';  % convert to single and make a column vector, see issue #115
                 insert(preprocess.ExtractRawSpikeRate, spike_key);
                 trace_id = trace_id + 1;
             end

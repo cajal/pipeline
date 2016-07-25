@@ -400,7 +400,7 @@ class ComputeTraces(dj.Computed):
                     x[start:end] = (-b_free + g_free * gamma - r * (b_free + g_free * gamma)) / \
                                    (db - dg * gamma + r * (db + dg * gamma))
 
-                    trace_key = dict(key, trace_id=trace_id, trace=x.astype(np.float32))
+                    trace_key = dict(key, trace_id=trace_id, trace=x.astype(np.float32)[:, None])
                     self.Trace().insert1(trace_key)
 
 
