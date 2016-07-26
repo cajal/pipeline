@@ -1,16 +1,16 @@
 %{
-a stand-alone script for Monet stimulus processing of galvo traces
+a stand-alone script for MadMax stimulus processing of galvo traces
 %}
 
 %% prepare
 matched_trials = preprocess.Sync * vis.Trial & 'trial_idx between first_trial and last_trial';
 
 %% all galvo scans for which there is a monet stimulus
-monet_keys = fetch(preprocess.Spikes*preprocess.SpikeMethod*preprocess.Galvo*preprocess.MethodGalvo & ...
-    (matched_trials & vis.Monet) & 'spike_method_name="stm"' & 'segmentation="nmf"');
+madmax_keys = fetch(preprocess.Spikes*preprocess.SpikeMethod*preprocess.MethodGalvo & ...
+    (matched_trials & vis.MovieClipCond) & 'spike_method_name="stm"' & 'segmentation="nmf"');
 
 %% select one of the datasets
-key = monet_keys(1);
+key = madmax_keys(1);
 
 %% Alternatively, start with a known dataset
 key = struct(...
@@ -32,13 +32,10 @@ time = time(1:nslices:end);   % downsample to frame rate. To get precise time of
 
 %% get movies one-by-one to save memory
 for movie_key = fetch(matched_trials & key)'
-    movie_info = fetch(matched_trials * vis.Monet * vis.MonetLookup & movie_key, '*');
+    movie_info = fetch(matched_trials * vis.MovieClipCond * vis.MovieClip & movie_key, '*');
     
     disp 'Movie info'
     disp(movie_info)
-    
-    disp 'Drifting periods'
-    disp(movie_info.params{4})
     
     ...... do your processing here using time, traces, and movie_info .....
         
