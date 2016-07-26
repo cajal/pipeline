@@ -241,15 +241,12 @@ class ScanIgnored(dj.Manual):
     """
 
 
-schema.spawn_missing_classes()
-
-
-def migrate_reso_pipeline():
+def migrate_galvo_pipeline():
     """
     migration from the old schema
     :return:
     """
-    from . import common, rf, psy
+    from .legacy import common, rf, psy
     # migrate FOV calibration
     FOV().insert(rf.FOV().proj('width', 'height', rig="setup", fov_ts="fov_date").fetch(), skip_duplicates=True)
 
