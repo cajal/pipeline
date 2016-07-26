@@ -3,25 +3,25 @@ a stand-alone script for MadMax stimulus processing of galvo traces
 %}
 
 %% prepare
-matched_trials = preprocess.Sync * vis.Trial & 'trial_idx between first_trial and last_trial';
+matched_trials = preprocess.Sync * vis.Trial * vis.Condition & 'trial_idx between first_trial and last_trial';
 
 %% all galvo scans for which there is a monet stimulus
 madmax_keys = fetch(preprocess.Spikes*preprocess.SpikeMethod*preprocess.MethodGalvo & ...
-    (matched_trials & vis.MovieClipCond) & 'spike_method_name="stm"' & 'segmentation="nmf"');
+    (matched_trials & (vis.MovieClipCond | vis.MovieStillCond | vis.MovieSeqCond)) & 'spike_method_name="nmf"' & 'segmentation="nmf"');
 
 %% select one of the datasets
 key = madmax_keys(1);
 
 %% Alternatively, start with a known dataset
 key = struct(...
-    'animal_id', 9161, ...
+    'animal_id', 9036, ...
     'session', 1, ...
-    'scan_idx', 11, ...
+    'scan_idx', 3, ...
     'extract_method', 2, ...
-    'spike_method', 3);
+    'spike_method', 5);
 
 %% get spike traces
-[traces, slice] = fetchn(preprocess.SpikesRateTrace*preprocess.ExtractRawTrace & key, 'rate_trace', 'slice');
+[traces, slice] = fetchn(preprocess.SpikesRateTrace*preprocess.ExtractRawGalvoROI & key, 'rate_trace', 'slice');
 nslices = fetch1(preprocess.PrepareGalvo & key, 'nslices');
 traces = double([traces{:}]);  % to 2d array
 
@@ -31,12 +31,45 @@ time_between_slices = mean(diff(time));
 time = time(1:nslices:end);   % downsample to frame rate. To get precise time of each trace, do time + (slice-1)*time_between_slices
 
 %% get movies one-by-one to save memory
-for movie_key = fetch(matched_trials & key)'
-    movie_info = fetch(matched_trials * vis.MovieClipCond * vis.MovieClip & movie_key, '*');
+temp_movie_file = './temp.avi';
+for stim_key = fetch(matched_trials & key, 'ORDER BY trial_idx')'   % in chronological order
     
-    disp 'Movie info'
-    disp(movie_info)
-    
-    ...... do your processing here using time, traces, and movie_info .....
+    switch true
+        case exists(vis.MovieClipCond & stim_key)
+            % process movie clip
+            info = fetch(vis.Trial * vis.MovieClipCond * vis.MovieClip & stim_key, '*');
+            assert(length(info)==1)
+            
+            % write the compressed movie into temp_movie_file
+            fid = fopen(temp_movie_file, 'w');
+            fwrite(fid, info.clip, 'int8')
+            fclose(fid);
+            
+            % read the movie from temp_movie_file
+            v = VideoReader(temp_movie_file);
+            while hasFrame(v)
+                imshow(readFrame(v))
+                drawnow
+            end
+            disp(info)
+            
+            ....... do your processing here using traces, time, info, and v .......
+                
         
+        
+        case exists(vis.MovieStillCond & stim_key)
+            % process still images
+            info = fetch(vis.Trial * vis.MovieStillCond * vis.MovieStill & stim_key, '*');
+            disp(info)
+            
+            ....... do your processing here using traces, time, and info  .......
+                
+        
+        case exists(vis.MovieSeqCond & stim_key)
+            % process sequences of still images
+            info = fetch(vis.Trial * vis.MovieSeqCond & stim_key, '*');
+            
+            ....... do your processing here using traces and info .......
+                
+    end
 end
