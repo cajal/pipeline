@@ -58,3 +58,6 @@ docs/_build/
 target/
 .idea
 *.asv
+*.avi
+*.m~
+matlab/startup.m

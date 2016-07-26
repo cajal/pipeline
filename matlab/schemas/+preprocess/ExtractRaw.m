@@ -9,16 +9,20 @@ preprocess.ExtractRaw (imported) # pre-processing of a twp-photon scan
 classdef ExtractRaw < dj.Relvar & dj.AutoPopulate
     
     properties
-        popRel = preprocess.Prepare*preprocess.Method & (...
-            preprocess.PrepareAod*preprocess.MethodAod | ...
-            preprocess.PrepareGalvo*preprocess.MethodGalvo)
+        popRel = preprocess.Prepare*preprocess.Method ...
+            & ((preprocess.PrepareGalvo*preprocess.MethodGalvo - 'segmentation="manual"') | ... % do all automatic methods
+            preprocess.PrepareGalvo*preprocess.MethodGalvo*preprocess.ManualSegment) ... % but only manual for manual segmented scans
+            & (preprocess.PrepareAod*preprocess.MethodAod | ... % only run AOD methods on AOD
+            preprocess.PrepareGalvo*preprocess.MethodGalvo); % only run Galvo methods on Galvo
         tau = 4;
         p = 2;
         max_iter = 2;
         max_neurons = 0;
         nmf_options = 0;
         mask_range = 0;
-        batchsize = 0;
+        batchsize = 5000;
+        min_block_size = 0;
+        nan_tol = 0;
     end
     
     methods(Access=protected)
@@ -34,7 +38,6 @@ classdef ExtractRaw < dj.Relvar & dj.AutoPopulate
                         [d2, d1, nslices, nframes] = fetch1(preprocess.PrepareGalvo & key, 'px_width', 'px_height','nslices','nframes');
                         self.set_nmf_parameters(key);
                         
-                        
                         fprintf('\tInitializing reader\n');
                         [loader, channel] = experiment.create_loader(key);
                         
@@ -47,13 +50,15 @@ classdef ExtractRaw < dj.Relvar & dj.AutoPopulate
                             
                             
                             Y = loader(islice, self.mask_range);
-                            if ~preprocess.check_nans(Y)
+                            notnan = preprocess.getblocks(squeeze(any(any(~isnan(Y), 1),2)), round(length(self.mask_range)/2), self.nan_tol);
+                            
+                            if length(notnan) ~= 1                       
                                 error('Too many NaNs in frames for mask inference');
                             end
                             
                             fprintf('\tInferring masks\n');
                             try
-                                [A, b] = self.run_nmf(Y);
+                                [A, b] = self.run_nmf(Y(:,:,notnan{1}));
                             catch ME
                                 if strcmp(ME.identifier,'MATLAB:imresize:expectedNonempty')
                                     fprintf('\tCaught non-empty exception. No neuron found! Continuing to next slice. \n');
@@ -62,23 +67,20 @@ classdef ExtractRaw < dj.Relvar & dj.AutoPopulate
                             end
                             
                             fprintf('\tMasks inferred successfully. Inferring spikes\n');
-                            traces = zeros(size(A,2), nframes);
-                            S = 0*traces;
+                            traces = zeros(size(A,2), nframes)*NaN;
+                            S = 0*traces*NaN;
                             for start = 1:self.batchsize:nframes
                                 batch = start:min(nframes, start + self.batchsize - 1);
                                 
                                 fprintf('\t\tInferring spikes for frames %i:%i\n', batch(1), batch(end));
                                 Y = loader(islice, batch);
-                                [ok, nans] = preprocess.check_nans(Y,[], (start == 1) - (batch(end) == nframes));
-                                if ~ok
-                                    error('Too many Nans in frames');
-                                elseif ok < 0
-                                    Y = Y(:,:,~nans);
-                                    traces(:,batch(nans)) = NaN;
-                                    S(:,batch(nans)) = NaN;
+                                notnan = preprocess.getblocks(squeeze(any(any(~isnan(Y), 1),2)), self.min_block_size, self.nan_tol);
+                                
+                                for i = 1:length(notnan)
+                                    blk = notnan{i};
+                                    traces(:, batch(blk)) = A'*reshape(Y(:,:,blk),d1*d2,length(blk));
+                                    S(:,batch(blk)) = self.nmf_spikes(A, b, Y(:,:,blk));
                                 end
-                                traces(:, batch(~nans)) = A'*reshape(Y,d1*d2,size(Y,3));
-                                S(:,batch(~nans)) = self.nmf_spikes(A, b, Y);
                             end
                             
                             fprintf('\tInserting masks, traces, and spikes\n');
@@ -88,33 +90,50 @@ classdef ExtractRaw < dj.Relvar & dj.AutoPopulate
                             
                         end
                     case 'manual'
-                        [d2, d1, nslices] = fetch1(preprocess.PrepareGalvo & key, 'px_width', 'px_height','nslices');
-                        channel = 1;    % TODO: change to more flexible choice
+                        [d2, d1, nslices, nframes] = fetch1(preprocess.PrepareGalvo & key, 'px_width', 'px_height','nslices','nframes');
+                        [loader, channel] = experiment.create_loader(key,0);
                         self.insert(key)
+                        trace_id = ones(length(channel),1);
                         for islice = 1:nslices
-                            Y = squeeze(self.load_galvo_scan(key, islice, channel));
                             key.slice = islice;
                             insert(preprocess.ExtractRawGalvoSegmentation, key);
                             mask_image = fetch1(preprocess.ManualSegment & key, 'mask');
                             regions = regionprops(bwlabel(mask_image, 4),'PixelIdxList'); %#ok<MRPBW>
                             mask_pixels = {regions(:).PixelIdxList};
-                            for imask = 1:length(mask_pixels)
-                                trace_key = rmfield(key,'slice');
-                                trace_key.channel = channel;
-                                trace_key.trace_id = imask;
-                                [x,y] = ind2sub([d1 d2],mask_pixels{imask});
-                                trace_key.raw_trace = squeeze(nanmean(nanmean(Y(x,y,:))));
-                                insert(preprocess.ExtractRawTrace, trace_key);
+                            trace_key = rmfield(key,'slice');
+                            traces = zeros(length(mask_pixels), length(channel), nframes);
+                            
+                            for start = 1:self.batchsize:nframes
+                                batch = start:min(nframes, start + self.batchsize - 1);
+                                fprintf('\tComputing traces for frames %i:%i\n', batch(1), batch(end));
                                 
-                                mask_key = key;
-                                mask_key.channel = channel;
-                                mask_key.trace_id =  imask;
-                                mask_key.mask_pixels = mask_pixels{imask};
-                                mask_key.mask_weights = ones(size(mask_pixels{imask}));
-                                insert(preprocess.ExtractRawGalvoROI, mask_key);
+                                Y = loader(islice, batch);
+                                for imask = 1:length(mask_pixels)
+                                    for ichannel = 1:length(channel)
+                                        [x,y] = ind2sub([d1 d2],mask_pixels{imask});
+                                        traces(imask, ichannel, batch) = squeeze(nanmean(nanmean(Y(x,y,ichannel, :))));
+                                    end
+                                end
                                 
-                                self.insert(tuples)
                             end
+                            
+                            for imask = 1:length(mask_pixels)
+                                for ichannel = 1:length(channel)
+                                    trace_key.channel = channel(ichannel);
+                                    trace_key.trace_id = trace_id(ichannel);
+                                    trace_key.raw_trace = squeeze(single(traces(imask, ichannel, :)));
+                                    insert(preprocess.ExtractRawTrace, trace_key);
+                                    
+                                    mask_key = key;
+                                    mask_key.channel = channel(ichannel);
+                                    mask_key.trace_id =  trace_id(ichannel);
+                                    mask_key.mask_pixels = mask_pixels{imask};
+                                    mask_key.mask_weights = ones(size(mask_pixels{imask}));
+                                    insert(preprocess.ExtractRawGalvoROI, mask_key);
+                                    trace_id(ichannel) = trace_id(ichannel) + 1;
+                                end
+                            end
+                            
                         end
                     otherwise
                         disp(['Not performing ' segmentation_method ' segmentation']);
@@ -126,34 +145,25 @@ classdef ExtractRaw < dj.Relvar & dj.AutoPopulate
             else
                 error('Cannot match scan to neither Galvo nor AOD.')
             end
-            % 			self.insert(key)
         end
         
         
         function set_nmf_parameters(self, key)
             
             fprintf('\tSetting NMF parameters for functional scan on somas\n');
-            mask_chunk = 10*60; % chunk size in seconds
+            
+            mask_chunk = 1*60; % chunk size in seconds
             self.batchsize = 10000; % batch size for temporal processing
             [d2, d1, um_width, um_height, nframes] = fetch1(preprocess.PrepareGalvo & key, 'px_width', 'px_height', 'um_width', 'um_height','nframes');
             self.tau = 4;
             self.p = 2;
             neuron_density = 800; % neuron per mm^2 slice
             self.max_iter = 2;
-            downsample_to = 4;
+            downsample_to = 4; % temporal downsampling to this rate in Hz during mask inference
             fps = fetch1(preprocess.PrepareGalvo & key, 'fps');
-            self.nmf_options = CNMFSetParms(...
-                'd1',d1,'d2',d2,...                         % dimensions of datasets
-                'search_method','ellipse','dist',3,...      % search locations when updating spatial components
-                'deconv_method','constrained_foopsi',...    % activity deconvolution method
-                'temporal_iter',2,...                       % number of block-coordinate descent steps
-                'fudge_factor',0.98,...                     % bias correction for AR coefficients
-                'merge_thr',.8,...                          % merging threshold
-                'gSig', self.tau, ... % TODO: possibly update gsig to adapt to neuron size in FOV
-                'se',  strel('disk',3,0),...
-                'init_method', 'greedy_corr', ...
-                'tsub', floor(fps/downsample_to) ...
-                );
+            self.min_block_size = round(fps*5); % minimum block size for spike inference
+            self.nan_tol = round(fps/10); % maximal stretch of nans to tolerate
+            
             self.max_neurons = round((um_width * um_height)/1000^2 * neuron_density);
             mc = min(ceil(mask_chunk * fps), nframes);
             tmp = ceil((nframes - mc)/2);
@@ -165,6 +175,35 @@ classdef ExtractRaw < dj.Relvar & dj.AutoPopulate
             fprintf('\tUsing max %i neurons and %i frames to infer masks\n', self.max_neurons, ...
                 length(self.mask_range));
             fprintf('\tBatchsize is %i\n', self.batchsize);
+            
+            if count(experiment.SessionTargetStructure & key) == 0 || ...
+                    strcmp(fetch1(experiment.SessionTargetStructure & key,'compartment'),'soma')
+                fprintf('\tSetting parameters for soma segmentation\n');
+                self.nmf_options = CNMFSetParms(...
+                    'd1',d1,'d2',d2,...                         % dimensions of datasets
+                    'search_method','ellipse','dist',3,...      % search locations when updating spatial components
+                    'deconv_method','constrained_foopsi',...    % activity deconvolution method
+                    'temporal_iter',2,...                       % number of block-coordinate descent steps
+                    'fudge_factor',0.98,...                     % bias correction for AR coefficients
+                    'merge_thr',.8,...                          % merging threshold
+                    'gSig', self.tau, ... % TODO: possibly update gsig to adapt to neuron size in FOV
+                    'se',  strel('disk',3,0),...
+                    'init_method', 'greedy_corr', ...
+                    'tsub', floor(fps/downsample_to) ...
+                    );
+            elseif strcmp(fetch1(experiment.SessionTargetStructure & key,'compartment'),'axon')
+                fprintf('\tSetting parameters for axon segmentation\n');
+                self.nmf_options = CNMFSetParms(...
+                    'd1',d1,'d2',d2,...                         % dimensions of datasets
+                    'search_method','dilate',...      % search locations when updating spatial components
+                    'deconv_method','constrained_foopsi',...    % activity deconvolution method
+                    'temporal_iter',2,...                       % number of block-coordinate descent steps
+                    'fudge_factor',0.98,...                     % bias correction for AR coefficients
+                    'merge_thr',.8,...                          % merging threshold
+                    'init_method', 'HALS', ...
+                    'tsub', floor(fps/downsample_to) ...
+                    );
+            end
         end
         
         
@@ -226,7 +265,7 @@ classdef ExtractRaw < dj.Relvar & dj.AutoPopulate
                 trace_key = struct(key);
                 trace_key.channel = channel;
                 trace_key.trace_id = trace_id;
-                trace_key.raw_trace = traces(itrace, :);
+                trace_key.raw_trace = single(traces(itrace, :))'; % convert to single and make a column vector, see issue #115
                 insert(preprocess.ExtractRawTrace, trace_key);
                 trace_id = trace_id + 1;
             end
@@ -259,7 +298,7 @@ classdef ExtractRaw < dj.Relvar & dj.AutoPopulate
                 spike_key = struct(key);
                 spike_key.channel = channel;
                 spike_key.trace_id = trace_id;
-                spike_key.spike_trace = S(itrace, :);
+                spike_key.spike_trace = single(S(itrace, :))';  % convert to single and make a column vector, see issue #115
                 insert(preprocess.ExtractRawSpikeRate, spike_key);
                 trace_id = trace_id + 1;
             end
