@@ -32,7 +32,9 @@ class Fluorophore(dj.Lookup):
         ['mRuby', ''],
         ['mCherry', ''],
         ['tdTomato', ''],
-        ['OGB', '']]
+        ['OGB', ''],
+        ['RCaMP1a', '']
+    ]
 
     class EmissionSpectrum(dj.Part):
         definition = """
