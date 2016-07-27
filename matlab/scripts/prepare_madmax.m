@@ -31,7 +31,8 @@ time_between_slices = mean(diff(time));
 time = time(1:nslices:end);   % downsample to frame rate. To get precise time of each trace, do time + (slice-1)*time_between_slices
 
 %% get movies one-by-one to save memory
-temp_movie_file = './temp.avi';
+temp_movie_file = './temp.mp4';
+show_frames = false;
 for stim_key = fetch(matched_trials & key, 'ORDER BY trial_idx')'   % in chronological order
     
     switch true
@@ -46,14 +47,16 @@ for stim_key = fetch(matched_trials & key, 'ORDER BY trial_idx')'   % in chronol
             fclose(fid);
             
             % read the movie from temp_movie_file
-            v = VideoReader(temp_movie_file);
-            while hasFrame(v)
-                imshow(readFrame(v))
-                drawnow
+            if show_frames
+                v = VideoReader(temp_movie_file);
+                while hasFrame(v)
+                    imshow(readFrame(v))
+                    drawnow
+                end
             end
             disp(info)
             
-            ....... do your processing here using traces, time, info, and v .......
+            ....... do your processing here using traces, time, info, and temp_movie_file  .......
                 
         
         
@@ -68,8 +71,12 @@ for stim_key = fetch(matched_trials & key, 'ORDER BY trial_idx')'   % in chronol
         case exists(vis.MovieSeqCond & stim_key)
             % process sequences of still images
             info = fetch(vis.Trial * vis.MovieSeqCond & stim_key, '*');
-            
-            ....... do your processing here using traces and info .......
+            frames_shown = fetchn(vis.MovieStill & key & struct('still_id', num2cell(info.movie_still_ids)), 'still_frame');
+  
+            ....... do your processing here using traces, info, and frames_shown .......
+                
+        otherwise 
+            error 'another kind of stimulus was used for this trial'
                 
     end
 end
