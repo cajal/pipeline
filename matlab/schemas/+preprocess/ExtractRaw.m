@@ -11,9 +11,8 @@ classdef ExtractRaw < dj.Relvar & dj.AutoPopulate
     properties
         popRel = preprocess.Prepare*preprocess.Method ...
             & ((preprocess.PrepareGalvo*preprocess.MethodGalvo - 'segmentation="manual"') | ... % do all automatic methods
-            preprocess.PrepareGalvo*preprocess.MethodGalvo*preprocess.ManualSegment) ... % but only manual for manual segmented scans
-            & (preprocess.PrepareAod*preprocess.MethodAod | ... % only run AOD methods on AOD
-            preprocess.PrepareGalvo*preprocess.MethodGalvo); % only run Galvo methods on Galvo
+            preprocess.PrepareGalvo*preprocess.MethodGalvo*preprocess.ManualSegment | ... % but only manual for manual segmented scans
+            preprocess.PrepareAod*preprocess.MethodAod); % or AOD methods for AOD scans
         tau = 4;
         p = 2;
         max_iter = 2;
@@ -29,7 +28,7 @@ classdef ExtractRaw < dj.Relvar & dj.AutoPopulate
         
         function makeTuples(self, key)
             
-            %% extract masks and traces for Galvo Scanner
+            % extract masks and traces for Galvo Scanner
             if count(preprocess.PrepareGalvo & key)
                 segmentation_method = fetch1(preprocess.Method*preprocess.MethodGalvo & key, 'segmentation');
                 switch segmentation_method
@@ -52,7 +51,7 @@ classdef ExtractRaw < dj.Relvar & dj.AutoPopulate
                             Y = loader(islice, self.mask_range);
                             notnan = preprocess.getblocks(squeeze(any(any(~isnan(Y), 1),2)), round(length(self.mask_range)/2), self.nan_tol);
                             
-                            if length(notnan) ~= 1                       
+                            if length(notnan) ~= 1
                                 error('Too many NaNs in frames for mask inference');
                             end
                             
@@ -139,7 +138,7 @@ classdef ExtractRaw < dj.Relvar & dj.AutoPopulate
                         disp(['Not performing ' segmentation_method ' segmentation']);
                         return
                 end
-                %% extract AOD
+                % extract AOD
             elseif count(preprocess.PrepareAod & key)
                 error('AOD trace extraction not implemented.')
             else
@@ -248,14 +247,10 @@ classdef ExtractRaw < dj.Relvar & dj.AutoPopulate
         
     end
     
+    
     methods(Static)
         
         
-        
-        %%------------------------------------------------------------
-        
-        
-        %%
         function trace_id = insert_traces(key, traces, channel, trace_id)
             if nargin < 4
                 trace_id = 1;
@@ -269,10 +264,9 @@ classdef ExtractRaw < dj.Relvar & dj.AutoPopulate
                 insert(preprocess.ExtractRawTrace, trace_key);
                 trace_id = trace_id + 1;
             end
-            
         end
         
-        %%
+        
         function trace_id = insert_segmentation(key, A,  slice, channel, trace_id)
             
             seg_key = struct(key);
@@ -291,7 +285,7 @@ classdef ExtractRaw < dj.Relvar & dj.AutoPopulate
             end
         end
         
-        %%
+        
         function trace_id = insert_spikes(key, S, channel, trace_id)
             
             for itrace = 1:size(S, 1)

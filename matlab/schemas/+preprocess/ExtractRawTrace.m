@@ -9,12 +9,5 @@ raw_trace                   : longblob                      # unprocessed calciu
 
 
 classdef ExtractRawTrace < dj.Relvar
-	methods
-
-		function makeTuples(self, key)
-		%!!! compute missing fields for key here
-% 			self.insert(key)
-		end
-	end
-
+    % it's a part table of ExtractRaw
 end

@@ -11,7 +11,7 @@ schema = dj.schema('pipeline_vis', locals())
 @schema
 class Session(dj.Manual):
     definition = """  # Visual stimulus session, populated by the stimulus program.
-    -> common.Animal
+    -> mice.Mice
     psy_id               : smallint unsigned            # unique psy session number
     ---
     stimulus="grating"   : varchar(255)                 # experiment type
