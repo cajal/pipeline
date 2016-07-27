@@ -1,6 +1,6 @@
 import datajoint as dj
 import pandas as pd
-from . import mice # needed for referencing
+from . import mice  # needed for referencing
 import numpy as np
 from distutils.version import StrictVersion
 import numpy as np
@@ -15,7 +15,6 @@ schema = dj.schema('pipeline_experiment', locals())
 def erd():
     """for convenience"""
     dj.ERD(schema).draw()
-
 
 
 @schema
@@ -130,7 +129,6 @@ class Person(dj.Lookup):
     ]
 
 
-
 @schema
 class BrainArea(dj.Lookup):
     definition = """
@@ -171,16 +169,17 @@ class Software(dj.Lookup):
         ('aod', '2.0'),
         ('imager', '1.0')]
 
+
 @schema
 class LaserCalibration(dj.Manual):
     definition = """
     # stores measured values from the laser power calibration
 
-    calibration_id      : int
+    -> Rig
+    calibration_id                  : date
     ---
     -> Person
     -> Software
-    -> Rig
     calibration_ts=CURRENT_TIMESTAMP  : timestamp      # automatic
     """
 
@@ -197,32 +196,29 @@ class LaserCalibration(dj.Manual):
         power           : float     # power in mW
         """
 
-    def plot_calibration_curve(self, calibration_id):
+    def plot_calibration_curve(self, calibration_id, rig):
         import matplotlib.pyplot as plt
         import seaborn as sns
-        session =  LaserCalibration.PowerMeasurement() & dict(calibration_id=calibration_id)
+        session = LaserCalibration.PowerMeasurement() & dict(calibration_date=calibration_id, rig=rig)
         sns.set_context('talk')
         with sns.axes_style('darkgrid'):
             fig, ax = plt.subplots()
 
         # sns.set_palette("husl")
 
-        for k in (dj.U('pockels','bidirectional','gdd','wavelength') & session).fetch.keys():
-            pe, po, zoom = (session & k).fetch['percentage','power','zoom']
+        for k in (dj.U('pockels', 'bidirectional', 'gdd', 'wavelength') & session).fetch.keys():
+            pe, po, zoom = (session & k).fetch['percentage', 'power', 'zoom']
             zoom = np.unique(zoom)
             ax.plot(pe, po, 'o-', label=(u"zoom={0:.2f} ".format(zoom[0])
-                                   + " ".join("{0}={1}".format(*v) for v in k.items())))
+                                         + " ".join("{0}={1}".format(*v) for v in k.items())))
         ax.legend(loc='best')
-        ax.set_xlim((0,100))
-        y_min, y_max = [np.round(y/5)*5 for y in ax.get_ylim()]
-        ax.set_yticks(np.arange(0, y_max+5,5))
+        ax.set_xlim((0, 100))
+        y_min, y_max = [np.round(y / 5) * 5 for y in ax.get_ylim()]
+        ax.set_yticks(np.arange(0, y_max + 5, 5))
         ax.set_xlabel('power [in %]')
         ax.set_ylabel('power [in mW]')
 
         return fig, ax
-
-
-
 
 
 @schema
@@ -237,6 +233,7 @@ class Compartment(dj.Lookup):
         ('axon',),
         ('soma',),
     ]
+
 
 @schema
 class PMTFilterSet(dj.Lookup):
@@ -306,6 +303,7 @@ class Session(dj.Manual):
         -> Compartment
         ---
         """
+
 
 @schema
 class Scan(dj.Manual):
