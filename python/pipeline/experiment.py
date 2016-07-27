@@ -1,20 +1,61 @@
 import datajoint as dj
-from . import mice
-
+import pandas as pd
+from . import mice # needed for referencing
+import numpy as np
 from distutils.version import StrictVersion
-assert StrictVersion(dj.__version__) >= StrictVersion('0.2.5')
+import numpy as np
+import inspect
+import os
+
+assert StrictVersion(dj.__version__) >= StrictVersion('0.2.7')
 
 schema = dj.schema('pipeline_experiment', locals())
 
 
+def erd():
+    """for convenience"""
+    dj.ERD(schema).draw()
+
+
 @schema
-class Dye(dj.Lookup):
+class Fluorophore(dj.Lookup):
     definition = """
     # calcium-sensitive indicators
-    dye                   : char(10)   # fluorophore short name
+    fluorophore          : char(10)   # fluorophore short name
     -----
     dye_description = ''  : varchar(2048)
     """
+    contents = [
+        ['GCaMP6s', ''],
+        ['GCaMP6f', ''],
+        ['Twitch2B', ''],
+        ['mRuby', ''],
+        ['mCherry', ''],
+        ['tdTomato', ''],
+        ['OGB', '']]
+
+    class EmissionSpectrum(dj.Part):
+        definition = """
+        # spectra of fluorophores in Ca++ loaded and Ca++ free state
+        ->Fluorophore
+        loaded          : bool # whether the spectrum is for Ca++ loaded or free state
+        ---
+        wavelength      : longblob # wavelength in nm
+        fluorescence    : longblob # fluorescence in arbitrary units
+        """
+
+        @property
+        def contents(self):
+            # yield Twitch2B spectra
+            if len(self & dict(fluorophore='Twitch2B')) < 2:
+                path = '/'.join(os.path.realpath(__file__).split('/')[:-1])
+                loaded = pd.read_csv(path + '/data/twitch2B_loaded.csv')
+                free = pd.read_csv(path + '/data/twitch2B_free.csv')
+                x = np.linspace(np.min(free.wavelength), np.max(free.wavelength), 100)
+                y_loaded = np.interp(x, loaded.wavelength, loaded.fluorescence)
+                y_free = np.interp(x, free.wavelength, free.fluorescence)
+                yield ('Twitch2B', True, x, y_loaded)
+                yield ('Twitch2B', False, x, y_free)
 
 
 @schema
@@ -25,12 +66,22 @@ class Lens(dj.Lookup):
     ---
     """
 
+    contents = [['16x'], ['25x']]
+
+
+@schema
+class Rig(dj.Lookup):
+    definition = """
+    rig : char(4)    # multiphoton imaging setup
+    ---
+    """
+    contents = [['2P2'], ['2P3']]
+
 
 @schema
 class FOV(dj.Lookup):
-    definition = """
-    # field-of-view sizes for all lenses and magnifications
-    setup           : char(4)                # two-photon setup
+    definition = """  # field-of-view sizes for all lenses and magnifications
+    -> Rig
     -> Lens
     mag                         : decimal(5,2)                  # ScanImage zoom factor
     fov_ts                      : datetime                      # fov measurement date and time
@@ -42,9 +93,7 @@ class FOV(dj.Lookup):
 
 @schema
 class Anesthesia(dj.Lookup):
-    definition = """
-    # different anesthesia
-
+    definition = """   #  anesthesia states
     anesthesia                     : char(20) # anesthesia short name
     ---
     anesthesia_description=''      : varchar(255) # longer description
@@ -66,50 +115,39 @@ class Person(dj.Lookup):
     full_name     : varchar(255)
     """
     contents = [
+        ('unknown', 'placeholder'),
+        ('jiakun', 'Jiakun Fu'),
         ('manolis', 'Emmanouil Froudarakis'),
         ('dimitri', 'Dimitri Yatsenko'),
         ('shan', 'Shan Shen'),
-        ('jake', 'Jacob Reimer (Overlord)'),
+        ('jake', 'Jacob Reimer'),
         ('fabee', 'Fabian Sinz'),
         ('edgar', 'Edgar Y. Walker'),
         ('cathryn', 'Cathryn Rene Cadwell'),
         ('shuang', 'Shuang Li'),
-        ('xiaolong', 'Xiaolong Jiang (Patchgrandmaster)'),
+        ('xiaolong', 'Xiaolong Jiang')
     ]
-
-
-@schema
-class Session(dj.Manual):
-    definition = """
-    # session
-    -> mice.Mice
-    session                       : smallint                      # session index for the mouse
-    ---
-    -> Anesthesia
-    -> Person
-    session_date                  : date                          # date
-    scan_path                     : varchar(255)                  # file path for TIFF stacks
-    craniotomy_notes              : varchar(4095)                 # free-text notes
-    session_notes                 : varchar(4095)                 # free-text notes
-    session_ts=CURRENT_TIMESTAMP  : timestamp                     # automatic
-    """
 
 
 @schema
 class BrainArea(dj.Lookup):
     definition = """
-    cortical_area       : char(12)     # short name for cortical area
+    brain_area       : char(12)     # short name for cortical area
     ---
     area_description    : varchar(255)
     """
     contents = [
         ('other', ''),
+        ('unset', ''),
         ('unknown', ''),
         ('V1', ''),
         ('LM', ''),
+        ('LI', ''),
         ('AL', ''),
         ('PM', ''),
-     ]
+        ('POR', ''),
+        ('RL', '')
+    ]
 
 
 @schema
@@ -121,81 +159,171 @@ class Software(dj.Lookup):
     ---
     """
     contents = [
+        ('unset', '0.0'),
         ('scanimage', '3.8'),
         ('scanimage', '4.0'),
+        ('scanimage', '4.2'),
+        ('scanimage', '4.2pr1'),
+        ('scanimage', '5.1'),
+        ('scanimage', '5.2'),
         ('aod', '2.0'),
         ('imager', '1.0')]
 
+@schema
+class Compartment(dj.Lookup):
+    definition = """
+    # cell compartments that can be imaged
+    compartment         : char(16)
+    ---
+    """
+
+    contents = [
+        ('axon',),
+        ('soma',),
+    ]
 
 @schema
-class Aim(dj.Lookup):
-    definition = """  # what is being imaged: somas, axons, etc.
-    aim : varchar(40)   # short description of what is being imaged
+class PMTFilterSet(dj.Lookup):
+    definition = """  #  microscope filter sets: dichroic and PMT Filters
+    pmt_filter_set : varchar(16)    # short name of microscope filter set
+    ----
+    primary_dichroic      :  varchar(255)    #  passes the laser  (excitation/emission separation)
+    secondary_dichroic    :  varchar(255)    #  splits emission spectrum
+    filter_set_description :  varchar(4096)     #   A detailed description of the filter set
     """
     contents = [
-        ['functional: somas'],
-        ['functional: axons'],
-        ['functional: axons, somas'],
-        ['structural']]
+        ['2P3 red-green A', '680 nm long-pass?', '562 nm long-pass', 'purchased with Thorlabs microscope'],
+        ['2P3 blue-green A', '680 nm long-pass?', '506 nm long-pass', 'purchased with Thorlabs microscope']]
 
+    class Channel(dj.Part):
+        definition = """  #  PMT description including dichroic and filter
+        -> PMTFilterSet
+        pmt_channel : tinyint   #  pmt_channel
+        ---
+        color      : enum('green', 'red', 'blue')
+        pmt_serial_number :  varchar(40)   #
+        spectrum_center     :  smallint  unsigned  #  (nm) overall pass spectrum of all upstream filters
+        spectrum_bandwidth  :  smallint  unsigned  #  (nm) overall pass spectrum of all upstream filters
+        pmt_filter_details :varchar(255)  #  more details, spectrum, pre-amp gain, pre-amp ADC filter
+        """
+        contents = [
+            ['2P3 red-green A', 1, 'green', 'AC7438 Thor', 525, 50, ''],
+            ['2P3 red-green A', 2, 'red', 'AC7753 Thor', 625, 90, ''],
+            ['2P3 blue-green A', 1, 'blue', 'AC7438 Thor', 475, 50, ''],
+            ['2P3 blue-green A', 2, 'green', 'AC7753 Thor', 540, 50, '']
+        ]
+
+
+@schema
+class Session(dj.Manual):
+    definition = """ # imaging session
+    -> mice.Mice
+    session                       : smallint                      # session index for the mouse
+    ---
+    -> Rig
+    session_date                  : date                          # date
+    -> Person
+    -> Anesthesia
+    -> PMTFilterSet
+    scan_path                     : varchar(255)                  # file path for TIFF stacks
+    behavior_path =""             : varchar(255)   # pupil movies, whisking, locomotion, etc.
+    craniotomy_notes=""           : varchar(4095)                 # free-text notes
+    session_notes=""              : varchar(4095)                 # free-text notes
+    session_ts=CURRENT_TIMESTAMP  : timestamp                     # automatic
+    """
+
+    class Fluorophore(dj.Part):
+        definition = """
+        # Fluorophores expressed in prep for the imaging session
+        -> Session
+        -> Fluorophore
+        ---
+        notes=""          : varchar(255) # additional information about fluorophore in this scan
+        """
+
+    class TargetStructure(dj.Part):
+        definition = """
+        # specifies which neuronal structure was imaged
+
+        -> Session
+        -> Fluorophore
+        -> Compartment
+        ---
+        """
 
 @schema
 class Scan(dj.Manual):
     definition = """    # scanimage scan info
+    animal_id            : int(11)                      # id number
     -> Session
-    scan_idx        : smallint               # number of TIFF stack file
+    scan_idx             : smallint(6)                  # number of TIFF stack file
     ---
     -> Lens
     -> BrainArea
-    laser_wavelength            : float                         # (nm)
-    laser_power                 : float                         # (mW) to brain
-    filename                    : varchar(255)                  # file base name
-    -> Aim
-    surf_z=0                    : int                           # manual depth measurement
-    scan_notes                  : varchar(4095)                 # free-notes
-    site_number=0               : tinyint                       # site number
+    laser_wavelength     : float                        # (nm)
+    laser_power          : float                        # (mW) to brain
+    filename             : varchar(255)                 # file base name
+    depth="0"            : int(11)                      # manual depth measurement
+    scan_notes           : varchar(4095)                # free-notes
+    site_number="0"      : tinyint(4)                   # site number
+    software             : varchar(20)                  # name of the software
     -> Software
-    scan_ts=CURRENT_TIMESTAMP   : timestamp                     # don't edit
+    scan_ts="CURRENT_TIMESTAMP" : timestamp                    # don't edit
     """
 
 
 @schema
-class SessionDye(dj.Manual):
-    definition = """
-    # Dye used in session
-    -> Session
-    -> Dye
-    ---
-    notes           : varchar(255) # additional information
+class ScanIgnored(dj.Manual):
+    definition = """  # scans to ignore
+    -> Scan
     """
 
 
-@schema
-class PMTFilter(dj.Lookup):
-    definition = """
-    # filter in the filter cube
-    pmt_filter :char(12)   # PMT filter_description
-    ---
-    pmt_filter_details :varchar(255)  #  more details, spectrum
+def migrate_galvo_pipeline():
     """
-
-
-@schema
-class PMTChannel(dj.Manual):
-    definition = """
-    # microscope acquisition channel
-    -> Session
-    pmt_channel : tinyint  #  two-photon channel
-    ---
-    -> PMTFilter
-    notes           : varchar(255) # additional information
+    migration from the old schema
+    :return:
     """
+    from .legacy import common, rf, psy
+    # migrate FOV calibration
+    FOV().insert(rf.FOV().proj('width', 'height', rig="setup", fov_ts="fov_date").fetch(), skip_duplicates=True)
 
-schema.spawn_missing_classes()
+    # migrate Session
+    sessions_to_migrate = rf.Session() * common.Animal() & 'session_date>"2016-02"' & 'animal_id>0'
+    w = sessions_to_migrate.proj(
+        'session_date',
+        'anesthesia',
+        'session_ts',
+        'scan_path',
+        rig='setup',
+        username='lcase(owner)',
+        pmt_filter_set='"2P3 red-green A"',
+        session_notes="concat(session_notes,';;', animal_notes)")
+    Session().insert(w.fetch(), skip_duplicates=True)
 
+    # migrate fluorophore
+    Session.Fluorophore().insert(sessions_to_migrate.proj('fluorophore').fetch(), skip_duplicates=True)
 
-def migrate():
-    from . import common, rf, psy
-    mice = common.Animal() & (rf.Session() & 'session_date > "2016-02-01"')
+    assert len(Session()) == len(Session.Fluorophore())
+
+    # migrate scans
+
+    scans = (rf.Session().proj('lens', 'file_base') * rf.Scan()).proj(
+        'lens',
+        'laser_wavelength',
+        'laser_power',
+        'scan_notes',
+        'scan_ts',
+        'depth',
+        software="'scanimage'",
+        version="5.1",
+        site_number='site',
+        filename="concat(file_base, '_', LPAD(file_num, 5, '0'))",
+        brain_area='cortical_area',
+        aim="'unset'"
+    ) & Session()
+
+    Scan().insert(scans.fetch(as_dict=True), skip_duplicates=True)
+
 
 schema.spawn_missing_classes()

@@ -1,4 +1,4 @@
-FROM datajoint/datajoint
+FROM datajoint_local
 
 MAINTAINER Edgar Y. Walker <edgar.walker@gmail.com>
 
@@ -14,13 +14,14 @@ RUN \
     autoconf \
     automake \
     libtool \
-    octave
+    octave \
+    wget
 
 
 # Build HDF5
-RUN cd ; wget https://www.hdfgroup.org/ftp/HDF5/current/src/hdf5-1.8.16.tar.gz \
-    && tar zxf hdf5-1.8.16.tar.gz \
-    && mv hdf5-1.8.16 hdf5-setup \
+RUN cd ; wget https://www.hdfgroup.org/ftp/HDF5/current/src/hdf5-1.8.17.tar.gz \
+    && tar zxf hdf5-1.8.17.tar.gz \
+    && mv hdf5-1.8.17 hdf5-setup \
     &&  cd hdf5-setup \
     && ./configure --prefix=/usr/local/ \
     &&  make -j 12 && make install \
@@ -29,6 +30,7 @@ RUN cd ; wget https://www.hdfgroup.org/ftp/HDF5/current/src/hdf5-1.8.16.tar.gz \
     && apt-get -yq autoremove \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
+
 
 # Install OpenCV
 RUN \
@@ -53,8 +55,7 @@ RUN \
 
 
 # install HDF5 reader and rabbit-mq client lib
-RUN pip install h5py && \
-    pip install pika
+RUN pip3 install h5py 
 
 # Install Lucas
 RUN \
@@ -68,22 +69,22 @@ RUN \
   python setup.py install
 
 RUN \
-  pip install git+https://github.com/cajal/c2s.git
+  pip3 install git+https://github.com/cajal/c2s.git
 
 
 # Install pipeline
 COPY . /data/pipeline
 RUN \
-  pip install -e pipeline/python/
+  pip3 install -e pipeline/python/
 
 # Get pupil tracking repo
 RUN \
   git clone https://github.com/cajal/pupil-tracking.git && \
-  pip install -e pupil-tracking/
+  pip3 install -e pupil-tracking/
 
 RUN \
-  pip install oct2py && \
-  pip install git+https://github.com/atlab/tiffreader
+  pip3 install oct2py && \
+  pip3 install git+https://github.com/atlab/tiffreader
 
 
 ENTRYPOINT ["worker"]

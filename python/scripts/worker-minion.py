@@ -27,7 +27,7 @@ def callback(ch, method, properties, body):
     try:
         rel = getattr(mod, m)()
     except AttributeError:
-        print("Could not find class", m)
+        print("Could not fincd class", m)
         return 1
 
     restrictions = order['restrictions']
