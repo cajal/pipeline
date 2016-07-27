@@ -67,8 +67,8 @@ classdef ExtractRaw < dj.Relvar & dj.AutoPopulate
                             end
                             
                             fprintf('\tMasks inferred successfully. Inferring spikes\n');
-                            traces = zeros(size(A,2), nframes)*NaN;
-                            S = 0*traces*NaN;
+                            traces = nan(size(A,2), nframes);
+                            spike_traces = 0*traces*NaN;
                             for start = 1:self.batchsize:nframes
                                 batch = start:min(nframes, start + self.batchsize - 1);
                                 
@@ -79,14 +79,14 @@ classdef ExtractRaw < dj.Relvar & dj.AutoPopulate
                                 for i = 1:length(notnan)
                                     blk = notnan{i};
                                     traces(:, batch(blk)) = A'*reshape(Y(:,:,blk),d1*d2,length(blk));
-                                    S(:,batch(blk)) = self.nmf_spikes(A, b, Y(:,:,blk));
+                                    spike_traces(:,batch(blk)) = self.nmf_spikes(A, b, Y(:,:,blk));
                                 end
                             end
                             
                             fprintf('\tInserting masks, traces, and spikes\n');
                             self.insert_traces(key, traces, channel, trace_id);
                             self.insert_segmentation(key, A, islice, channel, trace_id);
-                            trace_id = self.insert_spikes(key, S, channel,trace_id);
+                            trace_id = self.insert_spikes(key, spike_traces, channel,trace_id);
                             
                         end
                     case 'manual'
@@ -207,7 +207,7 @@ classdef ExtractRaw < dj.Relvar & dj.AutoPopulate
         end
         
         
-        function S = nmf_spikes(self, A, b, Y)
+        function spike_traces = nmf_spikes(self, A, b, Y)
             %P = struct('p',1);
             [d1,d2, T] = size(Y);
             d = d1*d2;
@@ -215,7 +215,7 @@ classdef ExtractRaw < dj.Relvar & dj.AutoPopulate
             % update spatial and temporal components
             tsub = self.nmf_options.tsub;
             self.nmf_options.tsub = 1;
-            [C,f,P,S] = update_temporal_components(reshape(Y,d,T),A,b,[],[],P,self.nmf_options);
+            [C,f,P,spike_traces] = update_temporal_components(reshape(Y,d,T),A,b,[],[],P,self.nmf_options);
             self.nmf_options.tsub = tsub;
         end
         
