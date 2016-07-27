@@ -178,7 +178,7 @@ class LaserCalibration(dj.Manual):
     # stores measured values from the laser power calibration
 
     -> Rig
-    calibration_id                  : date
+    calibration_date                  : date
     ---
     -> Person
     -> Software
