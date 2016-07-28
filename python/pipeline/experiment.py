@@ -327,6 +327,25 @@ class Scan(dj.Manual):
     scan_ts="CURRENT_TIMESTAMP" : timestamp                    # don't edit
     """
 
+    class EyeVideo(dj.Part):
+        definition = """
+        # name of the eye tracking video
+
+        -> Scan
+        ---
+        filename        : varchar(50)                   # filename of the video
+        """
+
+
+    class WheelFile(dj.Part):
+        definition = """
+        # name of the running wheel file
+
+        -> Scan
+        ---
+        filename        : varchar(50)                   # filename of the video
+        """
+
 
 @schema
 class ScanIgnored(dj.Manual):
@@ -352,6 +371,7 @@ def migrate_galvo_pipeline():
         'session_ts',
         'scan_path',
         rig='setup',
+        behavior_path='hd5_path',
         username='lcase(owner)',
         pmt_filter_set='"2P3 red-green A"',
         session_notes="concat(session_notes,';;', animal_notes)")
@@ -376,10 +396,15 @@ def migrate_galvo_pipeline():
         site_number='site',
         filename="concat(file_base, '_', LPAD(file_num, 5, '0'))",
         brain_area='cortical_area',
-        aim="'unset'"
     ) & Session()
 
     Scan().insert(scans.fetch(as_dict=True), skip_duplicates=True)
+
+    eye_videos = (rf.Session() * rf.Scan()).proj(filename="concat(file_base,file_num,'behavior.avi')")
+    Scan.EyeVideo().insert(eye_videos, skip_duplicates=True)
+
+    wheel_files = (rf.Session() * rf.Scan()).proj(filename="concat(file_base,file_num,'0.h5')")
+    Scan.WheelFile().insert(wheel_files, skip_duplicates=True)
 
 
 schema.spawn_missing_classes()
