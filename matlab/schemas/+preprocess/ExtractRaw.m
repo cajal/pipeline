@@ -13,7 +13,7 @@ classdef ExtractRaw < dj.Relvar & dj.AutoPopulate
             & ((preprocess.PrepareGalvo*preprocess.MethodGalvo - 'segmentation="manual"') | ... % do all automatic methods
             preprocess.PrepareGalvo*preprocess.MethodGalvo*preprocess.ManualSegment | ... % but only manual for manual segmented scans
             preprocess.PrepareAod*preprocess.MethodAod) ...% or AOD methods for AOD scans
-            - (experiment.Session.TargetStructure() & 'compartment="axon"'); % but no axons at the moment
+            - (experiment.SessionTargetStructure() & 'compartment="axon"'); % but no axons at the moment
         tau = 4;
         p = 2;
         max_iter = 2;
