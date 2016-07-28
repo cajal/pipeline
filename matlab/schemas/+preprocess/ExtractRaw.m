@@ -12,7 +12,8 @@ classdef ExtractRaw < dj.Relvar & dj.AutoPopulate
         popRel = preprocess.Prepare*preprocess.Method ...
             & ((preprocess.PrepareGalvo*preprocess.MethodGalvo - 'segmentation="manual"') | ... % do all automatic methods
             preprocess.PrepareGalvo*preprocess.MethodGalvo*preprocess.ManualSegment | ... % but only manual for manual segmented scans
-            preprocess.PrepareAod*preprocess.MethodAod); % or AOD methods for AOD scans
+            preprocess.PrepareAod*preprocess.MethodAod) ...% or AOD methods for AOD scans
+            - (experiment.Session.TargetStructure() & 'compartment="axon"'); % but no axons at the moment
         tau = 4;
         p = 2;
         max_iter = 2;
@@ -151,7 +152,7 @@ classdef ExtractRaw < dj.Relvar & dj.AutoPopulate
             
             fprintf('\tSetting NMF parameters for functional scan on somas\n');
             
-            mask_chunk = 1*60; % chunk size in seconds
+            mask_chunk = 10*60; % chunk size in seconds
             self.batchsize = 10000; % batch size for temporal processing
             [d2, d1, um_width, um_height, nframes] = fetch1(preprocess.PrepareGalvo & key, 'px_width', 'px_height', 'um_width', 'um_height','nframes');
             self.tau = 4;
@@ -191,6 +192,7 @@ classdef ExtractRaw < dj.Relvar & dj.AutoPopulate
                     'tsub', floor(fps/downsample_to) ...
                     );
             elseif strcmp(fetch1(experiment.SessionTargetStructure & key,'compartment'),'axon')
+                error('Axons are currently not processed. ');
                 fprintf('\tSetting parameters for axon segmentation\n');
                 self.nmf_options = CNMFSetParms(...
                     'd1',d1,'d2',d2,...                         % dimensions of datasets
