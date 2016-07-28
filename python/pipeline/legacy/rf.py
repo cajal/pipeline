@@ -7,7 +7,7 @@ import datajoint as dj
 from pipeline.utils import ROIGrabber
 
 schema = dj.schema('pipeline_rf', locals())
-from . import utils
+from .. import utils
 import numpy as np
 import os
 
