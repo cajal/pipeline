@@ -1,6 +1,6 @@
 import datajoint as dj
 import pandas as pd
-from . import mice # needed for referencing
+from . import mice  # needed for referencing
 import numpy as np
 from distutils.version import StrictVersion
 import numpy as np
@@ -32,7 +32,9 @@ class Fluorophore(dj.Lookup):
         ['mRuby', ''],
         ['mCherry', ''],
         ['tdTomato', ''],
-        ['OGB', '']]
+        ['OGB', ''],
+        ['RCaMP1a', '']
+    ]
 
     class EmissionSpectrum(dj.Part):
         definition = """
@@ -169,6 +171,58 @@ class Software(dj.Lookup):
         ('aod', '2.0'),
         ('imager', '1.0')]
 
+
+@schema
+class LaserCalibration(dj.Manual):
+    definition = """
+    # stores measured values from the laser power calibration
+
+    -> Rig
+    calibration_date                  : date
+    ---
+    -> Person
+    -> Software
+    calibration_ts=CURRENT_TIMESTAMP  : timestamp      # automatic
+    """
+
+    class PowerMeasurement(dj.Part):
+        definition = """
+        -> LaserCalibration
+        wavelength      : int       # wavelength of the laser
+        percentage      : tinyint   # power setting in percent
+        zoom            : float     # zoom setting
+        pockels         : int       # pockels cell setting
+        bidirectional   : tinyint   # 0 if off 1 if on
+        gdd             : int       # GDD setting on the laser
+        ---
+        power           : float     # power in mW
+        """
+
+    def plot_calibration_curve(self, calibration_id, rig):
+        import matplotlib.pyplot as plt
+        import seaborn as sns
+        session = LaserCalibration.PowerMeasurement() & dict(calibration_date=calibration_id, rig=rig)
+        sns.set_context('talk')
+        with sns.axes_style('darkgrid'):
+            fig, ax = plt.subplots()
+
+        # sns.set_palette("husl")
+
+        for k in (dj.U('pockels', 'bidirectional', 'gdd', 'wavelength') & session).fetch.keys():
+            pe, po, zoom = (session & k).fetch['percentage', 'power', 'zoom']
+            zoom = np.unique(zoom)
+            ax.plot(pe, po, 'o-', label=(u"zoom={0:.2f} ".format(zoom[0])
+                                         + " ".join("{0}={1}".format(*v) for v in k.items())))
+        ax.legend(loc='best')
+        ax.set_xlim((0, 100))
+        y_min, y_max = [np.round(y / 5) * 5 for y in ax.get_ylim()]
+        ax.set_yticks(np.arange(0, y_max + 5, 5))
+        ax.set_xlabel('power [in %]')
+        ax.set_ylabel('power [in mW]')
+
+        return fig, ax
+
+
 @schema
 class Compartment(dj.Lookup):
     definition = """
@@ -181,6 +235,7 @@ class Compartment(dj.Lookup):
         ('axon',),
         ('soma',),
     ]
+
 
 @schema
 class PMTFilterSet(dj.Lookup):
@@ -251,6 +306,7 @@ class Session(dj.Manual):
         ---
         """
 
+
 @schema
 class Scan(dj.Manual):
     definition = """    # scanimage scan info
@@ -270,6 +326,25 @@ class Scan(dj.Manual):
     -> Software
     scan_ts="CURRENT_TIMESTAMP" : timestamp                    # don't edit
     """
+
+    class EyeVideo(dj.Part):
+        definition = """
+        # name of the eye tracking video
+
+        -> Scan
+        ---
+        filename        : varchar(50)                   # filename of the video
+        """
+
+
+    class WheelFile(dj.Part):
+        definition = """
+        # name of the running wheel file
+
+        -> Scan
+        ---
+        filename        : varchar(50)                   # filename of the video
+        """
 
 
 @schema
@@ -296,6 +371,7 @@ def migrate_galvo_pipeline():
         'session_ts',
         'scan_path',
         rig='setup',
+        behavior_path='hd5_path',
         username='lcase(owner)',
         pmt_filter_set='"2P3 red-green A"',
         session_notes="concat(session_notes,';;', animal_notes)")
@@ -320,10 +396,15 @@ def migrate_galvo_pipeline():
         site_number='site',
         filename="concat(file_base, '_', LPAD(file_num, 5, '0'))",
         brain_area='cortical_area',
-        aim="'unset'"
     ) & Session()
 
     Scan().insert(scans.fetch(as_dict=True), skip_duplicates=True)
+
+    eye_videos = (rf.Session() * rf.Scan()).proj(filename="concat(file_base,file_num,'behavior.avi')")
+    Scan.EyeVideo().insert(eye_videos, skip_duplicates=True)
+
+    wheel_files = (rf.Session() * rf.Scan()).proj(filename="concat(file_base,file_num,'0.h5')")
+    Scan.WheelFile().insert(wheel_files, skip_duplicates=True)
 
 
 schema.spawn_missing_classes()

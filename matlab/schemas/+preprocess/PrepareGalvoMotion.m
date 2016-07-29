@@ -80,12 +80,17 @@ classdef PrepareGalvoMotion < dj.Relvar
             tic
             fprintf('Motion alignment: ')
             % prepare
-            [nframes, nslices, nchannels] = fetch1(preprocess.PrepareGalvo & key, ...
-                'nframes', 'nslices', 'nchannels');
+            [nframes, nslices] = fetch1(preprocess.PrepareGalvo & key, ...
+                'nframes', 'nslices');
             [dx,dy] = fetch1(preprocess.PrepareGalvo & key, ...
                 'um_width/px_width->dx', 'um_height/px_height->dy');
             zero = 0;
-            key.channel = 1;  % channel on which to perform motion alignment
+            switch fetch1(experiment.SessionFluorophore & key, 'fluorophore')
+                case 'RCaMP1a'
+                    key.channel = 2;
+                otherwise
+                    key.channel = 1;
+            end
             quantal_size = 50;  % from prior experience
             anscombe = @(img) 2*sqrt(max(0, img-zero)/quantal_size+3/8);   % Anscombe transform
             fixRaster = get_fix_raster_fun(preprocess.PrepareGalvo & key);
@@ -127,17 +132,15 @@ classdef PrepareGalvoMotion < dj.Relvar
                         fprintf('Frame %5d/%d  %4.1fs\n', iframe, nframes, toc);
                     end
                     frame = getFrames(islice, iframe);
-                    if mean(frame(:))-anscombe(0) < 0.5*(templateMean-anscombe(0))
+                    if mean(frame(:))-anscombe(0) < 0.25*(templateMean-anscombe(0))
                         % do not attempt motion correction for dark frames
                         x = nan;
                         y = nan;
                     else
                         [x, y] = ne7.ip.measureShift(fft2(frame).*ftemplate);
-                    end
-                    xy(:,iframe) = [x;y];
-                    if ~isnan(x) && ~isnan(y) 
                         avgFrame = avgFrame + ne7.ip.correctMotion(frame, [x;y])/nframes;
                     end
+                    xy(:,iframe) = [x;y];
                 end
                 key.motion_xy = xy;
                 

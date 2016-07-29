@@ -6,7 +6,7 @@ a stand-alone script for Monet stimulus processing of galvo traces
 matched_trials = preprocess.Sync * vis.Trial & 'trial_idx between first_trial and last_trial';
 
 %% all galvo scans for which there is a monet stimulus
-monet_keys = fetch(preprocess.Spikes*preprocess.SpikeMethod*preprocess.Galvo*preprocess.MethodGalvo & ...
+monet_keys = fetch(preprocess.Spikes*preprocess.SpikeMethod*preprocess.PrepareGalvo*preprocess.MethodGalvo & ...
     (matched_trials & vis.Monet) & 'spike_method_name="stm"' & 'segmentation="nmf"');
 
 %% select one of the datasets
@@ -21,7 +21,7 @@ key = struct(...
     'spike_method', 3);
 
 %% get spike traces
-[traces, slice] = fetchn(preprocess.SpikesRateTrace*preprocess.ExtractRawTrace & key, 'rate_trace', 'slice');
+[traces, slice] = fetchn(preprocess.SpikesRateTrace*preprocess.ExtractRawGalvoROI & key, 'rate_trace', 'slice');
 nslices = fetch1(preprocess.PrepareGalvo & key, 'nslices');
 traces = double([traces{:}]);  % to 2d array
 
@@ -32,7 +32,7 @@ time = time(1:nslices:end);   % downsample to frame rate. To get precise time of
 
 %% get movies one-by-one to save memory
 for movie_key = fetch(matched_trials & key)'
-    movie_info = fetch(matched_trials * vis.Monet * vis.MonetLookup & movie_key, '*');
+    movie_info = fetch(vis.Trial * vis.Monet * vis.MonetLookup & movie_key, '*');
     
     disp 'Movie info'
     disp(movie_info)

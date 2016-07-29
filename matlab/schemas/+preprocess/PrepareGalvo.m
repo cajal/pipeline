@@ -46,7 +46,7 @@ classdef PrepareGalvo < dj.Relvar
                        
             %%%% compute field of view
             zoom = reader.zoom;
-            fov = rf.FOV * pro(rf.Session*rf.Scan & key, 'setup', 'lens', 'session_date') & 'session_date>=fov_date';
+            fov = experiment.FOV * pro(experiment.Session*experiment.Scan & key, 'rig', 'lens', 'session_date') & 'session_date>=fov_ts';
             mags = fov.fetchn('mag');
             [~, i] = min(abs(log(mags/zoom)));
             mag = mags(i); % closest measured magnification
