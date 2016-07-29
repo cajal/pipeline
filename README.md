@@ -28,5 +28,6 @@ The code in this repository is licensed under the [Creative Commons Attribution-
 1.  [pipeline.vis](jupyter/notebooks/pipeline_vis.ipynb)
 1.  [pipeline.preprocess](jupyter/notebooks/pipeline_preprocess.ipynb)
 1.  [Synchronization](jupyter/notebooks/pipeline_synchronization.ipynb)
+1.  [Processing Monet stimulus](jupyter/notebooks/pipeline_prepare_monet.ipynb)
+1.  [Processing movie stimulus](jupyter/notebooks/pipeline_prepare_movie.ipynb)
 1.  [pipeline.tuning](jupyter/notebooks/pipeline_tuning.ipynb)
-1.  [Common Queries](jupyter/notebooks/common_queries.ipynb)

@@ -132,13 +132,10 @@ classdef PrepareGalvoMotion < dj.Relvar
                         fprintf('Frame %5d/%d  %4.1fs\n', iframe, nframes, toc);
                     end
                     frame = getFrames(islice, iframe);
-                    if mean(frame(:))-anscombe(0) < 0.5*(templateMean-anscombe(0))
+                    if mean(frame(:))-anscombe(0) < 0.25*(templateMean-anscombe(0))
                         % do not attempt motion correction for dark frames
                         x = nan;
                         y = nan;
-                        if iframe>1000
-                            error 'nans found late in movie'
-                        end
                     else
                         [x, y] = ne7.ip.measureShift(fft2(frame).*ftemplate);
                         avgFrame = avgFrame + ne7.ip.correctMotion(frame, [x;y])/nframes;
