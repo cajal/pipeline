@@ -458,7 +458,7 @@ class Spikes(dj.Computed):
     @property
     def key_source(self):
         return (ComputeTraces() * SpikeMethod() & [dict(spike_method_name='stm'), dict(spike_method_name='nmf')]).proj()
-        # return (ComputeTraces() * SpikeMethod() & dict(spike_method_name='nmf')).proj()
+        #return (ComputeTraces() * SpikeMethod() & dict(spike_method_name='nmf')).proj()
 
     class RateTrace(dj.Part):
         definition = """  # Inferred
