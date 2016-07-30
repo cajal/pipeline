@@ -16,4 +16,4 @@ def mirrconv(s, h):
     assert len(h) % 2 == 1, "Filter must have odd length"
 
     n = h.size // 2
-    return np.convolve(np.stack((s[n-1::-1], s, s[:-n-1:-1])), h, mode='valid')
+    return np.convolve(np.hstack((s[n-1::-1], s, s[:-n-1:-1])), h, mode='valid')
