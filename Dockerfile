@@ -1,6 +1,6 @@
-FROM datajoint_local
+FROM datajoint/datajoint:latest
 
-MAINTAINER Edgar Y. Walker <edgar.walker@gmail.com>
+MAINTAINER Edgar Y. Walker, Fabian Sinz
 
 WORKDIR /data
 
@@ -33,6 +33,24 @@ RUN cd ; wget https://www.hdfgroup.org/ftp/HDF5/current/src/hdf5-1.8.17.tar.gz \
 
 
 # Install OpenCV
+# RUN wget http://mirrors.kernel.org/ubuntu/pool/main/g/gmp/libgmp10_6.1.0+dfsg-2_amd64.deb\
+# 	&& dpkg -i libgmp10_6.1.0+dfsg-2_amd64.deb \
+# 	&& rm libgmp10_6.1.0+dfsg-2_amd64.deb \
+#  	&& apt-get update && \
+#     	apt-get install -y libhogweed2 && \
+# 	wget http://mirrors.kernel.org/ubuntu/pool/main/p/p11-kit/libp11-kit0_0.23.1-3_amd64.deb&& \
+# 	dpkg -i libp11-kit0_0.23.1-3_amd64.deb && \
+# 	rm libp11-kit0_0.23.1-3_amd64.deb && \
+# 	wget http://security.ubuntu.com/ubuntu/pool/main/libt/libtasn1-6/libtasn1-6_4.5-2ubuntu0.1_amd64.deb&& \
+# 	dpkg -i libtasn1-6_4.5-2ubuntu0.1_amd64.deb && \
+# 	rm libtasn1-6_4.5-2ubuntu0.1_amd64.deb && \
+# 	wget http://security.ubuntu.com/ubuntu/pool/main/g/gnutls28/libgnutls-deb0-28_3.3.8-3ubuntu3.2_amd64.deb&& \
+# 	dpkg -i libgnutls-deb0-28_3.3.8-3ubuntu3.2_amd64.deb && \
+# 	rm libgnutls-deb0-28_3.3.8-3ubuntu3.2_amd64.deb&& \
+# 	wget http://security.ubuntu.com/ubuntu/pool/universe/o/openjpeg/libopenjpeg5_1.5.2-3.1_amd64.deb&& \
+# 	dpkg -i libopenjpeg5_1.5.2-3.1_amd64.deb && \
+# 	rm libopenjpeg5_1.5.2-3.1_amd64.deb
+
 RUN \
   apt-get update && \
   apt-get install -y cmake git libgtk2.0-dev pkg-config libavcodec-dev libavformat-dev libswscale-dev && \
@@ -44,6 +62,7 @@ RUN \
   cd opencv_contrib && git checkout 3.1.0 && \
   cd ../opencv && mkdir build && cd build && \
   cmake -D CMAKE_BUILD_TYPE=RELEASE \
+  	-D WITH_CUDA=OFF \
         -D CMAKE_INSTALL_PREFIX=/usr/local \
         -D OPENCV_EXTRA_MODULES_PATH=/data/opencv_contrib/modules \
         -D BUILD_EXAMPLES=ON .. && \
@@ -57,6 +76,7 @@ RUN \
 # install HDF5 reader and rabbit-mq client lib
 RUN pip3 install h5py 
 
+
 # Install Lucas
 RUN \
   git clone https://github.com/lucastheis/cmt.git && \
@@ -65,8 +85,8 @@ RUN \
   ./configure --enable-sse2 && \
   make CFLAGS="-fPIC" && \
   cd ../..  && \
-  python setup.py build && \
-  python setup.py install
+  python3 setup.py build && \
+  python3 setup.py install
 
 RUN \
   pip3 install git+https://github.com/cajal/c2s.git
