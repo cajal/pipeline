@@ -1,5 +1,5 @@
 """
-Analysis of visual maps: receptive fields, tuning curves, pixelwise maps
+Analysis of visual tuning: receptive fields, tuning curves, pixelwise maps
 """
 
 import numpy as np
@@ -64,7 +64,7 @@ class OriDesignMatrix(dj.Computed):
 
 @schema
 class OriMap(dj.Imported):
-    definition = """ # pixelwise maps to full-field directional stimuli
+    definition = """ # pixelwise responses to full-field directional stimuli
     -> OriDesignMatrix
     -> preprocess.Prepare.GalvoMotion
     ---
@@ -76,7 +76,7 @@ class OriMap(dj.Imported):
 
 @schema
 class Cos2Map(dj.Computed):
-    definition = """  # pixelwise cosine fit to directional maps
+    definition = """  # pixelwise cosine fit to directional response
     -> OriMap
     -----
     cos2_amp   : longblob   # dF/F at preferred direction
@@ -117,6 +117,7 @@ class MonetRF(dj.Computed):
         from scipy.interpolate import interp1d
         from scipy.signal import convolve
 
+        # enter basic information about the RF Map
         nbins = 6
         bin_size = 0.1     # s
         [x, y, distance, diagonal] = (preprocess.Sync() * vis.Session() & key).fetch1[
@@ -126,7 +127,8 @@ class MonetRF(dj.Computed):
         degrees_x = degrees_per_pixel * x
         degrees_y = degrees_per_pixel * y
         self.insert1(dict(key, degrees_x=degrees_x, degrees_y=degrees_y, nbins=nbins, bin_size=bin_size*1000))
-        # now compute the maps
+
+        # fetch traces and their slices (for galvo scans)
         trace_time = (preprocess.Sync() & key).fetch1['frame_times'].squeeze()  # calcium scan frame times
         trace_list, slices, trace_keys = (
             preprocess.Spikes.RateTrace() * preprocess.ExtractRaw.GalvoROI() &
@@ -137,7 +139,8 @@ class MonetRF(dj.Computed):
         maps = [0]*len(trace_list)
         n_trials = 0
         for trial_key in (preprocess.Sync() * vis.Trial() * vis.Condition() &
-                          'trial_idx between first_trial and last_trial' & vis.Monet() & key).fetch.keys():
+                          'trial_idx between first_trial and last_trial' &
+                          vis.Monet() & key).fetch.order_by('trial_idx').keys():
             print('Trial', trial_key['trial_idx'], flush=True, end=' - ')
             n_trials += 1
             movie_times = (vis.Trial() & trial_key).fetch1['flip_times'].flatten()
@@ -151,7 +154,7 @@ class MonetRF(dj.Computed):
             for islice in set(slices):
                 print('Slice', islice, end=' ', flush=True)
                 ix = np.where(slices == islice)[0]
-                time = trace_time[islice-1::n_slices]   # keep only one timestamp per frame (ignore time offsets of slices)
+                time = trace_time[islice-1::n_slices]
                 snippets = interp1d(time, convolve(
                     np.stack(trace_list[ix]),
                     hamming(bin_size/dt, 1), 'same'), fill_value=0)(
@@ -160,8 +163,8 @@ class MonetRF(dj.Computed):
                     maps[i] += convolve(movie, snippet[::-1].reshape((1, 1, snippet.size)), mode='valid')
             print()
         MonetRF.Map().insert(
-            dict(trace_key, map=m/n_trials)
-            for trace_key, m in zip(trace_keys, maps))
+            (dict(trace_key, map=m/n_trials) for trace_key, m in zip(trace_keys, maps)),
+            ignore_extra_fields=True)
         print('Done')
 
 schema.spawn_missing_classes()
