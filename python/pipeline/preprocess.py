@@ -320,6 +320,10 @@ class ComputeTraces(dj.Computed):
         trace = null         : longblob                     # leave null same as ExtractRaw.Trace
         """
 
+    @property
+    def key_source(self):
+        return (ExtractRaw() & ExtractRaw.Trace()).proj()
+
     @staticmethod
     def get_band_emission(fluorophore, center, band_width):
         pass_band = (center - band_width / 2, center + band_width / 2)
