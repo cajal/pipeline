@@ -6,6 +6,7 @@ import sh
 import os
 from scipy import integrate as integr
 from .utils.dsp import mirrconv
+from .utils.eye_tracking import ROIGrabber, ts2sec, read_video_hdf5
 from scipy import signal
 from scipy import stats
 
@@ -555,8 +556,8 @@ class Eye(dj.Imported):
     -> experiment.Scan
     ---
     eye_roi                     : tinyblob  # manual roi containing eye in full-size movie
-    eye_total_frames=NULL       : int       # total number of frames in movie.
     eye_time                    : longblob  # timestamps of each frame in seconds, with same t=0 as patch and ball data
+    total_frames                : int       # total number of frames in movie.
     eye_ts=CURRENT_TIMESTAMP    : timestamp # automatic
     """
 
@@ -575,8 +576,8 @@ class Eye(dj.Imported):
         return (rel - self) & restr
 
 
-    def new_eye(self, key, path_prefix='/mnt/', n_sample_frames = 50):
-        from . import utils
+    def grab_timestamps_and_frames(self, key, path_prefix='/mnt/', n_sample_frames = 100):
+
         import cv2
 
         rel = experiment.Session() * experiment.Scan.EyeVideo() * experiment.Scan.WheelFile().proj(hdf_file='filename')
@@ -590,12 +591,12 @@ class Eye(dj.Imported):
 
         hdf_path = "{path_prefix}/{behavior_path}/{hdf_file}".format(path_prefix=path_prefix, **info)
 
-        data = utils.read_video_hdf5(hdf_path)
+        data = read_video_hdf5(hdf_path)
         packet_length = data['analogPacketLen']
-        dat_time, _, _ = utils.ts2sec(data['ts'], packet_length)
+        dat_time, _, _ = ts2sec(data['ts'], packet_length)
 
         cam_key = 'cam1ts' if info['rig'] == '2P3' else  'cam2ts'
-        eye_time, _, _ = utils.ts2sec(data[cam_key], packet_length)
+        eye_time, _, _ = ts2sec(data[cam_key], packet_length)
         total_frames = len(eye_time)
 
         frame_idx = np.floor(np.linspace(0, total_frames-1, n_sample_frames))
@@ -615,12 +616,18 @@ class Eye(dj.Imported):
         frames = []
         for frame_pos in frame_idx:
             cap.set(cv2.CAP_PROP_POS_FRAMES, frame_pos)
-            print(frame_pos, total_frames)
             ret, frame = cap.read()
 
 
             frames.append(np.asarray(frame, dtype=float)[..., 0])
         frames = np.stack(frames, axis=2)
-        return eye_time, frames
+        return eye_time, frames, total_frames
+
+    def _make_tuples(self, key):
+        key['eye_time'], frames, key['total_frames'] = self.grab_timestamps_and_frames(key)
+        rg = ROIGrabber(frames.mean(axis=2))
+        key['eye_roi'] = rg.roi
+        self.insert1(key)
+
 
 schema.spawn_missing_classes()
