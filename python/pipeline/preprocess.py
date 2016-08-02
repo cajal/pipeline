@@ -4,10 +4,7 @@ from warnings import warn
 import numpy as np
 import sh
 import os
-from scipy import integrate as integr
 from .utils.dsp import mirrconv
-from scipy import signal
-from scipy import stats
 
 from distutils.version import StrictVersion
 
@@ -326,12 +323,13 @@ class ComputeTraces(dj.Computed):
 
     @staticmethod
     def get_band_emission(fluorophore, center, band_width):
+        from scipy import integrate as integr
         pass_band = (center - band_width / 2, center + band_width / 2)
-        nu_loaded, s_loaded = (experiment.Fluorophore.EmissionSpectrum()
-                               & dict(fluorophore=fluorophore, loaded=1)).fetch1['wavelength', 'fluorescence']
+        nu_loaded, s_loaded = (experiment.Fluorophore.EmissionSpectrum() &
+                               dict(fluorophore=fluorophore, loaded=1)).fetch1['wavelength', 'fluorescence']
 
-        nu_free, s_free = (experiment.Fluorophore.EmissionSpectrum()
-                           & dict(fluorophore=fluorophore, loaded=0)).fetch1['wavelength', 'fluorescence']
+        nu_free, s_free = (experiment.Fluorophore.EmissionSpectrum() &
+                           dict(fluorophore=fluorophore, loaded=0)).fetch1['wavelength', 'fluorescence']
 
         f_loaded = lambda xx: np.interp(xx, nu_loaded, s_loaded)
         f_free = lambda xx: np.interp(xx, nu_free, s_free)
@@ -339,6 +337,8 @@ class ComputeTraces(dj.Computed):
 
     @staticmethod
     def estimate_twitch_ratio(x, y, fps, df1, df2):
+        from scipy import signal, stats
+
         # low pass filter for unsharp masking
         hh = signal.hamming(2 * np.round(fps / 0.03) + 1)
         hh /= hh.sum()
@@ -460,8 +460,7 @@ class Spikes(dj.Computed):
 
     @property
     def key_source(self):
-        return (ComputeTraces() * SpikeMethod() & [dict(spike_method_name='stm'), dict(spike_method_name='nmf')]).proj()
-        #return (ComputeTraces() * SpikeMethod() & dict(spike_method_name='nmf')).proj()
+        return (ComputeTraces() * SpikeMethod() & "spike_method_name in ('stm','nmf')").proj()
 
     class RateTrace(dj.Part):
         definition = """  # Inferred
@@ -522,9 +521,9 @@ class Spikes(dj.Computed):
                 pass
 
             fig.tight_layout()
-            plt.savefig(outdir \
-                        + "/session{session}/scan_idx{scan_idx}/trace{trace_id:03d}_animal_id_{animal_id}.png".format(
-                **key))
+            plt.savefig(outdir +
+                        "/session{session}/scan_idx{scan_idx}/trace{trace_id:03d}_animal_id_{animal_id}.png".format(
+                            **key))
             plt.close(fig)
 
     def _make_tuples(self, key):
