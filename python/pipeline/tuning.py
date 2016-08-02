@@ -187,6 +187,8 @@ class MonetRF(dj.Computed):
                     np.stack(trace_list[ix]),
                     hamming(bin_size/dt, 1), 'same'), fill_value=0)(
                     np.r_[start_time+bin_size*(nbins-1):movie_times[-1]:bin_size])
+
+                # correlate snippents to movie
                 for i, snippet in zip(ix, snippets):
                     maps[i] += convolve(
                         movie,
