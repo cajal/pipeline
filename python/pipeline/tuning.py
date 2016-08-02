@@ -108,9 +108,29 @@ class MonetRF(dj.Computed):
         map : longblob
         """
 
+        def save(self, path="."):
+            """
+            save RF maps into PNG files
+            """
+            import os
+            from matplotlib.image import imsave
+            from matplotlib import pyplot as plt
+            cmap = plt.get_cmap('seismic')
+            for key in self.fetch.keys():
+                map = (MonetRF.Map() & key).fetch1['map']
+                scale = np.abs(map).max()*2
+                for i in range(map.shape[2]):
+                    filename = os.path.join(
+                        os.path.expanduser(path),
+                        '{animal_id:05d}_{session}_scan{scan_idx:02d}_method{extract_method}'
+                        '-{spike_method}_{trace_id:03d}-{frame}.png'.format(frame=i, **key))
+                    print(filename)
+                    imsave(filename, cmap(map[:, :, i]/scale+0.5))
+
     def _make_tuples(self, key):
 
         def hamming(half, dim):
+            """ normalized hamming kernel """
             k = np.hamming(np.floor(half)*2+1)
             return k.reshape([1]*dim+[k.size])/k.sum()
 
@@ -135,7 +155,7 @@ class MonetRF(dj.Computed):
             key).fetch['rate_trace', 'slice', dj.key]
         n_slices = (preprocess.Prepare.Galvo() & key).fetch1['nslices']
         assert n_slices*trace_list[0].size == trace_time.size, 'trace times must be a multiple of n_slices'
-        dt = (trace_time[1:]-trace_time[:-1]).mean()/n_slices
+        dt = (trace_time[1:]-trace_time[:-1]).mean()*n_slices
         maps = [0]*len(trace_list)
         n_trials = 0
         for trial_key in (preprocess.Sync() * vis.Trial() * vis.Condition() &
@@ -143,28 +163,63 @@ class MonetRF(dj.Computed):
                           vis.Monet() & key).fetch.order_by('trial_idx').keys():
             print('Trial', trial_key['trial_idx'], flush=True, end=' - ')
             n_trials += 1
+
+            # get the movie and scale to [-1, +1]
             movie_times = (vis.Trial() & trial_key).fetch1['flip_times'].flatten()
             movie = (vis.Monet() * vis.MonetLookup() & trial_key).fetch1['cached_movie']
             movie = (np.float32(movie) - 127.5) / 126.5
-            fps = 1/(movie_times[1:] - movie_times[:-1]).mean()
+
+            # rebin the movie to bin_size
+            fps = 1 / (movie_times[1:] - movie_times[:-1]).mean()
             start_time = movie_times[0] + bin_size / 2
             movie = interp1d(
                 movie_times, convolve(
                     movie, hamming(bin_size*fps, 2), 'same'))(np.r_[start_time:movie_times[-1]:bin_size])
+
+            # compute the maps for each slice separately to account for time differences between slices
             for islice in set(slices):
                 print('Slice', islice, end=' ', flush=True)
                 ix = np.where(slices == islice)[0]
                 time = trace_time[islice-1::n_slices]
+
+                # rebin traces to bin_size
                 snippets = interp1d(time, convolve(
                     np.stack(trace_list[ix]),
                     hamming(bin_size/dt, 1), 'same'), fill_value=0)(
                     np.r_[start_time+bin_size*(nbins-1):movie_times[-1]:bin_size])
                 for i, snippet in zip(ix, snippets):
-                    maps[i] += convolve(movie, snippet[::-1].reshape((1, 1, snippet.size)), mode='valid')
+                    maps[i] += convolve(
+                        movie,
+                        snippet[::-1].reshape((1, 1, snippet.size))/np.linalg.norm(snippet),
+                        mode='valid')
             print()
         MonetRF.Map().insert(
             (dict(trace_key, map=m/n_trials) for trace_key, m in zip(trace_keys, maps)),
             ignore_extra_fields=True)
         print('Done')
+
+
+@schema
+class DirectionalResponse(dj.Computed):
+    definition = """
+    -> Directional
+    -> preprocess.Spikes
+    ---
+    latency : float   # latency used (s)
+    """
+
+    class Trial(dj.Part):
+        definition = """
+        -> DirectionalResponse
+        -> preprocess.Spikes.RateTrace
+        -> Directional.Trial
+        ---
+        response : float   #  integrated response
+        """
+
+    def _make_tuples(self, key):
+        # fetch traces
+        pass
+
 
 schema.spawn_missing_classes()
