@@ -40,17 +40,9 @@ def main(argv):
 
     run_daemon = True # execute at least one loop
     while run_daemon:
-        populated_at_least_one = False
-        start = time.time()
         for name, rel in rels_cls.items():
-            todo, done = rel().progress()
-            if todo > 0:
-                populated_at_least_one = True
-                rel().populate(reserve_jobs=True)
-        end = time.time()
-        if run_daemon and not populated_at_least_one or (end - start) < 1:
-            t = np.random.randint(args.t_min, args.t_max)
-            time.sleep(t)
+            rel().populate(reserve_jobs=True, suppress_errors=True)
+        time.sleep(np.random.randint(args.t_min, args.t_max))
         run_daemon = args.daemon
     return 0
 
