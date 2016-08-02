@@ -1,5 +1,5 @@
 import datajoint as dj
-from . import experiment, vis
+from . import experiment, vis, PipelineException
 from warnings import warn
 import numpy as np
 import sh
@@ -320,6 +320,10 @@ class ComputeTraces(dj.Computed):
         trace = null         : longblob                     # leave null same as ExtractRaw.Trace
         """
 
+    @property
+    def key_source(self):
+        return (ExtractRaw() & ExtractRaw.Trace()).proj()
+
     @staticmethod
     def get_band_emission(fluorophore, center, band_width):
         pass_band = (center - band_width / 2, center + band_width / 2)
@@ -439,8 +443,8 @@ class SpikeMethod(dj.Lookup):
                 data = c2s.preprocess([trace], fps=fps)
                 data = c2s.predict(data, verbosity=0)
 
-                tr0[start:end + 1] = data[0].pop('predictions').squeeze()
-                data[0]['rate_trace'] = tr0
+                tr0[start:end + 1] = data[0].pop('predictions')
+                data[0]['rate_trace'] = tr0.T
                 data[0].pop('calcium')
                 data[0].pop('fps')
 
@@ -542,5 +546,81 @@ class Spikes(dj.Computed):
         else:
             raise NotImplementedError('Method {spike_method} not implemented.'.format(**key))
 
+
+@schema
+class Eye(dj.Imported):
+    definition = """
+    # eye velocity and timestamps
+
+    -> experiment.Scan
+    ---
+    eye_roi                     : tinyblob  # manual roi containing eye in full-size movie
+    eye_total_frames=NULL       : int       # total number of frames in movie.
+    eye_time                    : longblob  # timestamps of each frame in seconds, with same t=0 as patch and ball data
+    eye_ts=CURRENT_TIMESTAMP    : timestamp # automatic
+    """
+
+
+    def unpopulated(self, path_prefix='/mnt/'):
+        """
+        Returns all keys from Scan()*Session() that are not in Eye but have a video.
+
+
+        :param path_prefix: prefix to the path to find the video (usually '/mnt/', but empty by default)
+        """
+
+        rel = experiment.Session()*experiment.Scan.EyeVideo()
+        restr = [k for k in (rel - self).proj('behavior_path', 'filename').fetch.as_dict() if
+            os.path.exists("{path_prefix}/{behavior_path}/{filename}".format(path_prefix=path_prefix, **k))]
+        return (rel - self) & restr
+
+
+    def new_eye(self, key, path_prefix='/mnt/', n_sample_frames = 50):
+        from . import utils
+        import cv2
+
+        rel = experiment.Session() * experiment.Scan.EyeVideo() * experiment.Scan.WheelFile().proj(hdf_file='filename')
+
+        info = (rel & key).fetch1()
+        avi_path = "{path_prefix}/{behavior_path}/{filename}".format(path_prefix=path_prefix, **info)
+
+        # replace number by %d for hdf-file reader
+        tmp = info['hdf_file'].split('.')
+        info['hdf_file'] = tmp[0][:-1] + '%d.' + tmp[-1]
+
+        hdf_path = "{path_prefix}/{behavior_path}/{hdf_file}".format(path_prefix=path_prefix, **info)
+
+        data = utils.read_video_hdf5(hdf_path)
+        packet_length = data['analogPacketLen']
+        dat_time, _, _ = utils.ts2sec(data['ts'], packet_length)
+
+        cam_key = 'cam1ts' if info['rig'] == '2P3' else  'cam2ts'
+        eye_time, _, _ = utils.ts2sec(data[cam_key], packet_length)
+        total_frames = len(eye_time)
+
+        frame_idx = np.floor(np.linspace(0, total_frames-1, n_sample_frames))
+
+        cap = cv2.VideoCapture(avi_path)
+        no_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+        if total_frames != no_frames:
+            warn("{total_frames} timestamps, but {no_frames}  movie frames.".format(total_frames=total_frames,
+                                                                                             no_frames=no_frames))
+            if total_frames > no_frames and total_frames and no_frames:
+                total_frames = no_frames
+                eye_time = eye_time[:total_frames]
+                frame_idx = np.round(np.linspace(0, total_frames - 1, n_sample_frames)).astype(int)
+            else:
+                raise PipelineException('Can not reconcile frame count', key)
+        frames = []
+        for frame_pos in frame_idx:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_pos)
+            print(frame_pos, total_frames)
+            ret, frame = cap.read()
+
+
+            frames.append(np.asarray(frame, dtype=float)[..., 0])
+        frames = np.stack(frames, axis=2)
+        return eye_time, frames
 
 schema.spawn_missing_classes()
