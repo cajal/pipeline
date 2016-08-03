@@ -6,10 +6,10 @@ import sh
 import os
 from scipy import integrate as integr
 from .utils.dsp import mirrconv
-from .utils.eye_tracking import ROIGrabber, ts2sec, read_video_hdf5
+from .utils.eye_tracking import ROIGrabber, ts2sec, read_video_hdf5, PupilTracker
 from scipy import signal
 from scipy import stats
-
+from . import config
 from distutils.version import StrictVersion
 
 assert StrictVersion(dj.__version__) >= StrictVersion('0.2.8')
@@ -462,7 +462,7 @@ class Spikes(dj.Computed):
     @property
     def key_source(self):
         return (ComputeTraces() * SpikeMethod() & [dict(spike_method_name='stm'), dict(spike_method_name='nmf')]).proj()
-        #return (ComputeTraces() * SpikeMethod() & dict(spike_method_name='nmf')).proj()
+        # return (ComputeTraces() * SpikeMethod() & dict(spike_method_name='nmf')).proj()
 
     class RateTrace(dj.Part):
         definition = """  # Inferred
@@ -547,6 +547,21 @@ class Spikes(dj.Computed):
         else:
             raise NotImplementedError('Method {spike_method} not implemented.'.format(**key))
 
+@schema
+class EyeQuality(dj.Lookup):
+    definition = """
+    # Different eye quality definitions for Tracking
+    
+    eye_quality                : smallint
+    ---
+    description                : varchar(255)
+    """
+
+    contents = [
+        (-1, 'unusable'),
+        (0,  'good quality'),
+        (1,  'poor quality'),
+    ]
 
 @schema
 class Eye(dj.Imported):
@@ -555,14 +570,14 @@ class Eye(dj.Imported):
 
     -> experiment.Scan
     ---
+    -> EyeQuality
     eye_roi                     : tinyblob  # manual roi containing eye in full-size movie
     eye_time                    : longblob  # timestamps of each frame in seconds, with same t=0 as patch and ball data
     total_frames                : int       # total number of frames in movie.
     eye_ts=CURRENT_TIMESTAMP    : timestamp # automatic
     """
 
-
-    def unpopulated(self, path_prefix='/mnt/'):
+    def unpopulated(self):
         """
         Returns all keys from Scan()*Session() that are not in Eye but have a video.
 
@@ -570,15 +585,16 @@ class Eye(dj.Imported):
         :param path_prefix: prefix to the path to find the video (usually '/mnt/', but empty by default)
         """
 
-        rel = experiment.Session()*experiment.Scan.EyeVideo()
+        rel = experiment.Session() * experiment.Scan.EyeVideo()
+        path_prefix = config['path.mounts']
         restr = [k for k in (rel - self).proj('behavior_path', 'filename').fetch.as_dict() if
-            os.path.exists("{path_prefix}/{behavior_path}/{filename}".format(path_prefix=path_prefix, **k))]
+                 os.path.exists("{path_prefix}/{behavior_path}/{filename}".format(path_prefix=path_prefix, **k))]
         return (rel - self) & restr
 
-
-    def grab_timestamps_and_frames(self, key, path_prefix='/mnt/', n_sample_frames = 100):
+    def grab_timestamps_and_frames(self, key, n_sample_frames=100):
 
         import cv2
+        path_prefix = config['path.mounts']
 
         rel = experiment.Session() * experiment.Scan.EyeVideo() * experiment.Scan.WheelFile().proj(hdf_file='filename')
 
@@ -599,14 +615,14 @@ class Eye(dj.Imported):
         eye_time, _, _ = ts2sec(data[cam_key], packet_length)
         total_frames = len(eye_time)
 
-        frame_idx = np.floor(np.linspace(0, total_frames-1, n_sample_frames))
+        frame_idx = np.floor(np.linspace(0, total_frames - 1, n_sample_frames))
 
         cap = cv2.VideoCapture(avi_path)
         no_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
         if total_frames != no_frames:
             warn("{total_frames} timestamps, but {no_frames}  movie frames.".format(total_frames=total_frames,
-                                                                                             no_frames=no_frames))
+                                                                                    no_frames=no_frames))
             if total_frames > no_frames and total_frames and no_frames:
                 total_frames = no_frames
                 eye_time = eye_time[:total_frames]
@@ -618,7 +634,6 @@ class Eye(dj.Imported):
             cap.set(cv2.CAP_PROP_POS_FRAMES, frame_pos)
             ret, frame = cap.read()
 
-
             frames.append(np.asarray(frame, dtype=float)[..., 0])
         frames = np.stack(frames, axis=2)
         return eye_time, frames, total_frames
@@ -626,8 +641,94 @@ class Eye(dj.Imported):
     def _make_tuples(self, key):
         key['eye_time'], frames, key['total_frames'] = self.grab_timestamps_and_frames(key)
         rg = ROIGrabber(frames.mean(axis=2))
+        print(EyeQuality())
+        key['eye_quality'] = int(input("Enter the quality of the eye: ")) 
         key['eye_roi'] = rg.roi
         self.insert1(key)
+        print('[Done]')
+
+@schema
+class TrackingParameters(dj.Lookup):
+    definition = """
+    # table that stores the paths for the params for pupil_tracker
+
+    -> EyeQuality
+    ---
+    thres_perc_high              : float        # parameter for tracking
+    thres_perc_low               : float        # parameter for tracking
+    convex_weight_low            : float        # threshold will be the convex combination of the low and high percentile weighted
+    relative_area_threshold      : float        # enclosing rotating rectangle has to have at least that amount of area
+    ratio_threshold              : float        # ratio of major and minor radius cannot be larger than this
+    error_threshold              : float        # threshold on the RMSE of the ellipse fit
+    min_contour_len              : int          # minimal required contour length (must be at least 5)
+    margin                       : float        # relative margin the pupil center should not be in
+    """
+
+    contents = [
+        {'eye_quality': 0,
+         'thres_perc_high': 98,
+         'thres_perc_low': 10,
+         'convex_weight_low': 0.5,
+         'relative_area_threshold': 0.01,
+         'ratio_threshold': 1.5,
+         'error_threshold': 0.15,
+         'min_contour_len': 5,
+         'margin': 0.2
+         },
+        {'eye_quality': 1,
+         'thres_perc_high': 98,
+         'thres_perc_low': 10,
+         'convex_weight_low': 0.3,
+         'relative_area_threshold': 0.01,
+         'ratio_threshold': 1.3,
+         'error_threshold': 0.2,
+         'min_contour_len': 5,
+         'margin': 0.2
+         },
+    ]
+
+@schema
+class EyeTracking(dj.Computed):
+    definition = """
+    -> Eye
+    -> TrackingParameters
+    ---
+    tracking_ts=CURRENT_TIMESTAMP    : timestamp  # automatic
+    """
+
+    class Frame(dj.Part):
+        definition = """
+        -> EyeTracking
+        frame_id            : int           # frame id with matlab based 1 indexing
+        ---
+        rotated_rect=NULL        : tinyblob      # rotated rect (center, sidelength, angle) containing the ellipse
+        contour=NULL             : longblob      # eye contour relative to ROI
+        center=NULL              : tinyblob      # center of the ellipse in (x, y) of image
+        major_r=NULL             : float         # major radius of the ellipse
+        frame_intensity=NULL     : float         # std of the frame
+        """
+    @property
+    def key_source(self):
+        return (Eye()*TrackingParameters()).proj()
+
+    def _make_tuples(self, key):
+        print("Populating", key)
+        param = (TrackingParameters() & key).fetch1()
+
+        roi = (Eye() & key).fetch1['eye_roi']
+
+        video_info = (experiment.Session() * experiment.Scan.EyeVideo() & key).fetch1()
+        avi_path = "{path_prefix}/{behavior_path}/{filename}".format(path_prefix=config['path.mounts'], **video_info)
+
+        tr = PupilTracker(param)
+        traces = tr.track(avi_path, roi-1) # -1 because of matlab indices
+
+        self.insert1(key)
+        fr = self.Frame()
+        for trace in traces:
+            trace.update(key)
+            fr.insert1(trace)
+
 
 
 schema.spawn_missing_classes()

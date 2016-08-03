@@ -1,10 +1,22 @@
 import warnings
+from collections import defaultdict
+
 import h5py
 import numpy as np
 from scipy.interpolate import InterpolatedUnivariateSpline as iu_spline
 from pipeline import PipelineException
+import matplotlib
+import pandas as pd
+
+matplotlib.use('agg')
 import matplotlib.pyplot as plt
-import seaborn as sns
+import numpy as np
+import cv2
+
+try:
+    import cv2
+except ImportError:
+    print("Could not find cv2. You won't be able to use the pupil tracker.")
 
 ANALOG_PACKET_LEN = 2000
 
@@ -169,12 +181,12 @@ class ROIGrabber:
     """
 
     def __init__(self, img):
+        plt.switch_backend('GTK3Agg')
         self.img = img
         self.start = None
         self.current = None
         self.end = None
         self.pressed = False
-        sns.set_style('white')
         self.fig, self.ax = plt.subplots(facecolor='w')
 
         self.fig.canvas.mpl_connect('button_press_event', self.on_press)
@@ -231,3 +243,145 @@ class ROIGrabber:
             self.current = np.asarray([event.xdata, event.ydata])
             if self.pressed:
                 self.replot()
+
+
+class PupilTracker:
+    def __init__(self, param):
+        self._params = param
+
+    @staticmethod
+    def goodness_of_fit(contour, ellipse):
+        center, size, angle = ellipse
+        angle *= np.pi / 180
+        err = 0
+        for coord in contour.squeeze().astype(np.float):
+            posx = (coord[0] - center[0]) * np.cos(-angle) - (coord[1] - center[1]) * np.sin(-angle)
+            posy = (coord[0] - center[0]) * np.sin(-angle) - (coord[1] - center[1]) * np.cos(-angle)
+            err += ((posx / size[0]) ** 2 + (posy / size[1]) ** 2 - 0.25) ** 2
+
+        return np.sqrt(err / len(contour))
+
+    def get_pupil_from_contours(self, contours, small_gray, display=False):
+        ratio_thres = self._params['ratio_threshold']
+        area_threshold = self._params['relative_area_threshold']
+        error_threshold = self._params['error_threshold']
+        min_contour = self._params['min_contour_len']
+        margin = self._params['margin']
+
+        err = np.inf
+        best_ellipse = None
+        best_contour = None
+        results = defaultdict(list)
+
+        for j, cnt in enumerate(contours):
+            if len(contours[j]) < min_contour:  # otherwise fitEllipse won't work
+                continue
+
+            ellipse = cv2.fitEllipse(contours[j])
+            ((x, y), axes, angle) = ellipse
+            if min(axes) == 0:  # otherwise ratio won't work
+                continue
+
+            ratio = max(axes) / min(axes)
+            area = np.prod(ellipse[1]) / np.prod(small_gray.shape)
+            curr_err = self.goodness_of_fit(cnt, ellipse)
+            results['ratio'].append(ratio)
+            results['area'].append(area)
+            results['rmse'].append(curr_err)
+            results['x coord'].append(x / small_gray.shape[1])
+            results['y coord'].append(y / small_gray.shape[0])
+
+            matching_conditions = 1 * (ratio <= ratio_thres) + 1 * (area >= area_threshold) \
+                                  + 1 * (curr_err < error_threshold) \
+                                  + 1 * (margin < x / small_gray.shape[1] < 1 - margin) \
+                                  + 1 * (margin < y / small_gray.shape[0] < 1 - margin)
+            results['conditions'] = matching_conditions
+
+            if curr_err < err and matching_conditions == 5:
+                best_ellipse = ellipse
+                best_contour = cnt
+                err = curr_err
+                if display:
+                    cv2.ellipse(small_gray, ellipse, (0, 0, 255), 2)
+            elif matching_conditions > 3:
+                if display:
+                    cv2.ellipse(small_gray, ellipse, (255, 0, 0), 2)
+        if best_ellipse is None:
+            df = pd.DataFrame(results)
+            print('-', end="", flush=True)
+            if np.any(df['conditions'] > 3):
+                print(df[df['conditions'] >3])
+
+        return best_contour, best_ellipse
+
+    def track(self, videofile, eye_roi, display=True):
+
+        cw_low = self._params['convex_weight_low']
+        p1 = self._params['thres_perc_high']
+        p2 = self._params['thres_perc_low']
+
+        print("Tracking videofile", videofile)
+
+        cap = cv2.VideoCapture(videofile)
+        trace = []
+
+        no_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+        fr_count = 0
+
+        while cap.isOpened():
+            ret, frame = cap.read()
+            fr_count += 1
+            if not ret:
+                trace.append(dict(frame_id=fr_count))
+                continue
+            if fr_count % 1000 == 0:
+                print("\tframe ({}/{})".format(fr_count, no_frames))
+
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            img_std = np.std(gray)
+
+            small_gray = gray[slice(*eye_roi[0]), slice(*eye_roi[1])]
+            blur = cv2.GaussianBlur(small_gray, (15, 15), 0)
+            th = (1 - cw_low) * np.percentile(blur, p1) + cw_low * np.percentile(blur, p2)
+            _, thres = cv2.threshold(blur, th, 255, cv2.THRESH_BINARY)
+            if display:
+                cv2.imshow('blur', blur)
+                cv2.imshow('threshold', thres)
+
+            _, contours, hierarchy1 = cv2.findContours(thres, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+            contour, ellipse = self.get_pupil_from_contours(contours, small_gray, display=display)
+
+            if contour is None:
+                trace.append(dict(frame_id=fr_count,
+                                  frame_intensity=img_std))
+            else:
+                eye_center = eye_roi[::-1, 0] + np.asarray(ellipse[0])
+                trace.append(dict(center=eye_center,
+                                  major_r=np.max(ellipse[1]),
+                                  rotated_rect=np.hstack(ellipse),
+                                  contour=contour.astype(np.int16),
+                                  frame_id=fr_count,
+                                  frame_intensity=img_std
+                                  ))
+            if display:
+                if contour is not None:
+                    ellipse = list(ellipse)
+                    ellipse[0] = tuple(eye_center)
+                    ellipse = tuple(ellipse)
+                    cv2.drawContours(gray, [contour], 0, (255, 0, 0), 1, offset=tuple(eye_roi[::-1, 0]))
+                    cv2.ellipse(gray, ellipse, (0, 0, 255), 2)
+                    epy, epx = np.round(eye_center).astype(int)
+                    gray[epx - 2:epx + 2, epy - 2:epy + 2] = 0
+                cv2.imshow('frame', gray)
+
+            if (cv2.waitKey(1) & 0xFF == ord('q')):
+                raise PipelineException('Tracking aborted')
+            if fr_count >= no_frames:
+                print("Reached end of videofile ", videofile)
+                break
+
+        cap.release()
+        cv2.destroyAllWindows()
+
+        return trace
