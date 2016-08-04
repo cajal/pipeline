@@ -261,13 +261,14 @@ class PupilTracker:
 
         return np.sqrt(err / len(contour))
 
-    def get_pupil_from_contours(self, contours, small_gray, display=False):
+    def get_pupil_from_contours(self, contours, small_gray, old_center, old_r, display=False, show_matching=5):
         ratio_thres = self._params['ratio_threshold']
         area_threshold = self._params['relative_area_threshold']
         error_threshold = self._params['error_threshold']
         min_contour = self._params['min_contour_len']
         margin = self._params['margin']
-
+        speed_thres = self._params['speed_threshold']
+        dr_thres = self._params['dr_threshold']
         err = np.inf
         best_ellipse = None
         best_contour = None
@@ -291,73 +292,102 @@ class PupilTracker:
             results['x coord'].append(x / small_gray.shape[1])
             results['y coord'].append(y / small_gray.shape[0])
 
+            center = np.array([x / small_gray.shape[1], y / small_gray.shape[0]])
+            r = max(axes)
+
+            dr = 0 if old_r is None else abs(r-old_r)/old_r
+            dx = 0 if old_center is None else np.sqrt(np.sum((center - old_center) ** 2))
+
+            results['dx'].append(dx)
+            results['dr/r'].append(dr)
             matching_conditions = 1 * (ratio <= ratio_thres) + 1 * (area >= area_threshold) \
                                   + 1 * (curr_err < error_threshold) \
-                                  + 1 * (margin < x / small_gray.shape[1] < 1 - margin) \
-                                  + 1 * (margin < y / small_gray.shape[0] < 1 - margin)
+                                  + 1 * (margin < center[0] < 1 - margin) \
+                                  + 1 * (margin < center[1] < 1 - margin) \
+                                  + 1 * (dx < speed_thres) \
+                                  + 1 * (dr < dr_thres)
+
             results['conditions'] = matching_conditions
 
-            if curr_err < err and matching_conditions == 5:
+            if curr_err < err and matching_conditions == 7:
                 best_ellipse = ellipse
                 best_contour = cnt
                 err = curr_err
                 if display:
                     cv2.ellipse(small_gray, ellipse, (0, 0, 255), 2)
-            elif matching_conditions > 3:
-                if display:
-                    cv2.ellipse(small_gray, ellipse, (255, 0, 0), 2)
+            elif matching_conditions >= show_matching and display:
+                cv2.ellipse(small_gray, ellipse, (255, 0, 0), 2)
         if best_ellipse is None:
             df = pd.DataFrame(results)
             print('-', end="", flush=True)
-            if np.any(df['conditions'] > 3):
-                print(df[df['conditions'] >3])
+            if np.any(df['conditions'] >= show_matching):
+                print("\n",df[df['conditions'] >= show_matching], flush=True)
 
         return best_contour, best_ellipse
 
     def track(self, videofile, eye_roi, display=True):
 
-        cw_low = self._params['convex_weight_low']
-        p1 = self._params['thres_perc_high']
-        p2 = self._params['thres_perc_low']
+        cw_low = self._params['perc_weight']
+        p_high = self._params['perc_high']
+        p_low = self._params['perc_low']
+        contrast_low = self._params['contrast_threshold']
 
         print("Tracking videofile", videofile)
 
         cap = cv2.VideoCapture(videofile)
-        trace = []
+        traces = []
 
         no_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
 
         fr_count = 0
-
+        old_center = None
+        old_r = None
         while cap.isOpened():
+            if fr_count >= no_frames:
+                print("Reached end of videofile ", videofile)
+                break
             ret, frame = cap.read()
             fr_count += 1
             if not ret:
-                trace.append(dict(frame_id=fr_count))
+                traces.append(dict(frame_id=fr_count))
                 continue
-            if fr_count % 1000 == 0:
+            if fr_count % 500 == 0:
                 print("\tframe ({}/{})".format(fr_count, no_frames))
 
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             img_std = np.std(gray)
 
+            if img_std < contrast_low:
+                traces.append(dict(frame_id=fr_count,
+                                  frame_intensity=img_std))
+                if display:
+                    cv2.imshow('frame', gray)
+                    cv2.waitKey(1)
+                print('_', end="",flush=True)
+                continue
+
             small_gray = gray[slice(*eye_roi[0]), slice(*eye_roi[1])]
             blur = cv2.GaussianBlur(small_gray, (15, 15), 0)
-            th = (1 - cw_low) * np.percentile(blur, p1) + cw_low * np.percentile(blur, p2)
+            th = (1 - cw_low) * np.percentile(blur, p_high) + cw_low * np.percentile(blur, p_low)
             _, thres = cv2.threshold(blur, th, 255, cv2.THRESH_BINARY)
+
             if display:
                 cv2.imshow('blur', blur)
                 cv2.imshow('threshold', thres)
 
             _, contours, hierarchy1 = cv2.findContours(thres, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-            contour, ellipse = self.get_pupil_from_contours(contours, small_gray, display=display)
+            contour, ellipse = self.get_pupil_from_contours(contours, small_gray, old_center, old_r,  display=display)
 
             if contour is None:
-                trace.append(dict(frame_id=fr_count,
+                traces.append(dict(frame_id=fr_count,
                                   frame_intensity=img_std))
+                old_center = None
+                old_r = None
             else:
                 eye_center = eye_roi[::-1, 0] + np.asarray(ellipse[0])
-                trace.append(dict(center=eye_center,
+                old_center = np.asarray(ellipse[0])/np.asarray(small_gray.shape[::-1])
+                old_r = max(ellipse[1])
+                traces.append(dict(center=eye_center,
                                   major_r=np.max(ellipse[1]),
                                   rotated_rect=np.hstack(ellipse),
                                   contour=contour.astype(np.int16),
@@ -377,11 +407,8 @@ class PupilTracker:
 
             if (cv2.waitKey(1) & 0xFF == ord('q')):
                 raise PipelineException('Tracking aborted')
-            if fr_count >= no_frames:
-                print("Reached end of videofile ", videofile)
-                break
 
         cap.release()
         cv2.destroyAllWindows()
 
-        return trace
+        return traces

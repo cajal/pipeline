@@ -547,6 +547,7 @@ class Spikes(dj.Computed):
         else:
             raise NotImplementedError('Method {spike_method} not implemented.'.format(**key))
 
+
 @schema
 class EyeQuality(dj.Lookup):
     definition = """
@@ -559,9 +560,11 @@ class EyeQuality(dj.Lookup):
 
     contents = [
         (-1, 'unusable'),
-        (0,  'good quality'),
-        (1,  'poor quality'),
+        (0, 'good quality'),
+        (1, 'poor quality'),
+        (2, 'very poor quality (not well centered, pupil not fully visible)'),
     ]
+
 
 @schema
 class Eye(dj.Imported):
@@ -591,7 +594,7 @@ class Eye(dj.Imported):
                  os.path.exists("{path_prefix}/{behavior_path}/{filename}".format(path_prefix=path_prefix, **k))]
         return (rel - self) & restr
 
-    def grab_timestamps_and_frames(self, key, n_sample_frames=100):
+    def grab_timestamps_and_frames(self, key, n_sample_frames=10):
 
         import cv2
         path_prefix = config['path.mounts']
@@ -641,11 +644,13 @@ class Eye(dj.Imported):
     def _make_tuples(self, key):
         key['eye_time'], frames, key['total_frames'] = self.grab_timestamps_and_frames(key)
         rg = ROIGrabber(frames.mean(axis=2))
-        print(EyeQuality())
-        key['eye_quality'] = int(input("Enter the quality of the eye: ")) 
+        with dj.config(display__width=50):
+            print(EyeQuality())
+        key['eye_quality'] = int(input("Enter the quality of the eye: "))
         key['eye_roi'] = rg.roi
         self.insert1(key)
         print('[Done]')
+
 
 @schema
 class TrackingParameters(dj.Lookup):
@@ -654,38 +659,61 @@ class TrackingParameters(dj.Lookup):
 
     -> EyeQuality
     ---
-    thres_perc_high              : float        # parameter for tracking
-    thres_perc_low               : float        # parameter for tracking
-    convex_weight_low            : float        # threshold will be the convex combination of the low and high percentile weighted
+    perc_high                    : float        # upper percentile for bright pixels
+    perc_low                     : float        # lower percentile for dark pixels
+    perc_weight                  : float        # threshold will be perc_weight*perc_low + (1- perc_weight)*perc_high
     relative_area_threshold      : float        # enclosing rotating rectangle has to have at least that amount of area
     ratio_threshold              : float        # ratio of major and minor radius cannot be larger than this
     error_threshold              : float        # threshold on the RMSE of the ellipse fit
     min_contour_len              : int          # minimal required contour length (must be at least 5)
     margin                       : float        # relative margin the pupil center should not be in
+    contrast_threshold           : float        # contrast below that threshold are considered dark
+    speed_threshold              : float        # eye center can at most move that fraction of the roi between frames
+    dr_threshold                 : float        # maximally allow relative change in radius
     """
 
     contents = [
         {'eye_quality': 0,
-         'thres_perc_high': 98,
-         'thres_perc_low': 10,
-         'convex_weight_low': 0.5,
+         'perc_high': 95,
+         'perc_low': 5,
+         'perc_weight': 0.5,
          'relative_area_threshold': 0.01,
-         'ratio_threshold': 1.5,
-         'error_threshold': 0.15,
+         'ratio_threshold': 1.7,
+         'error_threshold': 0.175,
          'min_contour_len': 5,
-         'margin': 0.2
+         'margin': 0.2,
+         'contrast_threshold': 10,
+         'speed_threshold': 0.35,
+         'dr_threshold': 0.15,
          },
         {'eye_quality': 1,
-         'thres_perc_high': 98,
-         'thres_perc_low': 10,
-         'convex_weight_low': 0.3,
+         'perc_high': 95,
+         'perc_low': 5,
+         'perc_weight': 0.5,
          'relative_area_threshold': 0.01,
-         'ratio_threshold': 1.3,
+         'ratio_threshold': 1.9,
          'error_threshold': 0.2,
          'min_contour_len': 5,
-         'margin': 0.2
+         'margin': 0.2,
+         'contrast_threshold': 10,
+         'speed_threshold': 0.35,
+         'dr_threshold': 0.15,
+         },
+        {'eye_quality': 2,
+         'perc_high': 95,
+         'perc_low': 5,
+         'perc_weight': 0.5,
+         'relative_area_threshold': 0.01,
+         'ratio_threshold': 1.9,
+         'error_threshold': 0.25,
+         'min_contour_len': 5,
+         'margin': 0.05,
+         'contrast_threshold': 10,
+         'speed_threshold': 0.35,
+         'dr_threshold': 0.15,
          },
     ]
+
 
 @schema
 class EyeTracking(dj.Computed):
@@ -707,9 +735,10 @@ class EyeTracking(dj.Computed):
         major_r=NULL             : float         # major radius of the ellipse
         frame_intensity=NULL     : float         # std of the frame
         """
+
     @property
     def key_source(self):
-        return (Eye()*TrackingParameters()).proj()
+        return (Eye() * TrackingParameters()).proj()
 
     def _make_tuples(self, key):
         print("Populating", key)
@@ -721,14 +750,13 @@ class EyeTracking(dj.Computed):
         avi_path = "{path_prefix}/{behavior_path}/{filename}".format(path_prefix=config['path.mounts'], **video_info)
 
         tr = PupilTracker(param)
-        traces = tr.track(avi_path, roi-1) # -1 because of matlab indices
+        traces = tr.track(avi_path, roi - 1)  # -1 because of matlab indices
 
         self.insert1(key)
         fr = self.Frame()
         for trace in traces:
             trace.update(key)
             fr.insert1(trace)
-
 
 
 schema.spawn_missing_classes()
