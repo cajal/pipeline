@@ -10,8 +10,10 @@ switch fluorophore
         loader = @(islice, varargin)(twitch_loader(key, islice, reader, varargin{:}));
     otherwise
         if strcmp(fluorophore, 'RCaMP1a')
+            fprintf('\tLoading channel 2 for RCaMP1a\n');
             channel = 2;
         else
+            fprintf('\tLoading channel 2 for RCaMP1a\n');
             channel = 1;  
         end
         

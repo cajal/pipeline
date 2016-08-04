@@ -1,17 +1,18 @@
 from collections import OrderedDict
 import numpy as np
 import matplotlib.pyplot as plt
-import seaborn as sns
 from mpl_toolkits.mplot3d import Axes3D
 
 
-# plot_params = dict(cmap=plt.cm.gray, vmin=0, vmax=1)
 plot_params = dict(cmap=plt.cm.gray)
-plot_paramsP = dict(cmap=sns.blend_palette(['yellow', 'deeppink'], as_cmap=True), zorder=5)
 
 
 class CellLabeler:
     def __init__(self, X, cells=None, P=None):
+
+        import seaborn as sns
+        self.plot_paramsP = dict(cmap=sns.blend_palette(['yellow', 'deeppink'], as_cmap=True), zorder=5)
+
         self.X = X
         self.P = P
         self.cells = cells
@@ -91,9 +92,9 @@ class CellLabeler:
         if self.P is not None:
             P0 = np.asarray(self.P)
             P0[P0 < 0.005] = np.nan
-            ax['row'].imshow(P0[row, :, :].T, **plot_paramsP)
-            ax['col'].imshow(P0[:, col, :], **plot_paramsP)
-            ax['depth'].imshow(P0[:, :, depth], **plot_paramsP)
+            ax['row'].imshow(P0[row, :, :].T, **self.plot_paramsP)
+            ax['col'].imshow(P0[:, col, :], **self.plot_paramsP)
+            ax['depth'].imshow(P0[:, :, depth], **self.plot_paramsP)
 
 
         if self.cells is not None and len(self.cells) > 0:
