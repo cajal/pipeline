@@ -22,12 +22,12 @@ This software is published under the [LGPLv3 license](LICENSE.txt).
 The code in this repository is licensed under the [Creative Commons Attribution-NonCommercial-ShareAlike 3.0 Unported License](http://creativecommons.org/licenses/by-nc-sa/3.0/). 
 
 # Notebooks
-1.  [Intro](jupyter/notebooks/pipeline_intro.ipynb)
-1.  [Big Picture](jupyter/notebooks/big_picture.ipynb)
-1.  [pipeline.experiment](jupyter/notebooks/pipeline_experiment.ipynb)
-1.  [pipeline.vis](jupyter/notebooks/pipeline_vis.ipynb)
-1.  [pipeline.preprocess](jupyter/notebooks/pipeline_preprocess.ipynb)
-1.  [Synchronization](jupyter/notebooks/pipeline_synchronization.ipynb)
-1.  [Processing Monet stimulus](jupyter/notebooks/pipeline_prepare_monet.ipynb)
-1.  [Processing movie stimulus](jupyter/notebooks/pipeline_prepare_movie.ipynb)
-1.  [pipeline.tuning](jupyter/notebooks/pipeline_tuning.ipynb)
+1.  [Intro](jupyter/tutorial/pipeline_intro.ipynb)
+1.  [Big Picture](jupyter/tutorial/big_picture.ipynb)
+1.  [pipeline.experiment](jupyter/tutorial/pipeline_experiment.ipynb)
+1.  [pipeline.vis](jupyter/tutorial/pipeline_vis.ipynb)
+1.  [pipeline.preprocess](jupyter/tutorial/pipeline_preprocess.ipynb)
+1.  [Synchronization](jupyter/tutorial/pipeline_synchronization.ipynb)
+1.  [Processing Monet stimulus](jupyter/tutorial/pipeline_prepare_monet.ipynb)
+1.  [Processing movie stimulus](jupyter/tutorial/pipeline_prepare_movie.ipynb)
+1.  [pipeline.tuning](jupyter/tutorial/pipeline_tuning.ipynb)
