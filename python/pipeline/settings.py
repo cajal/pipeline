@@ -14,6 +14,7 @@ validators = collections.defaultdict(lambda: lambda value: True)
 
 default = OrderedDict({
     'path.mounts': '/mnt/',
+    'display.tracking': False
 })
 
 class Config(collections.MutableMapping):

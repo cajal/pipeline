@@ -750,7 +750,7 @@ class EyeTracking(dj.Computed):
         avi_path = "{path_prefix}/{behavior_path}/{filename}".format(path_prefix=config['path.mounts'], **video_info)
 
         tr = PupilTracker(param)
-        traces = tr.track(avi_path, roi - 1)  # -1 because of matlab indices
+        traces = tr.track(avi_path, roi - 1, display=config['display.tracking'])  # -1 because of matlab indices
 
         self.insert1(key)
         fr = self.Frame()

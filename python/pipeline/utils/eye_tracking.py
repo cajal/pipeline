@@ -325,7 +325,7 @@ class PupilTracker:
 
         return best_contour, best_ellipse
 
-    def track(self, videofile, eye_roi, display=True):
+    def track(self, videofile, eye_roi, display=False):
 
         cw_low = self._params['perc_weight']
         p_high = self._params['perc_high']
