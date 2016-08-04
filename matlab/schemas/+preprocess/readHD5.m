@@ -6,14 +6,18 @@ function [data, settings, ver] = readHD5(F)
 % ver: file version
 
 if isstruct(F)
-    filename = fetch1(experiment.Scan & F,'filename');
-    filename = strsplit(filename, '_');
-    scanId = str2double(filename{2});
-    filename = filename{1};
-    
-    F = fullfile( ...
-        getLocalPath(fetch1(experiment.Session & F,'behavior_path')), ... 
-        sprintf('%s%d0.h5', filename, scanId));
+    if count(experiment.ScanWheelFile & F)
+        F = fullfile(getLocalPath(fetch1(experiment.Session & F,'behavior_path')), ...
+            fetch1(experiment.ScanWheelFile & F, 'filename'));
+    else
+        filename = fetch1(experiment.Scan & F,'filename');
+        filename = strsplit(filename, '_');
+        scanId = str2double(filename{2});
+        filename = filename{1};
+        F = fullfile( ...
+            getLocalPath(fetch1(experiment.Session & F,'behavior_path')), ... 
+            sprintf('%s%d0.h5', filename, scanId));
+    end
 end
     
 f=dir(F);

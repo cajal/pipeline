@@ -156,14 +156,21 @@ class MonetRF(dj.Computed):
         n_slices = (preprocess.Prepare.Galvo() & key).fetch1['nslices']
         trace_time = trace_time[:n_slices*traces[0].size]  # truncate if interrupted scan
         assert n_slices*traces[0].size == trace_time.size, 'trace times must be a multiple of n_slices'
-        frame_interval = (trace_time[1:]-trace_time[:-1]).mean()*n_slices
+        slice_interval = (trace_time[1:]-trace_time[:-1]).mean()
+        frame_interval = slice_interval*n_slices
         maps = [0]*len(traces)
+
+        # interpolate traces on times of the first slice, smoothed for bin_size
+        traces = interp1d(trace_time[::n_slices], convolve(
+                            np.stack(trace.flatten() for trace in traces),
+                            hamming(bin_size/frame_interval, 1), 'same'))
+
         n_trials = 0
         stim_duration = 0.0
         for trial_key in (preprocess.Sync() * vis.Trial() * vis.Condition() &
                           'trial_idx between first_trial and last_trial' &
                           vis.Monet() & key).fetch.order_by('trial_idx').keys():
-            print('Trial', trial_key['trial_idx'], flush=True, end=' - ')
+            print('Trial %d:' % trial_key['trial_idx'], flush=True, end='')
             n_trials += 1
 
             # get the movie and scale to [-1, +1]
@@ -179,26 +186,22 @@ class MonetRF(dj.Computed):
                 movie_times, convolve(
                     movie, hamming(bin_size*fps, 2), 'same'))(np.r_[movie_times[-1]:start_time:-bin_size])
 
-            # compute the maps for each slice separately to account for time differences between slices
-            for islice in set(slices):
-                print('Slice', islice, end=' ', flush=True)
-                ix = np.where(slices == islice)[0]
-                time = trace_time[islice-1::n_slices]
-
-                # rebin traces to bin_size
-                snippets = interp1d(time, convolve(
-                    np.stack(traces[ix].flatten()),
-                    hamming(bin_size/frame_interval, 1), 'same'), fill_value=0)(
-                    np.r_[start_time+bin_size*(nbins-1):movie_times[-1]:bin_size])
-
-                # correlate snippents to movie
-                for i, snippet in zip(ix, snippets):
-                    maps[i] += convolve(
-                        movie,
-                        snippet.reshape((1, 1, snippet.size))/np.linalg.norm(snippet),
-                        mode='valid')
+            # compute the maps with appropriate slice times
+            prev_slice_index = -1
+            for trace_index, slice_index in enumerate(slices):
+                if prev_slice_index != slice_index:
+                    print()
+                    print('[Slice %d]' % slice_index, end='')
+                    snippets = traces(np.r_[start_time+bin_size*(nbins-1):movie_times[-1]:bin_size] -
+                                      slice_index*slice_interval)
+                    prev_slice_index = slice_index
+                print(end='.', flush=True)
+                snippet = snippets[trace_index]
+                maps[trace_index] += convolve(
+                    movie,
+                    snippet.reshape((1, 1, snippet.size))/np.linalg.norm(snippet),
+                    mode='valid')
             print()
-
         # submit data
         self.insert1(dict(key,
                           degrees_x=degrees_x,
