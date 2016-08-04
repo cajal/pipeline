@@ -6,7 +6,7 @@ import json
 from collections import OrderedDict
 from . import PipelineException
 import collections
-from pprint import pprint
+from pprint import pprint, pformat
 
 LOCALCONFIG = 'pipeline_config.json'
 GLOBALCONFIG = '.pipeline_config.json'
@@ -37,7 +37,7 @@ class Config(collections.MutableMapping):
         self.instance.__setitem__(item, value)
 
     def __str__(self):
-        return pprint.pformat(self.instance._conf, indent=4)
+        return pformat(self.instance._conf, indent=4)
 
     def __repr__(self):
         return self.__str__()
