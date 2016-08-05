@@ -24,6 +24,7 @@ def normalize(img):
     return (img - img.min()) / (img.max() - img.min())
 
 
+
 def erd():
     """a shortcut for convenience"""
     dj.ERD(schema).draw(prefix=False)
@@ -197,6 +198,66 @@ class ExtractRaw(dj.Imported):
         spike_trace :longblob
         """
 
+    def plot_traces_and_masks(self, traces, slice, mask_channel=1, outfile='traces.pdf'):
+
+        import seaborn as sns
+        import matplotlib.pyplot as plt
+
+        key = (self * self.GalvoSegmentation().proj() * Method.Galvo() & dict(segmentation='nmf', slice=slice))
+        rel = self.GalvoROI() * \
+              self.SpikeRate() * ComputeTraces().Trace() & key & \
+              dict(segmentation=2) & 'trace_id in ({})'.format(','.join([str(s) for s in traces]))
+
+        mask_px, mask_w, spikes, traces, ids = rel.fetch.order_by('trace_id')[
+            'mask_pixels', 'mask_weights', 'spike_trace', 'trace', 'trace_id']
+        template = np.stack([normalize(t)
+                             for t in (Prepare.GalvoAverageFrame() & key).fetch['frame']], axis=2)[...,mask_channel-1]
+
+        d1, d2, fps = tuple(map(int, (Prepare.Galvo() & key).fetch1['px_height', 'px_width', 'fps']))
+        hs = int(np.round(fps * 120))
+        t = np.arange(hs) / fps
+        masks = self.GalvoROI.reshape_masks(mask_px, mask_w, d1, d2)
+        try:
+            sh.mkdir('-p', os.path.expanduser(outdir) + '/scan_idx{scan_idx}/slice{slice}'.format(**key))
+        except:
+            pass
+
+        gs = plt.GridSpec(1, 3)
+
+        with sns.axes_style('white'):
+            fig = plt.figure(figsize=(15, 5), dpi=100)
+            ax_image = fig.add_subplot(gs[0, 0])
+        with sns.axes_style('ticks'):
+            ax = fig.add_subplot(gs[0, 1:])
+
+        ax_image.imshow(template, cmap=plt.cm.gray)
+        sp = np.hstack(spikes).T
+        # --- plot zoom in
+        n = sp.shape[1]
+        sp[np.isnan(sp)] = 0
+        loc = np.argmax(np.convolve(sp.sum(axis=0), np.ones(hs) / hs, mode='same'))
+        loc = max(loc - hs // 2, 0)
+        loc = n - hs if loc > n - hs else loc
+
+        offset = 0
+        for i, (ca_trace, trace_id) in enumerate(zip(traces, ids)):
+            ca_trace = np.array(ca_trace[loc:loc + hs])
+            ca_trace -= ca_trace.min()
+            ax.plot(t, ca_trace + offset, 'k', lw=1)
+            offset += ca_trace.max() * 1.1
+            tmp_mask = np.asarray(masks[..., i])
+            tmp_mask[tmp_mask == 0] = np.NaN
+            ax_image.imshow(tmp_mask, cmap=plt.cm.get_cmap('autumn'), zorder=10, alpha=.5)
+
+            fig.suptitle(
+                "animal {animal_id} session {session} scan {scan_idx} slice {slice}".format(trace_id=trace_id,
+                                                                                            **key.fetch1()))
+        ax.set_yticks([])
+        ax.set_ylabel('Fluorescence [a.u.]')
+        ax.set_xlabel('time [s]')
+        sns.despine(fig, left=True)
+        fig.savefig(outfile)
+
     def plot_galvo_ROIs(self, outdir='./'):
         import seaborn as sns
         import matplotlib.pyplot as plt
@@ -206,10 +267,11 @@ class ExtractRaw(dj.Imported):
         # theCM = plt.cm.get_cmap('viridis')
 
         for key in (self * self.GalvoSegmentation().proj() * Method.Galvo() & dict(segmentation='nmf')).fetch.as_dict:
-            mask_px, mask_w, spikes, traces = \
+            mask_px, mask_w, spikes, traces, ids = \
                 (self.GalvoROI() * \
                  self.SpikeRate() * ComputeTraces().Trace() & key & \
-                 dict(segmentation=2)).fetch.order_by('trace_id')['mask_pixels', 'mask_weights', 'spike_trace', 'trace']
+                 dict(segmentation=2)).fetch.order_by('trace_id')[
+                    'mask_pixels', 'mask_weights', 'spike_trace', 'trace', 'trace_id']
 
             template = np.stack([normalize(t)
                                  for t in (Prepare.GalvoAverageFrame() & key).fetch['frame']], axis=2).max(axis=2)
@@ -224,14 +286,14 @@ class ExtractRaw(dj.Imported):
             gs = plt.GridSpec(6, 2)
 
             N = len(spikes)
-            for cell, (sp_trace, ca_trace) in enumerate(zip(spikes, traces)):
+            for cell, (sp_trace, ca_trace, trace_id) in enumerate(zip(spikes, traces, ids)):
                 print(
-                    "{cell:03d}/{N}: animal_id {animal_id}\tsession {session}\tscan_idx {scan_idx:02d}\t{segmentation}\tslice {slice}".format(
-                        cell=cell + 1, N=N, **key))
+                    "{trace_id:03d}/{N}: animal_id {animal_id}\tsession {session}\tscan_idx {scan_idx:02d}\t{segmentation}\tslice {slice}".format(
+                        trace_id=trace_id, N=N, **key))
                 sp_trace = sp_trace.squeeze()
                 ca_trace = ca_trace.squeeze()
                 with sns.axes_style('white'):
-                    fig = plt.figure(figsize=(6, 8))
+                    fig = plt.figure(figsize=(9, 12), dpi=400)
                     ax_image = fig.add_subplot(gs[:-2, 0])
 
                 with sns.axes_style('ticks'):
@@ -260,11 +322,14 @@ class ExtractRaw(dj.Imported):
                 ax_tr.fill_between([loc, loc + hs], np.zeros(2), np.ones(2) * np.nanmax(ca_trace),
                                    color='steelblue', alpha=0.5)
                 ax_image.imshow(template, cmap=plt.cm.gray)
-                ax_image.contour(masks[..., cell], colors=theCM, zorder=10)
+                # ax_image.contour(masks[..., cell], colors=theCM, zorder=10)
+                tmp_mask = np.asarray(masks[..., cell])
+                tmp_mask[tmp_mask == 0] = np.NaN
+                ax_image.imshow(tmp_mask, cmap=plt.cm.get_cmap('autumn'), zorder=10, alpha=.3)
 
                 fig.suptitle(
-                    "animal_id {animal_id}:session {session}:scan_idx {scan_idx}:{segmentation}:slice{slice}:cell{cell}".format(
-                        cell=cell + 1, **key))
+                    "animal_id {animal_id}:session {session}:scan_idx {scan_idx}:{segmentation}:slice{slice}:trace_id{trace_id}".format(
+                        trace_id=trace_id, **key))
 
                 sns.despine(fig)
                 ax_sp.set_title('NMF spike trace', fontweight='bold')
@@ -279,8 +344,8 @@ class ExtractRaw(dj.Imported):
                 ax_sp.set_xlabel('time')
                 fig.tight_layout()
                 plt.savefig(
-                    outdir + "/scan_idx{scan_idx}/slice{slice}/cell{cell:03d}_animal_id_{animal_id}_session_{session}.png".format(
-                        cell=cell + 1, **key))
+                    outdir + "/scan_idx{scan_idx}/slice{slice}/trace_id{trace_id:03d}_animal_id_{animal_id}_session_{session}.png".format(
+                        trace_id=trace_id, **key))
                 plt.close(fig)
 
     def _make_tuples(self, key):
@@ -562,6 +627,7 @@ class EyeQuality(dj.Lookup):
         (0, 'good quality'),
         (1, 'poor quality'),
         (2, 'very poor quality (not well centered, pupil not fully visible)'),
+        (3, 'good (but pupil is not the brightest spot)'),
     ]
 
 
@@ -598,7 +664,8 @@ class Eye(dj.Imported):
         import cv2
         path_prefix = config['path.mounts']
 
-        rel = experiment.Session() * experiment.Scan.EyeVideo() * experiment.Scan.BehaviorFile().proj(hdf_file='filename')
+        rel = experiment.Session() * experiment.Scan.EyeVideo() * experiment.Scan.BehaviorFile().proj(
+            hdf_file='filename')
 
         info = (rel & key).fetch1()
         avi_path = "{path_prefix}/{behavior_path}/{filename}".format(path_prefix=path_prefix, **info)
@@ -649,6 +716,9 @@ class Eye(dj.Imported):
         key['eye_roi'] = rg.roi
         self.insert1(key)
         print('[Done]')
+        if input('Do you want to stop? y/N: ') == 'y':
+            self.connection.commit_transaction()
+            raise PipelineException('User interrupted population.')
 
 
 @schema
@@ -669,7 +739,6 @@ class TrackingParameters(dj.Lookup):
     contrast_threshold           : float        # contrast below that threshold are considered dark
     speed_threshold              : float        # eye center can at most move that fraction of the roi between frames
     dr_threshold                 : float        # maximally allow relative change in radius
-    reestimation_window          : float        # proportion of a window around the minor axis to restimate the ellipse
     """
 
     contents = [
@@ -679,13 +748,12 @@ class TrackingParameters(dj.Lookup):
          'perc_weight': 0.2,
          'relative_area_threshold': 0.01,
          'ratio_threshold': 1.7,
-         'error_threshold': 0.175,
+         'error_threshold': 0.03,
          'min_contour_len': 5,
          'margin': 0.15,
          'contrast_threshold': 10,
          'speed_threshold': 0.2,
          'dr_threshold': 0.15,
-         'reestimation_window': 0.5,
          },
         {'eye_quality': 1,
          'perc_high': 98,
@@ -693,13 +761,12 @@ class TrackingParameters(dj.Lookup):
          'perc_weight': 0.4,
          'relative_area_threshold': 0.01,
          'ratio_threshold': 1.9,
-         'error_threshold': 0.2,
+         'error_threshold': 0.05,
          'min_contour_len': 5,
          'margin': 0.15,
          'contrast_threshold': 10,
          'speed_threshold': 0.2,
          'dr_threshold': 0.15,
-         'reestimation_window': 0.5,
          },
         {'eye_quality': 2,
          'perc_high': 98,
@@ -707,13 +774,25 @@ class TrackingParameters(dj.Lookup):
          'perc_weight': 0.2,
          'relative_area_threshold': 0.01,
          'ratio_threshold': 1.9,
-         'error_threshold': 0.20,
+         'error_threshold': 0.1,
          'min_contour_len': 5,
          'margin': 0.02,
          'contrast_threshold': 10,
          'speed_threshold': 0.2,
          'dr_threshold': 0.15,
-         'reestimation_window': 0.5,
+         },
+        {'eye_quality': 3,
+         'perc_high': 95,
+         'perc_low': 2,
+         'perc_weight': 0.3,
+         'relative_area_threshold': 0.01,
+         'ratio_threshold': 1.9,
+         'error_threshold': 0.1,
+         'min_contour_len': 5,
+         'margin': 0.02,
+         'contrast_threshold': 10,
+         'speed_threshold': 0.2,
+         'dr_threshold': 0.15,
          },
     ]
 

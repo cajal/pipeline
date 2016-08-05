@@ -10,26 +10,24 @@ long_description = "Datajoint schemata and analysis code for the mouse pipeline.
 setup(
     name='pipeline',
     version='0.1.0.dev1',
-    description="A collection of datajoint schemata.",
+    description="data processing chain for MICrONS project team ninai",
     long_description=long_description,
-    author='Fabian Sinz',
+    author='Fabian Sinz, Dimitri Yatsenko',
     author_email='sinz@bcm.edu',
-    license="Creative Commons Attribution-NonCommercial-ShareAlike 3.0 Unported License",
+    license="GNU LGPL",
     url='https://github.com/cajal/pipeline',
-    keywords='database organization',
+    keywords='neuroscientific data processing',
     packages=find_packages(exclude=['contrib', 'docs', 'tests*']),
-    install_requires=['numpy','slacker','sh'],
+    install_requires=['numpy','sh','matplotlib','pandas','seaborn','scipy'],
     classifiers=[
         'Development Status :: 1 - Beta',
         'Intended Audience :: Science/Research',
         'Programming Language :: Python :: 3 :: Only',
-        'License :: OSI Approved :: Creative Commons Attribution-NonCommercial-ShareAlike 3.0 Unported License',
+        'License :: OSI Approved :: GNU LGPL',
         'Topic :: Database :: Front-Ends',
     ],
     scripts=[
         'scripts/worker',
         'scripts/worker-populate.py',
-        'scripts/worker-report.py',
-        'scripts/worker-minion.py',
     ]
 )
