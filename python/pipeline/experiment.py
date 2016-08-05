@@ -337,7 +337,7 @@ class Scan(dj.Manual):
         """
 
 
-    class WheelFile(dj.Part):
+    class BehaviorFile(dj.Part):
         definition = """
         # name of the running wheel file
 
@@ -404,7 +404,7 @@ def migrate_galvo_pipeline():
     Scan.EyeVideo().insert(eye_videos, skip_duplicates=True)
 
     wheel_files = (rf.Session() * rf.Scan()).proj(filename="concat(file_base,file_num,'0.h5')")
-    Scan.WheelFile().insert(wheel_files, skip_duplicates=True)
+    Scan.BehaviorFile().insert(wheel_files, skip_duplicates=True)
 
 
 schema.spawn_missing_classes()

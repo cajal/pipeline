@@ -598,7 +598,7 @@ class Eye(dj.Imported):
         import cv2
         path_prefix = config['path.mounts']
 
-        rel = experiment.Session() * experiment.Scan.EyeVideo() * experiment.Scan.WheelFile().proj(hdf_file='filename')
+        rel = experiment.Session() * experiment.Scan.EyeVideo() * experiment.Scan.BehaviorFile().proj(hdf_file='filename')
 
         info = (rel & key).fetch1()
         avi_path = "{path_prefix}/{behavior_path}/{filename}".format(path_prefix=path_prefix, **info)
@@ -669,47 +669,51 @@ class TrackingParameters(dj.Lookup):
     contrast_threshold           : float        # contrast below that threshold are considered dark
     speed_threshold              : float        # eye center can at most move that fraction of the roi between frames
     dr_threshold                 : float        # maximally allow relative change in radius
+    reestimation_window          : float        # proportion of a window around the minor axis to restimate the ellipse
     """
 
     contents = [
         {'eye_quality': 0,
-         'perc_high': 95,
-         'perc_low': 5,
-         'perc_weight': 0.4,
+         'perc_high': 98,
+         'perc_low': 2,
+         'perc_weight': 0.2,
          'relative_area_threshold': 0.01,
          'ratio_threshold': 1.7,
          'error_threshold': 0.175,
          'min_contour_len': 5,
-         'margin': 0.2,
+         'margin': 0.15,
          'contrast_threshold': 10,
-         'speed_threshold': 0.35,
+         'speed_threshold': 0.2,
          'dr_threshold': 0.15,
+         'reestimation_window': 0.5,
          },
         {'eye_quality': 1,
-         'perc_high': 95,
-         'perc_low': 5,
+         'perc_high': 98,
+         'perc_low': 2,
          'perc_weight': 0.4,
          'relative_area_threshold': 0.01,
          'ratio_threshold': 1.9,
          'error_threshold': 0.2,
          'min_contour_len': 5,
-         'margin': 0.2,
+         'margin': 0.15,
          'contrast_threshold': 10,
-         'speed_threshold': 0.35,
+         'speed_threshold': 0.2,
          'dr_threshold': 0.15,
+         'reestimation_window': 0.5,
          },
         {'eye_quality': 2,
-         'perc_high': 95,
-         'perc_low': 5,
-         'perc_weight': 0.4,
+         'perc_high': 98,
+         'perc_low': 2,
+         'perc_weight': 0.2,
          'relative_area_threshold': 0.01,
          'ratio_threshold': 1.9,
-         'error_threshold': 0.25,
+         'error_threshold': 0.20,
          'min_contour_len': 5,
-         'margin': 0.05,
+         'margin': 0.02,
          'contrast_threshold': 10,
-         'speed_threshold': 0.35,
+         'speed_threshold': 0.2,
          'dr_threshold': 0.15,
+         'reestimation_window': 0.5,
          },
     ]
 
@@ -756,6 +760,102 @@ class EyeTracking(dj.Computed):
         for trace in traces:
             trace.update(key)
             fr.insert1(trace)
+
+    def plot_traces(self, outdir='./'):
+        """
+        Plot existing traces to output directory.
+
+        :param outdir: destination of plots
+        """
+        import seaborn as sns
+        import matplotlib.pyplot as plt
+
+        for key in self.fetch.keys():
+            print('Processing', key)
+            with sns.axes_style('ticks'):
+                fig, ax = plt.subplots(3, 1, figsize=(10, 6), sharex=True)
+
+            r, center, contrast = (EyeTracking.Frame() & key).fetch.order_by('frame_id')[
+                'major_r', 'center', 'frame_intensity']
+            ax[0].plot(r)
+            ax[0].set_title('Major Radius')
+
+            c = np.vstack([cc if cc is not None else np.NaN * np.ones(2) for cc in center])
+
+            ax[1].plot(c[:, 0], label='x')
+            ax[1].plot(c[:, 1], label='y')
+            ax[1].set_title('Pupil Center Coordinates')
+            ax[1].legend()
+
+            ax[2].plot(contrast)
+            ax[2].set_title('Contrast (frame std)')
+            ax[2].set_xlabel('Frames')
+
+            fig.suptitle(
+                'animal id {animal_id} session {session} scan_idx {scan_idx} eye quality {eye_quality}'.format(**key))
+            fig.tight_layout()
+            sns.despine(fig)
+            fig.savefig(outdir + '/AI{animal_id}SE{session}SI{scan_idx}EQ{eye_quality}.png'.format(**key))
+            plt.close(fig)
+
+
+def show_video(self, from_frame, to_frame):
+    """
+    Shows the video from from_frame to to_frame (1-based) and the corrsponding tracking results.
+    Needs opencv installation.
+
+    :param from_frame: start frame (1 based)
+    :param to_frame:  end frame (1 based)
+    """
+    if not len(self) == 1:
+        raise PipelineException("Restrict EyeTracking to one video only.")
+    import cv2
+    video_info = (experiment.Session() * experiment.Scan.EyeVideo() & self).fetch1()
+    videofile = "{path_prefix}/{behavior_path}/{filename}".format(path_prefix=config['path.mounts'], **video_info)
+    eye_roi = (Eye() & self).fetch1['eye_roi'] - 1
+
+    contours, ellipses = ((EyeTracking.Frame() & self) \
+                          & 'frame_id between {0} and {1}'.format(from_frame, to_frame)
+                          ).fetch.order_by('frame_id')['contour', 'rotated_rect']
+    cap = cv2.VideoCapture(videofile)
+    no_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    font = cv2.FONT_HERSHEY_SIMPLEX
+
+    if not from_frame < no_frames:
+        raise PipelineException('Starting frame exceeds number of frames')
+
+    cap.set(cv2.CAP_PROP_POS_FRAMES, from_frame - 1)
+    fr_count = from_frame - 1
+
+    elem_count = 0
+    while cap.isOpened():
+        fr_count += 1
+        ret, frame = cap.read()
+        if fr_count < from_frame:
+            continue
+
+        if fr_count >= to_frame or fr_count >= no_frames:
+            print("Reached end of videofile ", videofile)
+            break
+        contour = contours[elem_count]
+        ellipse = ellipses[elem_count]
+        elem_count += 1
+
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+        cv2.putText(gray, str(fr_count), (10, 30), font, 1, (127, 127, 127), 2)
+
+        if contour is not None:
+            ellipse = (tuple(eye_roi[::-1, 0] + ellipse[:2]), tuple(ellipse[2:4]), ellipse[4])
+            cv2.drawContours(gray, [contour.astype(np.int32)], 0, (255, 0, 0), 1, offset=tuple(eye_roi[::-1, 0]))
+            cv2.ellipse(gray, ellipse, (0, 0, 255), 2)
+        cv2.imshow('frame', gray)
+
+        if (cv2.waitKey(1) & 0xFF == ord('q')):
+            break
+
+    cap.release()
+    cv2.destroyAllWindows()
 
 
 schema.spawn_missing_classes()
