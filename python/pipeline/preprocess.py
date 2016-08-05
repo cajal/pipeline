@@ -598,7 +598,7 @@ class Eye(dj.Imported):
         import cv2
         path_prefix = config['path.mounts']
 
-        rel = experiment.Session() * experiment.Scan.EyeVideo() * experiment.Scan.WheelFile().proj(hdf_file='filename')
+        rel = experiment.Session() * experiment.Scan.EyeVideo() * experiment.Scan.BehaviorFile().proj(hdf_file='filename')
 
         info = (rel & key).fetch1()
         avi_path = "{path_prefix}/{behavior_path}/{filename}".format(path_prefix=path_prefix, **info)
@@ -669,47 +669,51 @@ class TrackingParameters(dj.Lookup):
     contrast_threshold           : float        # contrast below that threshold are considered dark
     speed_threshold              : float        # eye center can at most move that fraction of the roi between frames
     dr_threshold                 : float        # maximally allow relative change in radius
+    reestimation_window          : float        # proportion of a window around the minor axis to restimate the ellipse
     """
 
     contents = [
         {'eye_quality': 0,
-         'perc_high': 95,
-         'perc_low': 5,
-         'perc_weight': 0.4,
+         'perc_high': 98,
+         'perc_low': 2,
+         'perc_weight': 0.2,
          'relative_area_threshold': 0.01,
          'ratio_threshold': 1.7,
          'error_threshold': 0.175,
          'min_contour_len': 5,
-         'margin': 0.2,
+         'margin': 0.15,
          'contrast_threshold': 10,
-         'speed_threshold': 0.35,
+         'speed_threshold': 0.2,
          'dr_threshold': 0.15,
+         'reestimation_window': 0.5,
          },
         {'eye_quality': 1,
-         'perc_high': 95,
-         'perc_low': 5,
+         'perc_high': 98,
+         'perc_low': 2,
          'perc_weight': 0.4,
          'relative_area_threshold': 0.01,
          'ratio_threshold': 1.9,
          'error_threshold': 0.2,
          'min_contour_len': 5,
-         'margin': 0.2,
+         'margin': 0.15,
          'contrast_threshold': 10,
-         'speed_threshold': 0.35,
+         'speed_threshold': 0.2,
          'dr_threshold': 0.15,
+         'reestimation_window': 0.5,
          },
         {'eye_quality': 2,
-         'perc_high': 95,
-         'perc_low': 5,
-         'perc_weight': 0.4,
+         'perc_high': 98,
+         'perc_low': 2,
+         'perc_weight': 0.2,
          'relative_area_threshold': 0.01,
          'ratio_threshold': 1.9,
-         'error_threshold': 0.25,
+         'error_threshold': 0.20,
          'min_contour_len': 5,
-         'margin': 0.05,
+         'margin': 0.02,
          'contrast_threshold': 10,
-         'speed_threshold': 0.35,
+         'speed_threshold': 0.2,
          'dr_threshold': 0.15,
+         'reestimation_window': 0.5,
          },
     ]
 
@@ -758,7 +762,11 @@ class EyeTracking(dj.Computed):
             fr.insert1(trace)
 
     def plot_traces(self, outdir='./'):
+        """
+        Plot existing traces to output directory.
 
+        :param outdir: destination of plots
+        """
         import seaborn as sns
         import matplotlib.pyplot as plt
 
