@@ -17,12 +17,6 @@ class PipelineException(Exception):
         Pipeline Exception raised while processing {0}
         """.format(repr(self.keys))
 
-class DataJointError(Exception):
-    """
-    Base class for errors specific to DataJoint internal operation.
-    """
-    pass
-
 # ----------- loads local configuration from file ----------------
 from .settings import Config, LOCALCONFIG, GLOBALCONFIG
 config = Config()
