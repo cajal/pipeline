@@ -336,7 +336,6 @@ class Scan(dj.Manual):
         filename        : varchar(50)                   # filename of the video
         """
 
-
     class BehaviorFile(dj.Part):
         definition = """
         # name of the running wheel file

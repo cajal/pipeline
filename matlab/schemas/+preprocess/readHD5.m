@@ -8,7 +8,7 @@ function [data, settings, ver] = readHD5(F)
 if isstruct(F)
     if count(experiment.ScanWheelFile & F)
         F = fullfile(getLocalPath(fetch1(experiment.Session & F,'behavior_path')), ...
-            fetch1(experiment.ScanWheelFile & F, 'filename'));
+            fetch1(experiment.ScanBehaviorFile & F, 'filename'));
     else
         filename = fetch1(experiment.Scan & F,'filename');
         filename = strsplit(filename, '_');
