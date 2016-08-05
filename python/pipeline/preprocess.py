@@ -24,7 +24,6 @@ def normalize(img):
     return (img - img.min()) / (img.max() - img.min())
 
 
-
 def erd():
     """a shortcut for convenience"""
     dj.ERD(schema).draw(prefix=False)
@@ -204,44 +203,40 @@ class ExtractRaw(dj.Imported):
         import matplotlib.pyplot as plt
 
         key = (self * self.GalvoSegmentation().proj() * Method.Galvo() & dict(segmentation='nmf', slice=slice))
-        rel = self.GalvoROI() * \
-              self.SpikeRate() * ComputeTraces().Trace() & key & \
-              dict(segmentation=2) & 'trace_id in ({})'.format(','.join([str(s) for s in traces]))
+        trace_selection = 'trace_id in ({})'.format(','.join([str(s) for s in traces]))
+        rel = self.GalvoROI() * self.SpikeRate() * ComputeTraces.Trace() & key & dict(segmentation=2) & trace_selection
 
-        mask_px, mask_w, spikes, traces, ids = rel.fetch.order_by('trace_id')[
-            'mask_pixels', 'mask_weights', 'spike_trace', 'trace', 'trace_id']
-        template = np.stack([normalize(t)
-                             for t in (Prepare.GalvoAverageFrame() & key).fetch['frame']], axis=2)[...,mask_channel-1]
+        mask_px, mask_w, spikes, traces, ids \
+            = rel.fetch.order_by('trace_id')['mask_pixels', 'mask_weights', 'spike_trace', 'trace', 'trace_id']
+        template = np.stack((normalize(t) for t in (Prepare.GalvoAverageFrame() & key).fetch['frame'])
+                            , axis=2)[..., mask_channel - 1]
 
-        d1, d2, fps = tuple(map(int, (Prepare.Galvo() & key).fetch1['px_height', 'px_width', 'fps']))
-        hs = int(np.round(fps * 120))
-        t = np.arange(hs) / fps
+        d1, d2, fps = [int(elem) for elem in (Prepare.Galvo() & key).fetch1['px_height', 'px_width', 'fps']]
+        selected_window = int(np.round(fps * 120))
+        t = np.arange(selected_window) / fps
+
         masks = self.GalvoROI.reshape_masks(mask_px, mask_w, d1, d2)
-        try:
-            sh.mkdir('-p', os.path.expanduser(outdir) + '/scan_idx{scan_idx}/slice{slice}'.format(**key))
-        except:
-            pass
 
-        gs = plt.GridSpec(1, 3)
+        plot_grid = plt.GridSpec(1, 3)
 
         with sns.axes_style('white'):
             fig = plt.figure(figsize=(15, 5), dpi=100)
-            ax_image = fig.add_subplot(gs[0, 0])
+            ax_image = fig.add_subplot(plot_grid[0, 0])
         with sns.axes_style('ticks'):
-            ax = fig.add_subplot(gs[0, 1:])
+            ax = fig.add_subplot(plot_grid[0, 1:])
 
         ax_image.imshow(template, cmap=plt.cm.gray)
-        sp = np.hstack(spikes).T
+        spike_traces = np.hstack(spikes).T
         # --- plot zoom in
-        n = sp.shape[1]
-        sp[np.isnan(sp)] = 0
-        loc = np.argmax(np.convolve(sp.sum(axis=0), np.ones(hs) / hs, mode='same'))
-        loc = max(loc - hs // 2, 0)
-        loc = n - hs if loc > n - hs else loc
+        T = spike_traces.shape[1]
+        spike_traces[np.isnan(spike_traces)] = 0
+        loc = np.argmax(np.convolve(spike_traces.sum(axis=0), np.ones(selected_window) / selected_window, mode='same'))
+        loc = max(loc - selected_window // 2, 0)
+        loc = T - selected_window if loc > T - selected_window else loc
 
         offset = 0
         for i, (ca_trace, trace_id) in enumerate(zip(traces, ids)):
-            ca_trace = np.array(ca_trace[loc:loc + hs])
+            ca_trace = np.array(ca_trace[loc:loc + selected_window])
             ca_trace -= ca_trace.min()
             ax.plot(t, ca_trace + offset, 'k', lw=1)
             offset += ca_trace.max() * 1.1
@@ -269,7 +264,7 @@ class ExtractRaw(dj.Imported):
         for key in (self * self.GalvoSegmentation().proj() * Method.Galvo() & dict(segmentation='nmf')).fetch.as_dict:
             mask_px, mask_w, spikes, traces, ids = \
                 (self.GalvoROI() * \
-                 self.SpikeRate() * ComputeTraces().Trace() & key & \
+                 self.SpikeRate() * ComputeTraces.Trace() & key & \
                  dict(segmentation=2)).fetch.order_by('trace_id')[
                     'mask_pixels', 'mask_weights', 'spike_trace', 'trace', 'trace_id']
 
