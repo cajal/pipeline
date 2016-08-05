@@ -6,7 +6,7 @@ function [data, settings, ver] = readHD5(F)
 % ver: file version
 
 if isstruct(F)
-    if count(experiment.ScanWheelFile & F)
+    if count(experiment.ScanBehaviorFile & F)
         F = fullfile(getLocalPath(fetch1(experiment.Session & F,'behavior_path')), ...
             fetch1(experiment.ScanBehaviorFile & F, 'filename'));
     else
