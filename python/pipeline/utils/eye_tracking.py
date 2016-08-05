@@ -11,7 +11,6 @@ import pandas as pd
 matplotlib.use('agg')
 import matplotlib.pyplot as plt
 import numpy as np
-import cv2
 
 try:
     import cv2
