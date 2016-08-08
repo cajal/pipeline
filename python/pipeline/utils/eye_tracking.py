@@ -255,10 +255,20 @@ class PupilTracker:
         err = 0
         for coord in contour.squeeze().astype(np.float):
             posx = (coord[0] - center[0]) * np.cos(-angle) - (coord[1] - center[1]) * np.sin(-angle)
-            posy = (coord[0] - center[0]) * np.sin(-angle) - (coord[1] - center[1]) * np.cos(-angle)
+            posy = (coord[0] - center[0]) * np.sin(-angle) + (coord[1] - center[1]) * np.cos(-angle)
             err += ((posx / size[0]) ** 2 + (posy / size[1]) ** 2 - 0.25) ** 2
 
         return np.sqrt(err / len(contour))
+
+    @staticmethod
+    def restrict_to_long_axis(contour, ellipse, corridor):
+        center, size, angle = ellipse
+        angle *= np.pi / 180
+        R = np.asarray([[np.cos(-angle), - np.sin(-angle)],[np.sin(-angle), np.cos(-angle)]])
+        contour = np.dot(contour.squeeze() - center, R.T)
+        contour = contour[np.abs(contour[:,0]) < corridor*ellipse[1][1]/2]
+        return (np.dot(contour, R)+center).astype(np.int32)
+
 
     def get_pupil_from_contours(self, contours, small_gray, old_center, old_r, display=False, show_matching=5):
         ratio_thres = self._params['ratio_threshold']
@@ -366,7 +376,7 @@ class PupilTracker:
                 continue
 
             small_gray = gray[slice(*eye_roi[0]), slice(*eye_roi[1])]
-            blur = cv2.GaussianBlur(small_gray, (15, 15), 0)
+            blur = cv2.GaussianBlur(small_gray, (9, 9), 0)
             th = (1 - cw_low) * np.percentile(blur, p_high) + cw_low * np.percentile(blur, p_low)
             _, thres = cv2.threshold(blur, th, 255, cv2.THRESH_BINARY)
 
