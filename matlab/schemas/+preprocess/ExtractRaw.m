@@ -50,6 +50,10 @@ classdef ExtractRaw < dj.Relvar & dj.AutoPopulate
                             
                             
                             Y = loader(islice, self.mask_range);
+%                             Y(1:10,:,:) = 0;
+%                             Y(end-10:end,:,:) = 0;
+%                             Y(:,1:10,:) = 0;
+%                             Y(:,end-10:end,:) = 0;
                             notnan = preprocess.getblocks(squeeze(any(any(~isnan(Y), 1),2)), round(length(self.mask_range)/2), self.nan_tol);
                             
                             if length(notnan) ~= 1
