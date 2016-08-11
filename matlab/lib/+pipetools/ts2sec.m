@@ -1,4 +1,4 @@
-function [s, start, badInd] = ts2sec(ts,packetLen)
+function s = ts2sec(ts,packetLen)
 
 % convert 10MHz timestamps from Saumil's patching program (ts) to seconds (s)
 % s: timestamps converted to seconds
@@ -12,19 +12,8 @@ end
 
 ts=double(ts);
 
-%% find bad indices in camera timestamps and replace with linear est
-if sum(ts==2^31-1) > 10
-    error('Bad camera ts...');
-    badInd = find(ts==2^31-1)';
-    plateauStart = [badInd(1) badInd(find(diff(badInd)>1)+1)];
-    plateauEnd = [badInd(diff(badInd)>1) badInd(end)];
-    dt = diff(ts(setdiff(1:length(ts),badInd)));
-    dtm = mean(dt(dt>quantile(dt,.01) & dt<quantile(dt,.99)));
-    for i=1:length(plateauStart)
-        len = plateauEnd(i) - plateauStart(i);
-        ts(plateauStart(i):plateauEnd(i)) = ts(plateauStart(i)) + [0:len]*dtm;
-    end
-end
+%% check for random issue
+assert(sum(ts==2^31-1) < 10,'Check for old bad timestamp issue failed')
 
 %%  remove wraparound
 wrapInd = find(diff(ts)<0);
@@ -46,11 +35,7 @@ if any(diff(s)<=0)
     s=interp1(nonZero,s(nonZero),1:length(s),'linear','extrap');
 end
 
-%% remove offset
-start = s(1);
-s = s - start;
-
-
+%% reshape if necessary
 if size(s) ~= size(ts)
     s=s';
 end
