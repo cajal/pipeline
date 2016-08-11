@@ -347,6 +347,22 @@ class Scan(dj.Manual):
 
 
 @schema
+class Stack(dj.Manual):
+    definition = """
+    # scanimage scan info
+    -> Session
+    stack_idx            : smallint                     # number of TIFF stack file
+    ---
+    bottom_z             : int                          # z location at bottom of the stack
+    surf_z               : int                          # z location of surface
+    laser_wavelength     : int                          # (nm)
+    laser_power          : int                          # (mW) to brain
+    stack_notes          : varchar(4095)                # free-notes
+    scan_ts=CURRENT_TIMESTAMP : timestamp               # don't edit
+    """
+
+
+@schema
 class ScanIgnored(dj.Manual):
     definition = """  # scans to ignore
     -> Scan
@@ -398,6 +414,9 @@ def migrate_galvo_pipeline():
     ) & Session()
 
     Scan().insert(scans.fetch(as_dict=True), skip_duplicates=True)
+
+    # migrate stacks
+    Stack().insert(rf.Stack().proj(*Stack().heading.names))
 
     eye_videos = (rf.Session() * rf.Scan()).proj(filename="concat(file_base,file_num,'behavior.avi')")
     Scan.EyeVideo().insert(eye_videos, skip_duplicates=True)
