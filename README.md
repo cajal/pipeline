@@ -1,3 +1,6 @@
+# License
+This software is published under the [LGPLv3 license](LICENSE.txt).
+
 # Dependencies
 **Matlab and Python**
 * [DataJoint](http://datajoint.github.com/)
@@ -15,5 +18,5 @@
 * [pupil-tracking](https://github.com/cajal/pupil-tracking)
 * check `requirements.txt` for other libraries
 
-# License
-The code in this repository is licensed under the [Creative Commons Attribution-NonCommercial-ShareAlike 3.0 Unported License](http://creativecommons.org/licenses/by-nc-sa/3.0/). 
+# Tutorial 
+Tutorial IPython Notebooks are in [TUTORIAL.md](TUTORIAL.md).
