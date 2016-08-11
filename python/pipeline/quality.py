@@ -2,6 +2,8 @@ import datajoint as dj
 from pipeline.preprocess import notnan
 from . import preprocess, vis
 import numpy as np
+import pandas as pd
+
 
 
 schema = dj.schema('pipeline_quality', locals())
@@ -9,7 +11,7 @@ schema = dj.schema('pipeline_quality', locals())
 @schema
 class Spikes(dj.Computed):
     definition = """
-    ->preprocess.Spikes
+    -> preprocess.Spikes
     ---
     leading_nans      : bool        # whether or not any of the traces has leading nans
     trailing_nans     : bool        # whether or not any of the traces has trailing nans
@@ -49,4 +51,49 @@ class Spikes(dj.Computed):
         key['stimulus_end'] = idx_to
 
         self.insert1(key)
+
+@schema
+class SpikeMethods(dj.Computed):
+    definition = """
+    -> preprocess.ComputeTraces
+    spike_method_1  -> preprocess.Spikes
+    spike_method_2  -> preprocess.Spikes
+    ---
+
+    """
+
+    class Correlation(dj.Part):
+        definition = """
+        -> SpikeMethods
+        -> preprocess.ComputeTraces.Trace
+        ---
+        corr=null  : float # correlation between spike method 1 and 2 on that trace
+        """
+    @property
+    def key_source(self):
+        return preprocess.Spikes().proj(spike_method_1='spike_method') \
+                        * preprocess.Spikes().proj(spike_method_2='spike_method') \
+                        & 'spike_method_1<spike_method_2'
+
+    def _make_tuples(self, key):
+        tr1 = pd.DataFrame((preprocess.Spikes.RateTrace() & key & dict(spike_method=key['spike_method_1'])).fetch())
+        tr2 = pd.DataFrame((preprocess.Spikes.RateTrace() & key & dict(spike_method=key['spike_method_2'])).fetch())
+        tr1['rate_trace'] = [np.asarray(e).squeeze() for e in tr1.rate_trace]
+        tr2['rate_trace'] = [np.asarray(e).squeeze() for e in tr2.rate_trace]
+        trs = tr1.merge(tr2, on=['animal_id',  'session',  'scan_idx',  'extract_method',  'trace_id'], how='inner',suffixes=('_1','_2'))
+
+        self.insert1(key)
+        print('Populating', key)
+        corr = np.zeros(len(trs))*np.NaN
+        for i, row in trs.iterrows():
+            trace1, trace2 = tuple(map(np.asarray, (row.rate_trace_1, row.rate_trace_2)))
+            idx = ~np.isnan(trace1 + trace2)
+            k = row.to_dict()
+            k['corr'] = np.corrcoef(trace1[idx], trace2[idx])[0,1]
+            self.Correlation().insert1(k, ignore_extra_fields=True)
+
+
+
+
+
 

@@ -336,8 +336,7 @@ class Scan(dj.Manual):
         filename        : varchar(50)                   # filename of the video
         """
 
-
-    class WheelFile(dj.Part):
+    class BehaviorFile(dj.Part):
         definition = """
         # name of the running wheel file
 
@@ -345,6 +344,22 @@ class Scan(dj.Manual):
         ---
         filename        : varchar(50)                   # filename of the video
         """
+
+
+@schema
+class Stack(dj.Manual):
+    definition = """
+    # scanimage scan info
+    -> Session
+    stack_idx            : smallint                     # number of TIFF stack file
+    ---
+    bottom_z             : int                          # z location at bottom of the stack
+    surf_z               : int                          # z location of surface
+    laser_wavelength     : int                          # (nm)
+    laser_power          : int                          # (mW) to brain
+    stack_notes          : varchar(4095)                # free-notes
+    scan_ts=CURRENT_TIMESTAMP : timestamp               # don't edit
+    """
 
 
 @schema
@@ -400,11 +415,14 @@ def migrate_galvo_pipeline():
 
     Scan().insert(scans.fetch(as_dict=True), skip_duplicates=True)
 
+    # migrate stacks
+    Stack().insert(rf.Stack().proj(*Stack().heading.names))
+
     eye_videos = (rf.Session() * rf.Scan()).proj(filename="concat(file_base,file_num,'behavior.avi')")
     Scan.EyeVideo().insert(eye_videos, skip_duplicates=True)
 
     wheel_files = (rf.Session() * rf.Scan()).proj(filename="concat(file_base,file_num,'0.h5')")
-    Scan.WheelFile().insert(wheel_files, skip_duplicates=True)
+    Scan.BehaviorFile().insert(wheel_files, skip_duplicates=True)
 
 
 schema.spawn_missing_classes()

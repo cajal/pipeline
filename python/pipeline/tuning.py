@@ -71,7 +71,7 @@ class OriMap(dj.Imported):
     -> OriDesignMatrix
     -> preprocess.Prepare.GalvoMotion
     ---
-    regr_coef_maps: longblob  # regression coefficients, width x height x nConds
+    regr_coef_maps: longblob  # regression coefficients, widtlh x height x nConds
     r2_map: longblob  # pixelwise r-squared after gaussinization
     dof_map: longblob  # degrees of in original signal, width x height
     """
@@ -121,15 +121,15 @@ class MonetRF(dj.Computed):
             from matplotlib import pyplot as plt
             cmap = plt.get_cmap('seismic')
             for key in self.fetch.keys():
-                map = (MonetRF.Map() & key).fetch1['map']
-                scale = np.abs(map).max()*2
-                for i in range(map.shape[2]):
-                    filename = os.path.join(
-                        os.path.expanduser(path),
-                        '{animal_id:05d}_{session}_scan{scan_idx:02d}_method{extract_method}'
-                        '-{spike_method}_{trace_id:03d}-{frame}.png'.format(frame=i, **key))
-                    print(filename)
-                    imsave(filename, cmap(map[:, :, i]/scale+0.5))
+                data = (MonetRF.Map() & key).fetch1['map']
+                scale = 1.5
+                frame = 1
+                filename = os.path.join(
+                    os.path.expanduser(path),
+                    '{animal_id:05d}_{session}_scan{scan_idx:02d}_method{extract_method}'
+                    '-{spike_method}_{trace_id:03d}-{frame}.png'.format(frame=frame, **key))
+                print(filename)
+                imsave(filename, cmap(data[:, :, frame]/scale+0.5))
 
     def _make_tuples(self, key):
 
@@ -156,14 +156,21 @@ class MonetRF(dj.Computed):
         n_slices = (preprocess.Prepare.Galvo() & key).fetch1['nslices']
         trace_time = trace_time[:n_slices*traces[0].size]  # truncate if interrupted scan
         assert n_slices*traces[0].size == trace_time.size, 'trace times must be a multiple of n_slices'
-        dt = (trace_time[1:]-trace_time[:-1]).mean()*n_slices
+        slice_interval = (trace_time[1:]-trace_time[:-1]).mean()
+        frame_interval = slice_interval*n_slices
         maps = [0]*len(traces)
+
+        # interpolate traces on times of the first slice, smoothed for bin_size
+        traces = interp1d(trace_time[::n_slices], convolve(
+                            np.stack(trace.flatten() for trace in traces),
+                            hamming(bin_size/frame_interval, 1), 'same'))
+
         n_trials = 0
         stim_duration = 0.0
         for trial_key in (preprocess.Sync() * vis.Trial() * vis.Condition() &
                           'trial_idx between first_trial and last_trial' &
                           vis.Monet() & key).fetch.order_by('trial_idx').keys():
-            print('Trial', trial_key['trial_idx'], flush=True, end=' - ')
+            print('Trial %d:' % trial_key['trial_idx'], flush=True, end='')
             n_trials += 1
 
             # get the movie and scale to [-1, +1]
@@ -179,26 +186,22 @@ class MonetRF(dj.Computed):
                 movie_times, convolve(
                     movie, hamming(bin_size*fps, 2), 'same'))(np.r_[movie_times[-1]:start_time:-bin_size])
 
-            # compute the maps for each slice separately to account for time differences between slices
-            for islice in set(slices):
-                print('Slice', islice, end=' ', flush=True)
-                ix = np.where(slices == islice)[0]
-                time = trace_time[islice-1::n_slices]
-
-                # rebin traces to bin_size
-                snippets = interp1d(time, convolve(
-                    np.stack(traces[ix].flatten()),
-                    hamming(bin_size/dt, 1), 'same'), fill_value=0)(
-                    np.r_[start_time+bin_size*(nbins-1):movie_times[-1]:bin_size])
-
-                # correlate snippents to movie
-                for i, snippet in zip(ix, snippets):
-                    maps[i] += convolve(
-                        movie,
-                        snippet.reshape((1, 1, snippet.size))/np.linalg.norm(snippet),
-                        mode='valid')
+            # compute the maps with appropriate slice times
+            prev_slice_index = -1
+            for trace_index, slice_index in enumerate(slices):
+                if prev_slice_index != slice_index:
+                    print()
+                    print('[Slice %d]' % slice_index, end='')
+                    snippets = traces(np.r_[start_time+bin_size*(nbins-1):movie_times[-1]:bin_size] -
+                                      slice_index*slice_interval)
+                    prev_slice_index = slice_index
+                print(end='.', flush=True)
+                snippet = snippets[trace_index]
+                maps[trace_index] += convolve(
+                    movie,
+                    snippet.reshape((1, 1, snippet.size))/np.linalg.norm(snippet),
+                    mode='valid')
             print()
-
         # submit data
         self.insert1(dict(key,
                           degrees_x=degrees_x,
@@ -207,9 +210,52 @@ class MonetRF(dj.Computed):
                           bin_size=bin_size * 1000,
                           stim_duration=stim_duration))
         MonetRF.Map().insert(
-            (dict(trace_key, map=m/n_trials) for trace_key, m in zip(trace_keys, maps)),
+            (dict(trace_key, map=np.float32(m/n_trials)) for trace_key, m in zip(trace_keys, maps)),
             ignore_extra_fields=True)
         print('Done')
+
+
+@schema
+class MonetCleanRF(dj.Computed):
+    definition = """  # RF maps with common components removed
+    -> MonetRF.Map
+    ---
+    clean_map  :  longblob
+    """
+
+    key_source = MonetRF() & MonetRF.Map()
+
+    def save(self, path="."):
+        """
+        save RF maps into PNG files
+        """
+        import os
+        from matplotlib.image import imsave
+        from matplotlib import pyplot as plt
+        cmap = plt.get_cmap('seismic')
+        for key in self.fetch.keys():
+            data = (MonetCleanRF() & key).fetch1['clean_map']
+            scale = 1.5
+            frame = 1
+            filename = os.path.join(
+                os.path.expanduser(path),
+                '{animal_id:05d}_{session}_scan{scan_idx:02d}_method{extract_method}'
+                '-{spike_method}_{trace_id:03d}-{frame}.png'.format(frame=frame, **key))
+            print(filename)
+            imsave(filename, cmap(data[:, :, frame] / scale + 0.5))
+
+    def _make_tuples(self, key):
+        maps, keys = (MonetRF.Map() & key).fetch['map', dj.key]
+        # subtract the first view principal components if their projections have the same sign
+        n_components = 5
+        shape = maps[0].shape
+        maps = np.stack(np.float64(m.flatten()) for m in maps)
+        cell_comps, values, space_comps = np.linalg.svd(maps, full_matrices=False)
+        for cell_comp, space_comp, value in zip((r for r in cell_comps.T), space_comps, values[:n_components]):
+            if np.percentile(np.sign(cell_comp), 2) == np.percentile(np.sign(cell_comp), 98):
+                maps -= np.outer(cell_comp*value, space_comp)
+        for key, clean_map in zip(keys, (m.reshape(shape) for m in maps)):
+            self.insert1(dict(key, clean_map=np.float32(clean_map)))
 
 
 @schema
@@ -221,7 +267,7 @@ class DirectionalResponse(dj.Computed):
     latency : float   # latency used (ms)
     """
 
-    class TraceTrial(dj.Part):
+    class Trial(dj.Part):
         definition = """   # the response for each trial and each trace
         -> DirectionalResponse
         -> preprocess.Spikes.RateTrace
@@ -242,25 +288,30 @@ class DirectionalResponse(dj.Computed):
         n_slices = (preprocess.Prepare.Galvo() & key).fetch1['nslices']
         trace_time = trace_time[:n_slices*traces.shape[1]]  # truncate if interrupted scan
         assert n_slices*traces[0].size == trace_time.size, 'trace times must be a multiple of n_slices'
+        slice_interval = (trace_time[1:]-trace_time[:-1]).mean()
+        frame_interval = slice_interval * n_slices
         trace_time = trace_time[::n_slices]    # keep trace times for the first slice only
-        dt = (trace_time[1:]-trace_time[:-1]).mean()
 
         # compute and interpolate cumulative traces on time of first slice
         assert traces.ndim == 2 and traces.shape[0] == len(trace_keys), 'incorrect trace dimensions'
-        traces = interp1d(trace_time, np.cumsum(traces, axis=1)*dt)
+        traces = interp1d(trace_time, np.cumsum(traces, axis=1)*frame_interval)
 
         # insert responses for each trace and trial with time adjustment for slices
         latency = 0.01  # s
         self.insert1(dict(key, latency=1000*latency))
-        table = DirectionalResponse.TraceTrial()
+        table = DirectionalResponse.Trial()
         for onset, offset, trial_key in zip(*(Directional.Trial() & key).fetch['onset', 'offset', dj.key]):
             for islice in set(slices):
                 ix = np.where(slices == islice)[0]
-                responses = (traces(offset+latency-dt*islice) -
-                             traces(onset+latency-dt*islice))[ix]/(offset-onset)
-                table.insert((dict(trial_key, response=response, **trace_keys[i])
-                              for i, response in zip(ix, responses)),
-                             ignore_extra_fields=True)
+                try:
+                    responses = (traces(offset+latency-slice_interval*islice) -
+                                 traces(onset+latency-slice_interval*islice))[ix]/(offset-onset)
+                except ValueError:
+                    pass
+                else:
+                    table.insert((dict(trial_key, response=response, **trace_keys[i])
+                                  for i, response in zip(ix, responses)),
+                                 ignore_extra_fields=True)
         print('Done')
 
 
