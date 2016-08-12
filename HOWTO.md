@@ -1,7 +1,8 @@
 # Jupyter Server with Pipeline
 
 ```
-sudo docker run --rm -it -e DJ_PASS='MYSQL_SERVER_PWD' -e DJ_USER='MYSQL_USER' -e DJ_HOST='IP_OF_HOST' ninai/pipeline:jupyter
+sudo docker run --rm -it -e DJ_PASS='MYSQL_SERVER_PWD' -e DJ_USER='MYSQL_USER' \
+                         -e DJ_HOST='IP_OF_HOST' ninai/pipeline:jupyter
 ```
 
 # Populate Tables
