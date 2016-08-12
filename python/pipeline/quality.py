@@ -1,12 +1,10 @@
 import datajoint as dj
-from pipeline.preprocess import notnan
 from . import preprocess, vis
 import numpy as np
 import pandas as pd
 
-
-
 schema = dj.schema('pipeline_quality', locals())
+
 
 @schema
 class Spikes(dj.Computed):
@@ -52,6 +50,7 @@ class Spikes(dj.Computed):
 
         self.insert1(key)
 
+
 @schema
 class SpikeMethods(dj.Computed):
     definition = """
@@ -84,7 +83,6 @@ class SpikeMethods(dj.Computed):
 
         self.insert1(key)
         print('Populating', key)
-        corr = np.zeros(len(trs))*np.NaN
         for i, row in trs.iterrows():
             trace1, trace2 = tuple(map(np.asarray, (row.rate_trace_1, row.rate_trace_2)))
             idx = ~np.isnan(trace1 + trace2)
@@ -93,7 +91,4 @@ class SpikeMethods(dj.Computed):
             self.Correlation().insert1(k, ignore_extra_fields=True)
 
 
-
-
-
-
+schema.spawn_missing_classes()
