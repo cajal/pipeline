@@ -30,7 +30,6 @@ classdef Sync < dj.Relvar & dj.AutoPopulate
                 packetLen = dat.analogPacketLen;
             end
             datT = pipetools.ts2sec(dat.ts, packetLen);
-            datT = datT-datT(1); % subtract offset
             
             photodiode_fs = 1/median(diff(datT));
             photodiode_signal = dat.syncPd;
