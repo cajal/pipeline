@@ -15,7 +15,7 @@ schema = dj.schema('pipeline_preprocess', locals())
 
 
 def notnan(x, start=0, increment=1):
-    while np.isnan(x[start]) and start < len(x) and start >= 0:
+    while np.isnan(x[start]) and 0 <= start < len(x):
         start += increment
     return start
 
@@ -611,7 +611,7 @@ class Spikes(dj.Computed):
 class EyeQuality(dj.Lookup):
     definition = """
     # Different eye quality definitions for Tracking
-    
+
     eye_quality                : smallint
     ---
     description                : varchar(255)
