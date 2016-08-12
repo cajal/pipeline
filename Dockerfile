@@ -43,7 +43,7 @@ RUN \
   cd opencv_contrib && git checkout 3.1.0 && \
   cd ../opencv && mkdir build && cd build && \
   cmake -D CMAKE_BUILD_TYPE=RELEASE \
-  	-D WITH_CUDA=OFF \
+  	    -D WITH_CUDA=OFF \
         -D CMAKE_INSTALL_PREFIX=/usr/local \
         -D OPENCV_EXTRA_MODULES_PATH=/data/opencv_contrib/modules \
         -D BUILD_EXAMPLES=ON .. && \
@@ -86,7 +86,6 @@ RUN \
 RUN \
   pip3 install oct2py && \
   pip3 install git+https://github.com/atlab/tiffreader
-
 
 ENTRYPOINT ["worker"]
   

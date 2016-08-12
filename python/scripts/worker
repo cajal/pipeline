@@ -17,13 +17,7 @@ def main(argv):
                                       help='Populate the specified relation.')
     subparser.add_argument('--command', default='populate')
 
-    subparser = subparsers.add_parser('report',
-                                      help='Report to slack.')
-    subparser.add_argument('--command', default='report')
 
-    subparser = subparsers.add_parser('minion',
-                                      help='Populate Minion.')
-    subparser.add_argument('--command', default='minion')
 
     args = parser.parse_args(argv[1:2])
 
