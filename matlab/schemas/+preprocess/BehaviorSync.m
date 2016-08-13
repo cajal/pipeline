@@ -16,8 +16,8 @@ classdef BehaviorSync < dj.Relvar & dj.AutoPopulate
     methods(Access=protected)
         
         function makeTuples(self, key)
-            assert(numel(key)==1)
-            
+            assert(numel(key)==1,'One key at a time, please.')
+            tuple=key;
             % read photodiode signal
             dat = preprocess.readHD5(key);
             packetLen = 2000;
