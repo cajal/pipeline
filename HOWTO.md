@@ -43,5 +43,5 @@ from pipeline import preprocess
 ## Display video in a particular frame range
 
 ```
-(preprocess.EyeTracking() & dict(animal_id=8623, scan_idx=13)).show_video(24000,27000)  
+(preprocess.EyeTracking() & dict(animal_id=8623, scan_idx=13)).show_video(24000,27000)  1
 ```

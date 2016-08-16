@@ -198,10 +198,10 @@ class LaserCalibration(dj.Manual):
         power           : float     # power in mW
         """
 
-    def plot_calibration_curve(self, calibration_id, rig):
+    def plot_calibration_curve(self, calibration_date, rig):
         import matplotlib.pyplot as plt
         import seaborn as sns
-        session = LaserCalibration.PowerMeasurement() & dict(calibration_date=calibration_id, rig=rig)
+        session = LaserCalibration.PowerMeasurement() & dict(calibration_date=calibration_date, rig=rig)
         sns.set_context('talk')
         with sns.axes_style('darkgrid'):
             fig, ax = plt.subplots()

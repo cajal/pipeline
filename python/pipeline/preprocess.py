@@ -890,6 +890,7 @@ class EyeTracking(dj.Computed):
             fig.savefig(outdir + '/AI{animal_id}SE{session}SI{scan_idx}EQ{eye_quality}.png'.format(**key))
             plt.close(fig)
 
+
     def show_video(self, from_frame, to_frame):
         """
         Shows the video from from_frame to to_frame (1-based) and the corrsponding tracking results.
@@ -911,7 +912,6 @@ class EyeTracking(dj.Computed):
         cap = cv2.VideoCapture(videofile)
         no_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         font = cv2.FONT_HERSHEY_SIMPLEX
-
         if not from_frame < no_frames:
             raise PipelineException('Starting frame exceeds number of frames')
 
