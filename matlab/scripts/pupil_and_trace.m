@@ -7,7 +7,7 @@
 % used to synchronize behavioral variables with the visual stimulation.
 % We'll also plot the trial start times for this scan to demonstrate this.
 
-%% Choose a scan
+%% Choose an arbitrary scan
 key.animal_id=8804;
 key.session=1;
 key.scan_idx=3;
@@ -37,7 +37,7 @@ hold on
 plot(et,xy)
 
 %% calcium traces
-% choose a random calcium trace
+% choose an arbitrary calcium trace
 traceKey = key;
 traceKey.extract_method=2;
 traceKey.trace_id=256;
