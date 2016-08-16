@@ -1,7 +1,8 @@
 # Jupyter Server with Pipeline
 
 ```
-sudo docker run --rm -it -e DJ_PASS='MYSQL_SERVER_PWD' -e DJ_USER='MYSQL_USER' -e DJ_HOST='IP_OF_HOST' ninai/pipeline:jupyter
+sudo docker run --rm -it -e DJ_PASS='MYSQL_SERVER_PWD' -e DJ_USER='MYSQL_USER' \
+                         -e DJ_HOST='IP_OF_HOST' ninai/pipeline:jupyter
 ```
 
 # Populate Tables
@@ -43,5 +44,5 @@ from pipeline import preprocess
 ## Display video in a particular frame range
 
 ```
-(preprocess.EyeTracking() & dict(animal_id=8623, scan_idx=13)).show_video(24000,27000)  1
+(preprocess.EyeTracking() & dict(animal_id=8623, scan_idx=13)).show_video(24000,27000)  
 ```
