@@ -30,6 +30,7 @@ classdef Sync < dj.Relvar & dj.AutoPopulate
                 packetLen = dat.analogPacketLen;
             end
             datT = pipetools.ts2sec(dat.ts, packetLen);
+            
             photodiode_fs = 1/median(diff(datT));
             photodiode_signal = dat.syncPd;
             fps = 60;   % does not need to be exact

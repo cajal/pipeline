@@ -11,3 +11,4 @@ This software is published under the [LGPLv3 license](LICENSE.txt).
 1.  [Processing Monet stimulus](jupyter/tutorial/pipeline_prepare_monet.ipynb)
 1.  [Processing movie stimulus](jupyter/tutorial/pipeline_prepare_movie.ipynb)
 1.  [pipeline.tuning](jupyter/tutorial/pipeline_tuning.ipynb)
+1.  [Eyetracking traces](jupyter/tutorial/pipeline_eyetracking.ipynb)

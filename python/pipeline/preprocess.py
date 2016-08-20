@@ -5,7 +5,7 @@ import numpy as np
 import sh
 import os
 from .utils.dsp import mirrconv
-from .utils.eye_tracking import ROIGrabber, ts2sec, read_video_hdf5, PupilTracker
+from .utils.eye_tracking import ROIGrabber, ts2sec, read_video_hdf5, PupilTracker, CVROIGrabber
 from . import config
 from distutils.version import StrictVersion
 
@@ -15,7 +15,7 @@ schema = dj.schema('pipeline_preprocess', locals())
 
 
 def notnan(x, start=0, increment=1):
-    while np.isnan(x[start]) and start < len(x) and start >= 0:
+    while np.isnan(x[start]) and 0 <= start < len(x):
         start += increment
     return start
 
@@ -611,7 +611,7 @@ class Spikes(dj.Computed):
 class EyeQuality(dj.Lookup):
     definition = """
     # Different eye quality definitions for Tracking
-    
+
     eye_quality                : smallint
     ---
     description                : varchar(255)
@@ -676,16 +676,17 @@ class Eye(dj.Imported):
 
         # replace number by %d for hdf-file reader
         tmp = info['hdf_file'].split('.')
+
         info['hdf_file'] = tmp[0][:-1] + '%d.' + tmp[-1]
 
         hdf_path = "{path_prefix}/{behavior_path}/{hdf_file}".format(path_prefix=path_prefix, **info)
 
         data = read_video_hdf5(hdf_path)
         packet_length = data['analogPacketLen']
-        dat_time, _, _ = ts2sec(data['ts'], packet_length)
+        dat_time, _ = ts2sec(data['ts'], packet_length)
 
         cam_key = 'cam1ts' if info['rig'] == '2P3' else  'cam2ts'
-        eye_time, _, _ = ts2sec(data[cam_key])
+        eye_time, _ = ts2sec(data[cam_key])
         total_frames = len(eye_time)
 
         frame_idx = np.floor(np.linspace(0, total_frames - 1, n_sample_frames))
@@ -713,7 +714,15 @@ class Eye(dj.Imported):
 
     def _make_tuples(self, key):
         key['eye_time'], frames, key['total_frames'] = self.grab_timestamps_and_frames(key)
-        rg = ROIGrabber(frames.mean(axis=2))
+
+        try:
+            import cv2
+            print('Drag window and print q when done')
+            rg = CVROIGrabber(frames.mean(axis=2))
+            rg.grab()
+        except ImportError:
+            rg = ROIGrabber(frames.mean(axis=2))
+
         with dj.config(display__width=50):
             print(EyeQuality())
         key['eye_quality'] = int(input("Enter the quality of the eye: "))
@@ -881,6 +890,7 @@ class EyeTracking(dj.Computed):
             fig.savefig(outdir + '/AI{animal_id}SE{session}SI{scan_idx}EQ{eye_quality}.png'.format(**key))
             plt.close(fig)
 
+
     def show_video(self, from_frame, to_frame):
         """
         Shows the video from from_frame to to_frame (1-based) and the corrsponding tracking results.
@@ -902,7 +912,6 @@ class EyeTracking(dj.Computed):
         cap = cv2.VideoCapture(videofile)
         no_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         font = cv2.FONT_HERSHEY_SIMPLEX
-
         if not from_frame < no_frames:
             raise PipelineException('Starting frame exceeds number of frames')
 

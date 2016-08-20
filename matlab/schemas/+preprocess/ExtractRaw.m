@@ -39,7 +39,7 @@ classdef ExtractRaw < dj.Relvar & dj.AutoPopulate
                         self.set_nmf_parameters(key);
                         
                         fprintf('\tInitializing reader\n');
-                        [loader, channel] = experiment.create_loader(key);
+                        [loader, channel] = preprocess.create_loader(key);
                         
                         self.insert(key);
                         trace_id = 1;
@@ -91,7 +91,7 @@ classdef ExtractRaw < dj.Relvar & dj.AutoPopulate
                         end
                     case 'manual'
                         [d2, d1, nslices, nframes] = fetch1(preprocess.PrepareGalvo & key, 'px_width', 'px_height','nslices','nframes');
-                        [loader, channel] = experiment.create_loader(key,0);
+                        [loader, channel] = preprocess.create_loader(key,0);
                         self.insert(key)
                         trace_id = ones(length(channel),1);
                         for islice = 1:nslices
