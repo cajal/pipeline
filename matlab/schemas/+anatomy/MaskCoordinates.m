@@ -1,5 +1,5 @@
 %{
-preprocess.MaskCoordinates (computed) # mask center of mass of a segmented cell
+anatomy.MaskCoordinates (computed) # mask center of mass of a segmented cell
 -> preprocess.ExtractRawGalvoSegmentation
 trace_id        : smallint               # trace id
 -----
