@@ -19,7 +19,7 @@ k = k/sum(k);
 l = size(x,1);
 n = length(k);
 n = floor(n/2);
-x = [x(n+2-(1:n),:); x; x(end-1-(1:n),:)];
+x = [x(n+2-(1:n),:); x; x(end-1-(1:n),:)]; % this pads the beginning and end with mirrored values
 x = fftfilt(k,x);  % apply filter
 rFilt = x(2*n+1:end,:);  % take valid values only
 
