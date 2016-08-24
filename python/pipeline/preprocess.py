@@ -623,6 +623,7 @@ class EyeQuality(dj.Lookup):
         (1, 'poor quality'),
         (2, 'very poor quality (not well centered, pupil not fully visible)'),
         (3, 'good (but pupil is not the brightest spot)'),
+        (4, 'very dark'),
     ]
 
 
@@ -671,10 +672,13 @@ class Eye(dj.Imported):
         rel = experiment.Session() * experiment.Scan.EyeVideo() * experiment.Scan.BehaviorFile().proj(
             hdf_file='filename')
 
+
         info = (rel & key).fetch1()
         avi_path = "{path_prefix}/{behavior_path}/{filename}".format(path_prefix=path_prefix, **info)
 
         # replace number by %d for hdf-file reader
+
+
         tmp = info['hdf_file'].split('.')
 
         info['hdf_file'] = tmp[0][:-1] + '%d.' + tmp[-1]
@@ -804,6 +808,19 @@ class TrackingParameters(dj.Lookup):
          'min_contour_len': 5,
          'margin': 0.02,
          'contrast_threshold': 10,
+         'speed_threshold': 0.2,
+         'dr_threshold': 0.15,
+         },
+        {'eye_quality': 4,
+         'perc_high': 95,
+         'perc_low': 2,
+         'perc_weight': 0.3,
+         'relative_area_threshold': 0.01,
+         'ratio_threshold': 1.9,
+         'error_threshold': 0.1,
+         'min_contour_len': 5,
+         'margin': 0.02,
+         'contrast_threshold': 3,
          'speed_threshold': 0.2,
          'dr_threshold': 0.15,
          },
