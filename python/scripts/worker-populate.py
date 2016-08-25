@@ -46,8 +46,13 @@ def main(argv):
                 rel().populate(args.restrictions, reserve_jobs=True, suppress_errors=True)
             else:
                 rel().populate(reserve_jobs=True, suppress_errors=True)
-        time.sleep(np.random.randint(args.t_min, args.t_max))
+
         run_daemon = args.daemon
+        if run_daemon:
+            t = np.random.randint(args.t_min, args.t_max)
+            print('Going to sleeping for', t, 'seconds')
+            time.sleep()
+            
     return 0
 
 
