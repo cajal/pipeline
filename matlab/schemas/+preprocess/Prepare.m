@@ -31,6 +31,8 @@ classdef Prepare < dj.Relvar & dj.AutoPopulate
                     makeTuples(preprocess.PrepareGalvo, key, reader, movie)
                     makeTuples(preprocess.PrepareGalvoMotion, key, reader, movie)
                     makeTuples(preprocess.PrepareGalvoAverageFrame, key, movie)
+                case 'aod'
+                    makeTuples(preprocess.PrepareAod,key)
                 otherwise
                     error('"%s" is not implemented yet', software)
             end
