@@ -63,6 +63,8 @@ classdef ExtractRaw < dj.Relvar & dj.AutoPopulate
                                 if strcmp(ME.identifier,'MATLAB:imresize:expectedNonempty')
                                     fprintf('\tCaught non-empty exception. No neuron found! Continuing to next slice. \n');
                                     continue
+                                else
+                                    throw(ME)
                                 end
                             end
                             
