@@ -78,11 +78,6 @@ COPY . /data/pipeline
 RUN \
   pip3 install -e pipeline/python/
 
-# Get pupil tracking repo
-RUN \
-  git clone https://github.com/cajal/pupil-tracking.git && \
-  pip3 install -e pupil-tracking/
-
 RUN \
   pip3 install oct2py && \
   pip3 install git+https://github.com/atlab/tiffreader
