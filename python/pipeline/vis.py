@@ -237,7 +237,7 @@ def migrate():
     Trippy().insert(trippy - Trippy())
 
     # copy MovieClip and MovieStill
-    Movie().insert(psy.MovieInfo())
+    Movie().insert(psy.MovieInfo()-Movie())
     Movie.Clip().insert(psy.MovieClipStore())
     Movie.Still().insert(psy.MovieStill())
     MovieClipCond().insert(psy.MovieClipCond() & Condition())
