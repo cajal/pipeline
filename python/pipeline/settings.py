@@ -1,7 +1,6 @@
 """
 Settings for DataJoint.
 """
-from contextlib import contextmanager
 import json
 from collections import OrderedDict
 from . import PipelineException
@@ -16,6 +15,7 @@ default = OrderedDict({
     'path.mounts': '/mnt/',
     'display.tracking': False
 })
+
 
 class Config(collections.MutableMapping):
 
@@ -90,8 +90,7 @@ class Config(collections.MutableMapping):
         def load(self, filename):
             """
             Updates the setting from config file in JSON format.
-
-            :param filename=None: filename of the local JSON settings file. If None, the local config file is used.
+            :param filename: filename of the local JSON settings file. If None, the local config file is used.
             """
             if filename is None:
                 filename = LOCALCONFIG

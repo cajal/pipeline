@@ -907,7 +907,6 @@ class EyeTracking(dj.Computed):
             fig.savefig(outdir + '/AI{animal_id}SE{session}SI{scan_idx}EQ{eye_quality}.png'.format(**key))
             plt.close(fig)
 
-
     def show_video(self, from_frame, to_frame):
         """
         Shows the video from from_frame to to_frame (1-based) and the corrsponding tracking results.
