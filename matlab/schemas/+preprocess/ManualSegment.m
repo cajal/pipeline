@@ -19,7 +19,7 @@ classdef ManualSegment < dj.Relvar & dj.AutoPopulate
         function makeTuples(self, key)
             images = fetchn(preprocess.PrepareGalvoAverageFrame & key, 'frame', 'ORDER BY channel');
             assert(ismember(numel(images), [1 2]))
-            bw = pre.ManualSegment.outlineCells(images);
+            bw = preprocess.ManualSegment.outlineCells(images);
             assert(~isempty(bw), 'user aborted segmentation')
             key.mask = bw;
             self.insert(key)
