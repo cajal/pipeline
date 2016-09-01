@@ -26,8 +26,8 @@ classdef MonetRF < dj.Relvar & dj.AutoPopulate
             disp 'loading traces...'
             caTimes = fetch1(preprocess.Sync & key, 'frame_times');
             nslices = fetch1(preprocess.PrepareGalvo & key, 'nslices');
-            caTimes = caTimes(key.slice:nslices:end);
-            [X, traceKeys] = fetchn(preprocess.Spikes & key, 'spike_trace');
+            caTimes = caTimes(1:nslices:end);
+            [X, traceKeys] = fetchn(preprocess.SpikesRateTrace & key, 'rate_trace');
             X = [X{:}];
             lenDif = length(caTimes)-size(X,1);
             if lenDif<nslices && lenDif>0 % aborted scans can give rise to unequal ca traces!
@@ -52,14 +52,17 @@ classdef MonetRF < dj.Relvar & dj.AutoPopulate
             degSize = degPerPix*rect;
             
             disp 'integrating maps...'
-            maps = zeros(trials(1).tex_ydim, trials(1).tex_xdim, nbins, ntraces);
+            keys = fetch(vis.Monet * vis.MonetLookup & key);
+            map = fetch1(vis.Monet * vis.MonetLookup & keys(1),'cached_movie');
+            maps = zeros(size(map,1), size(map,2), nbins, ntraces);
             sz = size(maps);
             
             total_frames = 0;
             for trial = trials'
                 fprintf('\nTrial %d', trial.trial_idx);
                 % reconstruct movie
-                movie = (double(trial.cached_movie)-127.5)/127.5;
+                cached_movie = fetch1(vis.Monet * vis.MonetLookup & trial,'cached_movie');
+                movie = (double(cached_movie)-127.5)/127.5;
                 trial_frames = length(trial.flip_times);
                 movie = fliplr(reshape(movie, [], trial_frames));
                 total_frames = total_frames + trial_frames;
