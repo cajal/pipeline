@@ -8,13 +8,19 @@ preprocess.ComputeTraces (computed) # compute traces
 classdef ComputeTraces < dj.Relvar & dj.AutoPopulate
 
 	properties
-		popRel = preprocess.ExtractRaw  % !!! update the populate relation
+        % Twitch traces are populated in Python
+		popRel = preprocess.ExtractRaw & (experiment.SessionFluorophore & 'fluorophore!="Twitch2B"'); 
 	end
 
 	methods(Access=protected)
 
 		function makeTuples(self, key)
-            error('Implemented in python.')
+            % Copy traces from ExtractRawTrace
+            tuples = fetch(preprocess.ExtractRawTrace & key,'raw_trace->trace','*');
+            tuples = rmfield(tuples,'channel');
+            
+            self.insert(key)
+            insert(preprocess.ComputeTracesTrace,tuples);
 		end
 	end
 
