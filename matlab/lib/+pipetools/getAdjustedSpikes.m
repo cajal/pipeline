@@ -6,14 +6,14 @@ function [NewTraces, NewTimes] = getAdjustedSpikes(key)
 [Traces, slice] = fetchn( ...
     preprocess.SpikesRateTrace * preprocess.ExtractRawGalvoROI ...
     & key, 'rate_trace', 'slice' );
-nslices = length(unique(slice));
+nslices = fetch1(preprocess.PrepareGalvo & key, 'nslices');
+uslices = unique(slice);
 CaTimes = fetch1(preprocess.Sync &  (experiment.Scan & key), 'frame_times');
 Traces = [Traces{:}];
-NewTraces = nan(size(Traces));
 NewTimes = CaTimes(1:nslices:end);
-
-for islice = 1:nslices
-    
+NewTraces = nan(length(NewTimes),size(Traces,2));
+for isl = 1:length(uslices)
+    islice = uslices(isl);
     caTimes = CaTimes(islice:nslices:end);
     X = Traces(:,islice==slice);
     xm = min([length(caTimes) length(X)]);
