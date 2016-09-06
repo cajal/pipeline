@@ -262,10 +262,9 @@ class ExtractRaw(dj.Imported):
         # theCM = plt.cm.get_cmap('viridis')
 
         for key in (self * self.GalvoSegmentation().proj() * Method.Galvo() & dict(segmentation='nmf')).fetch.as_dict:
-            mask_px, mask_w, spikes, traces, ids = \
-                (self.GalvoROI() * \
-                 self.SpikeRate() * ComputeTraces.Trace() & key & \
-                 dict(segmentation=2)).fetch.order_by('trace_id')[
+            mask_px, mask_w, spikes, traces, ids = (
+                self.GalvoROI() * self.SpikeRate() *
+                ComputeTraces.Trace() & key & dict(segmentation=2)).fetch.order_by('trace_id')[
                     'mask_pixels', 'mask_weights', 'spike_trace', 'trace', 'trace_id']
 
             template = np.stack([normalize(t)
