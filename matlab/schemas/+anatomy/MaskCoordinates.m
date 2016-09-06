@@ -38,7 +38,7 @@ classdef MaskCoordinates < dj.Relvar & dj.AutoPopulate
                 centerOfMass = px_centerOfMass./size(im).*[width,height] - [width,height]/2;
                 
                 % get slice possition (um)
-                slice_position = depth - slice_pos(key.slice);
+                slice_position = depth + slice_pos(key.slice);
                 
                 % insert
                 key.trace_id = mask_id(imask);
