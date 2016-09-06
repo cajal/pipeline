@@ -1,23 +1,23 @@
-function [NewTraces, NewTimes] = getAdjustedSpikes(key) 
-% function [NewTraces, NewTimes] = getSpikes(key) 
+function [new_traces, new_times] = getAdjustedSpikes(key) 
+% function [new_traces, new_times] = getAdjustedSpikes(key) 
 %
 % Adjusts traces for time difference between slices in a scan
 
-[Traces, slice] = fetchn( ...
-    preprocess.SpikesRateTrace * preprocess.ExtractRawGalvoROI ...
+[traces, slice] = fetchn( ...
+    preprocess.SpikesRateTrace * preprocess.Slice & preprocess.ExtractRawGalvoROI ...
     & key, 'rate_trace', 'slice' );
-nslices = length(unique(slice));
-CaTimes = fetch1(preprocess.Sync &  (experiment.Scan & key), 'frame_times');
-Traces = [Traces{:}];
-NewTraces = nan(size(Traces));
-NewTimes = CaTimes(1:nslices:end);
-
-for islice = 1:nslices
+nslices = fetch1(preprocess.PrepareGalvo & key, 'nslices');
+uslices = unique(slice);
+ca_times = fetch1(preprocess.Sync &  (experiment.Scan & key), 'frame_times');
+traces = [traces{:}];
+new_times = ca_times(1:nslices:end);
+new_traces = nan(length(new_times),size(traces,2));
+for isl = 1:length(uslices)
+    islice = uslices(isl);
+    slice_ca_times = ca_times(islice:nslices:end);
+    X = traces(:,islice==slice);
+    xm = min([length(slice_ca_times) length(X)]);
+    X = @(t) interp1(slice_ca_times(1:xm), X(1:xm,:), t, 'linear', 'extrap');  % traces indexed by time
     
-    caTimes = CaTimes(islice:nslices:end);
-    X = Traces(:,islice==slice);
-    xm = min([length(caTimes) length(X)]);
-    X = @(t) interp1(caTimes(1:xm), X(1:xm,:), t, 'linear', 'extrap');  % traces indexed by time
-    
-    NewTraces(:,islice==slice) = X(NewTimes);
+    new_traces(:,islice==slice) = X(new_times);
 end
