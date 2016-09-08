@@ -5,8 +5,6 @@ vis.FancyBar (manual) # pink noise with periods of motion and orientation$
 pre_blank                   : double                        # (s) blank period preceding trials
 luminance                   : float                         # (cd/m^2)
 contrast                    : float                         # michelson contrast
-speed                       : float                         # (degrees/s)
-frame_downsample            : tinyint                       # 1=60 fps, 2=30 fps, 3=20 fps, 4=15 fps, etc
 bar_width                   : float                         # Degrees
 grid_width                  : float                         # Degrees
 bar_speed                   : float                         # Bar speed in °/s
