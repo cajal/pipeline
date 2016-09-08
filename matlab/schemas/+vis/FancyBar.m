@@ -1,7 +1,7 @@
  %{
 vis.FancyBar (manual) # Moving Bar stimulus that keeps the size and speed
-of the bar constant relative to the mouse’s perspective. 
-The bar can be either a Flashing checkeboard (grating=0) or a Moving grating (grating=1)
+# of the bar constant relative to the mouse’s perspective. 
+# The bar can be either a Flashing checkeboard (grating=0) or a Moving grating (grating=1)
 -> vis.Condition
 ---
 pre_blank                   : double                        # (s) blank period preceding trials
