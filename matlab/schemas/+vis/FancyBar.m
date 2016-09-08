@@ -14,7 +14,7 @@ flash_speed                 : float                         # cycles/sec tempora
 grating                     : float                         # selection beween grating (1) or flashing (0)
 grat_width                  : float                         # in cycles/deg
 grat_speed                  : float                         # in cycles/deg
-axis                        : float                         # the direction of bar movement
+axis                        : float                         # the direction of bar movement 1 --> horizontal 2-->vertical 
 %}
 
 
