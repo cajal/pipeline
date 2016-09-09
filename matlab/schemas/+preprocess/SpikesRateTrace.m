@@ -1,24 +1,31 @@
 %{
-preprocess.SpikesRateTrace (computed) # Inferred
+preprocess.SpikesRateTrace (computed) # Inferred spikes
 -> preprocess.Spikes
 -> preprocess.ComputeTracesTrace
 ---
-rate_trace=null             : longblob                      # leave null same as ExtractRaw.Trace
+rate_trace=null             : longblob                      # leave null if same as ExtractRaw.Trace
 %}
 
 
-classdef SpikesRateTrace < dj.Relvar & dj.AutoPopulate
-
-	properties
-		popRel = preprocess.Spikes*preprocess.ComputeTracesTrace  % !!! update the populate relation
-	end
-
-	methods(Access=protected)
-
-		function makeTuples(self, key)
-		%!!! compute missing fields for key here
-			self.insert(key)
-		end
-	end
-
+classdef SpikesRateTrace < dj.Relvar
+    
+    methods
+        
+        function makeTuples(self, key)
+            method = fetch1(preprocess.SpikeMethod & key, 'spike_method_name') ;
+            
+            switch method    
+                case 'nmf'
+                    % Copy NMF spikes from preprocess.ExtractRawSpikeRate
+                    self.insert(rmfield(...
+                        fetch(preprocess.ExtractRawSpikeRate & key, 'spike_trace->rate_trace', '*'), ...
+                        'channel'))
+                                        
+                otherwise
+                    error('invalid method %s', method)
+                    
+            end
+        end
+        
+    end
 end
