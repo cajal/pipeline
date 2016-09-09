@@ -7,7 +7,7 @@ import os
 try:
     import pyfnnd
 except ImportError:
-    warn('Could not load pyfnnd.  Spike inference will fail. Clone oopsi from https://github.com/cajal/PyFNND.git')
+    warn('Could not load pyfnnd.  Oopsi spike inference will fail. Install from https://github.com/cajal/PyFNND.git')
 from .utils.dsp import mirrconv
 from .utils.eye_tracking import ROIGrabber, ts2sec, read_video_hdf5, PupilTracker, CVROIGrabber
 from . import config
