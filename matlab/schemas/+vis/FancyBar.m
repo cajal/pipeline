@@ -11,7 +11,7 @@ bar_speed                   : float                         # Bar speed in deg/s
 flash_speed                 : float                         # cycles/sec temporal frequency of the grid flickering
 style                       : enum('grating','checkerboard')# selection beween a bar with a flashing checkeboard or a moving grating
 grat_width                  : float                         # in cycles/deg
-grat_speed                  : float                         # in cycles/deg
+grat_freq                   : float                         # in cycles/sec
 axis                        : enum('vertical', 'horizontal')# the direction of bar movement
 %}
 
