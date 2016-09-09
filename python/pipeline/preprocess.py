@@ -4,6 +4,10 @@ from warnings import warn
 import numpy as np
 import sh
 import os
+try:
+    import pyfnnd
+except ImportError:
+    warn('Could not load pyfnnd.  Spike inference will fail. Clone oopsi from https://github.com/cajal/PyFNND.git')
 from .utils.dsp import mirrconv
 from .utils.eye_tracking import ROIGrabber, ts2sec, read_video_hdf5, PupilTracker, CVROIGrabber
 from . import config
@@ -18,6 +22,17 @@ def notnan(x, start=0, increment=1):
     while np.isnan(x[start]) and 0 <= start < len(x):
         start += increment
     return start
+
+
+def fill_nans(x):
+    """
+    :param x:  1D array
+    :return: the array with nans interpolated
+    The input argument is modified.
+    """
+    nans = np.isnan(x)
+    x[nans] = 0 if nans.all() else np.interp(nans.nonzero()[0], (~nans).nonzero()[0], x[~nans])
+    return x
 
 
 def normalize(img):
@@ -243,10 +258,9 @@ class ExtractRaw(dj.Imported):
             tmp_mask = np.asarray(masks[..., i])
             tmp_mask[tmp_mask == 0] = np.NaN
             ax_image.imshow(tmp_mask, cmap=plt.cm.get_cmap('autumn'), zorder=10, alpha=.5)
-
             fig.suptitle(
-                "animal {animal_id} session {session} scan {scan_idx} slice {slice}".format(trace_id=trace_id,
-                                                                                            **key.fetch1()))
+                "animal {animal_id} session {session} scan {scan_idx} slice {slice}".format(
+                    trace_id=trace_id, **key.fetch1()))
         ax.set_yticks([])
         ax.set_ylabel('Fluorescence [a.u.]')
         ax.set_xlabel('time [s]')
@@ -478,9 +492,8 @@ class SpikeMethod(dj.Lookup):
     """
 
     contents = [
-        [2, "fastoopsi", "nonnegative sparse deconvolution from Vogelstein (2010)", "matlab"],
+        [2, "oopsi", "nonnegative sparse deconvolution from Vogelstein (2010)", "python"],
         [3, "stm", "spike triggered mixture model from Theis et al. (2016)", "python"],
-        [4, "improved oopsi", "", "matlab"],
         [5, "nmf", "", "matlab"]
     ]
 
@@ -520,7 +533,7 @@ class Spikes(dj.Computed):
 
     @property
     def key_source(self):
-        return (ComputeTraces() * SpikeMethod() & "spike_method_name in ('stm','nmf')").proj()
+        return (ComputeTraces() * SpikeMethod() & "language='python'").proj()
 
     class RateTrace(dj.Part):
         definition = """  # Inferred
@@ -587,23 +600,33 @@ class Spikes(dj.Computed):
             plt.close(fig)
 
     def _make_tuples(self, key):
-        print('Populating', key)
-        if (SpikeMethod() & key).fetch1['spike_method_name'] == 'stm':
+        print('Populating Spikes for ', key, end='...', flush=True)
+        method = (SpikeMethod() & key).fetch1['spike_method_name']
+        if method == 'stm':
             prep = (Prepare() * Prepare.Aod() & key) or (Prepare() * Prepare.Galvo() & key)
             fps = prep.fetch1['fps']
             X = (ComputeTraces.Trace() & key).proj('trace').fetch.as_dict()
             self.insert1(key)
             for x in (SpikeMethod() & key).spike_traces(X, fps):
                 self.RateTrace().insert1(dict(key, **x))
-        elif (SpikeMethod() & key).fetch1['spike_method_name'] == 'nmf':
+        elif method == 'nmf':
             if ExtractRaw.SpikeRate() & key:
                 self.insert1(key)
                 for x in (ExtractRaw.SpikeRate() & key).fetch.as_dict:
                     x['rate_trace'] = x.pop('spike_trace')
                     x.pop('channel')
                     self.RateTrace().insert1(dict(key, **x))
+        elif method == 'oopsi':
+            prep = (Prepare() * Prepare.Aod() & key) or (Prepare() * Prepare.Galvo() & key)
+            self.insert1(key)
+            fps = prep.fetch1['fps']
+            part = self.RateTrace()
+            for trace, trace_key in zip(*(ComputeTraces.Trace() & key).fetch['trace', dj.key]):
+                trace = pyfnnd.deconvolve(fill_nans(np.float64(trace.flatten())), dt=1/fps)[0]
+                part.insert1(dict(trace_key, **key, rate_trace=trace.astype(np.float32)[:, np.newaxis]))
         else:
             raise NotImplementedError('Method {spike_method} not implemented.'.format(**key))
+        print('Done', flush=True)
 
 
 @schema
