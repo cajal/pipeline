@@ -7,17 +7,19 @@ preprocess.Spikes (computed) # infer spikes from calcium traces
 
 
 classdef Spikes < dj.Relvar & dj.AutoPopulate
+    
+    properties
+        % NMF spikes (method 5) can be copied via MATLAB, STM spike detection is performed in Python
+        popRel = preprocess.ComputeTraces*preprocess.SpikeMethod  & preprocess.ExtractRawSpikeRate & 'language="matlab"';
+    end
+    
+    methods(Access=protected)
+        
+        function makeTuples(self, key)
+            
+            self.insert(key)
+            makeTuples(preprocess.SpikesRateTrace, key)
 
-	properties
-		popRel = preprocess.ComputeTraces*preprocess.SpikeMethod  % !!! update the populate relation
-	end
-
-	methods(Access=protected)
-
-		function makeTuples(self, key)
-		%!!! compute missing fields for key here
-			self.insert(key)
-		end
-	end
-
+        end
+    end
 end

@@ -238,10 +238,10 @@ def migrate():
 
     # copy MovieClip and MovieStill
     Movie().insert(psy.MovieInfo() - Movie())
-    Movie.Clip().insert(psy.MovieClipStore() - MovieClip())
-    Movie.Still().insert(psy.MovieStill() - MovieStill())
-    MovieClipCond().insert((psy.MovieClipCond() - MovieClipCond) & Condition())
-    MovieStillCond().insert((psy.MovieStillCond() - MovieStillCond) & Condition())
+    Movie.Clip().insert(psy.MovieClipStore() - Movie.Clip())
+    Movie.Still().insert(psy.MovieStill() - Movie.Still())
+    MovieClipCond().insert((psy.MovieClipCond() - MovieClipCond()) & Condition())
+    MovieStillCond().insert((psy.MovieStillCond() - MovieStillCond()) & Condition())
     MovieClipCond().insert(
         psy.MadMax().proj('clip_number', 'cut_after', movie_name="'MadMax'") & Condition() - MovieClipCond())
     MovieSeqCond().insert(psy.MovieSeqCond() & Condition())

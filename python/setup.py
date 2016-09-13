@@ -18,7 +18,7 @@ setup(
     url='https://github.com/cajal/pipeline',
     keywords='neuroscientific data processing',
     packages=find_packages(exclude=['contrib', 'docs', 'tests*']),
-    install_requires=['numpy','sh','matplotlib','pandas','seaborn','scipy'],
+    install_requires=['numpy','sh','matplotlib','pandas','seaborn','scipy','imageio','pyfnnd'],
     classifiers=[
         'Development Status :: 1 - Beta',
         'Intended Audience :: Science/Research',

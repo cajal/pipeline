@@ -1,18 +1,26 @@
 """
 Analysis of visual tuning: receptive fields, tuning curves, pixelwise maps
 """
-
+from collections import defaultdict
 import numpy as np
 from scipy.interpolate import interp1d
 from scipy.signal import convolve
+import io
+import imageio
 
 import datajoint as dj
 from . import preprocess, vis   # needed for foreign keys
 
 from distutils.version import StrictVersion
-assert StrictVersion(dj.__version__) >= StrictVersion('0.2.8')
+assert StrictVersion(dj.__version__) >= StrictVersion('0.3.8')
 
 schema = dj.schema('pipeline_tuning', locals())
+
+
+def hamming(half, dim):
+    """ normalized hamming kernel """
+    k = np.hamming(np.floor(half) * 2 + 1)
+    return k.reshape([1] * dim + [k.size]) / k.sum()
 
 
 @schema
@@ -90,26 +98,45 @@ class Cos2Map(dj.Computed):
 
 
 @schema
-class MonetRF(dj.Computed):
+class RFMethod(dj.Lookup):
+    definition = """
+    rf_method :  tinyint    #   rf computation method
+    ----
+    rf_method_description :  varchar(255)
+    """
+    contents = [
+        (1, 'STA')
+    ]
+
+
+@schema
+class RF(dj.Computed):
     definition = """  # spike-triggered average of receptive fields
     -> preprocess.Sync
     -> preprocess.Spikes
+    -> RFMethod
+    stim_subset          :  varchar(12)    #  stimulus subset
     ---
-    nbins              : smallint                      # temporal bins
-    bin_size           : float                         # (ms) temporal bin size
-    degrees_x          : float                         # degrees along x
-    degrees_y          : float                         # degrees along y
-    stim_duration      : float                         # (s) total stimulus duration
+    nbins                : smallint                     # temporal bins
+    bin_size             : float                        # (ms) temporal bin size
+    degrees_x            : float                        # degrees along x
+    degrees_y            : float                        # degrees along y
+    stim_duration        : float                        # (s) total stimulus duration
     """
 
-    key_source = preprocess.Spikes() * preprocess.Sync() & vis.Monet()
+    @property
+    def key_source(self):
+        return preprocess.Spikes() * RFMethod() & (
+            preprocess.Sync() * vis.Trial() & 'trial_idx between first_trial and last_trial' & dj.OrList((
+                vis.Monet(), vis.MovieClipCond(), vis.Trippy(), vis.MovieStillCond(), vis.MovieSeqCond())))
 
     class Map(dj.Part):
-        definition = """   #
-        -> MonetRF
+        definition = """   # spatiotemporal receptive field map
+        -> RF
         -> preprocess.Spikes.RateTrace
         ---
-        map : longblob
+        scale : float       # receptive field scale
+        map   : longblob    # int8 data map scaled by scale
         """
 
         def save(self, path="."):
@@ -120,27 +147,24 @@ class MonetRF(dj.Computed):
             from matplotlib.image import imsave
             from matplotlib import pyplot as plt
             cmap = plt.get_cmap('seismic')
+            range = 8.0
             for key in self.fetch.keys():
-                data = (MonetRF.Map() & key).fetch1['map']
-                scale = 1.5
+                data, scale = (RF.Map() & key).fetch1['map', 'scale']
+                data = np.float64(data)*scale/127
                 frame = 1
                 filename = os.path.join(
                     os.path.expanduser(path),
-                    '{animal_id:05d}_{session}_scan{scan_idx:02d}_method{extract_method}'
-                    '-{spike_method}_{trace_id:03d}-{frame}.png'.format(frame=frame, **key))
+                    '{animal_id:05d}_{session}_scan{scan_idx:02d}_{trace_id:03d}-meth{extract_method}'
+                    '-{spike_method}_{frame}-{stim_subset}-{rf_method}.png'.format(frame=frame, **key))
                 print(filename)
-                imsave(filename, cmap(data[:, :, frame]/scale+0.5))
+                imsave(filename, cmap(data[:, :, frame]/range+0.5))
 
     def _make_tuples(self, key):
 
-        def hamming(half, dim):
-            """ normalized hamming kernel """
-            k = np.hamming(np.floor(half)*2+1)
-            return k.reshape([1]*dim+[k.size])/k.sum()
-
         # enter basic information about the RF Map
-        nbins = 6
-        bin_size = 0.1     # s
+        print('Populating', key)
+        nbins = 3
+        bin_size = 0.15     # s
         [x, y, distance, diagonal] = (preprocess.Sync() * vis.Session() & key).fetch1[
             'resolution_x', 'resolution_y', 'monitor_distance', 'monitor_size']
         cm_per_inch = 2.54
@@ -150,80 +174,96 @@ class MonetRF(dj.Computed):
 
         # fetch traces and their slices (for galvo scans)
         trace_time = (preprocess.Sync() & key).fetch1['frame_times'].squeeze()  # calcium scan frame times
-        traces, slices, trace_keys = (
-            preprocess.Spikes.RateTrace() * preprocess.ExtractRaw.GalvoROI() &
-            key).fetch['rate_trace', 'slice', dj.key]
+        traces, trace_keys = (preprocess.Spikes.RateTrace() & key).fetch['rate_trace', dj.key]
         n_slices = (preprocess.Prepare.Galvo() & key).fetch1['nslices']
         trace_time = trace_time[:n_slices*traces[0].size]  # truncate if interrupted scan
         assert n_slices*traces[0].size == trace_time.size, 'trace times must be a multiple of n_slices'
-        slice_interval = (trace_time[1:]-trace_time[:-1]).mean()
-        frame_interval = slice_interval*n_slices
-        maps = [0]*len(traces)
+        frame_interval = (trace_time[1:]-trace_time[:-1]).mean()*n_slices
 
         # interpolate traces on times of the first slice, smoothed for bin_size
         traces = interp1d(trace_time[::n_slices], convolve(
                             np.stack(trace.flatten() for trace in traces),
                             hamming(bin_size/frame_interval, 1), 'same'))
 
-        n_trials = 0
-        stim_duration = 0.0
-        for trial_key in (preprocess.Sync() * vis.Trial() * vis.Condition() &
-                          'trial_idx between first_trial and last_trial' &
-                          vis.Monet() & key).fetch.order_by('trial_idx').keys():
-            print('Trial %d:' % trial_key['trial_idx'], flush=True, end='')
-            n_trials += 1
+        # enumerate all the stimulus types:
+        stimuli = dict(
+            monet=vis.Monet(),
+            trippy=vis.Trippy(),
+            clips=vis.MovieClipCond(),
+            stills=dj.OrList((vis.MovieStillCond(), vis.MovieSeqCond())))
 
-            # get the movie and scale to [-1, +1]
-            movie_times = (vis.Trial() & trial_key).fetch1['flip_times'].flatten()
-            stim_duration += movie_times[-1] - movie_times[0]
-            movie = (vis.Monet() * vis.MonetLookup() & trial_key).fetch1['cached_movie']
-            movie = (np.float32(movie) - 127.5) / 126.5
+        for stim_subset, condition_table in stimuli.items():
+            if stim_subset not in ['monet', 'clips']:
+                continue
+            n_trials = 0
+            trials = (preprocess.Sync() * vis.Trial() * vis.Condition() &
+                      'trial_idx between first_trial and last_trial' & condition_table & key)
+            maps = 0
+            trace_norm = 0
+            stim_duration = 0
+            if stim_subset == 'clips':
+                counts = dict(dj.U('clip_number').aggregate(trials * vis.MovieClipCond(), n='count(*)').fetch())
+            elif stim_subset == 'monet':
+                counts = dict(dj.U('rng_seed').aggregate(trials * vis.Monet(), n='count(*)').fetch())
+            for trial_key in trials.fetch.order_by('trial_idx').keys():
+                if not n_trials:
+                    print('Found some %s trials' % stim_subset)
+                print('%d' % trial_key['trial_idx'], flush=True, end=' ')
+                n_trials += 1
+                movie_times = (vis.Trial() & trial_key).fetch1['flip_times'].flatten()
+                stim_duration += movie_times[-1] - movie_times[0]
+                if stim_subset == 'monet':
+                    movie, cond = (vis.Monet() * vis.MonetLookup() & trial_key).fetch1['cached_movie', 'rng_seed']
+                    movie = (np.float32(movie) - 127.5) / 126.5    # rescale to [-1, +1]
+                elif stim_subset == 'clips':
+                    movie, cond = (vis.MovieClipCond() * vis.Movie.Clip() & trial_key).fetch1['clip', 'clip_number']
+                    movie = imageio.get_reader(io.BytesIO(movie.tobytes()), 'ffmpeg')
+                    movie = np.stack((np.float64(frame).mean(axis=2)*2/255-1
+                                      for t, frame in zip(movie_times, movie.iter_data())), axis=2)
+                    movie -= movie.mean(axis=2, keepdims=True)
+                    assert movie.shape[2] == movie_times.size
+                else:
+                    raise NotImplementedError
 
-            # rebin the movie to bin_size.  Reverse time for convoluion.
-            fps = 1 / (movie_times[1:] - movie_times[:-1]).mean()
-            start_time = movie_times[0] + bin_size / 2
-            movie = interp1d(
-                movie_times, convolve(
-                    movie, hamming(bin_size*fps, 2), 'same'))(np.r_[movie_times[-1]:start_time:-bin_size])
+                # rebin the movie to bin_size.  Reverse time for convoluion.
+                fps = 1 / np.diff(movie_times).mean()
+                start_time = movie_times[0] + bin_size / 2
+                movie = convolve(movie, hamming(bin_size*fps, 2), 'same')
+                movie = interp1d(movie_times, movie)
+                movie = movie(np.r_[start_time:movie_times[-1]:bin_size])
+                # compute STA map update
+                snippets = traces(np.r_[start_time+bin_size*(nbins-1):movie_times[-1]:bin_size])/counts[cond]
+                maps += np.stack((
+                    np.einsum('ij,klj', snippets, movie[:, :, rf_bin:rf_bin+snippets.shape[1]])
+                    for rf_bin in range(nbins)), 3)
+                trace_norm += ((snippets - snippets.mean(axis=1, keepdims=True)) ** 2).sum(axis=1)
 
-            # compute the maps with appropriate slice times
-            prev_slice_index = -1
-            for trace_index, slice_index in enumerate(slices):
-                if prev_slice_index != slice_index:
-                    print()
-                    print('[Slice %d]' % slice_index, end='')
-                    snippets = traces(np.r_[start_time+bin_size*(nbins-1):movie_times[-1]:bin_size] -
-                                      slice_index*slice_interval)
-                    prev_slice_index = slice_index
-                print(end='.', flush=True)
-                snippet = snippets[trace_index]
-                maps[trace_index] += convolve(
-                    movie,
-                    snippet.reshape((1, 1, snippet.size))/np.linalg.norm(snippet),
-                    mode='valid')
-            print()
-        # submit data
-        self.insert1(dict(key,
-                          degrees_x=degrees_x,
-                          degrees_y=degrees_y,
-                          nbins=nbins,
-                          bin_size=bin_size * 1000,
-                          stim_duration=stim_duration))
-        MonetRF.Map().insert(
-            (dict(trace_key, map=np.float32(m/n_trials)) for trace_key, m in zip(trace_keys, maps)),
-            ignore_extra_fields=True)
+            if n_trials:
+                # submit data
+                key['stim_subset'] = stim_subset
+                self.insert1(dict(key,
+                                  degrees_x=degrees_x,
+                                  degrees_y=degrees_y,
+                                  nbins=nbins,
+                                  bin_size=bin_size * 1000,
+                                  stim_duration=stim_duration))
+                RF.Map().insert((dict(trace_key, **key,
+                                      map=np.int8(127*m/np.max(abs(m))),
+                                      scale=np.max(abs(m))/np.sqrt(n))
+                                 for trace_key, m, n in zip(trace_keys, maps, trace_norm)),
+                                ignore_extra_fields=True)
         print('Done')
 
 
 @schema
-class MonetCleanRF(dj.Computed):
+class CleanRF(dj.Computed):
     definition = """  # RF maps with common components removed
-    -> MonetRF.Map
+    -> RF.Map
     ---
     clean_map  :  longblob
     """
 
-    key_source = MonetRF() & MonetRF.Map()
+    key_source = RF() & RF.Map()
 
     def save(self, path="."):
         """
@@ -234,7 +274,7 @@ class MonetCleanRF(dj.Computed):
         from matplotlib import pyplot as plt
         cmap = plt.get_cmap('seismic')
         for key in self.fetch.keys():
-            data = (MonetCleanRF() & key).fetch1['clean_map']
+            data = (CleanRF() & key).fetch1['clean_map']
             scale = 1.5
             frame = 1
             filename = os.path.join(
@@ -245,7 +285,7 @@ class MonetCleanRF(dj.Computed):
             imsave(filename, cmap(data[:, :, frame] / scale + 0.5))
 
     def _make_tuples(self, key):
-        maps, keys = (MonetRF.Map() & key).fetch['map', dj.key]
+        maps, keys = (RF.Map() & key).fetch['map', dj.key]
         # subtract the first view principal components if their projections have the same sign
         n_components = 5
         shape = maps[0].shape
@@ -279,7 +319,7 @@ class DirectionalResponse(dj.Computed):
     def _make_tuples(self, key):
         print('Directional response for ', key)
         traces, slices, trace_keys = (
-            preprocess.Spikes.RateTrace() * preprocess.ExtractRaw.GalvoROI() &
+            preprocess.Spikes.RateTrace() * preprocess.Slice() & preprocess.ExtractRaw.GalvoROI() &
             key).fetch['rate_trace', 'slice', dj.key]
         traces = np.float64(np.stack(t.flatten() for t in traces))
 
