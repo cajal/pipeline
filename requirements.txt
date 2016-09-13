@@ -5,4 +5,5 @@ matplotlib
 seaborn
 sklearn
 h5py
+pyfnnd
 sh
