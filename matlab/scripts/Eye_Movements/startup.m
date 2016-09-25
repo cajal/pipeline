@@ -23,3 +23,4 @@ addpath(genpath([drive filesep 'home' filesep 'atlab' filesep 'pipeline' filesep
 run([drive filesep 'home' filesep 'atlab' filesep 'pipeline' filesep 'mym' filesep 'mymSetup']);
 run([drive filesep 'home' filesep 'atlab' filesep 'pipeline' filesep 'cvx' filesep 'cvx_startup']);
 run([drive filesep 'home' filesep 'atlab' filesep 'pipeline' filesep 'hdf5matlab' filesep 'setPath']);
+userscript

@@ -1,0 +1,19 @@
+# comment the line below if gui not needed
+# sudo xhost +local:docker
+
+# name of container
+CONTAINER='at-docker:5000/matlabpipeline_eyeposcluster'
+
+# MUST USE THIS MAC ADDRESS!
+# Matlab license wouldn't work otherwise
+MAC_ADDRESS='00:01:02:03:04:05'
+
+# prepend -r if any argument present
+ARGS=''
+if [ "$#" -gt 0 ]
+then
+  ARGS="-r $@"
+fi
+
+# run the container
+sudo docker run -it --mac-address=$MAC_ADDRESS -e DISPLAY=$DISPLAY -e UID=$UID -e XAUTHORITY=$XAUTHORITY -e XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR -v /tmp/.X11-unix:/tmp/.X11-unix:ro  -v /mnt/lab:/mnt/lab -v /mnt/stor01:/mnt/stor01 -v /mnt/stor02:/mnt/stor02 -v /mnt/stor03:/mnt/stor03 -v /mnt/scratch01:/mnt/scratch01 -v /mnt/scratch02:/mnt/scratch02 -v /mnt/scratch03:/mnt/scratch03 $CONTAINER $ARGS
