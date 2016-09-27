@@ -33,7 +33,7 @@ classdef MonetRF < dj.Relvar & dj.AutoPopulate
             if lenDif<nslices && lenDif>0 % aborted scans can give rise to unequal ca traces!
                 warning('Unequal vectors, equilizing caTimes...')
                 caTimes = caTimes(1:end-lenDif);
-            else
+            elseif abs(lenDif)>=nslices
                 error('Ca traces & stimulus vector significantly different!');
             end
             X = @(t) interp1(caTimes-caTimes(1), X, t, 'linear', nan);  % traces indexed by time
