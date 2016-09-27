@@ -52,7 +52,7 @@ def main(argv):
             t = np.random.randint(args.t_min, args.t_max)
             print('Going to sleeping for', t, 'seconds')
             time.sleep()
-            
+
     return 0
 
 
