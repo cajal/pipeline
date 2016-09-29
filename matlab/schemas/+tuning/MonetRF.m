@@ -89,7 +89,7 @@ classdef MonetRF < dj.Relvar & dj.AutoPopulate
             self.insert(tuple)
             
             for itrace = 1:ntraces
-                tuple = dj.struct.join(key, traceKeys(itrace));
+                tuple = dj.struct.join(key, rmfield(traceKeys(itrace),'slice'));
                 tuple.map = single(maps(:,:,:,itrace));
                 makeTuples(tuning.MonetRFMap,tuple)
             end
