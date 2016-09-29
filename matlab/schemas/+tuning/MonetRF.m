@@ -72,9 +72,11 @@ classdef MonetRF < dj.Relvar & dj.AutoPopulate
                     update = conv2(movie, snippet(:,itrace)', 'valid')';
                     update = interp1((0:size(update,1)-1)/fps, update, (0:nbins-1)*bin_width);  % resample 
                     update = reshape(update', sz(1), sz(2), nbins);
+                    if any(isnan(update(:)));fprintf('nan values for trial # %d, skipping...',trial.trial_idx);break;end
                     maps(:,:,:,itrace) = maps(:,:,:,itrace) + update;
                 end
             end
+            
             fprintf \n
             disp 'inserting...'
             
