@@ -24,18 +24,14 @@ classdef MonetRF < dj.Relvar & dj.AutoPopulate
             bin_width = 0.1;  %(s)
             
             disp 'loading traces...'
-            caTimes = fetch1(preprocess.Sync & key, 'frame_times');
-            nslices = fetch1(preprocess.PrepareGalvo & key, 'nslices');
-            caTimes = caTimes(1:nslices:end);
-            [X, traceKeys] = fetchn(preprocess.SpikesRateTrace & key, 'rate_trace');
-            X = [X{:}];
-            lenDif = length(caTimes)-size(X,1);
-            if lenDif<nslices && lenDif>0 % aborted scans can give rise to unequal ca traces!
-                warning('Unequal vectors, equilizing caTimes...')
-                caTimes = caTimes(1:end-lenDif);
-            elseif abs(lenDif)>=nslices
-                error('Ca traces & stimulus vector significantly different!');
-            end
+            [X, caTimes, traceKeys] = pipetools.getAdjustedSpikes(key);
+%             lenDif = length(caTimes)-size(X,1);
+%             if lenDif<nslices && lenDif>0 % aborted scans can give rise to unequal ca traces!
+%                 warning('Unequal vectors, equilizing caTimes...')
+%                 caTimes = caTimes(1:end-lenDif);
+%             elseif abs(lenDif)>=nslices
+%                 error('Ca traces & stimulus vector significantly different!');
+%             end
             X = @(t) interp1(caTimes-caTimes(1), X, t, 'linear', nan);  % traces indexed by time
             ntraces = length(traceKeys);
             
