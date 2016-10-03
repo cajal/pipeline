@@ -17,6 +17,7 @@ classdef StackMotion < dj.Relvar & dj.AutoPopulate
             
             
             startTime = tic;
+            tic;
             
             %% load and init
             fprintf('Loading stack...');
