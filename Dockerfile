@@ -72,7 +72,6 @@ RUN \
 RUN \
   pip3 install git+https://github.com/cajal/c2s.git
 
-
 # Install pipeline
 COPY . /data/pipeline
 RUN \
