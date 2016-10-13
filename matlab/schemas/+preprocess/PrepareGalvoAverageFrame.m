@@ -53,7 +53,7 @@ classdef PrepareGalvoAverageFrame < dj.Relvar
                             [path, fname, ending] = fileparts(getLocalPath(reader.files{fileidx}));
                             name = fullfile(path,'mrc',sprintf('%s%s',fname,ending));  
                             fprintf('Writing file %s', name);
-                            saveastiff(data,name)
+                            pipetools.saveastiff(data,name)
                             data = zeros(imw,imh,fpf(fileidx),'uint16');
                             fileidx = fileidx+1;
                             frameidx = 0;
