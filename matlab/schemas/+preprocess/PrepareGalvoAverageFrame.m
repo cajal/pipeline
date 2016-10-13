@@ -23,7 +23,7 @@ classdef PrepareGalvoAverageFrame < dj.Relvar
             fixRaster = get_fix_raster_fun(preprocess.PrepareGalvo & key);
             frameidx = 1;
             fileidx = 1;
-            [path, fname, ending] = fileparts(movie.files{fileidx});
+            [path, fname, ending] = fileparts(getLocalPath(movie.files{fileidx}));
             name = fullfile(path,sprintf('%s%s%s',fname,'_fixed',ending));
             tic
             for iframe = 1:nframes
@@ -35,7 +35,7 @@ classdef PrepareGalvoAverageFrame < dj.Relvar
                         if frameidx>fpf(fileidx)
                             frameidx = 1;
                             fileidx = fileidx+1;
-                            [path, fname, ending] = fileparts(movie.files{fileidx});
+                            [path, fname, ending] = fileparts(getLocalPath(movie.files{fileidx}));
                             name = fullfile(path,sprintf('%s%s%s',fname,'_fixed',ending));
                             imwrite(frame,name)
                         else
