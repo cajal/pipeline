@@ -43,6 +43,18 @@ class RFMethod(dj.Lookup):
         (3, 'clips', 'backprop')]
 
 
+def spike_triggered_avg(snippets, movie, nbins):
+    """
+    spatiotemporal spike-triggered-average
+    :param snippets: traces ndarray of shape (n, t) where n is the trace number and t is time index
+    :param movie: ndarray of shape (y, x, t)
+    :param nbins: number of temporal bins in the STA.
+    :return: ndarray of shape (n, y, x, nbins)
+    """
+    return np.stack((np.tensordot(snippets, movie[:, :, rf_bin:rf_bin + snippets.shape[1]], axes=(1, 2))
+                     for rf_bin in reversed(range(nbins))), 3)
+
+
 @schema
 class RF(dj.Computed):
     definition = """  # spike-triggered average of receptive fields
@@ -92,19 +104,6 @@ class RF(dj.Computed):
                     imsave(filename, cmap(data[:, :, frame]/crange+0.5))
 
     @staticmethod
-    def spike_triggered_avg(snippets, movie, nbins):
-        """
-        spatiotemporal spike-triggered-average
-        :param snippets: traces ndarray of shape (n, t) where n is the trace number and t is time index
-        :param movie: ndarray of shape (y, x, t)
-        :param nbins: number of temporal bins in the STA.
-        :return: ndarray of shape (n, y, x, nbins)
-        """
-        return np.stack((
-            np.tensordot(snippets, movie[:, :, rf_bin:rf_bin + snippets.shape[1]], axes=(1, 2))
-            for rf_bin in reversed(range(nbins))), 3)
-
-    @staticmethod
     def predict_traces(movie, maps):
         """
         :param movie: ndarray of shape (y, x, t)
@@ -112,12 +111,9 @@ class RF(dj.Computed):
         :return: traces ndarray of shape (n, t)
         """
         nbins = maps.shape[-1]
-        traces = 0
-        for tau in range(nbins):
-            traces += np.tensordot(
-                maps[:, :, :, nbins-tau-1], movie, axes=((1, 2), (0, 1))
-            )[:, tau:movie.shape[2]+tau-nbins+1]
-        return traces
+        return sum(
+            np.tensordot(maps[:, :, :, nbins-tau-1], movie, axes=((1, 2), (0, 1)))[:, tau:movie.shape[2]+tau-nbins+1]
+            for tau in range(nbins))
 
     @staticmethod
     def soft_thresh(maps, lam, mu):
@@ -160,6 +156,7 @@ class RF(dj.Computed):
             return
 
         # fetch traces and their slices (for galvo scans)
+        print('fetching traces...', flush=True)
         trace_time = (preprocess.Sync() & key).fetch1['frame_times'].squeeze()  # calcium scan frame times
         traces, trace_keys = (
             preprocess.Spikes.RateTrace() & key).fetch['rate_trace', dj.key]
@@ -207,7 +204,7 @@ class RF(dj.Computed):
             snippets = traces(np.r_[start_time + bin_size * (nbins - 1):movie_times[-1]:bin_size])
             trace_norm += ((snippets - snippets.mean(axis=1, keepdims=True)) ** 2
                            / number_of_repeats[cond]).sum(axis=1)
-            maps += RF.spike_triggered_avg(snippets, movie, nbins)
+            maps += spike_triggered_avg(snippets, movie, nbins)
         del traces
         del snippets
 
@@ -223,7 +220,7 @@ class RF(dj.Computed):
                     print(end='.', flush=True)
                     movie = cache[trial_key['trial_idx']]
                     predicted_traces = RF.predict_traces(movie, maps)
-                    predicted_sta += RF.spike_triggered_avg(predicted_traces, movie, nbins)
+                    predicted_sta += spike_triggered_avg(predicted_traces, movie, nbins)
                 predicted_sta /= np.sqrt(
                     (predicted_sta**2).sum(axis=(1, 2, 3), keepdims=True) /
                     (sta**2).sum(axis=(1, 2, 3), keepdims=True))
