@@ -49,7 +49,9 @@ classdef MonetCleanRF < dj.Relvar & dj.AutoPopulate
                 total_frames = total_frames + length(trial.flip_times);
                 fps = 1/median(diff(trial.flip_times));
                 t = trial.flip_times(ceil(nbins*bin_width*fps):end) - caTimes(1);
-                vars = vars + sum(X(t).^2);
+                s = sum(X(t).^2);
+                if any(isnan(s(:)));fprintf('nan values for trial # %d, skipping...',trial.trial_idx);break;end
+                vars = vars + s;
             end
             vars = vars/total_frames;
             nsigmas = norminv(1e-5/2);  % inverse of movie contrast expressed in standard deviations.  This is derived from the fact that the movie was clipped to 1-1e-5 qauntile
