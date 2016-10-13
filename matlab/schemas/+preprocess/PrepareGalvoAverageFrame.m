@@ -25,10 +25,12 @@ classdef PrepareGalvoAverageFrame < dj.Relvar
             frameidx = 1;
             fileidx = 1;
             [path, fname, ending] = fileparts(getLocalPath(reader.files{fileidx}));
-            name = fullfile(path,sprintf('%s%s%s',fname,'_fixed',ending));
+            name = fullfile(path,'mrc',sprintf('%s%s%s',fname,ending));
             tic
             
-            if ~isdir(fullfile(path,'mrc'));mkdir mrc;end
+            if ~isdir(fullfile(getLocalPath(path),'mrc'))
+                mkdir(getLocalPath(fullfile(path,mrc)))
+            end
             
             for iframe = 1:nframes
                 for islice = 1:nslices
