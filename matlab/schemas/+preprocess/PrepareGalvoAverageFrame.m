@@ -12,10 +12,11 @@ classdef PrepareGalvoAverageFrame < dj.Relvar
         function saveTiffStack(self, key)
             
             % get movie
-            movie = preprocess.getGalvoReader(key);
-            
+            reader = preprocess.getGalvoReader(key);
+            movie = reader(:,:,:,:,:);
+             
             % get info
-            fpf = movie.frames_per_file;
+            fpf = reader.frames_per_file;
             [nframes, nslices, nchannels] = fetch1(preprocess.PrepareGalvo & key, ...
                 'nframes', 'nslices', 'nchannels');
             
@@ -23,9 +24,12 @@ classdef PrepareGalvoAverageFrame < dj.Relvar
             fixRaster = get_fix_raster_fun(preprocess.PrepareGalvo & key);
             frameidx = 1;
             fileidx = 1;
-            [path, fname, ending] = fileparts(getLocalPath(movie.files{fileidx}));
+            [path, fname, ending] = fileparts(getLocalPath(reader.files{fileidx}));
             name = fullfile(path,sprintf('%s%s%s',fname,'_fixed',ending));
             tic
+            
+            if ~isdir(fullfile(path,'mrc'));mkdir mrc;end
+            
             for iframe = 1:nframes
                 for islice = 1:nslices
                     key.slice = islice;
@@ -35,14 +39,13 @@ classdef PrepareGalvoAverageFrame < dj.Relvar
                         if frameidx>fpf(fileidx)
                             frameidx = 1;
                             fileidx = fileidx+1;
-                            [path, fname, ending] = fileparts(getLocalPath(movie.files{fileidx}));
-                            name = fullfile(path,sprintf('%s%s%s',fname,'_fixed',ending));
+                            [path, fname, ending] = fileparts(getLocalPath(reader.files{fileidx}));
+                            name = fullfile(path,'mrc',sprintf('%s%s%s',fname,ending));
                             imwrite(frame,name)
                         else
                             frameidx = frameidx+1;
                             imwrite(frame,name, 'writemode', 'append');
                         end
-                       
                     end
                 end
                  
