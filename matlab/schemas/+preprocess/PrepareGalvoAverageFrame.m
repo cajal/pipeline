@@ -13,44 +13,54 @@ classdef PrepareGalvoAverageFrame < dj.Relvar
             
             % get movie
             reader = preprocess.getGalvoReader(key);
-            movie = reader(:,:,:,:,:);
-             
+            movie = reader;
+            %movie = reader(:,:,:,:,:);
+            
             % get info
             fpf = reader.frames_per_file;
-            [nframes, nslices, nchannels] = fetch1(preprocess.PrepareGalvo & key, ...
-                'nframes', 'nslices', 'nchannels');
+            [nframes, nslices, nchannels,imw,imh] = fetch1(preprocess.PrepareGalvo & key, ...
+                'nframes', 'nslices', 'nchannels','px_width','px_height');
             
-            % save
+            % get functions
             fixRaster = get_fix_raster_fun(preprocess.PrepareGalvo & key);
-            frameidx = 1;
-            fileidx = 1;
-            [path, fname, ending] = fileparts(getLocalPath(reader.files{fileidx}));
-            name = fullfile(path,'mrc',sprintf('%s%s%s',fname,ending));
-            tic
-            
-            if ~isdir(fullfile(getLocalPath(path),'mrc'))
-                mkdir(getLocalPath(fullfile(path,mrc)))
+            for islice = 1:nslices
+                key.slice = islice;
+                fixMotion{islice} = get_fix_motion_fun(preprocess.PrepareGalvoMotion & key);
             end
             
+            % initialize
+            frameidx = 0; fileidx = 1;
+            data = zeros(imw,imh,fpf(fileidx),'uint16');
+              
+            % make export directory
+            [path, fname, ending] = fileparts(getLocalPath(reader.files{fileidx}));
+            if ~isdir(fullfile(getLocalPath(path),'mrc'))
+                mkdir(getLocalPath(fullfile(path,'mrc')))
+            end
+            
+            % set tiff params
+            options.append = true;
+                  
+            % save
+            tic
             for iframe = 1:nframes
                 for islice = 1:nslices
-                    key.slice = islice;
-                    fixMotion = get_fix_motion_fun(preprocess.PrepareGalvoMotion & key);
                     for ichannel = 1:nchannels
-                        frame = fixMotion(fixRaster(movie(:,:,ichannel, islice, iframe)), iframe);
-                        if frameidx>fpf(fileidx)
-                            frameidx = 1;
-                            fileidx = fileidx+1;
+                        frameidx = frameidx+1;
+                        data(:,:,frameidx) = uint16(fixMotion{islice}(fixRaster(movie(:,:,ichannel, islice, iframe)), iframe));
+                                               
+                        if frameidx == fpf(fileidx)
                             [path, fname, ending] = fileparts(getLocalPath(reader.files{fileidx}));
-                            name = fullfile(path,'mrc',sprintf('%s%s%s',fname,ending));
-                            imwrite(frame,name)
-                        else
-                            frameidx = frameidx+1;
-                            imwrite(frame,name, 'writemode', 'append');
+                            name = fullfile(path,'mrc',sprintf('%s%s',fname,ending));  
+                            fprintf('Writing file %s', name);
+                            saveastiff(data,name)
+                            data = zeros(imw,imh,fpf(fileidx),'uint16');
+                            fileidx = fileidx+1;
+                            frameidx = 0;
                         end
                     end
                 end
-                 
+                
                 if ismember(iframe,[1 10 100 500 1000 5000 nframes]) || mod(iframe,10000)==0
                     fprintf('Frame %5d/%d  %4.1fs\n', iframe, nframes, toc);
                 end
