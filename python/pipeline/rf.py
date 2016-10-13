@@ -43,18 +43,6 @@ class RFMethod(dj.Lookup):
         (3, 'clips', 'backprop')]
 
 
-def spike_triggered_avg(snippets, movie, nbins):
-    """
-    spatiotemporal spike-triggered-average
-    :param snippets: traces ndarray of shape (n, t) where n is the trace number and t is time index
-    :param movie: ndarray of shape (y, x, t)
-    :param nbins: number of temporal bins in the STA.
-    :return: ndarray of shape (n, y, x, nbins)
-    """
-    return np.stack((np.tensordot(snippets, movie[:, :, rf_bin:rf_bin + snippets.shape[1]], axes=(1, 2))
-                     for rf_bin in reversed(range(nbins))), 3)
-
-
 @schema
 class RF(dj.Computed):
     definition = """  # spike-triggered average of receptive fields
@@ -102,6 +90,18 @@ class RF(dj.Computed):
                         '-{spike_method}-{rf_method}_{frame}.png'.format(frame=frame, **key))
                     print(filename)
                     imsave(filename, cmap(data[:, :, frame]/crange+0.5))
+
+    @staticmethod
+    def spike_triggered_avg(snippets, movie, nbins):
+        """
+        spatiotemporal spike-triggered-average
+        :param snippets: traces ndarray of shape (n, t) where n is the trace number and t is time index
+        :param movie: ndarray of shape (y, x, t)
+        :param nbins: number of temporal bins in the STA.
+        :return: ndarray of shape (n, y, x, nbins)
+        """
+        return np.stack((np.tensordot(snippets, movie[:, :, rf_bin:rf_bin + snippets.shape[1]], axes=(1, 2))
+                         for rf_bin in reversed(range(nbins))), 3)
 
     @staticmethod
     def predict_traces(movie, maps):
@@ -204,14 +204,14 @@ class RF(dj.Computed):
             snippets = traces(np.r_[start_time + bin_size * (nbins - 1):movie_times[-1]:bin_size])
             trace_norm += ((snippets - snippets.mean(axis=1, keepdims=True)) ** 2
                            / number_of_repeats[cond]).sum(axis=1)
-            maps += spike_triggered_avg(snippets, movie, nbins)
+            maps += RF.spike_triggered_avg(snippets, movie, nbins)
         del traces
         del snippets
 
         if algorithm == 'backprop':
             sta = maps
-            iterations = 8
-            beta = 0.6
+            iterations = 15
+            beta = 0.4
             maps = beta*RF.soft_thresh(sta, lam=0.5, mu=0.05)
             print()
             for iteration in range(iterations):
@@ -220,11 +220,11 @@ class RF(dj.Computed):
                     print(end='.', flush=True)
                     movie = cache[trial_key['trial_idx']]
                     predicted_traces = RF.predict_traces(movie, maps)
-                    predicted_sta += spike_triggered_avg(predicted_traces, movie, nbins)
-                predicted_sta /= np.sqrt(
+                    predicted_sta += RF.spike_triggered_avg(predicted_traces, movie, nbins)
+                predicted_sta /= np.maximum(1, np.sqrt(
                     (predicted_sta**2).sum(axis=(1, 2, 3), keepdims=True) /
-                    (sta**2).sum(axis=(1, 2, 3), keepdims=True))
-                maps = RF.soft_thresh(maps + beta*(sta - predicted_sta), lam=beta*0.1, mu=beta*0.05)
+                    (sta**2).sum(axis=(1, 2, 3), keepdims=True)))
+                maps = RF.soft_thresh(maps + beta*(sta - predicted_sta), lam=beta*0.5, mu=beta*0.05)
                 print('iteration', iteration, flush=True)
 
         # submit data        print('\ninserting...', end=' ', flush=True)
