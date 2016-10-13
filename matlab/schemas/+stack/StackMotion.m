@@ -15,8 +15,7 @@ classdef StackMotion < dj.Relvar & dj.AutoPopulate
     methods(Access=protected)
         function makeTuples(self, key)
             
-            
-            startTime = tic;
+            tic;
             
             %% load and init
             fprintf('Loading stack...');
