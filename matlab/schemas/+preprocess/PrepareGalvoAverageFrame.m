@@ -8,7 +8,47 @@ frame                       : longblob                      # average frame ater
 
 
 classdef PrepareGalvoAverageFrame < dj.Relvar
-	methods
+    methods
+        function saveTiffStack(self, key)
+            
+            % get movie
+            movie = preprocess.getGalvoReader(key);
+            
+            % get info
+            fpf = movie.frames_per_file;
+            [nframes, nslices, nchannels] = fetch1(preprocess.PrepareGalvo & key, ...
+                'nframes', 'nslices', 'nchannels');
+            
+            % save
+            fixRaster = get_fix_raster_fun(preprocess.PrepareGalvo & key);
+            frameidx = 1;
+            fileidx = 1;
+            [path, fname, ending] = fileparts(movie.files{fileidx});
+            for iframe = 1:nframes
+                tic
+                for islice = 1:nslices
+                    key.slice = islice;
+                    fixMotion = get_fix_motion_fun(preprocess.PrepareGalvoMotion & key);
+                    for ichannel = 1:nchannels
+                        frame = fixMotion(fixRaster(movie(:,:,ichannel, islice, iframe)), iframe);
+                        if frameidx>fpf(fileidx)
+                            framesidx = 1;
+                            fileidx = fileidx+1;
+                            [path, fname, ending] = fileparts(movie.files{fileidx});
+                            name = fullfile(path,sprintf('%s%s%s',fname,'_fixed',ending));
+                            imwrite(frame,name, 'writemode', 'append');
+                        else
+                            frameidx = framesidx+1;
+                            imwrite(frame,name)
+                        end
+                        
+                        if ismember(iframe,[1 10 100 500 1000 5000 nframes]) || mod(iframe,10000)==0
+                            fprintf('Frame %5d/%d  %4.1fs\n', iframe, nframes, toc);
+                        end
+                    end
+                end
+            end
+        end
         
         function save(self)
             for key = fetch(preprocess.PrepareGalvoMotion & self)'
@@ -25,8 +65,8 @@ classdef PrepareGalvoAverageFrame < dj.Relvar
                 disp done.
             end
         end
-
-		function makeTuples(self, key, movie)
+        
+        function makeTuples(self, key, movie)
             q = 6;
             [nframes, nslices, nchannels] = fetch1(preprocess.PrepareGalvo & key, ...
                 'nframes', 'nslices', 'nchannels');
@@ -39,7 +79,7 @@ classdef PrepareGalvoAverageFrame < dj.Relvar
                     tic
                     tuple = key;
                     tuple.channel = ichannel;
-                    fprintf('Averaging slice %d/%d channel %d\n', islice, nslices, ichannel) 
+                    fprintf('Averaging slice %d/%d channel %d\n', islice, nslices, ichannel)
                     frame = 0;
                     for iframe = 1:nframes
                         frame = frame + max(0,fixMotion(fixRaster(movie(:,:,ichannel, islice, iframe)), iframe)).^q;
@@ -51,6 +91,6 @@ classdef PrepareGalvoAverageFrame < dj.Relvar
                     self.insert(tuple)
                 end
             end
-		end
+        end
     end
 end
