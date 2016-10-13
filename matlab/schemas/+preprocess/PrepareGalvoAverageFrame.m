@@ -24,28 +24,30 @@ classdef PrepareGalvoAverageFrame < dj.Relvar
             frameidx = 1;
             fileidx = 1;
             [path, fname, ending] = fileparts(movie.files{fileidx});
+            name = fullfile(path,sprintf('%s%s%s',fname,'_fixed',ending));
+            tic
             for iframe = 1:nframes
-                tic
                 for islice = 1:nslices
                     key.slice = islice;
                     fixMotion = get_fix_motion_fun(preprocess.PrepareGalvoMotion & key);
                     for ichannel = 1:nchannels
                         frame = fixMotion(fixRaster(movie(:,:,ichannel, islice, iframe)), iframe);
                         if frameidx>fpf(fileidx)
-                            framesidx = 1;
+                            frameidx = 1;
                             fileidx = fileidx+1;
                             [path, fname, ending] = fileparts(movie.files{fileidx});
                             name = fullfile(path,sprintf('%s%s%s',fname,'_fixed',ending));
-                            imwrite(frame,name, 'writemode', 'append');
-                        else
-                            frameidx = framesidx+1;
                             imwrite(frame,name)
+                        else
+                            frameidx = frameidx+1;
+                            imwrite(frame,name, 'writemode', 'append');
                         end
-                        
-                        if ismember(iframe,[1 10 100 500 1000 5000 nframes]) || mod(iframe,10000)==0
-                            fprintf('Frame %5d/%d  %4.1fs\n', iframe, nframes, toc);
-                        end
+                       
                     end
+                end
+                 
+                if ismember(iframe,[1 10 100 500 1000 5000 nframes]) || mod(iframe,10000)==0
+                    fprintf('Frame %5d/%d  %4.1fs\n', iframe, nframes, toc);
                 end
             end
         end
