@@ -100,9 +100,9 @@ class RF(dj.Computed):
         :param nbins: number of temporal bins in the STA.
         :return: ndarray of shape (n, y, x, nbins)
         """
-        return np.stack(
-            (np.einsum('nt,yxt -> nyx', snippets, movie[:, :, rf_bin:rf_bin + snippets.shape[1]])
-             for rf_bin in reversed(range(nbins))), 3)
+        return np.stack((
+            np.tensordot(snippets, movie[:, :, rf_bin:rf_bin + snippets.shape[1]], axes=(1, 2))
+            for rf_bin in reversed(range(nbins))), 3)
 
     @staticmethod
     def predict_traces(movie, maps):
@@ -114,17 +114,19 @@ class RF(dj.Computed):
         nbins = maps.shape[-1]
         traces = 0
         for tau in range(nbins):
-            traces += np.einsum('nyx,yxt->nt', maps[:, :, :, nbins-tau-1], movie)[:, tau:movie.shape[2]+tau-nbins+1]
+            traces += np.tensordot(
+                maps[:, :, :, nbins-tau-1], movie, axes=((1, 2), (0, 1))
+            )[:, tau:movie.shape[2]+tau-nbins+1]
         return traces
 
     @staticmethod
     def soft_thresh(maps, lam, mu):
-        return (1-mu)*np.sign(maps)*np.maximum(0, abs(maps)-lam*np.std(maps))
+        return (1-mu)*np.sign(maps)*np.maximum(0, abs(maps)-lam*np.sqrt((maps**2).mean(axis=(1, 2, 3), keepdims=True)))
 
     def _make_tuples(self, key):
         # enter basic information about the RF Map
         print('Populating', key)
-        nbins = 7
+        nbins = 5
         bin_size = 0.1     # s
         [x, y, distance, diagonal] = (preprocess.Sync() * vis.Session() & key).fetch1[
             'resolution_x', 'resolution_y', 'monitor_distance', 'monitor_size']
@@ -211,9 +213,9 @@ class RF(dj.Computed):
 
         if algorithm == 'backprop':
             sta = maps
-            iterations = 12
-            beta = 0.5
-            maps = beta*RF.soft_thresh(sta, lam=0.1, mu=0.05)
+            iterations = 8
+            beta = 0.6
+            maps = beta*RF.soft_thresh(sta, lam=0.5, mu=0.05)
             print()
             for iteration in range(iterations):
                 predicted_sta = 0
@@ -222,9 +224,9 @@ class RF(dj.Computed):
                     movie = cache[trial_key['trial_idx']]
                     predicted_traces = RF.predict_traces(movie, maps)
                     predicted_sta += RF.spike_triggered_avg(predicted_traces, movie, nbins)
-                scale = np.sqrt(np.einsum('nyxt,nyxt->n', predicted_sta, predicted_sta)
-                                / np.einsum('nyxt,nyxt->n', sta, sta))
-                predicted_sta /= scale[:, None, None, None]
+                predicted_sta /= np.sqrt(
+                    (predicted_sta**2).sum(axis=(1, 2, 3), keepdims=True) /
+                    (sta**2).sum(axis=(1, 2, 3), keepdims=True))
                 maps = RF.soft_thresh(maps + beta*(sta - predicted_sta), lam=beta*0.1, mu=beta*0.05)
                 print('iteration', iteration, flush=True)
 
