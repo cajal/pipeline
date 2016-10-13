@@ -25,7 +25,7 @@ def MatchedTrials():
     Common queries for trials corresponding to a scan
     :return: query corresponding to a scan.
     """
-    return (preprocess.Sync() * vis.Trial() * vis.Condition() &
+    return (preprocess.Sync() * vis.Trial() * dj.U('cond_idx') &
             'trial_idx between first_trial and last_trial').proj('flip_times')
 
 
@@ -79,7 +79,7 @@ class RF(dj.Computed):
             from matplotlib.image import imsave
             from matplotlib import pyplot as plt
             cmap = plt.get_cmap('seismic')
-            crange = 12.0
+            crange = 20.0
             for key in self.fetch.keys():
                 data, scale = (RF.Map() & key).fetch1['map', 'scale']
                 data = np.float64(data)*scale/127
@@ -140,9 +140,9 @@ class RF(dj.Computed):
         except KeyError:
             raise NotImplementedError('Unknown stimulus selection')
 
-        trials = MatchedTrials() & condition_table & key
+        trials = (MatchedTrials() & key) * condition_table
         number_of_repeats = dict(
-            dj.U(condition_identifier).aggregate(trials * condition_table, n='count(*)').fetch())
+            dj.U(condition_identifier).aggregate(trials, n='count(*)').fetch())
         trial_keys = list(trials.fetch.order_by('trial_idx').keys())
 
         if not trial_keys:
@@ -181,6 +181,7 @@ class RF(dj.Computed):
             # load the movies
             print('%d' % trial_key['trial_idx'], flush=True, end=' ')
             movie_times = (vis.Trial() & trial_key).fetch1['flip_times'].flatten()
+            fps = 1 / np.diff(movie_times).mean()
             stim_duration += movie_times[-1] - movie_times[0]
             if stim_selection == 'monet':
                 movie, cond = (vis.Monet() * vis.MonetLookup() & trial_key).fetch1['cached_movie', 'rng_seed']
@@ -190,10 +191,11 @@ class RF(dj.Computed):
                 movie = imageio.get_reader(io.BytesIO(movie.tobytes()), 'ffmpeg')
                 movie = np.stack((np.float64(frame).mean(axis=2) * 2 / 255 - 1
                                   for t, frame in zip(movie_times, movie.iter_data())), axis=2)
+                # high-pass filter above 1 Hz
+                movie -= convolve(movie, hamming(fps, 3), 'same')
             else:
                 raise NotImplementedError('invalid stimulus selection')
             # rebin the movie to bin_size.  Reverse time for convolution.
-            fps = 1 / np.diff(movie_times).mean()
             start_time = movie_times[0] + bin_size / 2
             movie = convolve(movie, hamming(bin_size * fps, 2), 'same')
             movie = interp1d(movie_times, movie)
