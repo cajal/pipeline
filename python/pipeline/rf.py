@@ -20,15 +20,6 @@ def hamming(half, dim):
     return k.reshape([1] * dim + [k.size]) / k.sum()
 
 
-def MatchedTrials():
-    """
-    Common queries for trials corresponding to a scan
-    :return: query corresponding to a scan.
-    """
-    return (preprocess.Sync() * vis.Trial() * dj.U('cond_idx') &
-            'trial_idx between first_trial and last_trial').proj('flip_times')
-
-
 @schema
 class RFMethod(dj.Lookup):
     definition = """
@@ -140,7 +131,8 @@ class RF(dj.Computed):
         except KeyError:
             raise NotImplementedError('Unknown stimulus selection')
 
-        trials = (MatchedTrials() & key) * condition_table
+        trials = (preprocess.Sync() * vis.Trial() * dj.U('cond_idx') * condition_table
+                  & 'trial_idx between first_trial and last_trial' & key)
         number_of_repeats = dict(
             dj.U(condition_identifier).aggregate(trials, n='count(*)').fetch())
         trial_keys = list(trials.fetch.order_by('trial_idx').keys())
