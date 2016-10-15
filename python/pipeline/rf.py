@@ -184,7 +184,7 @@ class RF(dj.Computed):
                 movie = np.stack((np.float64(frame).mean(axis=2) * 2 / 255 - 1
                                   for t, frame in zip(movie_times, movie.iter_data())), axis=2)
                 # high-pass filter above 1 Hz
-                movie -= convolve(movie, hamming(fps, 3), 'same')
+                movie -= convolve(movie, hamming(fps, 2), 'same')
             else:
                 raise NotImplementedError('invalid stimulus selection')
             # rebin the movie to bin_size.  Reverse time for convolution.
