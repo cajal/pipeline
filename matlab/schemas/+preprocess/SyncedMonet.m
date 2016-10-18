@@ -1,8 +1,8 @@
 %{
-preprocess.SyncedMonet (computed) # my newest table
+preprocess.SyncedMonet (computed) #  Monet stimuli synced to frame times
 -> preprocess.Sync
 -----
-movie = null : longblob   #
+movie = null : longblob   #  movie synced to frame times
 %}
 
 classdef SyncedMonet < dj.Relvar & dj.AutoPopulate
