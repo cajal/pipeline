@@ -6,6 +6,8 @@ calibration_ts  : timestamp              # calibration timestamp -- automatic
 -> experiment.Lens
 -> experiment.Person
 -> experiment.Software
+pockel          : mediumint              # pockel setting
+notes           : varchar(1024)          #
 %}
 
 
