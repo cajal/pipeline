@@ -279,7 +279,6 @@ class Session(dj.Manual):
     session_date                  : date                          # date
     -> Person
     -> Anesthesia
-    -> PMTFilterSet
     scan_path                     : varchar(255)                  # file path for TIFF stacks
     behavior_path =""             : varchar(255)   # pupil movies, whisking, locomotion, etc.
     craniotomy_notes=""           : varchar(4095)                 # free-text notes
@@ -299,32 +298,44 @@ class Session(dj.Manual):
     class TargetStructure(dj.Part):
         definition = """
         # specifies which neuronal structure was imaged
-
         -> Session
         -> Fluorophore
         -> Compartment
         ---
         """
 
+    class PMTFilterSet(dj.Part):
+        definition = """ # Fluorophores expressed in prep for the imaging session
+        -> Session
+        ---
+        -> PMTFilterSet
+        """
+
+
+@schema
+class Aim(dj.Lookup):
+    definition = """  # Declared purpose of the scan
+    aim                  : varchar(36)                  # short name for the purpose of the scan
+    ---
+    aim_description      : varchar(255)
+    """
+
 
 @schema
 class Scan(dj.Manual):
     definition = """    # scanimage scan info
-    animal_id            : int(11)                      # id number
     -> Session
-    scan_idx             : smallint(6)                  # number of TIFF stack file
+    scan_idx             : smallint                     # number of TIFF stack file
     ---
     -> Lens
     -> BrainArea
-    laser_wavelength     : float                        # (nm)
-    laser_power          : float                        # (mW) to brain
+    -> Aim
     filename             : varchar(255)                 # file base name
-    depth="0"            : int(11)                      # manual depth measurement
+    depth=0              : int                          # manual depth measurement
     scan_notes           : varchar(4095)                # free-notes
-    site_number="0"      : tinyint(4)                   # site number
-    software             : varchar(20)                  # name of the software
+    site_number=0        : tinyint                      # site number
     -> Software
-    scan_ts="CURRENT_TIMESTAMP" : timestamp                    # don't edit
+    scan_ts              : timestamp                    # don't edit
     """
 
     class EyeVideo(dj.Part):
@@ -343,6 +354,15 @@ class Scan(dj.Manual):
         -> Scan
         ---
         filename        : varchar(50)                   # filename of the video
+        """
+
+    class Laser(dj.Part):
+        definition = """  # Laser parameters for the scan
+        -> Scan
+        ---
+        wavelength: float  # (nm)
+        power: float  # (mW) to brain
+        gdd: float  # gdd setting
         """
 
 

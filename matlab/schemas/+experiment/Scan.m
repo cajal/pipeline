@@ -3,9 +3,9 @@ experiment.Scan (manual) # scanimage scan info
 -> experiment.Session
 scan_idx        : smallint               # number of TIFF stack file
 ---
--> experiment.Aim
 -> experiment.Lens
 -> experiment.BrainArea
+-> experiment.Aim
 -> experiment.Software
 filename                    : varchar(255)                  # file base name
 depth=0                     : int                           # manual depth measurement
