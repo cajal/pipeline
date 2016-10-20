@@ -176,26 +176,23 @@ class Software(dj.Lookup):
 class LaserCalibration(dj.Manual):
     definition = """
     # stores measured values from the laser power calibration
-
     -> Rig
-    calibration_date                  : date
+    calibration_ts : timestamp                # calibration timestamp -- automatic
     ---
+    -> Lens
     -> Person
     -> Software
-    calibration_ts=CURRENT_TIMESTAMP  : timestamp      # automatic
     """
 
     class PowerMeasurement(dj.Part):
         definition = """
-        -> LaserCalibration
-        wavelength      : int       # wavelength of the laser
-        percentage      : tinyint   # power setting in percent
-        zoom            : float     # zoom setting
-        pockels         : int       # pockels cell setting
-        bidirectional   : tinyint   # 0 if off 1 if on
-        gdd             : int       # GDD setting on the laser
+       -> LaserCalibration
+        wavelength      : int                 # wavelength of the laser
+        attenuation     : decimal(4,1)        # power setting (percent for resonant scanner or degrees of polarizer)
+        bidirectional   : bool                # 0 if off 1 if on
+        gdd             : int                 # GDD setting on the laser
         ---
-        power           : float     # power in mW
+        power                       : float                         # power in mW
         """
 
     def plot_calibration_curve(self, calibration_date, rig):
