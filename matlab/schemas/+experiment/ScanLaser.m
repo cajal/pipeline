@@ -1,10 +1,10 @@
 %{
-experiment.ScanLaser (manual) # Laser parameters
+experiment.ScanLaser (manual) # Laser parameters for the scan
 -> experiment.Scan
 ---
-laser_wavelength            : float                         # (nm)
-laser_power                 : float                         # (mW) to brain
-laser_gdd                   : float                         # gdd setting
+wavelength                  : float                         # (nm)
+power                       : float                         # (mW) to brain
+gdd                         : float                         # gdd setting
 %}
 
 

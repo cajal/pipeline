@@ -6,7 +6,6 @@ session         : smallint               # session index for the mouse
 -> experiment.Rig
 -> experiment.Person
 -> experiment.Anesthesia
--> experiment.PMTFilterSet
 session_date                : date                          # date
 scan_path                   : varchar(255)                  # file path for TIFF stacks
 behavior_path               : varchar(255)                  # pupil movies, whisking, locomotion, etc.
