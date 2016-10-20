@@ -74,10 +74,13 @@ class RF(dj.Computed):
             for key in self.fetch.keys():
                 data, scale = (RF.Map() & key).fetch1['map', 'scale']
                 data = np.float64(data)*scale/127
+                p = os.path.join(
+                    os.path.expanduser(path), '{animal_id:05d}_{session}_scan{scan_idx:02d}'.format(**key))
+                if not os.path.exists(p):
+                    os.makedirs(p)
                 for frame in range(data.shape[2]):
                     filename = os.path.join(
-                        os.path.expanduser(path),
-                        '{animal_id:05d}_{session}_scan{scan_idx:02d}_{trace_id:03d}-meth{extract_method}'
+                        p, '{trace_id:03d}-meth{extract_method}'
                         '-{spike_method}-{rf_method}_{frame}.png'.format(frame=frame, **key))
                     print(filename)
                     imsave(filename, cmap(data[:, :, frame]/crange+0.5))
