@@ -1,5 +1,5 @@
 %{
-experiment.SessionPMTFilterSet (manual) # Fluorophores expressed in prep for the imaging session
+experiment.SessionPMTFilterSet (manual) # Filters used in the session
 -> experiment.Session
 ---
 -> experiment.PMTFilterSet

@@ -1,5 +1,5 @@
 %{
-experiment.Lens (lookup) # calcium-sensitive indicators
+experiment.Lens (lookup) # Lens used for the recording
 lens     : char(4)               # objective lens
 ---
 %}
