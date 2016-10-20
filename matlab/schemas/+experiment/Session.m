@@ -12,6 +12,7 @@ scan_path                   : varchar(255)                  # file path for TIFF
 behavior_path               : varchar(255)                  # pupil movies, whisking, locomotion, etc.
 craniotomy_notes            : varchar(4095)                 # free-text notes
 session_notes               : varchar(4095)                 # free-text notes
+archive                     : varchar(255)                  # archive disk label
 session_ts=CURRENT_TIMESTAMP: timestamp                     # automatic
 %}
 
