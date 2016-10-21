@@ -1,18 +1,17 @@
 """
 Analysis of visual tuning: receptive fields, tuning curves, pixelwise maps
 """
-from collections import defaultdict
 import numpy as np
 from scipy.interpolate import interp1d
 from scipy.signal import convolve
 import io
 import imageio
-
 import datajoint as dj
 from . import preprocess, vis   # needed for foreign keys
 
 from distutils.version import StrictVersion
 assert StrictVersion(dj.__version__) >= StrictVersion('0.3.8')
+
 
 schema = dj.schema('pipeline_tuning', locals())
 
@@ -95,207 +94,6 @@ class Cos2Map(dj.Computed):
     cos2_fp    : longblob   # p-value of F-test (after gaussinization)
     pref_ori   : longblob   # (radians) preferred direction
     """
-
-
-@schema
-class RFMethod(dj.Lookup):
-    definition = """
-    rf_method :  tinyint    #   rf computation method
-    ----
-    rf_method_description :  varchar(255)
-    """
-    contents = [
-        (1, 'STA')
-    ]
-
-
-@schema
-class RF(dj.Computed):
-    definition = """  # spike-triggered average of receptive fields
-    -> preprocess.Sync
-    -> preprocess.Spikes
-    -> RFMethod
-    stim_subset          :  varchar(12)    #  stimulus subset
-    ---
-    nbins                : smallint                     # temporal bins
-    bin_size             : float                        # (ms) temporal bin size
-    degrees_x            : float                        # degrees along x
-    degrees_y            : float                        # degrees along y
-    stim_duration        : float                        # (s) total stimulus duration
-    """
-
-    @property
-    def key_source(self):
-        return preprocess.Spikes() * RFMethod() & (
-            preprocess.Sync() * vis.Trial() & 'trial_idx between first_trial and last_trial' & dj.OrList((
-                vis.Monet(), vis.MovieClipCond(), vis.Trippy(), vis.MovieStillCond(), vis.MovieSeqCond())))
-
-    class Map(dj.Part):
-        definition = """   # spatiotemporal receptive field map
-        -> RF
-        -> preprocess.Spikes.RateTrace
-        ---
-        scale : float       # receptive field scale
-        map   : longblob    # int8 data map scaled by scale
-        """
-
-        def save(self, path="."):
-            """
-            save RF maps into PNG files
-            """
-            import os
-            from matplotlib.image import imsave
-            from matplotlib import pyplot as plt
-            cmap = plt.get_cmap('seismic')
-            range = 8.0
-            for key in self.fetch.keys():
-                data, scale = (RF.Map() & key).fetch1['map', 'scale']
-                data = np.float64(data)*scale/127
-                frame = 1
-                filename = os.path.join(
-                    os.path.expanduser(path),
-                    '{animal_id:05d}_{session}_scan{scan_idx:02d}_{trace_id:03d}-meth{extract_method}'
-                    '-{spike_method}_{frame}-{stim_subset}-{rf_method}.png'.format(frame=frame, **key))
-                print(filename)
-                imsave(filename, cmap(data[:, :, frame]/range+0.5))
-
-    def _make_tuples(self, key):
-
-        # enter basic information about the RF Map
-        print('Populating', key)
-        nbins = 3
-        bin_size = 0.15     # s
-        [x, y, distance, diagonal] = (preprocess.Sync() * vis.Session() & key).fetch1[
-            'resolution_x', 'resolution_y', 'monitor_distance', 'monitor_size']
-        cm_per_inch = 2.54
-        degrees_per_pixel = 180 / np.pi * diagonal * cm_per_inch / np.sqrt(np.float64(x)*x + np.float64(y)*y) / distance
-        degrees_x = degrees_per_pixel * x
-        degrees_y = degrees_per_pixel * y
-
-        # fetch traces and their slices (for galvo scans)
-        trace_time = (preprocess.Sync() & key).fetch1['frame_times'].squeeze()  # calcium scan frame times
-        traces, trace_keys = (preprocess.Spikes.RateTrace() & key).fetch['rate_trace', dj.key]
-        n_slices = (preprocess.Prepare.Galvo() & key).fetch1['nslices']
-        trace_time = trace_time[:n_slices*traces[0].size]  # truncate if interrupted scan
-        assert n_slices*traces[0].size == trace_time.size, 'trace times must be a multiple of n_slices'
-        frame_interval = (trace_time[1:]-trace_time[:-1]).mean()*n_slices
-
-        # interpolate traces on times of the first slice, smoothed for bin_size
-        traces = interp1d(trace_time[::n_slices], convolve(
-                            np.stack(trace.flatten() for trace in traces),
-                            hamming(bin_size/frame_interval, 1), 'same'))
-
-        # enumerate all the stimulus types:
-        stimuli = dict(
-            monet=vis.Monet(),
-            trippy=vis.Trippy(),
-            clips=vis.MovieClipCond(),
-            stills=dj.OrList((vis.MovieStillCond(), vis.MovieSeqCond())))
-
-        for stim_subset, condition_table in stimuli.items():
-            if stim_subset not in ['monet', 'clips']:
-                continue
-            n_trials = 0
-            trials = (preprocess.Sync() * vis.Trial() * vis.Condition() &
-                      'trial_idx between first_trial and last_trial' & condition_table & key)
-            maps = 0
-            trace_norm = 0
-            stim_duration = 0
-            if stim_subset == 'clips':
-                counts = dict(dj.U('clip_number').aggregate(trials * vis.MovieClipCond(), n='count(*)').fetch())
-            elif stim_subset == 'monet':
-                counts = dict(dj.U('rng_seed').aggregate(trials * vis.Monet(), n='count(*)').fetch())
-            for trial_key in trials.fetch.order_by('trial_idx').keys():
-                if not n_trials:
-                    print('Found some %s trials' % stim_subset)
-                print('%d' % trial_key['trial_idx'], flush=True, end=' ')
-                n_trials += 1
-                movie_times = (vis.Trial() & trial_key).fetch1['flip_times'].flatten()
-                stim_duration += movie_times[-1] - movie_times[0]
-                if stim_subset == 'monet':
-                    movie, cond = (vis.Monet() * vis.MonetLookup() & trial_key).fetch1['cached_movie', 'rng_seed']
-                    movie = (np.float32(movie) - 127.5) / 126.5    # rescale to [-1, +1]
-                elif stim_subset == 'clips':
-                    movie, cond = (vis.MovieClipCond() * vis.Movie.Clip() & trial_key).fetch1['clip', 'clip_number']
-                    movie = imageio.get_reader(io.BytesIO(movie.tobytes()), 'ffmpeg')
-                    movie = np.stack((np.float64(frame).mean(axis=2)*2/255-1
-                                      for t, frame in zip(movie_times, movie.iter_data())), axis=2)
-                    movie -= movie.mean(axis=2, keepdims=True)
-                    assert movie.shape[2] == movie_times.size
-                else:
-                    raise NotImplementedError
-
-                # rebin the movie to bin_size.  Reverse time for convoluion.
-                fps = 1 / np.diff(movie_times).mean()
-                start_time = movie_times[0] + bin_size / 2
-                movie = convolve(movie, hamming(bin_size*fps, 2), 'same')
-                movie = interp1d(movie_times, movie)
-                movie = movie(np.r_[start_time:movie_times[-1]:bin_size])
-                # compute STA map update
-                snippets = traces(np.r_[start_time+bin_size*(nbins-1):movie_times[-1]:bin_size])/counts[cond]
-                maps += np.stack((
-                    np.einsum('ij,klj', snippets, movie[:, :, rf_bin:rf_bin+snippets.shape[1]])
-                    for rf_bin in range(nbins)), 3)
-                trace_norm += ((snippets - snippets.mean(axis=1, keepdims=True)) ** 2).sum(axis=1)
-
-            if n_trials:
-                # submit data
-                key['stim_subset'] = stim_subset
-                self.insert1(dict(key,
-                                  degrees_x=degrees_x,
-                                  degrees_y=degrees_y,
-                                  nbins=nbins,
-                                  bin_size=bin_size * 1000,
-                                  stim_duration=stim_duration))
-                RF.Map().insert((dict(trace_key, **key,
-                                      map=np.int8(127*m/np.max(abs(m))),
-                                      scale=np.max(abs(m))/np.sqrt(n))
-                                 for trace_key, m, n in zip(trace_keys, maps, trace_norm)),
-                                ignore_extra_fields=True)
-        print('Done')
-
-
-@schema
-class CleanRF(dj.Computed):
-    definition = """  # RF maps with common components removed
-    -> RF.Map
-    ---
-    clean_map  :  longblob
-    """
-
-    key_source = RF() & RF.Map()
-
-    def save(self, path="."):
-        """
-        save RF maps into PNG files
-        """
-        import os
-        from matplotlib.image import imsave
-        from matplotlib import pyplot as plt
-        cmap = plt.get_cmap('seismic')
-        for key in self.fetch.keys():
-            data = (CleanRF() & key).fetch1['clean_map']
-            scale = 1.5
-            frame = 1
-            filename = os.path.join(
-                os.path.expanduser(path),
-                '{animal_id:05d}_{session}_scan{scan_idx:02d}_method{extract_method}'
-                '-{spike_method}_{trace_id:03d}-{frame}.png'.format(frame=frame, **key))
-            print(filename)
-            imsave(filename, cmap(data[:, :, frame] / scale + 0.5))
-
-    def _make_tuples(self, key):
-        maps, keys = (RF.Map() & key).fetch['map', dj.key]
-        # subtract the first view principal components if their projections have the same sign
-        n_components = 5
-        shape = maps[0].shape
-        maps = np.stack(np.float64(m.flatten()) for m in maps)
-        cell_comps, values, space_comps = np.linalg.svd(maps, full_matrices=False)
-        for cell_comp, space_comp, value in zip((r for r in cell_comps.T), space_comps, values[:n_components]):
-            if np.percentile(np.sign(cell_comp), 2) == np.percentile(np.sign(cell_comp), 98):
-                maps -= np.outer(cell_comp*value, space_comp)
-        for key, clean_map in zip(keys, (m.reshape(shape) for m in maps)):
-            self.insert1(dict(key, clean_map=np.float32(clean_map)))
 
 
 @schema

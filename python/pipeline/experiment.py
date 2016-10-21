@@ -176,26 +176,23 @@ class Software(dj.Lookup):
 class LaserCalibration(dj.Manual):
     definition = """
     # stores measured values from the laser power calibration
-
     -> Rig
-    calibration_date                  : date
+    calibration_ts : timestamp                # calibration timestamp -- automatic
     ---
+    -> Lens
     -> Person
     -> Software
-    calibration_ts=CURRENT_TIMESTAMP  : timestamp      # automatic
     """
 
     class PowerMeasurement(dj.Part):
         definition = """
-        -> LaserCalibration
-        wavelength      : int       # wavelength of the laser
-        percentage      : tinyint   # power setting in percent
-        zoom            : float     # zoom setting
-        pockels         : int       # pockels cell setting
-        bidirectional   : tinyint   # 0 if off 1 if on
-        gdd             : int       # GDD setting on the laser
+       -> LaserCalibration
+        wavelength      : int                 # wavelength of the laser
+        attenuation     : decimal(4,1)        # power setting (percent for resonant scanner or degrees of polarizer)
+        bidirectional   : bool                # 0 if off 1 if on
+        gdd             : int                 # GDD setting on the laser
         ---
-        power           : float     # power in mW
+        power                       : float                         # power in mW
         """
 
     def plot_calibration_curve(self, calibration_date, rig):
@@ -279,7 +276,6 @@ class Session(dj.Manual):
     session_date                  : date                          # date
     -> Person
     -> Anesthesia
-    -> PMTFilterSet
     scan_path                     : varchar(255)                  # file path for TIFF stacks
     behavior_path =""             : varchar(255)   # pupil movies, whisking, locomotion, etc.
     craniotomy_notes=""           : varchar(4095)                 # free-text notes
@@ -299,32 +295,44 @@ class Session(dj.Manual):
     class TargetStructure(dj.Part):
         definition = """
         # specifies which neuronal structure was imaged
-
         -> Session
         -> Fluorophore
         -> Compartment
         ---
         """
 
+    class PMTFilterSet(dj.Part):
+        definition = """ # Fluorophores expressed in prep for the imaging session
+        -> Session
+        ---
+        -> PMTFilterSet
+        """
+
+
+@schema
+class Aim(dj.Lookup):
+    definition = """  # Declared purpose of the scan
+    aim                  : varchar(36)                  # short name for the purpose of the scan
+    ---
+    aim_description      : varchar(255)
+    """
+
 
 @schema
 class Scan(dj.Manual):
     definition = """    # scanimage scan info
-    animal_id            : int(11)                      # id number
     -> Session
-    scan_idx             : smallint(6)                  # number of TIFF stack file
+    scan_idx             : smallint                     # number of TIFF stack file
     ---
     -> Lens
     -> BrainArea
-    laser_wavelength     : float                        # (nm)
-    laser_power          : float                        # (mW) to brain
+    -> Aim
     filename             : varchar(255)                 # file base name
-    depth="0"            : int(11)                      # manual depth measurement
+    depth=0              : int                          # manual depth measurement
     scan_notes           : varchar(4095)                # free-notes
-    site_number="0"      : tinyint(4)                   # site number
-    software             : varchar(20)                  # name of the software
+    site_number=0        : tinyint                      # site number
     -> Software
-    scan_ts="CURRENT_TIMESTAMP" : timestamp                    # don't edit
+    scan_ts              : timestamp                    # don't edit
     """
 
     class EyeVideo(dj.Part):
@@ -343,6 +351,15 @@ class Scan(dj.Manual):
         -> Scan
         ---
         filename        : varchar(50)                   # filename of the video
+        """
+
+    class Laser(dj.Part):
+        definition = """  # Laser parameters for the scan
+        -> Scan
+        ---
+        wavelength: float  # (nm)
+        power: float  # (mW) to brain
+        gdd: float  # gdd setting
         """
 
 
