@@ -19,30 +19,30 @@ if isstruct(F)
             sprintf('%s%d0.h5', filename, scanId));
     end
 end
-    
-f=dir(F);
-
+  
 % Check file existsgetLocalPath(fetch1(experiment.Session & F,'behavior_path'))
+F = strrep(F,'%d','0'); % FIX trailing %d.h5 not found error
+f=dir(F);
 assert(length(f)==1,['Cannot find file ' F]);
+F = [F(1:end-4) '%d.h5']; % Append '%d.h5' to filename in place of trailing 'x.h5'
 
 % Use 'Date Modified' to determine file version.  so hacky.
-if f.datenum > datenum('2014-06-03 08:00') %%&& f.datenum < datenum('')
+if f.datenum > datenum('2016-10-21 08:00') %%&& f.datenum < datenum('')
+    ver = 8;
+elseif f.datenum > datenum('2014-06-03 08:00') %%&& f.datenum < datenum('')
     ver = 7;
 else
     error 'File version not known'
 end
 
-% Append '%d.h5' to filename in place of trailing 'x.h5'
-F = [F(1:end-4) '%d.h5'];
-
 switch ver
     case 7
-        %% Files recorded after 03-28-2014 using the NPI ELC-03XS amplifier as amp 1 and the AxoClamp 2B (.1x headstage) as amp 2
-        %% Amp 2 current low-pass is set to 3000Hz.
-        %% Skips settings telegraph from NPI if any(~sets), i.e. if NPI amp is turned off.
-        %% Adds scanimage sync channel
-        %% Ball data is from optical encoder
-        %% ts2sec now takes 'packetLen' argument in order to correctly assign timestamps to end of data packets. This version adds a analogPacketLen field to data struct
+        % Files recorded after 03-28-2014 using the NPI ELC-03XS amplifier as amp 1 and the AxoClamp 2B (.1x headstage) as amp 2
+        % Amp 2 current low-pass is set to 3000Hz.
+        % Skips settings telegraph from NPI if any(~sets), i.e. if NPI amp is turned off.
+        % Adds scanimage sync channel
+        % Ball data is from optical encoder
+        % ts2sec now takes 'packetLen' argument in order to correctly assign timestamps to end of data packets. This version adds a analogPacketLen field to data struct
         
         % *** Packet length is set at 2000 for analog channels ***
         ANALOG_PACKET_LEN = 2000;
@@ -129,5 +129,42 @@ switch ver
         data.i2 = data.i2/settings(2).iGain;
         
         
+        H5F.close(fp);
+        
+    case 8
+        % *** Packet length is set at 2000 for analog channels ***
+        ANALOG_PACKET_LEN = 2000;
+        
+        % open file using family driver
+        fapl = H5P.create('H5P_FILE_ACCESS');
+        H5P.set_fapl_family(fapl,2^31,'H5P_DEFAULT');
+        fp = H5F.open(F,'H5F_ACC_RDONLY',fapl);
+        H5P.close(fapl);
+
+        % read wheel trace
+        data.ball = H5Tools.readDataset(fp,'Wheel') ;
+        
+        % read camera timestamps
+        data.eyecam_ts = H5Tools.readDataset(fp,'eyetrackingvideotimestamp') ;
+        
+        % read frame timestamps
+        data.framenum_ts = H5Tools.readDataset(fp,'framenum_ts') ;
+        
+        % read trial timestamps
+        data.trialnum_ts = H5Tools.readDataset(fp,'trialnum_ts') ;
+        
+        % check for correct waveform structure
+        waveformDescStr=H5Tools.readAttribute(fp,'waveform Channels Description')';
+        assert(strcmp(deblank(waveformDescStr),'Current Input 1, Voltage Input 1, Sync Photodiode, Stimulation Photodiode, LED Level Input, Patch Command Input, Shutter, Current Input 2, Voltage Input 2, Scan Image Sync'),...
+            'waveform Channels Description is wrong for this file version');
+        
+        % read wf and convert waveform to structure
+        wf = H5Tools.readDataset(fp,'Analog Signals') ;
+        data.syncPd = wf(:,3);
+        data.scanImage = wf(:,10);
+        data.ts = wf(:,11);
+        data.analogPacketLen = ANALOG_PACKET_LEN;
+             
+        % close file
         H5F.close(fp);
 end
