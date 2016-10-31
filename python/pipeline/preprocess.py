@@ -711,7 +711,7 @@ class Eye(dj.Imported):
         packet_length = data['analogPacketLen']
         dat_time, _ = ts2sec(data['ts'], packet_length)
 
-        if data['version'] == '2.0':
+        if float(data['version']) == 2.:
             cam_key = 'eyecam_ts'
         else:
             cam_key = 'cam1ts' if info['rig'] == '2P3' else  'cam2ts'

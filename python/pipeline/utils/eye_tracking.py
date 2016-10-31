@@ -30,7 +30,7 @@ def read_video_hdf5(hdf_path):
     data = {}
     with h5py.File(hdf_path, 'r+', driver='family', memb_size=0) as fid:
         data['version'] = fid.attrs['Version']
-        if fid.attrs['Version'] == '2.0':
+        if float(fid.attrs['Version']) == 2.:
             data['ball'] = np.asarray(fid['Wheel']).T
             wf = np.asarray(np.asarray(fid['waveform'])).T
             data['framenum_ts'] = np.asarray(fid['framenum_ts']).squeeze()
@@ -41,7 +41,7 @@ def read_video_hdf5(hdf_path):
             data['ts'] = wf[:, 2]
             data['analogPacketLen'] = float(fid.attrs['AS_channelNames'])
 
-        elif fid.attrs['Version'] == '1.0':
+        elif float(fid.attrs['Version']) == 1.:
             data['ball'] = np.asarray(fid['ball']).T
             wf = np.asarray(np.asarray(fid['waveform'])).T
             data['cam1ts'] = np.asarray(fid['behaviorvideotimestamp']).squeeze()
