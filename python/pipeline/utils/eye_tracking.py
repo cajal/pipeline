@@ -19,6 +19,7 @@ except ImportError:
 
 ANALOG_PACKET_LEN = 2000
 
+
 def read_video_hdf5(hdf_path):
     """
     Reads hdf5 file for eye tracking
@@ -28,17 +29,29 @@ def read_video_hdf5(hdf_path):
     """
     data = {}
     with h5py.File(hdf_path, 'r+', driver='family', memb_size=0) as fid:
+        data['version'] = fid.attrs['Version']
+        if fid.attrs['Version'] == '2.0':
+            data['ball'] = np.asarray(fid['Wheel']).T
+            wf = np.asarray(np.asarray(fid['waveform'])).T
+            data['framenum_ts'] = np.asarray(fid['framenum_ts']).squeeze()
+            data['trialnum_ts'] = np.asarray(fid['trialnum_ts']).squeeze()
+            data['eyecam_ts'] = np.asarray(fid['videotimestamp']).squeeze()
+            data['syncPd'] = wf[:, 0]  # flip photo diode
+            data['scanImage'] = wf[:, 1]
+            data['ts'] = wf[:, 2]
+            data['analogPacketLen'] = float(fid.attrs['AS_channelNames'])
 
-        data['ball'] = np.asarray(fid['ball']).T
-        wf = np.asarray(np.asarray(fid['waveform'])).T
-        data['cam1ts'] = np.asarray(fid['behaviorvideotimestamp']).squeeze()
-        data['cam2ts'] = np.asarray(fid['eyetrackingvideotimestamp']).squeeze()
-
-
-        data['syncPd'] = wf[:, 2] # flip photo diode
-        data['scanImage'] = wf[:, 9]
-        data['ts'] = wf[:, 10]
-        data['analogPacketLen'] = ANALOG_PACKET_LEN
+        elif fid.attrs['Version'] == '1.0':
+            data['ball'] = np.asarray(fid['ball']).T
+            wf = np.asarray(np.asarray(fid['waveform'])).T
+            data['cam1ts'] = np.asarray(fid['behaviorvideotimestamp']).squeeze()
+            data['cam2ts'] = np.asarray(fid['eyetrackingvideotimestamp']).squeeze()
+            data['syncPd'] = wf[:, 2] # flip photo diode
+            data['scanImage'] = wf[:, 9]
+            data['ts'] = wf[:, 10]
+            data['analogPacketLen'] = ANALOG_PACKET_LEN
+        else:
+            print('File version not known')
 
     return data
 
