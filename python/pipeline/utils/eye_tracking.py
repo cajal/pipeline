@@ -19,6 +19,7 @@ except ImportError:
 
 ANALOG_PACKET_LEN = 2000
 
+
 def read_video_hdf5(hdf_path):
     """
     Reads hdf5 file for eye tracking
@@ -28,17 +29,29 @@ def read_video_hdf5(hdf_path):
     """
     data = {}
     with h5py.File(hdf_path, 'r+', driver='family', memb_size=0) as fid:
+        data['version'] = fid.attrs['Version']
+        if float(fid.attrs['Version']) == 2.:
+            data['ball'] = np.asarray(fid['Wheel']).T
+            wf = np.asarray(np.asarray(fid['waveform'])).T
+            data['framenum_ts'] = np.asarray(fid['framenum_ts']).squeeze()
+            data['trialnum_ts'] = np.asarray(fid['trialnum_ts']).squeeze()
+            data['eyecam_ts'] = np.asarray(fid['videotimestamp']).squeeze()
+            data['syncPd'] = wf[:, 0]  # flip photo diode
+            data['scanImage'] = wf[:, 1]
+            data['ts'] = wf[:, 2]
+            data['analogPacketLen'] = float(fid.attrs['AS_channelNames'])
 
-        data['ball'] = np.asarray(fid['ball']).T
-        wf = np.asarray(np.asarray(fid['waveform'])).T
-        data['cam1ts'] = np.asarray(fid['behaviorvideotimestamp']).squeeze()
-        data['cam2ts'] = np.asarray(fid['eyetrackingvideotimestamp']).squeeze()
-
-
-        data['syncPd'] = wf[:, 2] # flip photo diode
-        data['scanImage'] = wf[:, 9]
-        data['ts'] = wf[:, 10]
-        data['analogPacketLen'] = ANALOG_PACKET_LEN
+        elif float(fid.attrs['Version']) == 1.:
+            data['ball'] = np.asarray(fid['ball']).T
+            wf = np.asarray(np.asarray(fid['waveform'])).T
+            data['cam1ts'] = np.asarray(fid['behaviorvideotimestamp']).squeeze()
+            data['cam2ts'] = np.asarray(fid['eyetrackingvideotimestamp']).squeeze()
+            data['syncPd'] = wf[:, 2] # flip photo diode
+            data['scanImage'] = wf[:, 9]
+            data['ts'] = wf[:, 10]
+            data['analogPacketLen'] = ANALOG_PACKET_LEN
+        else:
+            print('File version not known')
 
     return data
 
@@ -97,6 +110,7 @@ class CVROIGrabber:
 
 
     def grab(self):
+        print('Contrast (std)', np.std(self.img))
         img = np.asarray(self.img/self.img.max(), dtype=float)
         cv2.namedWindow('real image')
         cv2.setMouseCallback('real image', self, 0)
@@ -209,6 +223,9 @@ class ROIGrabber:
 class PupilTracker:
     def __init__(self, param):
         self._params = param
+        self._center = None
+        self._radius = None
+        self._last_detection = 1
 
     @staticmethod
     def goodness_of_fit(contour, ellipse):
@@ -232,7 +249,7 @@ class PupilTracker:
         return (np.dot(contour, R)+center).astype(np.int32)
 
 
-    def get_pupil_from_contours(self, contours, small_gray, old_center, old_r, display=False, show_matching=5):
+    def get_pupil_from_contours(self, contours, small_gray, display=False, show_matching=5):
         ratio_thres = self._params['ratio_threshold']
         area_threshold = self._params['relative_area_threshold']
         error_threshold = self._params['error_threshold']
@@ -266,8 +283,8 @@ class PupilTracker:
             center = np.array([x / small_gray.shape[1], y / small_gray.shape[0]])
             r = max(axes)
 
-            dr = 0 if old_r is None else abs(r-old_r)/old_r
-            dx = 0 if old_center is None else np.sqrt(np.sum((center - old_center) ** 2))
+            dr = 0 if self._radius is None else np.abs(r-self._radius)/self._radius
+            dx = 0 if self._center is None else np.sqrt(np.sum((center - self._center) ** 2))
 
             results['dx'].append(dx)
             results['dr/r'].append(dr)
@@ -275,11 +292,10 @@ class PupilTracker:
                                   + 1 * (curr_err < error_threshold) \
                                   + 1 * (margin < center[0] < 1 - margin) \
                                   + 1 * (margin < center[1] < 1 - margin) \
-                                  + 1 * (dx < speed_thres) \
-                                  + 1 * (dr < dr_thres)
+                                  + 1 * (dx < speed_thres * self._last_detection) \
+                                  + 1 * (dr < dr_thres * self._last_detection)
 
             results['conditions'] = matching_conditions
-
             if curr_err < err and matching_conditions == 7:
                 best_ellipse = ellipse
                 best_contour = cnt
@@ -293,28 +309,27 @@ class PupilTracker:
             print('-', end="", flush=True)
             if np.any(df['conditions'] >= show_matching):
                 print("\n",df[df['conditions'] >= show_matching], flush=True)
+            self._last_detection += 1
+        else:
+            self._last_detection = 1
 
         return best_contour, best_ellipse
 
     def track(self, videofile, eye_roi, display=False):
 
         cw_low = self._params['perc_weight']
-        p_high = self._params['perc_high']
-        p_low = self._params['perc_low']
+        p_high, p_low = self._params['perc_high'], self._params['perc_low']
         contrast_low = self._params['contrast_threshold']
+        font = cv2.FONT_HERSHEY_SIMPLEX
 
         print("Tracking videofile", videofile)
-
         cap = cv2.VideoCapture(videofile)
         traces = []
 
-        no_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-
+        n_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         fr_count = 0
-        old_center = None
-        old_r = None
         while cap.isOpened():
-            if fr_count >= no_frames:
+            if fr_count >= n_frames:
                 print("Reached end of videofile ", videofile)
                 break
             ret, frame = cap.read()
@@ -323,7 +338,7 @@ class PupilTracker:
                 traces.append(dict(frame_id=fr_count))
                 continue
             if fr_count % 500 == 0:
-                print("\tframe ({}/{})".format(fr_count, no_frames))
+                print("\tframe ({}/{})".format(fr_count, n_frames))
 
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             img_std = np.std(gray)
@@ -332,13 +347,16 @@ class PupilTracker:
                 traces.append(dict(frame_id=fr_count,
                                   frame_intensity=img_std))
                 if display:
+                    cv2.putText(gray, "{fr_count}/{frames}".format(fr_count=fr_count, frames=n_frames),
+                                (10, 30), font, 1, (127, 127, 127), 2)
                     cv2.imshow('frame', gray)
                     cv2.waitKey(1)
                 print('_', end="",flush=True)
                 continue
 
             small_gray = gray[slice(*eye_roi[0]), slice(*eye_roi[1])]
-            blur = cv2.GaussianBlur(small_gray, (9, 9), 0)
+            # blur = cv2.GaussianBlur(small_gray, (3, 3), 0)
+            blur = cv2.medianBlur(small_gray,3)
             th = (1 - cw_low) * np.percentile(blur, p_high) + cw_low * np.percentile(blur, p_low)
             _, thres = cv2.threshold(blur, th, 255, cv2.THRESH_BINARY)
 
@@ -347,17 +365,16 @@ class PupilTracker:
                 cv2.imshow('threshold', thres)
 
             _, contours, hierarchy1 = cv2.findContours(thres, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-            contour, ellipse = self.get_pupil_from_contours(contours, small_gray, old_center, old_r,  display=display)
+            contour, ellipse = self.get_pupil_from_contours(contours, small_gray, display=display)
 
             if contour is None:
                 traces.append(dict(frame_id=fr_count,
                                   frame_intensity=img_std))
-                old_center = None
-                old_r = None
             else:
                 eye_center = eye_roi[::-1, 0] + np.asarray(ellipse[0])
-                old_center = np.asarray(ellipse[0])/np.asarray(small_gray.shape[::-1])
-                old_r = max(ellipse[1])
+
+                self._center = np.asarray(ellipse[0])/np.asarray(small_gray.shape[::-1])
+                self._radius = max(ellipse[1])
                 traces.append(dict(center=eye_center,
                                   major_r=np.max(ellipse[1]),
                                   rotated_rect=np.hstack(ellipse),
@@ -367,6 +384,8 @@ class PupilTracker:
                                   ))
             if display:
                 if contour is not None:
+                    cv2.putText(gray, "{fr_count}/{frames}".format(fr_count=fr_count, frames=n_frames),
+                                (10, 30), font, 1, (127, 127, 127), 2)
                     ellipse = list(ellipse)
                     ellipse[0] = tuple(eye_center)
                     ellipse = tuple(ellipse)

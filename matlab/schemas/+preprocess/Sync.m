@@ -3,8 +3,8 @@ preprocess.Sync (imported) #
 -> preprocess.Prepare
 ---
 -> vis.Session
-first_trial                 : int                           # first trial index from psy.Trial overlapping recording
-last_trial                  : int                           # last trial index from psy.Trial overlapping recording
+first_trial                 : int                           # first trial index from vis.Trial overlapping recording
+last_trial                  : int                           # last trial index from vis.Trial overlapping recording
 signal_start_time           : double                        # (s) signal start time on stimulus clock
 signal_duration             : double                        # (s) signal duration on stimulus time
 frame_times=null            : longblob                      # times of frames and slices
@@ -36,7 +36,7 @@ classdef Sync < dj.Relvar & dj.AutoPopulate
             fps = 60;   % does not need to be exact
             
             % synchronize to stimulus
-            tuple =  stims.analysis.sync(key, photodiode_signal, photodiode_fs, fps);
+            tuple =  stims.analysis.sync(key, photodiode_signal, photodiode_fs, fps, psy.Trial);
             
             % find scanimage frame pulses
             n = ceil(0.0002*photodiode_fs);

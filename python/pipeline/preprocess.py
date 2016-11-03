@@ -26,7 +26,7 @@ def notnan(x, start=0, increment=1):
 
 def fill_nans(x):
     """
-    :param x:  1D array
+    :param x:  1D array  -- will
     :return: the array with nans interpolated
     The input argument is modified.
     """
@@ -500,7 +500,7 @@ class SpikeMethod(dj.Lookup):
     def spike_traces(self, X, fps):
         try:
             import c2s
-        except:
+        except ImportError:
             warn("c2s was not found. You won't be able to populate ExtracSpikes")
         assert self.fetch1['language'] == 'python', "This tuple cannot be computed in python."
         if self.fetch1['spike_method'] == 3:
@@ -623,7 +623,7 @@ class Spikes(dj.Computed):
             part = self.RateTrace()
             for trace, trace_key in zip(*(ComputeTraces.Trace() & key).fetch['trace', dj.key]):
                 trace = pyfnnd.deconvolve(fill_nans(np.float64(trace.flatten())), dt=1/fps)[0]
-                part.insert1(dict(trace_key, **key, rate_trace=trace.astype(np.float32)[:, np.newaxis]))
+                part.insert1(dict(trace_key, rate_trace=trace.astype(np.float32)[:, np.newaxis], **key))
         else:
             raise NotImplementedError('Method {spike_method} not implemented.'.format(**key))
         print('Done', flush=True)
@@ -711,7 +711,11 @@ class Eye(dj.Imported):
         packet_length = data['analogPacketLen']
         dat_time, _ = ts2sec(data['ts'], packet_length)
 
-        cam_key = 'cam1ts' if info['rig'] == '2P3' else  'cam2ts'
+        if float(data['version']) == 2.:
+            cam_key = 'eyecam_ts'
+        else:
+            cam_key = 'cam1ts' if info['rig'] == '2P3' else  'cam2ts'
+
         eye_time, _ = ts2sec(data[cam_key])
         total_frames = len(eye_time)
 
@@ -786,65 +790,65 @@ class TrackingParameters(dj.Lookup):
          'perc_low': 2,
          'perc_weight': 0.2,
          'relative_area_threshold': 0.01,
-         'ratio_threshold': 1.7,
+         'ratio_threshold': 1.3,
          'error_threshold': 0.03,
          'min_contour_len': 5,
          'margin': 0.15,
          'contrast_threshold': 10,
-         'speed_threshold': 0.2,
-         'dr_threshold': 0.15,
+         'speed_threshold': 0.1,
+         'dr_threshold': 0.05,
          },
         {'eye_quality': 1,
          'perc_high': 98,
          'perc_low': 2,
-         'perc_weight': 0.4,
+         'perc_weight': 0.2,
          'relative_area_threshold': 0.01,
-         'ratio_threshold': 1.9,
+         'ratio_threshold': 1.3,
          'error_threshold': 0.05,
          'min_contour_len': 5,
          'margin': 0.15,
          'contrast_threshold': 10,
-         'speed_threshold': 0.2,
-         'dr_threshold': 0.15,
+         'speed_threshold': 0.1,
+         'dr_threshold': 0.05,
          },
         {'eye_quality': 2,
          'perc_high': 98,
          'perc_low': 2,
          'perc_weight': 0.2,
          'relative_area_threshold': 0.01,
-         'ratio_threshold': 1.9,
+         'ratio_threshold': 1.3,
          'error_threshold': 0.1,
          'min_contour_len': 5,
          'margin': 0.02,
          'contrast_threshold': 10,
-         'speed_threshold': 0.2,
-         'dr_threshold': 0.15,
+         'speed_threshold': 0.1,
+         'dr_threshold': 0.05,
          },
         {'eye_quality': 3,
          'perc_high': 95,
          'perc_low': 2,
          'perc_weight': 0.3,
          'relative_area_threshold': 0.01,
-         'ratio_threshold': 1.9,
+         'ratio_threshold': 1.3,
          'error_threshold': 0.1,
          'min_contour_len': 5,
          'margin': 0.02,
          'contrast_threshold': 10,
-         'speed_threshold': 0.2,
-         'dr_threshold': 0.15,
+         'speed_threshold': 0.1,
+         'dr_threshold': 0.05,
          },
         {'eye_quality': 4,
          'perc_high': 95,
          'perc_low': 2,
          'perc_weight': 0.3,
          'relative_area_threshold': 0.01,
-         'ratio_threshold': 1.9,
+         'ratio_threshold': 1.3,
          'error_threshold': 0.1,
          'min_contour_len': 5,
          'margin': 0.02,
          'contrast_threshold': 3,
-         'speed_threshold': 0.2,
-         'dr_threshold': 0.15,
+         'speed_threshold': 0.1,
+         'dr_threshold': 0.05,
          },
     ]
 
@@ -892,7 +896,7 @@ class EyeTracking(dj.Computed):
             trace.update(key)
             fr.insert1(trace)
 
-    def plot_traces(self, outdir='./'):
+    def plot_traces(self, outdir='./', show=False):
         """
         Plot existing traces to output directory.
 
@@ -900,6 +904,7 @@ class EyeTracking(dj.Computed):
         """
         import seaborn as sns
         import matplotlib.pyplot as plt
+        plt.switch_backend('GTK3Agg')
 
         for key in self.fetch.keys():
             print('Processing', key)
@@ -910,7 +915,6 @@ class EyeTracking(dj.Computed):
                 'major_r', 'center', 'frame_intensity']
             ax[0].plot(r)
             ax[0].set_title('Major Radius')
-
             c = np.vstack([cc if cc is not None else np.NaN * np.ones(2) for cc in center])
 
             ax[1].plot(c[:, 0], label='x')
@@ -921,15 +925,22 @@ class EyeTracking(dj.Computed):
             ax[2].plot(contrast)
             ax[2].set_title('Contrast (frame std)')
             ax[2].set_xlabel('Frames')
+            try:
+                sh.mkdir('-p', os.path.expanduser(outdir) + '/{animal_id}/'.format(**key))
+            except:
+                pass
 
             fig.suptitle(
                 'animal id {animal_id} session {session} scan_idx {scan_idx} eye quality {eye_quality}'.format(**key))
             fig.tight_layout()
             sns.despine(fig)
-            fig.savefig(outdir + '/AI{animal_id}SE{session}SI{scan_idx}EQ{eye_quality}.png'.format(**key))
-            plt.close(fig)
+            fig.savefig(outdir + '/{animal_id}/AI{animal_id}SE{session}SI{scan_idx}EQ{eye_quality}.png'.format(**key))
+            if show:
+                plt.show()
+            else:
+                plt.close(fig)
 
-    def show_video(self, from_frame, to_frame):
+    def show_video(self, from_frame, to_frame, framerate=1000):
         """
         Shows the video from from_frame to to_frame (1-based) and the corrsponding tracking results.
         Needs opencv installation.
@@ -980,7 +991,7 @@ class EyeTracking(dj.Computed):
                 cv2.ellipse(gray, ellipse, (0, 0, 255), 2)
             cv2.imshow('frame', gray)
 
-            if (cv2.waitKey(1) & 0xFF == ord('q')):
+            if (cv2.waitKey(int(1000/framerate)) & 0xFF == ord('q')):
                 break
 
         cap.release()

@@ -14,6 +14,31 @@ classdef ManualSegment < dj.Relvar & dj.AutoPopulate
         popRel  = preprocess.PrepareGalvoMotion & pro(preprocess.PrepareGalvoAverageFrame)
     end
     
+    methods
+        % Overloaded delete function:
+        % Deletes manual segmentations for other slices of this scan
+        % Deletes dependents of all manual segmentations for all slices of this scan
+        function del(self)
+            
+            % Check for any dependent data
+            if count(preprocess.ExtractRaw & self & 'extract_method=1')
+                
+                % There is dependent data. Prompt for delete
+                del(preprocess.ExtractRaw & self & 'extract_method=1');
+                
+                % only if dependent data is gone, prompt to delete the segmentations
+                if ~count(preprocess.ExtractRaw & self & 'extract_method=1')
+                    del@dj.Relvar(self);
+                end
+            else
+                % No dependent data - can delete segmentations
+                del@dj.Relvar(self);
+            end
+            
+            
+        end
+    end
+    
     methods(Access=protected)
         
         function makeTuples(self, key)
