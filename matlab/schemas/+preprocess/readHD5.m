@@ -40,7 +40,7 @@ end
 version  = H5Tools.readAttribute(fp,'Version');
 
 switch version
-    case '1.0'
+    case 1
         % Files recorded after 03-28-2014 using the NPI ELC-03XS amplifier as amp 1 and the AxoClamp 2B (.1x headstage) as amp 2
         % Amp 2 current low-pass is set to 3000Hz.
         % Skips settings telegraph from NPI if any(~sets), i.e. if NPI amp is turned off.
@@ -129,18 +129,18 @@ switch version
         
         H5F.close(fp);
         
-    case '2.0'
+    case 2
         % WH_channelNames = Position,Counter,Time
         % IM_channelNames = CTR Time, Real Time
 
         % Packet Length
-        data.analogPacketLen  = str2num(H5Tools.readAttribute(fp,'AS_samples_per_channel'));
+        data.analogPacketLen  = (H5Tools.readAttribute(fp,'AS_samples_per_channel'));
         
         % read wheel trace
         data.ball = H5Tools.readDataset(fp,'Wheel') ;
         
         % read camera timestamps
-        data.eyecam_ts = H5Tools.readDataset(fp,'videotimestamp') ;
+        data.eyecam_ts = H5Tools.readDataset(fp,'videotimestamps') ;
         
         % read frame timestamps
         data.framenum_ts = H5Tools.readDataset(fp,'framenum_ts') ;
