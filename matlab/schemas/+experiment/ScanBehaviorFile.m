@@ -1,8 +1,8 @@
 %{
-experiment.ScanBehaviorFile (manual) # name of the running wheel file
+experiment.ScanBehaviorFile (manual) # file with info about synchronization, wheel, timestamping
 -> experiment.Scan
 ---
-filename                    : varchar(50)                   # filename of the video
+filename                    : varchar(50)                   # filename of the h5 file
 %}
 
 

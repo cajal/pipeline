@@ -26,7 +26,7 @@ def notnan(x, start=0, increment=1):
 
 def fill_nans(x):
     """
-    :param x:  1D array
+    :param x:  1D array  -- will
     :return: the array with nans interpolated
     The input argument is modified.
     """
@@ -500,7 +500,7 @@ class SpikeMethod(dj.Lookup):
     def spike_traces(self, X, fps):
         try:
             import c2s
-        except:
+        except ImportError:
             warn("c2s was not found. You won't be able to populate ExtracSpikes")
         assert self.fetch1['language'] == 'python', "This tuple cannot be computed in python."
         if self.fetch1['spike_method'] == 3:
@@ -711,7 +711,11 @@ class Eye(dj.Imported):
         packet_length = data['analogPacketLen']
         dat_time, _ = ts2sec(data['ts'], packet_length)
 
-        cam_key = 'cam1ts' if info['rig'] == '2P3' else  'cam2ts'
+        if float(data['version']) == 2.:
+            cam_key = 'eyecam_ts'
+        else:
+            cam_key = 'cam1ts' if info['rig'] == '2P3' else  'cam2ts'
+
         eye_time, _ = ts2sec(data[cam_key])
         total_frames = len(eye_time)
 
