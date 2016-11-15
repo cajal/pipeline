@@ -872,13 +872,13 @@ class EyeTracking(dj.Computed):
 
     @property
     def key_source(self):
-        return (Eye() * TrackingParameters()).proj()
+        return (Eye() * TrackingParameters()).proj('eye_quality')
 
     def _make_tuples(self, key):
         print("Populating", key)
         param = (TrackingParameters() & key).fetch1()
 
-        roi = (Eye() & key).fetch1['eye_roi']
+        roi = (Eye().proj('eye_roi') & key).fetch1['eye_roi']
 
         video_info = (experiment.Session() * experiment.Scan.EyeVideo() & key).fetch1()
         avi_path = "{path_prefix}/{behavior_path}/{filename}".format(path_prefix=config['path.mounts'], **video_info)
