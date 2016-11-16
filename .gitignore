@@ -1,7 +1,7 @@
 # pipeline configuration
 .env
 pipeline_config.json
-.gitignore
+
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
