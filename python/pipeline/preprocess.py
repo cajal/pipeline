@@ -703,7 +703,12 @@ class Eye(dj.Imported):
 
         tmp = info['hdf_file'].split('.')
 
-        info['hdf_file'] = tmp[0][:-1] + '%d.' + tmp[-1]
+        if '%d' in tmp[0]:
+            # new version
+            info['hdf_file'] = tmp[0][:-2] + '%d.' + tmp[-1]
+        else:
+            info['hdf_file'] = tmp[0][:-1] + '%d.' + tmp[-1]
+        # info['hdf_file'] = tmp[0][:-1] + '%d.' + tmp[-1]
 
         hdf_path = "{path_prefix}/{behavior_path}/{hdf_file}".format(path_prefix=path_prefix, **info)
 
@@ -713,10 +718,11 @@ class Eye(dj.Imported):
 
         if float(data['version']) == 2.:
             cam_key = 'eyecam_ts'
+            eye_time, _ = ts2sec(data[cam_key][0])
         else:
             cam_key = 'cam1ts' if info['rig'] == '2P3' else  'cam2ts'
+            eye_time, _ = ts2sec(data[cam_key])
 
-        eye_time, _ = ts2sec(data[cam_key])
         total_frames = len(eye_time)
 
         frame_idx = np.floor(np.linspace(0, total_frames - 1, n_sample_frames))
