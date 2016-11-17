@@ -17,21 +17,6 @@ RUN \
     octave \
     wget
 
-
-# Build HDF5
-RUN cd ; wget https://www.hdfgroup.org/ftp/HDF5/current/src/hdf5-1.8.17.tar.gz \
-    && tar zxf hdf5-1.8.17.tar.gz \
-    && mv hdf5-1.8.17 hdf5-setup \
-    &&  cd hdf5-setup \
-    && ./configure --prefix=/usr/local/ \
-    &&  make -j 12 && make install \
-    && cd  \
-    && rm -rf hdf5-setup \
-    && apt-get -yq autoremove \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
-
-
 RUN \
   apt-get update && \
   apt-get install -y cmake git libgtk2.0-dev pkg-config libavcodec-dev libavformat-dev libswscale-dev && \
