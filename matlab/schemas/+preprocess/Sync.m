@@ -36,7 +36,7 @@ classdef Sync < dj.Relvar & dj.AutoPopulate
             fps = 60;   % does not need to be exact
             
             % synchronize to stimulus
-            tuple =  stims.analysis.sync(key, photodiode_signal, photodiode_fs, fps, psy.Trial);
+            tuple =  stims.analysis.sync(key, photodiode_signal, photodiode_fs, fps, vis.Trial);
             
             % find scanimage frame pulses
             n = ceil(0.0002*photodiode_fs);

@@ -3,7 +3,7 @@
 # pipeline configuration
 .env
 pipeline_config.json
-.gitignore
+
 
 # Docker files
 docker-compose.yml
