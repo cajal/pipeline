@@ -2,18 +2,8 @@ function p = getLocalPath(p,os)
 % Converts path names to local operating system format using lab conventions.
 %
 %    localPath = getLocalPath(inputPath) converts inputPath to local OS format
-%    using lab conventions. The following paths are converted:
-%
-%       input        Linux            Windows      Mac
-%       /lab         /mnt/lab         Z:\          /Volumes/lab
-%       /stor01      /mnt/stor01      Y:\          /Volumes/stor01
-%       /stor02      /mnt/stor02      X:\          /Volumes/stor02
-%       /scratch01   /mnt/scratch01   V:\          /Volumes/scratch01
-%       /scratch03   /mnt/scratch03   T:\          /Volumes/scratch03
-%       /stimulation /mnt/stor01/stimulation Y:\stor01\stimulation  /Volumes/stor01/stimulation
-%       /processed   /mnt/stor01/processed   Y:\stor01\processed    /Volumes/stor01/processed
-%       /raw         /mnt/at_scratch  W:           /Volumes/at_scratch
-%       ~            $HOME            %homepath%   ~
+%    using lab conventions. The paths that are converted are stored in the
+%    commons_lab.Paths table.
 %
 %    localPath = getLocalPath(inputPath,OS) will return the path in the format
 %    of the operating system specified in OS ('global' | 'linux' |'win' | 'mac')
@@ -25,9 +15,6 @@ if nargin < 2
     os = computer;
 end
 os = os(1:min(3,length(os)));
-
-% convert file separators if necessary
-p = strrep(p,'\','/');
 
 % local os' column
 switch lower(os)
@@ -46,24 +33,14 @@ switch lower(os)
     otherwise
         error('unknown OS');
 end
+
+% convert file separators if necessary
+p = strrep(p,'\','/');
+
+% assign home
 p = strrep(p,'~',home);
 
-% mapping table [INPUT LINUX WINDOWS MAC]
-% mapping = {
-%     '/stimulation','/mnt/stor01/stimulation','Y:/stimulation','/Volumes/stor01/stimulation'
-%     '/processed','/mnt/stor01/processed','Y:/processed','/Volumes/stor01/processed'
-%     '/lab','/mnt/lab','Z:','/Volumes/lab'
-%     '/stor01','/mnt/stor01','Y:','/Volumes/stor01'
-%     '/stor02','/mnt/stor02','X:','/Volumes/stor02'
-%     '/scratch01','/mnt/scratch01','V:','/Volumes/scratch01'
-%     '/scratch03','/mnt/scratch03','T:','/Volumes/scratch03'
-%     '/at_scratch','/mnt/at_scratch','W:','/Volumes/at_scratch'
-%     '/raw','/mnt/at_scratch','W:','/Volumes/at_scratch'
-%     '/2P2Drive','/mnt/2P2Drive','Q:','/Volumes/2P2Drive'
-%     '/manolism','/mnt/manolism','M:','/Volumes/M'
-%     '/dataCache','/media/Data','S:','xx'
-%     '~',home,home,'~'
-%     };
+% mapping table 
 [mapping(:,1),mapping(:,2),mapping(:,3),mapping(:,4)] = fetchn(lab.Paths,'global','linux','windows','mac');
 
 % convert path
