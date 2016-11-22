@@ -29,5 +29,6 @@ setup(
     scripts=[
         'scripts/worker',
         'scripts/worker-populate.py',
+        'scripts/worker-environment.py',
     ]
 )
