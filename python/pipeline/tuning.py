@@ -377,5 +377,3 @@ class RF(dj.Computed):
 
 schema.spawn_missing_classes()
 
-def plot_ori_and_rf(restriction=True):
-    ori = Map() * VonMises() & 'von_pvalue<0.001' & 'rf_method=1'
