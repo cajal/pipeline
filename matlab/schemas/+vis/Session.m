@@ -1,9 +1,9 @@
 %{
 vis.Session (manual) # Visual stimulus session, populated by the stimulus program.
--> common.Animal
+-> mice.Mice
 psy_id          : smallint unsigned      # unique psy session number
 ---
-stimulus="grating"          : varchar(255)                  # experiment type
+stimulus="unused"           : varchar(255)                  # experiment type
 monitor_distance            : float                         # (cm) eye-to-monitor distance
 monitor_size=19             : float                         # (inches) size diagonal dimension
 monitor_aspect=1.25         : float                         # physical aspect ratio of monitor
