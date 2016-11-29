@@ -360,7 +360,7 @@ class RF(dj.Computed):
                 maps = RF.soft_thresh(maps + beta * (sta - predicted_sta), lam=beta * 0.5, mu=beta * 0.05)
                 print('iteration', iteration, flush=True)
 
-        # submit data        print('\ninserting...', end=' ', flush=True)
+        # submit data
         self.insert1(dict(key,
                           degrees_x=degrees_x,
                           degrees_y=degrees_y,
