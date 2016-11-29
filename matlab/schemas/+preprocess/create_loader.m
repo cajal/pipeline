@@ -47,7 +47,7 @@ end
 
 
 fprintf('\tLoading slice %d channel %d\n', islice, ichannel)
-scan = zeros(c,r, 1, length(frames));
+scan = zeros(r,c, 1, length(frames));
 N = length(frames);
 
 for iframe = frames
