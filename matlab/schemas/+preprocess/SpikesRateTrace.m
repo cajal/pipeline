@@ -17,9 +17,11 @@ classdef SpikesRateTrace < dj.Relvar
             switch method    
                 case 'nmf'
                     % Copy NMF spikes from preprocess.ExtractRawSpikeRate
-                    self.insert(rmfield(...
+                    keys =  rmfield(...
                         fetch(preprocess.ExtractRawSpikeRate & key, 'spike_trace->rate_trace', '*'), ...
-                        'channel'))
+                        'channel');
+                    [keys.spike_method]=deal(key.spike_method);
+                    self.insert(keys)
                                         
                 otherwise
                     error('invalid method %s', method)
