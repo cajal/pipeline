@@ -367,9 +367,9 @@ class RF(dj.Computed):
                           nbins=nbins,
                           bin_size=bin_size * 1000,
                           stim_duration=stim_duration))
-        RF.Map().insert((dict(trace_key, **key,
+        RF.Map().insert((dict(trace_key,
                               map=np.int8(127 * m / np.max(abs(m))),
-                              scale=np.max(abs(m)) / np.sqrt(n))
+                              scale=np.max(abs(m)) / np.sqrt(n),  **key)
                          for trace_key, m, n in zip(trace_keys, maps, trace_norm)),
                         ignore_extra_fields=True)
         print('done.', flush=True)
