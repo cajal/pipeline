@@ -8,6 +8,7 @@ from . import mice     # needed for referencing
 schema = dj.schema('pipeline_vis', locals())
 
 
+schema.spawn_missing_classes()
 @schema
 class Session(dj.Manual):
     definition = """  # Visual stimulus session, populated by the stimulus program.
