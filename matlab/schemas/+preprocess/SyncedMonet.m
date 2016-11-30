@@ -28,7 +28,7 @@ classdef SyncedMonet < dj.Relvar & dj.AutoPopulate
                         'cached_movie', 'flip_times');
                     sz = size(movie);
                     if isempty(syncedMovie)
-                        syncedMovie = nan(sz(1), sz(2), nSlices);
+                        syncedMovie = nan(sz(1), sz(2), length(caTimes));
                     end
                     timeInd = find(caTimes > flips(1) & caTimes < flips(end));
                     if ~isempty(timeInd)
