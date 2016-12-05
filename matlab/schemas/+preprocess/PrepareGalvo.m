@@ -41,8 +41,8 @@ classdef PrepareGalvo < dj.Relvar
             key.nframes_requested = reader.requested_frames;
             key.nframes = reader.nframes;
             sz = size(reader);
-            key.px_height = sz(2);
-            key.px_width  = sz(1);
+            key.px_height = sz(1);
+            key.px_width  = sz(2);
                        
             %%%% compute field of view
             zoom = reader.zoom;

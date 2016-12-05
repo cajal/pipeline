@@ -33,7 +33,7 @@ classdef ScanCoordinates < dj.Relvar & dj.AutoPopulate
             
             self.insert(tuple);
             
-            for imask = 1:length(mask_id);
+            for imask = 1:length(mask_id)
                 
                 % get mask position
                 mask = masks{imask};

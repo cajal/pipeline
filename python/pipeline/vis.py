@@ -190,6 +190,7 @@ class FlashingBar(dj.Manual):
     pattern_frequency    : float                        # (Hz) will be rounded to the nearest fraction of fps
     """
 
+
 @schema
 class Grating(dj.Manual):
     definition = """  # drifting gratings with apertures
@@ -251,3 +252,6 @@ def migrate():
     orphan_conditions = (
         Condition() - Monet() - Trippy() - MovieClipCond() -
         MovieStillCond() - MovieSeqCond() - FlashingBar() - Grating())
+
+
+schema.spawn_missing_classes()

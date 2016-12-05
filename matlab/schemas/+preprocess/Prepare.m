@@ -8,7 +8,7 @@ preprocess.Prepare (imported) # master table that gathers data about the scans o
 classdef Prepare < dj.Relvar & dj.AutoPopulate
     
     properties
-        popRel = experiment.Scan & 'aim="2pScan"'
+        popRel = experiment.Scan - experiment.ScanIgnored & 'aim="2pScan"'
     end
     
     methods(Access=protected)

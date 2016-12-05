@@ -2,23 +2,13 @@ function p = getLocalPath(p,os)
 % Converts path names to local operating system format using lab conventions.
 %
 %    localPath = getLocalPath(inputPath) converts inputPath to local OS format
-%    using lab conventions. The following paths are converted:
-%
-%       input        Linux            Windows      Mac
-%       /lab         /mnt/lab         Z:\          /Volumes/lab
-%       /stor01      /mnt/stor01      Y:\          /Volumes/stor01
-%       /stor02      /mnt/stor02      X:\          /Volumes/stor02
-%       /scratch01   /mnt/scratch01   V:\          /Volumes/scratch01
-%       /scratch03   /mnt/scratch03   T:\          /Volumes/scratch03
-%       /stimulation /mnt/stor01/stimulation Y:\stor01\stimulation  /Volumes/stor01/stimulation
-%       /processed   /mnt/stor01/processed   Y:\stor01\processed    /Volumes/stor01/processed
-%       /raw         /mnt/at_scratch  W:           /Volumes/at_scratch
-%       ~            $HOME            %homepath%   ~
+%    using lab conventions. The paths that are converted are stored in the
+%    commons_lab.Paths table.
 %
 %    localPath = getLocalPath(inputPath,OS) will return the path in the format
 %    of the operating system specified in OS ('global' | 'linux' |'win' | 'mac')
 %
-% AE 2011-04-01
+% AE 2011, MF 2016
 
 % determine operating system;
 if nargin < 2
@@ -26,19 +16,11 @@ if nargin < 2
 end
 os = os(1:min(3,length(os)));
 
-% convert file separators if necessary
-p = strrep(p,'\','/');
-
-% a few fixes for outdated paths
-p = strrep(p,'/stor01/hammer','/at_scratch/hammer');
-p = strrep(p,'/stor02/hammer','/at_scratch/hammer');
-p = strrep(p,'hammer/ben','hammer/Ben');
-
 % local os' column
-home = 'Windows Home';
 switch lower(os)
     case 'glo'
         local = 1;
+        home = '~';
     case {'lin','gln'}
         local = 2;
         home = getenv('HOME');
@@ -47,26 +29,19 @@ switch lower(os)
         home = [getenv('HOMEDRIVE') getenv('HOMEPATH')];
     case 'mac'
         local = 4;
+        home = '~';
     otherwise
         error('unknown OS');
 end
 
-% mapping table [INPUT LINUX WINDOWS MAC]
-mapping = {
-    '/stimulation','/mnt/stor01/stimulation','Y:/stimulation','/Volumes/stor01/stimulation'
-    '/processed','/mnt/stor01/processed','Y:/processed','/Volumes/stor01/processed'
-    '/lab','/mnt/lab','Z:','/Volumes/lab'
-    '/stor01','/mnt/stor01','Y:','/Volumes/stor01'
-    '/stor02','/mnt/stor02','X:','/Volumes/stor02'
-    '/scratch01','/mnt/scratch01','V:','/Volumes/scratch01'
-    '/scratch03','/mnt/scratch03','T:','/Volumes/scratch03'
-    '/at_scratch','/mnt/at_scratch','W:','/Volumes/at_scratch'
-    '/raw','/mnt/at_scratch','W:','/Volumes/at_scratch'
-    '/2P2Drive','/mnt/2P2Drive','Q:','/Volumes/2P2Drive'
-    '/manolism','/mnt/manolism','M:','/Volumes/M'
-    '/dataCache','/media/Data','S:','xx'
-    '~',home,home,'~'
-    };
+% convert file separators if necessary
+p = strrep(p,'\','/');
+
+% assign home
+p = strrep(p,'~',home);
+
+% mapping table 
+[mapping(:,1),mapping(:,2),mapping(:,3),mapping(:,4)] = fetchn(lab.Paths,'global','linux','windows','mac');
 
 % convert path
 sz = size(mapping);
