@@ -90,6 +90,9 @@ class Prepare(dj.Imported):
         """
 
         def get_fix_raster(self):
+            """
+            :return: a function that perform raster correction on image [x, y, nchannel, nslice, nframe].
+            """
             raster_phase, fill_fraction = self.fetch1['raster_phase', 'fill_fraction']
             if raster_phase == 0:
                 return lambda img: np.double(img)
@@ -109,6 +112,9 @@ class Prepare(dj.Imported):
         """
 
         def get_fix_motion(self):
+            """
+            :return: a function that performs motion correction on image [x, y].
+            """
             xy = self.fetch['motion_xy']
             return lambda frame, i: galvo_corrections.correct_motion(frame, xy[:, i])
 

@@ -3,6 +3,12 @@ import numpy as np
 
 
 def correct_motion(img, xymotion):
+    """
+    motion correction for 2P scans.
+    :param img: 2D image [x, y]
+    :param xymotion: x, y motion offsets
+    :return: motion corrected image [x, y]
+    """
     assert isinstance(img, np.ndarray) and len(xymotion) == 2, 'Cannot correct stacks. Only 2D images please.'
     sz = img.shape
     y1, x1 = np.ogrid[0: sz[0], 0: sz[1]]
@@ -14,7 +20,14 @@ def correct_motion(img, xymotion):
     return img
 
 
-def correct_raster(img, raster_phase, fill_fraction ):
+def correct_raster(img, raster_phase, fill_fraction):
+    """
+    raster correction for resonant scanners.
+    :param img: 5D image [x, y, nchannel, nslice, nframe].
+    :param raster_phase: phase difference beetween odd and even lines.
+    :param fill_fraction: ratio between active acquisition and total length of the scan line. see scanimage.
+    :return: raster-corrected image [x, y, nchannel, nslice, nframe].
+    """
     img = np.array(img)
     assert img.ndim <= 5, 'Image size greater than 5D.'
     ix = np.arange(-img.shape[1]/2 + 0.5, img.shape[1]/2 + 0.5) / (img.shape[1]/2)
@@ -34,18 +47,22 @@ def correct_raster(img, raster_phase, fill_fraction ):
                                                                                         raster_phase)/fill_fraction)
     return img
 
-def plot_raster():
 
+def plot_raster(filename, key):
+    """
+    plot origin frame, raster-corrected frame, and reversed raster-corrected frame.
+    :param filename:  full file path for tiff file.
+    :param key: scan key for the tiff file.
+    """
     import matplotlib.pyplot as plt
     import seaborn as sns
-    from pipeline import preprocess
+    from pipeline import preprocess, experiment
     from tiffreader import TIFFReader
-    reader = TIFFReader('/Users/titan/data/cache/11676_4_00006_00009.tif')
-    img=reader[:,:,0,0,100]
-    raster_phase = (preprocess.Prepare.Galvo() & dict(animal_id=11676, session=4, scan_idx=6)).fetch1['raster_phase']
+    reader = TIFFReader(filename)
+    img=reader[:, :, 0, 0, 100]
+    raster_phase = (preprocess.Prepare.Galvo() & key).fetch1['raster_phase']
     newim = correct_raster(img, raster_phase, reader.fill_fraction)
     nnewim = correct_raster(newim, -raster_phase, reader.fill_fraction)
-
     print(np.mean(img - nnewim))
 
     plt.close()
