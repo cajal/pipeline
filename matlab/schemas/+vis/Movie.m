@@ -17,4 +17,57 @@ params=null                 : longblob                      # movie parameters f
 
 
 classdef Movie < dj.Relvar
+    
+    methods 
+        function createClips(obj)
+            [path,file,file_temp,dur,codec] = fetch1(obj,'path','original_file','file_template','file_duration','codec');
+            
+            infile = getLocalPath(fullfile(path,file));
+            info = ffmpeginfo(infile);
+            clip_number = floor(info.duration/dur);
+            
+            % read data file
+            csvname = [infile(1:end-3) 'csv'];
+            if exist(csvname,'file')
+                data = csvread(csvname,1,0); %#ok<NASGU>
+                fileID = fopen(csvname,'r');
+                names = textscan(fileID, '%s', 1, 'delimiter', '\n', 'headerlines', 0);
+                fclose(fileID);
+                names = textscan(names{1}{1},'%s','delimiter',',');
+                names = names{1};
+                params = [];
+                for iname = 1:length(names)
+                    eval(['params.' names{iname} '=data(:,iname);']);
+                end        
+            end
+            
+            % update movie params
+            update(obj, 'params', params)
+            update(obj, 'frame_rate', info.streams.codec.fps)
+            
+            % process & insert clips
+            for iclip = 1:clip_number
+                tuple = fetch(obj);
+                tuple.clip_number = iclip;
+                tuple.file_name = sprintf(file_temp,iclip);
+                if exists(psy.MovieClipStore & tuple);continue;end
+               
+                % create file
+                start = (iclip-1)*dur;
+                outfile = getLocalPath(fullfile(path,tuple.file_name));
+                if ~exist(outfile,'file')
+                    argstr = sprintf('-i %s -ss %d -t %d %s %s',infile,start,dur,codec,outfile);
+                    ffmpegexec(argstr)
+                end
+                
+                % load file & insert
+                fid = fopen(getLocalPath(fullfile(path,tuple.file_name)));
+                tuple.clip = fread(fid,'*int8');
+                fclose(fid);
+                insert(vis.MovieClip,tuple)
+            end
+            
+            
+        end
+    end
 end
