@@ -15,11 +15,12 @@ RUN \
     automake \
     libtool \
     octave \
-    wget
+    wget \
+    bzip2
 
 RUN \
   apt-get update && \
-  apt-get install -y cmake git libgtk2.0-dev pkg-config libavcodec-dev libavformat-dev libswscale-dev && \
+  apt-get install -y cmake git libgtk2.0-dev pkg-config libavcodec-dev libavformat-dev libswscale-dev libglib2.0-0 && \
   apt-get install -y python-numpy libtbb2 libtbb-dev libjpeg-dev libpng-dev libtiff-dev libjasper-dev libdc1394-22-dev && \
   apt-get install -y libatlas-base-dev gfortran && \
   git clone https://github.com/Itseez/opencv.git && \
@@ -39,11 +40,11 @@ RUN \
   rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 
 
-# install HDF5 reader and rabbit-mq client lib
+# --- install HDF5 reader and rabbit-mq client lib
 RUN pip3 install h5py 
 
 
-# Install Lucas
+# --- install Spike Triggered Mixture Model for deconvolution
 RUN \
   git clone https://github.com/lucastheis/cmt.git && \
   cd ./cmt/code/liblbfgs && \
@@ -57,14 +58,25 @@ RUN \
 RUN \
   pip3 install git+https://github.com/cajal/c2s.git
 
-# Install pipeline
+# --- install CaImAn
+
+RUN git clone --recursive -b dev https://github.com/simonsfoundation/CaImAn.git && \
+    pip3 install --file CaImAn/requirements_pip.txt && \
+    apt-get install -y libc6-i386 libsm6 libxrender1 && \
+    pip3 install pyqt=4.11.4
+RUN pip3 install -e CaImAn/
+
+# --- install tiffreader
+RUN \
+  pip3 install oct2py && \
+  pip3 install git+https://github.com/atlab/tiffreader
+
+# --- install pipeline
 COPY . /data/pipeline
 RUN \
   pip3 install -e pipeline/python/
 
-RUN \
-  pip3 install oct2py && \
-  pip3 install git+https://github.com/atlab/tiffreader
+
 
 ENTRYPOINT ["worker"]
   

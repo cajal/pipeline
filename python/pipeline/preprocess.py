@@ -605,7 +605,11 @@ class Spikes(dj.Computed):
         if method == 'stm':
             prep = (Prepare() * Prepare.Aod() & key) or (Prepare() * Prepare.Galvo() & key)
             fps = prep.fetch1['fps']
-            X = (ComputeTraces.Trace() & key).proj('trace').fetch.as_dict()
+            X = []
+            for x in (ComputeTraces.Trace() & key).proj('trace').fetch.as_dict:
+                x['trace'] = fill_nans(x['trace'].astype('float64'))
+                X.append(x)
+
             self.insert1(key)
             for x in (SpikeMethod() & key).spike_traces(X, fps):
                 self.RateTrace().insert1(dict(key, **x))
