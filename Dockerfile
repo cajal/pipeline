@@ -59,11 +59,15 @@ RUN \
   pip3 install git+https://github.com/cajal/c2s.git
 
 # --- install CaImAn
+RUN apt-get update -y -q && \
+    apt-get install -y libc6-i386  libsuitesparse-dev&& \
+    wget http://faculty.cse.tamu.edu/davis/SuiteSparse/SuiteSparse-4.5.3.tar.gz &&\
+    tar -xf SuiteSparse-4.5.3.tar.gz && \
+    export CVXOPT_SUITESPARSE_SRC_DIR=$(pwd)/SuiteSparse && \
+    git clone --recursive https://github.com/fabiansinz/CaImAn.git && \
+    pip3 install cython scikit-image ipyparallel psutil&& \
+    pip3 install -r CaImAn/requirements_pip.txt
 
-RUN git clone --recursive -b dev https://github.com/simonsfoundation/CaImAn.git && \
-    pip3 install --file CaImAn/requirements_pip.txt && \
-    apt-get install -y libc6-i386 libsm6 libxrender1 && \
-    pip3 install pyqt=4.11.4
 RUN pip3 install -e CaImAn/
 
 # --- install tiffreader
