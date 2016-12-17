@@ -4,6 +4,7 @@ from warnings import warn
 import numpy as np
 import sh
 import os
+
 try:
     import pyfnnd
 except ImportError:
@@ -13,10 +14,13 @@ from .utils.eye_tracking import ROIGrabber, ts2sec, read_video_hdf5, PupilTracke
 from . import config
 from distutils.version import StrictVersion
 from .utils import galvo_corrections
+from .experiment import Session
+# import caiman.source_extraction.cnmf as cnmf
 
 assert StrictVersion(dj.__version__) >= StrictVersion('0.2.8')
 
 schema = dj.schema('pipeline_preprocess', locals())
+schema.spawn_missing_classes()
 
 
 def notnan(x, start=0, increment=1):
@@ -118,7 +122,6 @@ class Prepare(dj.Imported):
             xy = self.fetch['motion_xy']
             return lambda frame, i: galvo_corrections.correct_motion(frame, xy[:, i])
 
-
     class GalvoAverageFrame(dj.Part):
         definition = """   # average frame for each slice and channel after corrections
         -> Prepare.GalvoMotion
@@ -185,8 +188,11 @@ class ExtractRaw(dj.Imported):
 
     @property
     def key_source(self):
-        return Prepare() * Method().proj() & dj.OrList(
-            Prepare.Aod() * Method.Aod(), Prepare.Galvo() * Method.Galvo())
+        return Prepare() * Method() \
+               & ((Prepare.Galvo() * Method.Galvo() - 'segmentation="manual"') | \
+                  Prepare.Galvo() * Method.Galvo() * ManualSegment() | \
+                  Prepare.Aod() * Method.Aod()) \
+                 - (Session.TargetStructure() & 'compartment="axon"')
 
     class Trace(dj.Part):
         definition = """  # raw trace, common to Galvo
@@ -230,6 +236,21 @@ class ExtractRaw(dj.Imported):
         ---
         spike_trace :longblob
         """
+    #
+    # def get_cnmf_parameters(self, key):
+    #     d2, d1, um_width, um_height, nframes = \
+    #         (self & key).fetch1['px_width', 'px_height', 'um_width', 'um_height', 'nframes']
+    #     tau = 4
+    #     p = 2
+    #     neuron_density = 800
+    #     max_iter = 2
+    #     downsample_to = 4
+    #     fps = (self & key).fetch1['fps']
+    #     max_neurons = np.round((um_width * um_height) / 1000 ** 2 * neuron_density)
+    #     options = cnmf.utilities.CNMFSetParms((d1, d2, nframes), n_processes=1, p=p, gSig=[4, 4], K=max_neurons, ssub=1,
+    #                                           tsub=1)
+    #
+
 
     def plot_traces_and_masks(self, traces, slice, mask_channel=1, outfile='traces.pdf'):
 
@@ -298,7 +319,7 @@ class ExtractRaw(dj.Imported):
             mask_px, mask_w, spikes, traces, ids = (
                 self.GalvoROI() * self.SpikeRate() *
                 ComputeTraces.Trace() & key & dict(segmentation=2)).fetch.order_by('trace_id')[
-                    'mask_pixels', 'mask_weights', 'spike_trace', 'trace', 'trace_id']
+                'mask_pixels', 'mask_weights', 'spike_trace', 'trace', 'trace_id']
 
             template = np.stack([normalize(t)
                                  for t in (Prepare.GalvoAverageFrame() & key).fetch['frame']], axis=2).max(axis=2)
@@ -376,8 +397,7 @@ class ExtractRaw(dj.Imported):
                 plt.close(fig)
 
     def _make_tuples(self, key):
-        """ implemented in matlab """
-        raise NotImplementedError("Implemented in Matlab")
+        pass
 
 
 @schema
@@ -645,7 +665,7 @@ class Spikes(dj.Computed):
             fps = prep.fetch1['fps']
             part = self.RateTrace()
             for trace, trace_key in zip(*(ComputeTraces.Trace() & key).fetch['trace', dj.key]):
-                trace = pyfnnd.deconvolve(fill_nans(np.float64(trace.flatten())), dt=1/fps)[0]
+                trace = pyfnnd.deconvolve(fill_nans(np.float64(trace.flatten())), dt=1 / fps)[0]
                 part.insert1(dict(trace_key, rate_trace=trace.astype(np.float32)[:, np.newaxis], **key))
         else:
             raise NotImplementedError('Method {spike_method} not implemented.'.format(**key))
@@ -716,7 +736,6 @@ class Eye(dj.Imported):
 
         rel = experiment.Session() * experiment.Scan.EyeVideo() * experiment.Scan.BehaviorFile().proj(
             hdf_file='filename')
-
 
         info = (rel & key).fetch1()
         avi_path = "{path_prefix}/{behavior_path}/{filename}".format(path_prefix=path_prefix, **info)
@@ -1020,11 +1039,8 @@ class EyeTracking(dj.Computed):
                 cv2.ellipse(gray, ellipse, (0, 0, 255), 2)
             cv2.imshow('frame', gray)
 
-            if (cv2.waitKey(int(1000/framerate)) & 0xFF == ord('q')):
+            if (cv2.waitKey(int(1000 / framerate)) & 0xFF == ord('q')):
                 break
 
         cap.release()
         cv2.destroyAllWindows()
-
-
-schema.spawn_missing_classes()
