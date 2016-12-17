@@ -71,12 +71,17 @@ RUN pip3 install -e CaImAn/
 # --- install tiffreader
 RUN \
   pip3 install oct2py && \
-  pip3 install git+https://github.com/atlab/tiffreader
+  git clone https://github.com/atlab/tiffreader.git && \
+  pip3 install -e tiffreader
 
 ## --- install pipeline
 COPY . /data/pipeline
 RUN \
   pip3 install -e pipeline/python/
+
+RUN git clone https://github.com/atlab/commons.git && \
+    pip3 install -e commons/python && \
+    pip3 install scikit-learn --upgrade
 
 ENTRYPOINT ["worker"]
 
