@@ -19,8 +19,7 @@ RUN \
     bzip2 \
     git
 
-RUN rm /usr/bin/python && ln -s /usr/bin/python2 /usr/bin/python && \
-    apt-get install -y build-essential cmake pkg-config libjpeg8-dev libtiff5-dev libjasper-dev libpng12-dev \
+RUN apt-get install -y build-essential cmake pkg-config libjpeg8-dev libtiff5-dev libjasper-dev libpng12-dev \
     libavcodec-dev libavformat-dev libswscale-dev libv4l-dev libxvidcore-dev libx264-dev libgtk-3-dev libatlas-base-dev
 
 RUN git clone https://github.com/Itseez/opencv.git && \
