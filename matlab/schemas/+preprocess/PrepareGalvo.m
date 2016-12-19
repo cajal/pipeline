@@ -45,16 +45,14 @@ classdef PrepareGalvo < dj.Relvar
             key.px_width  = sz(2);
                        
             %%%% compute field of view
-            fastScanMultiplier = reader.header.hRoiManager_scanAngleMultiplierFast;
-            slowScanMultiplier = reader.header.hRoiManager_scanAngleMultiplierSlow;
             zoom = reader.zoom;
             fov = experiment.FOV * pro(experiment.Session*experiment.Scan & key, 'rig', 'lens', 'session_date') & 'session_date>=fov_ts';
             mags = fov.fetchn('mag');
             [~, i] = min(abs(log(mags/zoom)));
             mag = mags(i); % closest measured magnification
             [key.um_width, key.um_height] = fetch1(fov & struct('mag', mag), 'width', 'height');
-            key.um_width = key.um_width * mag/zoom * fastScanMultiplier;
-            key.um_height = key.um_height * mag/zoom * slowScanMultiplier;
+            key.um_width = key.um_width * mag/zoom;
+            key.um_height = key.um_height * mag/zoom;
             
             key.slice_pitch = reader.slice_pitch;
             key.fps = reader.fps;
