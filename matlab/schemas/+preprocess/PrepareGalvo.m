@@ -51,8 +51,8 @@ classdef PrepareGalvo < dj.Relvar
             [~, i] = min(abs(log(mags/zoom)));
             mag = mags(i); % closest measured magnification
             [key.um_width, key.um_height] = fetch1(fov & struct('mag', mag), 'width', 'height');
-            key.um_width = key.um_width * mag/zoom;
-            key.um_height = key.um_height * mag/zoom;
+            key.um_width = key.um_width * zoom/mag;
+            key.um_height = key.um_height * zoom/mag;
             
             key.slice_pitch = reader.slice_pitch;
             key.fps = reader.fps;
