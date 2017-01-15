@@ -17,6 +17,10 @@ def main(argv):
                                       help='Populate the specified relation.')
     subparser.add_argument('--command', default='populate')
 
+    subparser = subparsers.add_parser('environment',
+                                      help='Populate relation specified in environmental variables.')
+    subparser.add_argument('--command', default='environment')
+
 
 
     args = parser.parse_args(argv[1:2])

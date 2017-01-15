@@ -2,13 +2,14 @@
 This schema copies recent data from common_psy for uploaded to the cloud
 """
 import datajoint as dj
-from . import mice     # needed for referencing
-
+from . import mice  # needed for referencing
+import numpy as np
 
 schema = dj.schema('pipeline_vis', locals())
 
-
 schema.spawn_missing_classes()
+
+
 @schema
 class Session(dj.Manual):
     definition = """  # Visual stimulus session, populated by the stimulus program.
@@ -92,8 +93,6 @@ class MovieSeqCond(dj.Manual):
     """
 
 
-
-
 @schema
 class MovieStillCond(dj.Manual):
     definition = """
@@ -104,6 +103,7 @@ class MovieStillCond(dj.Manual):
     pre_blank_period     : float                        # (s)
     duration             : float                        # (s)
     """
+
 
 @schema
 class MovieClipCond(dj.Manual):
@@ -216,6 +216,39 @@ class Grating(dj.Manual):
     """
 
 
+@schema
+class MadAlexFrameSet(dj.Lookup):
+    definition = """
+    # holds training and testing frames for MadAlex stimulus
+
+    frame_set_id       : tinyint # identifier for the frame set
+    ---
+    uniques            : longblob # integer array with unique image ids
+    repeats_shared     : longblob # integer array with repeated image ids
+    repeats_nonshared  : longblob # integer array with repeated image ids
+    """
+
+    @property
+    def contents(self):
+        np.random.seed(1706)
+        all_images = np.arange(1, 12001, dtype=np.int32)
+        ri = np.random.randint
+        repeats_shared = all_images[ri(0, len(all_images), size=25)]
+
+        all_images = np.setdiff1d(all_images, repeats_shared)
+        for frame_set_id in range(1,4):
+            uniques = all_images[ri(0, len(all_images), size=1000)]
+            all_images = np.setdiff1d(all_images, uniques)
+
+            repeats_nonshared = all_images[ri(0, len(all_images), size=25)]
+            all_images = np.setdiff1d(all_images, repeats_nonshared)
+
+            yield dict(frame_set_id=frame_set_id,
+                       uniques=uniques,
+                       repeats_shared=repeats_shared,
+                       repeats_nonshared=repeats_nonshared)
+
+
 def migrate():
     from .legacy import psy
     from . import experiment
@@ -224,9 +257,9 @@ def migrate():
     sessions = psy.Session() & (experiment.Session() & 'session_date>"2016-02-02"' & 'animal_id>1000')
     trial = psy.Trial() & sessions
     condition = psy.Condition() & sessions
-    Session().insert(sessions-Session())
-    Condition().insert(condition-Condition())
-    Trial().insert(trial-Trial())
+    Session().insert(sessions - Session())
+    Condition().insert(condition - Condition())
+    Trial().insert(trial - Trial())
 
     # copy Monet
     monet = psy.MovingNoise() & sessions
