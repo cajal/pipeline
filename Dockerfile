@@ -81,7 +81,8 @@ RUN \
 
 RUN git clone https://github.com/atlab/commons.git && \
     pip3 install -e commons/python && \
-    pip3 install scikit-learn --upgrade
+    pip3 install scikit-learn --upgrade && \
+    pip3 install imreg_dft
 
 ENTRYPOINT ["worker"]
 
