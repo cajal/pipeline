@@ -1074,7 +1074,7 @@ class MatchedMasks(dj.Computed):
 
     class MatchedID(dj.Part):
         definition = """
-        -> MatchedScanSite
+        -> MatchedMasks
         -> ExtractRaw.GalvoROI
         other_trace_id          : smallint # index of the other scan
         ---
@@ -1083,40 +1083,23 @@ class MatchedMasks(dj.Computed):
     def _make_tuples(self, key):
         # --- get keys that identify scans and get channels for motion correction of templates between scans
         other_key = dict(key)
-        other_key['scan_idx'] = key.pop('other_scan_idx')
-
-        channels = [(dj.U('channel') & (ExtractRaw.GalvoROI() & key)).fetch1['channel'],
-                    (dj.U('channel') & (ExtractRaw.GalvoROI() & other_key)).fetch1['channel']]
-
-        # --- fetch masks and motion correction templates between two scans
-
+        other_key['scan_idx'] = other_key.pop('other_scan_idx')
 
         for slice in (dj.U('slice') & (ExtractRaw.GalvoROI() & key)).fetch['slice']:
-            masks, trace_ids, templates = [], [], []
-            print("Matching masks in slice {:02d}".format(slice), flush=True)
-            for scan_key, mask_channel in zip([key, other_key], channels):
-                rel = ExtractRaw.GalvoROI() & scan_key & dict(slice=slice)
-                d1, d2, fps = [int(elem) for elem in
-                               (Prepare.Galvo() & scan_key).fetch1['px_height', 'px_width', 'fps']]
-                mask_px, mask_w, trace_id_set = rel.fetch.order_by('trace_id')['mask_pixels', 'mask_weights', dj.key]
-                trace_ids.append(trace_id_set)
-                masks.append(ExtractRaw.GalvoROI.reshape_masks(mask_px, mask_w, d1, d2))
-                template = np.stack((normalize(t) for t in (Prepare.GalvoAverageFrame() & scan_key).fetch['frame'])
-                                    , axis=2)[..., mask_channel - 1]
-                templates.append(template)
+            masks, trace_ids, templates = self.load_unmatched(key)
 
             # --- estimate translation between two motion correction templates
             tvec = ird.translation(*templates)['tvec']
-            masks[1] = np.stack([ird.transform_img(m, tvec=tvec) for m in masks[1].transpose([2, 0, 1])], axis=2)
+
+            masks[1] = self.motion_correct(masks[1], tvec=tvec)
 
             m = [m.reshape([-1, m.shape[-1]]) for m in masks]
             D, D1, D0 = m[0].T @ m[1], m[1].T @ m[1], m[0].T @ m[0]
             C = D / np.sqrt(np.diag(D0)[:, np.newaxis] * np.diag(D1)[np.newaxis, :])
 
-            matched_ids = [[], []]
             thres = (MatchedScanSite() & key).fetch1['match_threshold']
-            assert np.all((C > thres).sum(axis=0) < 2) and np.all(
-                (C > thres).sum(axis=1) < 2), 'threshold does not give unique assignments'
+            if np.all((C > thres).sum(axis=0) < 2) and np.all((C > thres).sum(axis=1) < 2):
+                raise PipelineException('threshold does not give unique assignments')
 
             self.insert1(dict(other_key, slice=slice, translation_correction=tvec, **key))
             pairs = self.MatchedID()
@@ -1124,10 +1107,70 @@ class MatchedMasks(dj.Computed):
                 idx = d > thres
 
                 if idx.sum() == 1:
-                    print('o',end='',flush=True)
+                    print('o', end='', flush=True)
                     tmp = dict(key, **trace_ids[0][i])
                     j = int(np.where(idx)[0])
                     match = dict(other_key, other_trace_id=trace_ids[1][j]['trace_id'], **tmp)
                     pairs.insert1(match)
                 else:
-                    print('x',end='',flush=True)
+                    print('x', end='', flush=True)
+
+    @staticmethod
+    def load_unmatched(key):
+        other_key = dict(key)
+        other_key['scan_idx'] = other_key.pop('other_scan_idx')
+
+        masks, trace_ids, templates = [], [], []
+        channels = [(dj.U('channel') & (ExtractRaw.GalvoROI() & key)).fetch1['channel'],
+                    (dj.U('channel') & (ExtractRaw.GalvoROI() & other_key)).fetch1['channel']]
+
+        print("Matching masks in slice {:02d}".format(slice), flush=True)
+        for scan_key, mask_channel in zip([key, other_key], channels):
+            rel = ExtractRaw.GalvoROI() & scan_key & dict(slice=slice)
+            d1, d2, fps = [int(elem) for elem in
+                           (Prepare.Galvo() & scan_key).fetch1['px_height', 'px_width', 'fps']]
+            mask_px, mask_w, trace_id_set = rel.fetch.order_by('trace_id')['mask_pixels', 'mask_weights', dj.key]
+            trace_ids.append(trace_id_set)
+            masks.append(ExtractRaw.GalvoROI.reshape_masks(mask_px, mask_w, d1, d2))
+            template = np.stack((normalize(t) for t in (Prepare.GalvoAverageFrame() & scan_key).fetch['frame'])
+                                , axis=2)[..., mask_channel - 1]
+            templates.append(template)
+        return masks, trace_ids, templates
+
+    def load_matched(self):
+        rel = ExtractRaw.GalvoROI() * (MatchedMasks.MatchedID() & self) * ExtractRaw.GalvoROI().proj(
+                    other_scan_idx='scan_idx',
+                    other_trace_id='trace_id',
+                    other_mask_weights='mask_weights',
+                    other_mask_pixels='mask_pixels')
+        d1, d2, fps = [int(elem) for elem in
+                       (Prepare.Galvo() & self).fetch1['px_height', 'px_width', 'fps']]
+        mask_px, mask_w = rel.fetch['mask_pixels', 'mask_weights']
+        other_mask_px, other_mask_w = rel.fetch['other_mask_pixels', 'other_mask_weights']
+        mask_channel = (dj.U('channel') & (ExtractRaw.GalvoROI() & self)).fetch1['channel']
+        masks = ExtractRaw.GalvoROI.reshape_masks(mask_px, mask_w, d1, d2)
+        other_masks = ExtractRaw.GalvoROI.reshape_masks(other_mask_px, other_mask_w, d1, d2)
+        other_masks = self.motion_correct(other_masks)
+        template = np.stack((normalize(t) for t in (Prepare.GalvoAverageFrame() & self).fetch['frame'])
+                        , axis=2)[..., mask_channel - 1]
+        return masks, other_masks, template
+
+    def motion_correct(self, masks, tvec = None):
+        if tvec is None:
+            tvec = self.fetch1['translation_correction']
+        masks = np.stack([ird.transform_img(m, tvec=tvec) for m in masks.transpose([2, 0, 1])], axis=2)
+        return masks
+
+    def plot(self):
+        import seaborn as sns
+        import matplotlib.pyplot as plt
+
+        masks, other_masks, template = self.load_matched()
+        with sns.axes_style('white'):
+            fig, ax = plt.subplots()
+        color = ['RdBu', 'gray']
+        for m, c in zip([masks, other_masks], color):
+            m = m.mean(axis=2)
+            m[m == 0] = np.nan
+            ax.matshow(m, cmap=c, alpha=.5)
+        return fig, ax
