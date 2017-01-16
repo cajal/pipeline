@@ -14,7 +14,7 @@ from .utils.eye_tracking import ROIGrabber, ts2sec, read_video_hdf5, PupilTracke
 from . import config
 from distutils.version import StrictVersion
 from .utils import galvo_corrections
-from .experiment import Session
+from .experiment import Session, Scan
 import imreg_dft as ird
 
 # import caiman.source_extraction.cnmf as cnmf
@@ -1054,12 +1054,10 @@ class MatchedScanSite(dj.Manual):
     definition = """
     # an entry in this table indicates that two scans have been recorded at the same location
 
-    -> Scan
+    -> experiment.Scan
     other_scan_idx             : smallint      # second dependent scan idx
     ---
     match_threshold=0.7        : float         # minimal cosine between masks for match
-    mask_channel=1             : smallint      # channel for the first scan
-    other_mask_channel=1       : smallint      # channel for the other scan
     """
 
 
@@ -1069,14 +1067,16 @@ class MatchedMasks(dj.Computed):
     # grouping table for matched masks
 
     -> MatchedScanSite
+    slice                       : smallint # slice where the masks are matched
     ---
     translation_correction      : longblob # translation correction to account for shifts between scans
     """
 
     class MatchedID(dj.Part):
-        definiton = """
+        definition = """
+        -> MatchedScanSite
         -> ExtractRaw.GalvoROI
-        -> other_trace_id
+        other_trace_id          : smallint # index of the other scan
         ---
         """
 
@@ -1084,46 +1084,50 @@ class MatchedMasks(dj.Computed):
         # --- get keys that identify scans and get channels for motion correction of templates between scans
         other_key = dict(key)
         other_key['scan_idx'] = key.pop('other_scan_idx')
-        channels = [(MatchedScanSite() & key).fetch1['mask_channel'],
-                    (MatchedScanSite() & key).fetch1['other_mask_channel']]
+
+        channels = [(dj.U('channel') & (ExtractRaw.GalvoROI() & key)).fetch1['channel'],
+                    (dj.U('channel') & (ExtractRaw.GalvoROI() & other_key)).fetch1['channel']]
 
         # --- fetch masks and motion correction templates between two scans
-        masks = []
-        trace_ids = []
-        templates = []
-        for scan_key, mask_channel in zip([key, other_key], channels):
-            rel = ExtractRaw.GalvoROI() & scan_key
-            d1, d2, fps = [int(elem) for elem in (Prepare.Galvo() & scan_key).fetch1['px_height', 'px_width', 'fps']]
-            # TODO: Embed and make sure that it works across slices
-            mask_px, mask_w, trace_id_set = rel.fetch.order_by('trace_id')['mask_pixels', 'mask_weights', dj.key]
-            trace_ids.append(trace_id_set)
-            masks.append(ExtractRaw.GalvoROI.reshape_masks(mask_px, mask_w, d1, d2))
-            template = np.stack((normalize(t) for t in (Prepare.GalvoAverageFrame() & scan_key).fetch['frame'])
-                                , axis=2)[..., mask_channel - 1]
-            templates.append(template)
 
-        # --- estimate translation between two motion correction templates
-        result = ird.translation(templates[0], templates[1])
-        tvec = result['tvec']
-        masks[1] = np.stack([ird.transform_img(m, tvec=tvec) for m in masks[1].transpose([2, 0, 1])], axis=2)
 
-        m = [m.reshape([-1, m.shape[-1]]) for m in masks]
-        D, D1, D0 = m[0].T @ m[1], m[1].T @ m[1], m[0].T @ m[0]
-        C = D / np.sqrt(np.diag(D0)[:, np.newaxis] * np.diag(D1)[np.newaxis, :])
+        for slice in (dj.U('slice') & (ExtractRaw.GalvoROI() & key)).fetch['slice']:
+            masks, trace_ids, templates = [], [], []
+            print("Matching masks in slice {:02d}".format(slice), flush=True)
+            for scan_key, mask_channel in zip([key, other_key], channels):
+                rel = ExtractRaw.GalvoROI() & scan_key & dict(slice=slice)
+                d1, d2, fps = [int(elem) for elem in
+                               (Prepare.Galvo() & scan_key).fetch1['px_height', 'px_width', 'fps']]
+                mask_px, mask_w, trace_id_set = rel.fetch.order_by('trace_id')['mask_pixels', 'mask_weights', dj.key]
+                trace_ids.append(trace_id_set)
+                masks.append(ExtractRaw.GalvoROI.reshape_masks(mask_px, mask_w, d1, d2))
+                template = np.stack((normalize(t) for t in (Prepare.GalvoAverageFrame() & scan_key).fetch['frame'])
+                                    , axis=2)[..., mask_channel - 1]
+                templates.append(template)
 
-        matched_ids = [[], []]
-        thres = (MatchedScanSite() & key).fetch1['match_threshold']
-        assert np.all((C > thres).sum(axis=0) < 2) and np.all(
-            (C > thres).sum(axis=1) < 2), 'threshold does not give unique assignments'
+            # --- estimate translation between two motion correction templates
+            tvec = ird.translation(*templates)['tvec']
+            masks[1] = np.stack([ird.transform_img(m, tvec=tvec) for m in masks[1].transpose([2, 0, 1])], axis=2)
 
-        self.insert1(key)
-        pairs = self.MatchedID()
-        for i, (d, tr_id1, tr_id2) in enumerate(zip(C, *trace_ids)):
-            idx = d > thres
-            det = idx.sum()
-            if det == 1:
-                match = dict(key, **tr_id1)
-                matched_ids[0].append(trace_ids[0][i])
-                matched_ids[1].append(trace_ids[1][idx])
+            m = [m.reshape([-1, m.shape[-1]]) for m in masks]
+            D, D1, D0 = m[0].T @ m[1], m[1].T @ m[1], m[0].T @ m[0]
+            C = D / np.sqrt(np.diag(D0)[:, np.newaxis] * np.diag(D1)[np.newaxis, :])
 
-        masks2 = [np.stack(m, axis=2) for m in masks2]
+            matched_ids = [[], []]
+            thres = (MatchedScanSite() & key).fetch1['match_threshold']
+            assert np.all((C > thres).sum(axis=0) < 2) and np.all(
+                (C > thres).sum(axis=1) < 2), 'threshold does not give unique assignments'
+
+            self.insert1(dict(other_key, slice=slice, translation_correction=tvec, **key))
+            pairs = self.MatchedID()
+            for i, d in enumerate(C):
+                idx = d > thres
+
+                if idx.sum() == 1:
+                    print('o',end='',flush=True)
+                    tmp = dict(key, **trace_ids[0][i])
+                    j = int(np.where(idx)[0])
+                    match = dict(other_key, other_trace_id=trace_ids[1][j]['trace_id'], **tmp)
+                    pairs.insert1(match)
+                else:
+                    print('x',end='',flush=True)
