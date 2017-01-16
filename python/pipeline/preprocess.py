@@ -22,7 +22,7 @@ import imreg_dft as ird
 assert StrictVersion(dj.__version__) >= StrictVersion('0.2.8')
 
 schema = dj.schema('pipeline_preprocess', locals())
-schema.spawn_missing_classes()
+
 
 
 def notnan(x, start=0, increment=1):
@@ -1156,3 +1156,6 @@ class MatchedMasks(dj.Computed):
             m[m == 0] = np.nan
             ax.matshow(m, cmap=c, alpha=.5)
         return fig, ax
+
+
+schema.spawn_missing_classes()
