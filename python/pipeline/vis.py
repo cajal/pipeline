@@ -237,7 +237,7 @@ class MadAlexFrameSet(dj.Lookup):
 
         all_images = np.setdiff1d(all_images, repeats_shared)
         for frame_set_id in range(1,4):
-            uniques = all_images[ri(0, len(all_images), size=1000)]
+            uniques = all_images[ri(0, len(all_images), size=1400)]
             all_images = np.setdiff1d(all_images, uniques)
 
             repeats_nonshared = all_images[ri(0, len(all_images), size=25)]

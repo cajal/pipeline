@@ -239,22 +239,6 @@ class ExtractRaw(dj.Imported):
         spike_trace :longblob
         """
 
-    #
-    # def get_cnmf_parameters(self, key):
-    #     d2, d1, um_width, um_height, nframes = \
-    #         (self & key).fetch1['px_width', 'px_height', 'um_width', 'um_height', 'nframes']
-    #     tau = 4
-    #     p = 2
-    #     neuron_density = 800
-    #     max_iter = 2
-    #     downsample_to = 4
-    #     fps = (self & key).fetch1['fps']
-    #     max_neurons = np.round((um_width * um_height) / 1000 ** 2 * neuron_density)
-    #     options = cnmf.utilities.CNMFSetParms((d1, d2, nframes), n_processes=1, p=p, gSig=[4, 4], K=max_neurons, ssub=1,
-    #                                           tsub=1)
-    #
-
-
     def plot_traces_and_masks(self, traces, slice, mask_channel=1, outfile='traces.pdf'):
 
         import seaborn as sns
@@ -400,7 +384,7 @@ class ExtractRaw(dj.Imported):
                 plt.close(fig)
 
     def _make_tuples(self, key):
-        pass
+        raise NotImplementedError('ExtractRaw is populated in Matlab')
 
 
 @schema
@@ -1054,7 +1038,7 @@ class MatchedScanSite(dj.Manual):
     definition = """
     # an entry in this table indicates that two scans have been recorded at the same location
 
-    -> experiment.Scan
+    -> ExtractRaw
     other_scan_idx             : smallint      # second dependent scan idx
     ---
     match_threshold=0.7        : float         # minimal cosine between masks for match
@@ -1067,7 +1051,7 @@ class MatchedMasks(dj.Computed):
     # grouping table for matched masks
 
     -> MatchedScanSite
-    slice                       : smallint # slice where the masks are matched
+    -> Slice
     ---
     translation_correction      : longblob # translation correction to account for shifts between scans
     """
@@ -1078,7 +1062,11 @@ class MatchedMasks(dj.Computed):
         -> ExtractRaw.GalvoROI
         other_trace_id          : smallint # index of the other scan
         ---
-        """
+            """
+
+    @property
+    def key_source(self):
+        return MatchedScanSite() * Slice() & ExtractRaw.GalvoROI()
 
     def _make_tuples(self, key):
         # --- get keys that identify scans and get channels for motion correction of templates between scans
@@ -1086,7 +1074,9 @@ class MatchedMasks(dj.Computed):
         other_key['scan_idx'] = other_key.pop('other_scan_idx')
 
         for slice in (dj.U('slice') & (ExtractRaw.GalvoROI() & key)).fetch['slice']:
-            masks, trace_ids, templates = self.load_unmatched(key)
+            print("Matching masks in slice {:02d}".format(slice), flush=True)
+            masks, trace_ids, templates = self.load_unmatched(key, slice)
+
 
             # --- estimate translation between two motion correction templates
             tvec = ird.translation(*templates)['tvec']
@@ -1098,51 +1088,47 @@ class MatchedMasks(dj.Computed):
             C = D / np.sqrt(np.diag(D0)[:, np.newaxis] * np.diag(D1)[np.newaxis, :])
 
             thres = (MatchedScanSite() & key).fetch1['match_threshold']
-            if np.all((C > thres).sum(axis=0) < 2) and np.all((C > thres).sum(axis=1) < 2):
-                raise PipelineException('threshold does not give unique assignments')
 
-            self.insert1(dict(other_key, slice=slice, translation_correction=tvec, **key))
+            if not np.all((C > thres).sum(axis=0) < 2) or not np.all((C > thres).sum(axis=1) < 2):
+                raise PipelineException('threshold does not give unique assignments')
+            self.insert1(dict(other_key, translation_correction=tvec, **key))
             pairs = self.MatchedID()
-            for i, d in enumerate(C):
+            for i, (d, ti) in enumerate(zip(C, trace_ids[0])):
                 idx = d > thres
 
                 if idx.sum() == 1:
-                    print('o', end='', flush=True)
-                    tmp = dict(key, **trace_ids[0][i])
+                    tmp = dict(key, **ti)
                     j = int(np.where(idx)[0])
                     match = dict(other_key, other_trace_id=trace_ids[1][j]['trace_id'], **tmp)
                     pairs.insert1(match)
-                else:
-                    print('x', end='', flush=True)
 
     @staticmethod
-    def load_unmatched(key):
+    def load_unmatched(key, slice):
         other_key = dict(key)
         other_key['scan_idx'] = other_key.pop('other_scan_idx')
 
         masks, trace_ids, templates = [], [], []
-        channels = [(dj.U('channel') & (ExtractRaw.GalvoROI() & key)).fetch1['channel'],
-                    (dj.U('channel') & (ExtractRaw.GalvoROI() & other_key)).fetch1['channel']]
 
-        print("Matching masks in slice {:02d}".format(slice), flush=True)
-        for scan_key, mask_channel in zip([key, other_key], channels):
+
+        channel = (dj.U('channel') & (ExtractRaw.GalvoROI() & key)).fetch1['channel']
+
+        for scan_key in [key, other_key]:
             rel = ExtractRaw.GalvoROI() & scan_key & dict(slice=slice)
-            d1, d2, fps = [int(elem) for elem in
-                           (Prepare.Galvo() & scan_key).fetch1['px_height', 'px_width', 'fps']]
+            d1, d2, fps = tuple(map(int, (Prepare.Galvo() & scan_key).fetch1['px_height', 'px_width', 'fps']))
             mask_px, mask_w, trace_id_set = rel.fetch.order_by('trace_id')['mask_pixels', 'mask_weights', dj.key]
             trace_ids.append(trace_id_set)
             masks.append(ExtractRaw.GalvoROI.reshape_masks(mask_px, mask_w, d1, d2))
             template = np.stack((normalize(t) for t in (Prepare.GalvoAverageFrame() & scan_key).fetch['frame'])
-                                , axis=2)[..., mask_channel - 1]
+                                , axis=2)[..., channel - 1]
             templates.append(template)
         return masks, trace_ids, templates
 
     def load_matched(self):
-        rel = ExtractRaw.GalvoROI() * (MatchedMasks.MatchedID() & self) * ExtractRaw.GalvoROI().proj(
-                    other_scan_idx='scan_idx',
-                    other_trace_id='trace_id',
-                    other_mask_weights='mask_weights',
-                    other_mask_pixels='mask_pixels')
+        rel = ExtractRaw.GalvoROI() * MatchedMasks.MatchedID() * self * ExtractRaw.GalvoROI().proj(
+            other_scan_idx='scan_idx',
+            other_trace_id='trace_id',
+            other_mask_weights='mask_weights',
+            other_mask_pixels='mask_pixels')
         d1, d2, fps = [int(elem) for elem in
                        (Prepare.Galvo() & self).fetch1['px_height', 'px_width', 'fps']]
         mask_px, mask_w = rel.fetch['mask_pixels', 'mask_weights']
@@ -1152,10 +1138,10 @@ class MatchedMasks(dj.Computed):
         other_masks = ExtractRaw.GalvoROI.reshape_masks(other_mask_px, other_mask_w, d1, d2)
         other_masks = self.motion_correct(other_masks)
         template = np.stack((normalize(t) for t in (Prepare.GalvoAverageFrame() & self).fetch['frame'])
-                        , axis=2)[..., mask_channel - 1]
+                            , axis=2)[..., mask_channel - 1]
         return masks, other_masks, template
 
-    def motion_correct(self, masks, tvec = None):
+    def motion_correct(self, masks, tvec=None):
         if tvec is None:
             tvec = self.fetch1['translation_correction']
         masks = np.stack([ird.transform_img(m, tvec=tvec) for m in masks.transpose([2, 0, 1])], axis=2)
