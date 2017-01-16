@@ -1,0 +1,6 @@
+FROM pipeline:latest
+
+MAINTAINER Edgar Y. Walker, Fabian Sinz
+
+ENTRYPOINT ["worker", "environment"]
+  
