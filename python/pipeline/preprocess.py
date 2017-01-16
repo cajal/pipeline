@@ -191,9 +191,9 @@ class ExtractRaw(dj.Imported):
     @property
     def key_source(self):
         return Prepare() * Method() \
-               & ((Prepare.Galvo() * Method.Galvo() - 'segmentation="manual"') | \
-                  Prepare.Galvo() * Method.Galvo() * ManualSegment() | \
-                  Prepare.Aod() * Method.Aod()) \
+               & dj.OrList([(Prepare.Galvo() * Method.Galvo() - 'segmentation="manual"'), \
+                            Prepare.Galvo() * Method.Galvo() * ManualSegment(), \
+                            Prepare.Aod() * Method.Aod()]) \
                  - (Session.TargetStructure() & 'compartment="axon"')
 
     class Trace(dj.Part):
@@ -631,10 +631,8 @@ class Spikes(dj.Computed):
         if method == 'stm':
             prep = (Prepare() * Prepare.Aod() & key) or (Prepare() * Prepare.Galvo() & key)
             fps = prep.fetch1['fps']
-            X = []
-            for x in (ComputeTraces.Trace() & key).proj('trace').fetch.as_dict:
-                x['trace'] = fill_nans(x['trace'].astype('float64'))
-                X.append(x)
+            X = [dict(trace=fill_nans(x['trace'].astype('float64'))) for x in
+                        (ComputeTraces.Trace() & key).proj('trace').fetch.as_dict]
 
             self.insert1(key)
             for x in (SpikeMethod() & key).spike_traces(X, fps):
@@ -1077,7 +1075,6 @@ class MatchedMasks(dj.Computed):
             print("Matching masks in slice {:02d}".format(slice), flush=True)
             masks, trace_ids, templates = self.load_unmatched(key, slice)
 
-
             # --- estimate translation between two motion correction templates
             tvec = ird.translation(*templates)['tvec']
 
@@ -1108,7 +1105,6 @@ class MatchedMasks(dj.Computed):
         other_key['scan_idx'] = other_key.pop('other_scan_idx')
 
         masks, trace_ids, templates = [], [], []
-
 
         channel = (dj.U('channel') & (ExtractRaw.GalvoROI() & key)).fetch1['channel']
 
