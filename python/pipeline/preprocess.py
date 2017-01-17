@@ -1179,8 +1179,8 @@ class MatchedMasks(dj.Computed):
             ax.imshow(template[ifro:ito, jfro:jto], cmap='gray')
             ax.matshow(m0[ifro:ito, jfro:jto], cmap='viridis', alpha=.5)
             ax.matshow(m1[ifro:ito, jfro:jto], cmap='magma', alpha=.5)
-            ax.contour((m0[ifro:ito, jfro:jto] > 0)*1.,V=[1.], colors='orange')
-            ax.contour((m1[ifro:ito, jfro:jto] > 0)*1.,V=[1.], colors='dodgerblue')
+            ax.contour((m0[ifro:ito, jfro:jto] > 0)*1.,V=[.5], colors='orange')
+            ax.contour((m1[ifro:ito, jfro:jto] > 0)*1.,V=[.5], colors='dodgerblue')
             fig.savefig('{outdir}/{num:03d}'.format(outdir=outdir, num=i))
             plt.close(fig)
 
