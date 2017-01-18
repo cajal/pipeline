@@ -1157,5 +1157,33 @@ class MatchedMasks(dj.Computed):
             ax.matshow(m, cmap=c, alpha=.5)
         return fig, ax
 
+    def plot_single(self, outdir='./'):
+        import seaborn as sns
+        import matplotlib.pyplot as plt
+
+        masks, other_masks, template = self.load_matched()
+        color = ['RdBu', 'gray']
+
+        for i, (m0, m1) in enumerate(zip(masks.transpose([2,0,1]), other_masks.transpose([2,0,1]))):
+            print('Mask {:03d}'.format(i), flush=True)
+            with sns.axes_style('white'):
+                fig, ax = plt.subplots()
+            m = m0 + m1
+            m0[m0 == 0] = np.nan
+            m1[m1 == 0] = np.nan
+
+            ifro = np.where(m.sum(axis=1) > 0)[0].min() - 5
+            ito = np.where(m.sum(axis=1) > 0)[0].max() + 5
+            jfro = np.where(m.sum(axis=0) > 0)[0].min() - 5
+            jto = np.where(m.sum(axis=0) > 0)[0].max() + 5
+            ax.imshow(template[ifro:ito, jfro:jto], cmap='gray')
+            ax.matshow(m0[ifro:ito, jfro:jto], cmap='viridis', alpha=.5)
+            ax.matshow(m1[ifro:ito, jfro:jto], cmap='magma', alpha=.5)
+            ax.contour((m0[ifro:ito, jfro:jto] > 0)*1.,V=[.5], colors='orange')
+            ax.contour((m1[ifro:ito, jfro:jto] > 0)*1.,V=[.5], colors='dodgerblue')
+            fig.savefig('{outdir}/{num:03d}'.format(outdir=outdir, num=i))
+            plt.close(fig)
+
+
 
 schema.spawn_missing_classes()
