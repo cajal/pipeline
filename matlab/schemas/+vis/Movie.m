@@ -66,8 +66,6 @@ classdef Movie < dj.Relvar
                 fclose(fid);
                 insert(vis.MovieClip,tuple)
             end
-            
-            
         end
     end
 end
