@@ -54,14 +54,10 @@ classdef Movie < dj.Relvar
                
                 % create file
                 start = (iclip-1)*dur;
-                outfile = getLocalPath(fullfile(path,tuple.file_name))
+                outfile = getLocalPath(fullfile(path,tuple.file_name));
                 if ~exist(outfile,'file')
                     argstr = sprintf('-i %s -ss %d -t %d %s %s',infile,start,dur,codec,outfile);
-                    if strcmp('PCWIN64',computer)
-                        ffmpegexec(argstr)
-                    else
-                        eval(['!' argstr])
-                    end
+                    ffmpegexec(argstr)
                 end
                 
                 % load file & insert
