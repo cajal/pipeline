@@ -56,7 +56,7 @@ classdef Movie < dj.Relvar
                 start = (iclip-1)*dur;
                 outfile = getLocalPath(fullfile(path,tuple.file_name));
                 if ~exist(outfile,'file')
-                    argstr = sprintf('-i %s -ss %d -t %d %s %s',infile,start,dur,codec,outfile);
+                    argstr = sprintf('-i %s -ss %d -t %d %s %s',infile,start,dur,codec,outfile)
                     ffmpegexec(argstr)
                 end
                 
