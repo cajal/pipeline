@@ -25,10 +25,10 @@ classdef DotRF < dj.Relvar & dj.AutoPopulate
                 'onset_delay', 'response_duration', 'rf_filter', 'shuffle', 'rf_sd');
             
             % get stimulus conditions
-            trials = fetch((preprocess.Sync & key) * vis.Trial * vis.SingleDot  ...
-                & 'trial_idx between first_trial and last_trial');
-            
-            conds = fetch(vis.Condition * vis.SingleDot & trials);
+            trials = (preprocess.Sync * vis.Trial * vis.SingleDot ...
+                    & key & 'trial_idx between first_trial and last_trial');
+                
+            conds = fetch(vis.Condition * vis.SingleDot & trials.fetch);
             [locations_x,locations_y] = fetchn(vis.SingleDot & conds, 'dot_x', 'dot_y');
             locations_x = unique(locations_x);
             locations_y = unique(locations_y);
@@ -42,16 +42,14 @@ classdef DotRF < dj.Relvar & dj.AutoPopulate
             frame_times = frame_times(1:size(traces,1));
             
             % get responses for each trial
+            trials = trials.fetch('cond_idx', 'dot_x', 'dot_y', 'flip_times');
             response = nan(length(trials),size(traces,2));
             index = nan(length(trials),1);
             for itrial = 1:length(trials)
                 trial = trials(itrial);
-                trial.cond_idx = fetch1(vis.Trial & trial, 'cond_idx');
-                [loc_x, loc_y] = fetch1(vis.Condition * vis.SingleDot & trial, 'dot_x','dot_y');
-                flip_times = fetch1(vis.Trial & trial,'flip_times');
-                frame_rel = frame_times<flip_times(1)+response_duration/1000 ...
-                    & frame_times>flip_times(1)+onset_delay/1000;
-                index(itrial) = sub2ind(map_size, find(locations_x==loc_x), find(locations_y==loc_y));
+                frame_rel = frame_times<trial.flip_times(1)+response_duration/1000 ...
+                    & frame_times>trial.flip_times(1)+onset_delay/1000;
+                index(itrial) = sub2ind(map_size, find(locations_x==trial.dot_x), find(locations_y==trial.dot_y));
                 response(itrial,:) = mean(traces(frame_rel,:));
             end
             
