@@ -57,7 +57,11 @@ classdef Movie < dj.Relvar
                 outfile = getLocalPath(fullfile(path,tuple.file_name));
                 if ~exist(outfile,'file')
                     argstr = sprintf('-i %s -ss %d -t %d %s %s',infile,start,dur,codec,outfile);
-                    ffmpegexec(argstr)
+                    if strcmp('PCWIN64',computer)
+                        ffmpegexec(argstr)
+                    else
+                        eval(['!' argstr])
+                    end
                 end
                 
                 % load file & insert
