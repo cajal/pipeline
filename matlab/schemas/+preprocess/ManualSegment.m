@@ -44,13 +44,17 @@ classdef ManualSegment < dj.Relvar & dj.AutoPopulate
         function makeTuples(self, key)
             images = fetchn(preprocess.PrepareGalvoAverageFrame & key, 'frame', 'ORDER BY channel');
             assert(ismember(numel(images), [1 2]))
-            bw = preprocess.ManualSegment.outlineCells(images);
+            if verLessThan('matlab', '9.1')
+                warning('You are running an older version of Matlab, switchin to the old segmenation code!')
+                bw = preprocess.ManualSegment.outlineCells(images);
+            else
+                bw = preprocess.ManualSegment.paintCells(images);
+            end
             assert(~isempty(bw), 'user aborted segmentation')
             key.mask = bw;
             self.insert(key)
         end
     end
-    
     
     methods(Static)
         function bw = outlineCells(images, bw)
@@ -72,6 +76,10 @@ classdef ManualSegment < dj.Relvar & dj.AutoPopulate
             end
             bw = ne7.ui.drawCells(bw);
             close(f)
+        end
+        
+        function bw = paintCells(images)
+            bw = ne7.ui.paintMasks(images{1});
         end
     end
 end
