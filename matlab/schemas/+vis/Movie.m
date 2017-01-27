@@ -65,6 +65,7 @@ classdef Movie < dj.Relvar
                 tuple.clip = fread(fid,'*int8');
                 fclose(fid);
                 insert(vis.MovieClip,tuple)
+                delete(outfile)
             end
         end
     end
