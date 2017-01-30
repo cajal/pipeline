@@ -248,6 +248,18 @@ class MadAlexFrameSet(dj.Lookup):
                        repeats_shared=repeats_shared,
                        repeats_nonshared=repeats_nonshared)
 
+@schema
+class MatisseCenterLoc(dj.Lookup):
+    definition = """  # location of center for Matisse scans.
+        id          : smallint   # one is default, 2 is online change.
+        ---
+        x_loc              : decimal(4,3)
+        y_loc              : decimal(4,3)
+        r                  : decimal(4,3)
+        """
+    contents = [
+        [1, 0, 0, 0.25], [2, 0, 0, 0.2]
+    ]
 
 def migrate():
     from .legacy import psy
