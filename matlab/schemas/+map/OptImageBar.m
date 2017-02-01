@@ -162,6 +162,7 @@ classdef OptImageBar < dj.Relvar & dj.AutoPopulate
             params.shift = 0;
             params.vessels = false;
             params.figure = [];
+            params.saturation = 1;
             
             params = getParams(params,varargin);
             
@@ -268,8 +269,8 @@ classdef OptImageBar < dj.Relvar & dj.AutoPopulate
         end
         
         function plotTight(obj,varargin)
+            params.saturation = 0.5;
             
-            params = [];
             params = getParams(params,varargin);
             
             [h,s,v] = plot(obj,params);
@@ -277,7 +278,7 @@ classdef OptImageBar < dj.Relvar & dj.AutoPopulate
             im = ones(size(h,1)*2,size(h,2)*2,3);
             
             im(1:size(h,1),1:size(h,2),1) = h;
-            im(1:size(h,1),1:size(h,2),2) = s;
+            im(1:size(h,1),1:size(h,2),2) = s*params.saturation;
             im(1:size(h,1),1:size(h,2),3) = v;
             
             im(size(h,1)+1:end,1:size(h,2),1) = zeros(size(v));
