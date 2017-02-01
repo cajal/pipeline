@@ -10,7 +10,7 @@ classdef Spikes < dj.Relvar & dj.AutoPopulate
     
     properties
         % NMF spikes (method 5) can be copied via MATLAB, STM spike detection is performed in Python
-        popRel = preprocess.ComputeTraces*preprocess.SpikeMethod  & preprocess.ExtractRawTrace & 'language="matlab"';
+        popRel = preprocess.ComputeTraces * preprocess.SpikeMethod & 'language="matlab"';
     end
     
     methods(Access=protected)

@@ -27,9 +27,8 @@ classdef SpikesRateTrace < dj.Relvar
                     
                     % get stuff
                     fps = fetch1(preprocess.PrepareGalvo & key,'fps');
-                    [traces, keys] = fetchn(preprocess.ExtractRawTrace ...
-                        & key & 'channel = 1',...
-                        'raw_trace');
+                    [traces, keys] = fetchn(preprocess.ComputeTracesTrace ...
+                        & key ,'trace');
                     traces = double(cell2mat(traces'));
                     
                     % remove 1PC
