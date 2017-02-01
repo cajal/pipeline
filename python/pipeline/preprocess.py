@@ -4,7 +4,7 @@ from warnings import warn
 import numpy as np
 import sh
 import os
-
+from commons import lab
 try:
     import pyfnnd
 except ImportError:
@@ -717,27 +717,22 @@ class Eye(dj.Imported):
     def grab_timestamps_and_frames(self, key, n_sample_frames=10):
 
         import cv2
-        path_prefix = config['path.mounts']
+
 
         rel = experiment.Session() * experiment.Scan.EyeVideo() * experiment.Scan.BehaviorFile().proj(
             hdf_file='filename')
 
         info = (rel & key).fetch1()
-        avi_path = "{path_prefix}/{behavior_path}/{filename}".format(path_prefix=path_prefix, **info)
 
+
+        avi_path = lab.Paths().get_local_path("{behavior_path}/{filename}".format(**info))
         # replace number by %d for hdf-file reader
 
-
         tmp = info['hdf_file'].split('.')
-
-        if '%d' in tmp[0]:
-            # new version
-            info['hdf_file'] = tmp[0][:-2] + '%d.' + tmp[-1]
-        else:
+        if not '%d' in tmp[0]:
             info['hdf_file'] = tmp[0][:-1] + '%d.' + tmp[-1]
-        # info['hdf_file'] = tmp[0][:-1] + '%d.' + tmp[-1]
 
-        hdf_path = "{path_prefix}/{behavior_path}/{hdf_file}".format(path_prefix=path_prefix, **info)
+        hdf_path = lab.Paths().get_local_path("{behavior_path}/{hdf_file}".format(**info))
 
         data = read_video_hdf5(hdf_path)
         packet_length = data['analogPacketLen']
@@ -918,7 +913,7 @@ class EyeTracking(dj.Computed):
         roi = (Eye() & key).fetch1['eye_roi']
 
         video_info = (experiment.Session() * experiment.Scan.EyeVideo() & key).fetch1()
-        avi_path = "{path_prefix}/{behavior_path}/{filename}".format(path_prefix=config['path.mounts'], **video_info)
+        avi_path = lab.Paths().get_local_path("{behavior_path}/{filename}".format(**video_info))
 
         tr = PupilTracker(param)
         traces = tr.track(avi_path, roi - 1, display=config['display.tracking'])  # -1 because of matlab indices
@@ -1117,9 +1112,15 @@ class MatchedMasks(dj.Computed):
             template = np.stack((normalize(t) for t in (Prepare.GalvoAverageFrame() & scan_key).fetch['frame'])
                                 , axis=2)[..., channel - 1]
             templates.append(template)
+        if templates[0].shape != template[1].shape:
+            i = np.argmax([t.shape[0] for t in templates])
+            stride = int(templates[i].shape[0]/templates[1-i].shape[0])
+            templates[i] = templates[i][::stride,::stride]
+            masks[i] = masks[i][::stride, ::stride, :]
+
         return masks, trace_ids, templates
 
-    def load_matched(self):
+    def load_matched(self, downsample=True):
         rel = ExtractRaw.GalvoROI() * MatchedMasks.MatchedID() * self * ExtractRaw.GalvoROI().proj(
             other_scan_idx='scan_idx',
             other_trace_id='trace_id',
@@ -1135,6 +1136,10 @@ class MatchedMasks(dj.Computed):
         other_masks = self.motion_correct(other_masks)
         template = np.stack((normalize(t) for t in (Prepare.GalvoAverageFrame() & self).fetch['frame'])
                             , axis=2)[..., mask_channel - 1]
+        if other_masks.shape[0] > masks.shape[0] and downsample:
+            print('Downsampling matched masks')
+            stride = int(other_masks.shape[0]/masks.shape[0])
+            other_masks = other_masks[::stride, ::stride, :]
         return masks, other_masks, template
 
     def motion_correct(self, masks, tvec=None):
