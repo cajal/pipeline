@@ -22,9 +22,37 @@ classdef SpikesRateTrace < dj.Relvar
                         'channel');
                     [keys.spike_method]=deal(key.spike_method);
                     self.insert(keys)
-                                        
+                    
+                case 'improved oopsi'
+                    
+                    % get stuff
+                    fps = fetch1(preprocess.PrepareGalvo & key,'fps');
+                    [traces, keys] = fetchn(preprocess.ExtractRawTrace ...
+                        & key & 'channel = 1',...
+                        'raw_trace');
+                    traces = double(cell2mat(traces'));
+                    
+                    % remove 1PC
+                    [c, p] = pca(traces);
+                    traces = p(:,2:end)*c(:,2:end)';
+    
+                    % high pass filter
+                    hp = 0.02; 
+                    traces = traces + abs(min(traces(:)))+eps;
+                    traces = traces./convmirr(traces,hamming(round(fps/hp)*2+1)/sum(hamming(round(fps/hp)*2+1)))-1;  %  dF/F where F is low pass
+                    traces = bsxfun(@plus,traces,abs(min(traces)))+eps;
+
+                    % fast oopsi
+                    for iTrace = 1:size(traces,2)
+                    	keys(iTrace).rate_trace = fast_oopsi(traces(:,iTrace)', struct('dt',1/fps),struct('lambda',.2));
+                    end
+                    
+                    % insert
+                    [keys.spike_method]=deal(key.spike_method);
+                    self.insert(keys)
+                    
                 otherwise
-                    error('invalid method %s', method)
+                    error('method "%s" not implemented', method)
                     
             end
         end
