@@ -43,7 +43,7 @@ classdef SpikesRateTrace < dj.Relvar
                     traces = bsxfun(@plus,traces,abs(min(traces)))+eps;
 
                     % fast oopsi
-                    for iTrace = 1:size(traces,2)
+                    parfor iTrace = 1:size(traces,2)
                     	keys(iTrace).rate_trace = fast_oopsi(traces(:,iTrace)', struct('dt',1/fps),struct('lambda',.2));
                     end
                     
