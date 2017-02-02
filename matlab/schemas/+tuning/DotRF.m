@@ -47,7 +47,7 @@ classdef DotRF < dj.Relvar & dj.AutoPopulate
             index = nan(length(trials),1);
             for itrial = 1:length(trials)
                 trial = trials(itrial);
-                frame_rel = frame_times<trial.flip_times(1)+response_duration/1000 ...
+                frame_rel = frame_times<trial.flip_times(1)+response_duration/1000 +onset_delay/1000 ...
                     & frame_times>trial.flip_times(1)+onset_delay/1000;
                 index(itrial) = sub2ind(map_size, find(locations_x==trial.dot_x), find(locations_y==trial.dot_y));
                 response(itrial,:) = mean(traces(frame_rel,:));
@@ -88,8 +88,8 @@ classdef DotRF < dj.Relvar & dj.AutoPopulate
             key.gauss_fit = self.fitGauss(key.response_map, deg2dot, rf_filter);
             key.snr = self.rfSNR(key.gauss_fit, key.response_map,sd);
             key.p_value = mean(key.snr<squeeze(self.rfSNR(key.gauss_fit, sfl_resp_map_p,sd)));
-            key.center_y = (key.gauss_fit(1) - map_size(2)/2) / map_size(1);
-            key.center_x = (key.gauss_fit(2) - map_size(1)/2) / map_size(1);
+            key.center_y = (key.gauss_fit(1) - map_size(2)/2 - 0.5) / map_size(1);
+            key.center_x = (key.gauss_fit(2) - map_size(1)/2 - 0.5) / map_size(1);
             insert(tuning.DotRFMapPop,key);
             
             % compute and insert cell rfs
@@ -101,8 +101,8 @@ classdef DotRF < dj.Relvar & dj.AutoPopulate
                 tuple.snr = self.rfSNR(tuple.gauss_fit, tuple.response_map,sd);
                 tuple.p_value = mean(tuple.snr<squeeze(...
                     self.rfSNR(tuple.gauss_fit, sfl_response_map(:,:,itrace,:),sd)));
-                tuple.center_x = (tuple.gauss_fit(1) - map_size(1)) / map_size(1);
-                tuple.center_y = (tuple.gauss_fit(2) - map_size(2)) / map_size(1);
+                tuple.center_y = (tuple.gauss_fit(1) - map_size(2)/2 - 0.5) / map_size(1);
+                tuple.center_x = (tuple.gauss_fit(2) - map_size(1)/2 - 0.5) / map_size(1);
                 insert(tuning.DotRFMap,tuple);
             end
         end

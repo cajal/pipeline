@@ -18,11 +18,13 @@ classdef DotRFMapPop < dj.Relvar
             keys = fetch(obj);
             for key = keys'
                 figure
-                [gaussfit, map,p] = fetch1(tuning.DotRFMapPop & key,'gauss_fit','response_map','p_value');
+                [gaussfit, map,p,x_loc,y_loc] = fetch1(tuning.DotRFMapPop & key,...
+                    'gauss_fit','response_map','p_value','center_x','center_y');
                 plot(tuning.DotRF & key, gaussfit, map)
                 area = fetch1(experiment.Scan & key,'brain_area');
-                title(sprintf('animal:%d scan:%d area:%s p:%.3f',...
-                    key.animal_id,key.scan_idx,area,p))
+                title(sprintf(...
+                    'animal:%d scan:%d area:%s p:%.3f\nx:%.2f y:%.2f',...
+                    key.animal_id,key.scan_idx,area,p,x_loc,y_loc))
                 set(gcf,'name','Population RF')
             end
         end
