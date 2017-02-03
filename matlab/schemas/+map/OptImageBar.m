@@ -247,7 +247,7 @@ classdef OptImageBar < dj.Relvar & dj.AutoPopulate
         
         function plotTight(obj,varargin)
             
-            params = [];
+            params.saturation = 0.5;
             params = getParams(params,varargin);
             
             keys = fetch(obj);
