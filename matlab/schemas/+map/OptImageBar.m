@@ -162,6 +162,7 @@ classdef OptImageBar < dj.Relvar & dj.AutoPopulate
             params.subplot = [1 2];
             params.figure = [];
             params.saturation = 1;
+            params.shift = 0;
             
             params = getParams(params,varargin);
             
@@ -188,7 +189,7 @@ classdef OptImageBar < dj.Relvar & dj.AutoPopulate
                 imP(imP<-3.14) = imP(imP<-3.14) +3.14*2;
                 imP(imP>3.14) = imP(imP>3.14) -3.14*2;
                 if ~isempty(params.exp)
-                    imP = imP-median(imP(:));
+                    imP = imP-nanmedian(imP(:));
                     imP(imP<-3.14) = imP(imP<-3.14) +3.14*2;
                     imP(imP>3.14) = imP(imP>3.14) -3.14*2;
                     imP = imP+params.shift;
@@ -199,7 +200,7 @@ classdef OptImageBar < dj.Relvar & dj.AutoPopulate
                 
                 % create the hsv map
                 h = imgaussian(normalize(imP),params.sigma);
-                s =  imgaussian(normalize(imA),params.sigma)*params.saturation;
+                s = imgaussian(normalize(imA),params.sigma)*params.saturation;
                 v = ones(size(imA));
                 if ~isempty(vessels); v = normalize(vessels);end
                 
