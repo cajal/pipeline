@@ -157,12 +157,10 @@ classdef OptImageBar < dj.Relvar & dj.AutoPopulate
             % MF 2012, MF 2016
             
             params.sigma = 2; %sigma of the gaussian filter
+            params.saturation = 1; % saturation scaling 
             params.exp = []; % exponent factor of rescaling, 1-2 works 
-            params.reverse = 0; % reverse the axis
-            params.subplot = [1 2]; % 
+            params.shift = 0; % angular shift for improving map presentation
             params.figure = [];
-            params.saturation = 1;
-            params.shift = 0;
             
             params = getParams(params,varargin);
             
