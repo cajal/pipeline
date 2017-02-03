@@ -159,7 +159,7 @@ classdef OptImageBar < dj.Relvar & dj.AutoPopulate
             params.sigma = 2; %sigma of the gaussian filter
             params.exp = []; % exponent factor of rescaling, 1-2 works 
             params.reverse = 0; % reverse the axis
-            params.subplot = [1 2];
+            params.subplot = [1 2]; % 
             params.figure = [];
             params.saturation = 1;
             params.shift = 0;
@@ -218,23 +218,10 @@ classdef OptImageBar < dj.Relvar & dj.AutoPopulate
                         'OptMap direction:%s animal:%d session:%d scan:%d',...
                         keys(ikey).axis,keys(ikey).animal_id,keys(ikey).session,keys(ikey).scan_idx))
                     
-                    % plot angle map
-                    if any(params.subplot==1) && any(params.subplot==2)
-                        subplot(1,2,1)
-                    end
-                    if any(params.subplot==1)
-                        imshow(hsv2rgb(cat(3,h,cat(3,ones(size(s)),ones(size(v))))))
-                        if params.reverse; set(gca,'xdir','reverse');end
-                    end
-                    
-                    % plot combined map
-                    if any(params.subplot==1) && any(params.subplot==2)
-                        subplot(1,2,2)
-                    end
-                    if any(params.subplot==2)
-                        imshow(hsv2rgb(cat(3,h,cat(3,s,v))))
-                        if params.reverse; set(gca,'xdir','reverse');end
-                    end
+                    % plot
+                    angle_map = hsv2rgb(cat(3,h,cat(3,ones(size(s)),ones(size(v)))));
+                    combined_map = hsv2rgb(cat(3,h,cat(3,s,v)));
+                    imshowpair(angle_map,combined_map,'montage')
                 end
             end
             
