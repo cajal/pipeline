@@ -160,9 +160,7 @@ classdef OptImageBar < dj.Relvar & dj.AutoPopulate
             params.exp = []; % exponent factor of rescaling, 1-2 works 
             params.reverse = 0; % reverse the axis
             params.subplot = [1 2];
-            params.amp = 0;
-            params.shift = 0;
-            params.figure = 1000;
+            params.figure = [];
             params.saturation = 1;
             
             params = getParams(params,varargin);
@@ -200,29 +198,31 @@ classdef OptImageBar < dj.Relvar & dj.AutoPopulate
                 imA(imA>prctile(imA(:),99)) = prctile(imA(:),99);
                 
                 % create the hsv map
-                h = normalize(imP);
-                s = ones(size(imP)); v = s; v2 = s;
-                if params.amp;v = normalize(imA);end
-                s2 = normalize(imA);
-                if ~isempty(vessels); v2 = normalize(vessels);end
+                h = imgaussian(normalize(imP),params.sigma);
+                s =  imgaussian(normalize(imA),params.sigma)*params.saturation;
+                v = ones(size(imA));
+                if ~isempty(vessels); v = normalize(vessels);end
                 
                 if nargout>0
                     iH{ikey} = h;
-                    iS{ikey} = s2;
-                    iV{ikey} = v2;
+                    iS{ikey} = s;
+                    iV{ikey} = v;
                 else
-                    figure(params.figure)
-                    set(gcf,'position',[50 200 920 435])
-                    set(gcf,'name',['OptMap: ' num2str(keys(ikey).animal_id) '_' num2str(keys(ikey).session) '_' num2str(keys(ikey).scan_idx)])
+                    if ~isempty(params.figure)
+                        figure(params.figure);
+                    else
+                        figure;
+                    end
+                    set(gcf,'NumberTitle','off','name',sprintf(...
+                        'OptMap direction:%s animal:%d session:%d scan:%d',...
+                        keys(ikey).axis,keys(ikey).animal_id,keys(ikey).session,keys(ikey).scan_idx))
                     
                     % plot angle map
                     if any(params.subplot==1) && any(params.subplot==2)
                         subplot(1,2,1)
                     end
                     if any(params.subplot==1)
-                        im = (hsv2rgb(cat(3,h,cat(3,s,v))));
-                        im = imgaussian(im,params.sigma);
-                        imshow(im)
+                        imshow(hsv2rgb(cat(3,h,cat(3,ones(size(s)),ones(size(v))))))
                         if params.reverse; set(gca,'xdir','reverse');end
                     end
                     
@@ -231,10 +231,7 @@ classdef OptImageBar < dj.Relvar & dj.AutoPopulate
                         subplot(1,2,2)
                     end
                     if any(params.subplot==2)
-                        s2 = imgaussian(s2,params.sigma);
-                        h = imgaussian(h,params.sigma);
-                        im = (hsv2rgb(cat(3,h,cat(3,s2,v2))));
-                        imshow(im)
+                        imshow(hsv2rgb(cat(3,h,cat(3,s,v))))
                         if params.reverse; set(gca,'xdir','reverse');end
                     end
                 end
@@ -248,31 +245,41 @@ classdef OptImageBar < dj.Relvar & dj.AutoPopulate
         end
         
         function plotTight(obj,varargin)
-            params.saturation = 0.5;
             
+            params = [];
             params = getParams(params,varargin);
             
-            [h,s,v] = plot(obj,params);
+            keys = fetch(obj);
+            if isempty(keys); disp('Nothing found!'); return; end
             
-            im = ones(size(h,1)*2,size(h,2)*2,3);
+            for ikey = 1:length(keys)
             
-            im(1:size(h,1),1:size(h,2),1) = h;
-            im(1:size(h,1),1:size(h,2),3) = v;
-            
-            im(size(h,1)+1:end,1:size(h,2),1) = zeros(size(v));
-            im(size(h,1)+1:end,1:size(h,2),2) = zeros(size(v));
-            im(size(h,1)+1:end,1:size(h,2),3) = v;
-            
-            im(1:size(h,1),size(h,2)+1:end,1) = h;
-            im(1:size(h,1),size(h,2)+1:end,2) = ones(size(h));
-            im(1:size(h,1),size(h,2)+1:end,3) = ones(size(h));
-            
-            im(size(h,1)+1:end,size(h,2)+1:end,1) = zeros(size(v));
-            im(size(h,1)+1:end,size(h,2)+1:end,2) = zeros(size(v));
-            im(size(h,1)+1:end,size(h,2)+1:end,3) = ones(size(h));
-            
-            figure
-            imshow(hsv2rgb(im))
+                [h,s,v] = plot(obj & keys(ikey),params);
+
+                im = ones(size(h,1)*2,size(h,2)*2,3);
+
+                im(1:size(h,1),1:size(h,2),1) = h;
+                im(1:size(h,1),1:size(h,2),2) = s;
+                im(1:size(h,1),1:size(h,2),3) = v;
+
+                im(size(h,1)+1:end,1:size(h,2),1) = zeros(size(v));
+                im(size(h,1)+1:end,1:size(h,2),2) = zeros(size(v));
+                im(size(h,1)+1:end,1:size(h,2),3) = v;
+
+                im(1:size(h,1),size(h,2)+1:end,1) = h;
+                im(1:size(h,1),size(h,2)+1:end,2) = ones(size(h));
+                im(1:size(h,1),size(h,2)+1:end,3) = ones(size(h));
+
+                im(size(h,1)+1:end,size(h,2)+1:end,1) = zeros(size(v));
+                im(size(h,1)+1:end,size(h,2)+1:end,2) = zeros(size(v));
+                im(size(h,1)+1:end,size(h,2)+1:end,3) = ones(size(h));
+
+                figure
+                set(gcf,'NumberTitle','off','name',sprintf(...
+                        'OptMap direction:%s animal:%d session:%d scan:%d',...
+                        keys(ikey).axis,keys(ikey).animal_id,keys(ikey).session,keys(ikey).scan_idx))
+                imshow(hsv2rgb(im))
+            end
         end
     end
     
