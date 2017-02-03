@@ -1,33 +1,27 @@
-function sync_info = sync(key, photodiode_signal, photodiode_fs, fps)
+function sync_info = sync(key, photodiode_signal, photodiode_fs)
 % given the photodiode signal, returns a structure describing visual
 % stimulus trials that were displayed and exact timing synchronization.
 % The photodiode signal is assumed to be uniformly sampled in time.
 
 trialTable = vis.Trial;
 
-% detect flips in the recorded photodiode_signal signal
-[photodiode_flip_indices, photodiode_flip_numbers] = ...
-    stims.analysis.whichFlips(photodiode_signal, photodiode_fs, fps);
+trials = trialTable & (vis.ScanConditions & key);
 
-% remove duplicated numbers due to terminated programs
-ix = ~isnan(photodiode_flip_numbers);
-photodiode_flip_indices = photodiode_flip_indices(ix);
-photodiode_flip_numbers = photodiode_flip_numbers(ix);
-ix = find(photodiode_flip_numbers(2:end) <= photodiode_flip_numbers(1:end-1), 1, 'last');
-if ~isempty(ix)
-    photodiode_flip_indices = photodiode_flip_indices(ix+1:end);
-    photodiode_flip_numbers = photodiode_flip_numbers(ix+1:end);
+if trials.count==0
+    [photodiode_flip_indices, photodiode_flip_numbers] = detectFlips(photodiode_signal, photodiode_fs, 30);
+    % consider all trials with flip nums within the min and max of detected flip nums
+    trials = trialTable & key & ...
+        sprintf('last_flip_count between %d and %d', min(photodiode_flip_numbers), max(photodiode_flip_numbers));
+    % get all flip times for each trial, also get the number of the last flip in the trial
+    [psy_id, last_flip_in_trial, trial_flip_times] = fetchn(trials,...
+        'psy_id', 'last_flip_count', 'flip_times', 'ORDER BY trial_idx');
+else
+    % get all flip times for each trial, also get the number of the last flip in the trial
+    [psy_id, last_flip_in_trial, trial_flip_times] = fetchn(trials,...
+        'psy_id', 'last_flip_count', 'flip_times', 'ORDER BY trial_idx');
+    fps = 1/mean(diff(trial_flip_times{1}));
+    [photodiode_flip_indices, photodiode_flip_numbers] = detectFlips(photodiode_signal, photodiode_fs, fps);
 end
-
-assert(~isempty(photodiode_flip_numbers), 'no flips detected in photodiode channel')
-
-% consider all trials with flip nums within the min and max of detected flip nums
-trials = trialTable & key & ...
-    sprintf('last_flip_count between %d and %d', min(photodiode_flip_numbers), max(photodiode_flip_numbers));
-
-% get all flip times for each trial, also get the number of the last flip in the trial
-[psy_id, last_flip_in_trial, trial_flip_times] = fetchn(trials,...
-    'psy_id', 'last_flip_count', 'flip_times', 'ORDER BY trial_idx');
 
 if any(psy_id ~= psy_id(1))
     warning 'Multiple psy.Sessions per scan: not allowed.'
@@ -76,4 +70,23 @@ while trials(i).flip_times(1) > sync_info.signal_start_time + sync_info.signal_d
 end
 sync_info.last_trial = trials(i).trial_idx;
 
+end
+
+function [photodiode_flip_indices, photodiode_flip_numbers] = detectFlips(photodiode_signal, photodiode_fs, fps)
+
+    % detect flips in the recorded photodiode_signal signal
+    [photodiode_flip_indices, photodiode_flip_numbers] = ...
+        stims.analysis.whichFlips(photodiode_signal, photodiode_fs, fps);
+
+    % remove duplicated numbers due to terminated programs
+    ix = ~isnan(photodiode_flip_numbers);
+    photodiode_flip_indices = photodiode_flip_indices(ix);
+    photodiode_flip_numbers = photodiode_flip_numbers(ix);
+    ix = find(photodiode_flip_numbers(2:end) <= photodiode_flip_numbers(1:end-1), 1, 'last');
+    if ~isempty(ix)
+        photodiode_flip_indices = photodiode_flip_indices(ix+1:end);
+        photodiode_flip_numbers = photodiode_flip_numbers(ix+1:end);
+    end
+
+    assert(~isempty(photodiode_flip_numbers), 'no flips detected in photodiode channel')
 end

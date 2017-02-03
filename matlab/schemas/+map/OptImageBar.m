@@ -29,11 +29,10 @@ classdef OptImageBar < dj.Relvar & dj.AutoPopulate
                     if isempty(strfind(name,'.h5')); name = [name '.h5'];end
                     [Data, data_fs,photodiode_signal, photodiode_fs] = ...
                         getOpticalData(getLocalPath(fullfile(path,name))); % time in sec
-                    Data(:,end,:) = Data(:,end-1,:); % fix one missing line
-                    fps = 30;   % does not need to be exact
+                    
                     disp 'synchronizing...'
                     % synchronize to stimulus
-                    tuple =  sync(key, photodiode_signal, photodiode_fs, fps);
+                    tuple =  sync(key, photodiode_signal, photodiode_fs);
                     
                     % calculate frame times
                     frame_times = tuple.signal_start_time + ...
@@ -70,17 +69,20 @@ classdef OptImageBar < dj.Relvar & dj.AutoPopulate
                     frame_times = fetch1(preprocess.Sync & key,'frame_times');
                     frame_times = frame_times(1:nslices:end);
                     
-%                     % get the vessel image
-%                     disp 'getting the vessels...'
-%                     k = [];
-%                     k.session = key.session;
-%                     k.animal_id = key.animal_id;
-%                     k.site_number = fetch1(experiment.Scan & key,'site_number');
-%                     ves_key = fetch(experiment.Scan & k & 'aim = "vessels"');
-%                     reader = preprocess.getGalvoReader(ves_key);
-%                     vessels = reader(:,:,:,:,:);
-%                     vessels = mean(vessels(:,:,:),3);
-                    vessels = [];
+                    % get the vessel image
+                    try
+                        disp 'getting the vessels...'
+                        k = [];
+                        k.session = key.session;
+                        k.animal_id = key.animal_id;
+                        k.site_number = fetch1(experiment.Scan & key,'site_number');
+                        ves_key = fetch(experiment.Scan & k & 'aim = "vessels"');
+                        reader = preprocess.getGalvoReader(ves_key);
+                        vessels = reader(:,:,:,:,:);
+                        vessels = mean(vessels(:,:,:),3);
+                    catch
+                        vessels = [];
+                    end
             end
             
             % DF/F
@@ -155,25 +157,29 @@ classdef OptImageBar < dj.Relvar & dj.AutoPopulate
             % MF 2012, MF 2016
             
             params.sigma = 2; %sigma of the gaussian filter
-            params.exp = []; % exponent factor of rescaling
+            params.exp = []; % exponent factor of rescaling, 1-2 works 
             params.reverse = 0; % reverse the axis
             params.subplot = [1 2];
             params.amp = 0;
             params.shift = 0;
-            params.vessels = false;
-            params.figure = [];
+            params.figure = 1000;
             params.saturation = 1;
             
             params = getParams(params,varargin);
             
+            % define normalize function
+            normalize = @(x) (x-min(x(:)))./(max(x(:)) - min(x(:)));
+            
+            % fetch all the keys
             keys = fetch(obj);
+            if isempty(keys); disp('Nothing found!'); return; end
             
             for ikey = 1:length(keys)
-                subs = 1;
-                if params.vessels;subs = 2;end
-                
+             
+                % get data
                 [imP, vessels, imA] = fetch1(obj & keys(ikey),'ang','vessels','amp');
                 
+                % process image range
                 imP(imP<-3.14) = imP(imP<-3.14) +3.14*2;
                 imP(imP>3.14) = imP(imP>3.14) -3.14*2;
                 uv =linspace(-3.14,3.14,20) ;
@@ -183,7 +189,6 @@ classdef OptImageBar < dj.Relvar & dj.AutoPopulate
                 imP = imP+minmode+3.14;
                 imP(imP<-3.14) = imP(imP<-3.14) +3.14*2;
                 imP(imP>3.14) = imP(imP>3.14) -3.14*2;
-                
                 if ~isempty(params.exp)
                     imP = imP-median(imP(:));
                     imP(imP<-3.14) = imP(imP<-3.14) +3.14*2;
@@ -192,71 +197,45 @@ classdef OptImageBar < dj.Relvar & dj.AutoPopulate
                     imP(imP<0) = normalize(exp((normalize((imP(imP<0)))+1).^params.exp))-1;
                     imP(imP>0) =  normalize(-exp((normalize((-imP(imP>0)))+1).^params.exp));
                 end
-                
                 imA(imA>prctile(imA(:),99)) = prctile(imA(:),99);
+                
+                % create the hsv map
                 h = normalize(imP);
-                s = ones(size(imP));
-                if params.amp
-                    v = normalize(imA);
-                else
-                    v = ones(size(imA));
-                end
+                s = ones(size(imP)); v = s; v2 = s;
+                if params.amp;v = normalize(imA);end
                 s2 = normalize(imA);
-                if ~isempty(vessels)
-                    v2 = normalize(vessels);
-                else
-                    v2 = ones(size(imA));
-                end
+                if ~isempty(vessels); v2 = normalize(vessels);end
                 
                 if nargout>0
                     iH{ikey} = h;
                     iS{ikey} = s2;
                     iV{ikey} = v2;
                 else
-                    if isempty(params.figure)
-                        figure
-                    else
-                        figure(params.figure)
-                    end
+                    figure(params.figure)
                     set(gcf,'position',[50 200 920 435])
                     set(gcf,'name',['OptMap: ' num2str(keys(ikey).animal_id) '_' num2str(keys(ikey).session) '_' num2str(keys(ikey).scan_idx)])
                     
+                    % plot angle map
                     if any(params.subplot==1) && any(params.subplot==2)
-                        subplot(subs,2,1)
+                        subplot(1,2,1)
                     end
                     if any(params.subplot==1)
                         im = (hsv2rgb(cat(3,h,cat(3,s,v))));
                         im = imgaussian(im,params.sigma);
                         imshow(im)
-                        if params.reverse
-                            set(gca,'xdir','reverse')
-                        end
+                        if params.reverse; set(gca,'xdir','reverse');end
                     end
                     
+                    % plot combined map
                     if any(params.subplot==1) && any(params.subplot==2)
-                        subplot(subs,2,2)
+                        subplot(1,2,2)
                     end
-                    
                     if any(params.subplot==2)
                         s2 = imgaussian(s2,params.sigma);
                         h = imgaussian(h,params.sigma);
                         im = (hsv2rgb(cat(3,h,cat(3,s2,v2))));
-                        
                         imshow(im)
-                    end
-                    
-                    if params.vessels
-                        subplot(subs,2,3:4)
-                        imagesc(v2);
-                        axis image
-                        axis off
-                        colormap gray
-                    end
-                    if params.reverse
-                        set(gca,'xdir','reverse')
-                    end
-                    if ikey ~= length(keys)
-                        pause
+                        if params.reverse; set(gca,'xdir','reverse');end
                     end
                 end
             end
@@ -278,7 +257,6 @@ classdef OptImageBar < dj.Relvar & dj.AutoPopulate
             im = ones(size(h,1)*2,size(h,2)*2,3);
             
             im(1:size(h,1),1:size(h,2),1) = h;
-            im(1:size(h,1),1:size(h,2),2) = s*params.saturation;
             im(1:size(h,1),1:size(h,2),3) = v;
             
             im(size(h,1)+1:end,1:size(h,2),1) = zeros(size(v));
