@@ -36,10 +36,10 @@ classdef DotRF < dj.Relvar & dj.AutoPopulate
             deg2dot = 2*atand((mon_size/2)/(mon_dist/2.54))\norm(map_size);
             
             % get traces and frame times
-            [traces, trace_keys] = fetchn(preprocess.SpikesRateTrace & key, 'rate_trace');
-            traces = cell2mat(traces');
-            frame_times = fetch1(preprocess.Sync & key, 'frame_times');
-            frame_times = frame_times(1:size(traces,1));
+            [traces, frame_times, trace_keys] = pipetools.getAdjustedSpikes(key);
+            xm = min([length(frame_times) length(traces)]);
+            frame_times = frame_times(1:xm);
+            traces = traces(1:xm,:);
             
             % get responses for each trial
             trials = trials.fetch('cond_idx', 'dot_x', 'dot_y', 'flip_times');
@@ -50,7 +50,7 @@ classdef DotRF < dj.Relvar & dj.AutoPopulate
                 frame_rel = frame_times<trial.flip_times(1)+response_duration/1000 +onset_delay/1000 ...
                     & frame_times>trial.flip_times(1)+onset_delay/1000;
                 index(itrial) = sub2ind(map_size, find(locations_x==trial.dot_x), find(locations_y==trial.dot_y));
-                response(itrial,:) = mean(traces(frame_rel,:));
+                response(itrial,:) = nanmean(traces(frame_rel,:));
             end
             
             % shuffle trials for bootstrap computation
@@ -75,9 +75,9 @@ classdef DotRF < dj.Relvar & dj.AutoPopulate
             sfl_resp_map_p = nan(map_size(1),map_size(2),shuffle);
             for iloc = unique(index)'
                 [x, y] = ind2sub(map_size, iloc);
-                response_map(x,y,:) = mean(response(index==iloc,:));
-                sfl_response_map(x,y,:,:) = mean(sfl_resp(index==iloc,:,:));
-                sfl_resp_map_p(x,y,:) = mean(sfl_resp_p(index==iloc,:));
+                response_map(x,y,:) = nanmean(response(index==iloc,:));
+                sfl_response_map(x,y,:,:) = nanmean(sfl_resp(index==iloc,:,:));
+                sfl_resp_map_p(x,y,:) = nanmean(sfl_resp_p(index==iloc,:));
             end
             
             % insert
@@ -94,7 +94,7 @@ classdef DotRF < dj.Relvar & dj.AutoPopulate
             
             % compute and insert cell rfs
             for itrace = 1:length(trace_keys)
-                tuple = trace_keys(itrace);
+                tuple = rmfield(trace_keys(itrace),'slice');
                 tuple.rf_method = key.rf_method;
                 tuple.response_map = response_map(:,:,itrace);
                 tuple.gauss_fit = self.fitGauss(tuple.response_map, deg2dot, rf_filter);
