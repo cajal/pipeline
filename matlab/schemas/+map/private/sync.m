@@ -82,7 +82,7 @@ function [photodiode_flip_indices, photodiode_flip_numbers] = detectFlips(photod
     ix = ~isnan(photodiode_flip_numbers);
     photodiode_flip_indices = photodiode_flip_indices(ix);
     photodiode_flip_numbers = photodiode_flip_numbers(ix);
-    ix = find(photodiode_flip_numbers(2:end) <= photodiode_flip_numbers(1:end-1), 1, 'last');
+    ix = find(diff(photodiode_flip_numbers)<0,1, 'last');
     if ~isempty(ix)
         photodiode_flip_indices = photodiode_flip_indices(ix+1:end);
         photodiode_flip_numbers = photodiode_flip_numbers(ix+1:end);
