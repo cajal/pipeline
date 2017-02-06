@@ -30,7 +30,8 @@ if ~photodiode
     end
     
     Data = permute(reshape(data,imsizeX,[],imsizeY),[2 3 1]); % reshape into [time x y]
-    
+    Data(:,end,:) = Data(:,end-1,:); % fix one missing line
+      
     if nargout>1
         Fs = loadHWS(fn,'imaging','hz'); % get framerate
     end

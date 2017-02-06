@@ -17,8 +17,14 @@ classdef Spikes < dj.Relvar & dj.AutoPopulate
         
         function makeTuples(self, key)
             
-            self.insert(key)
-            makeTuples(preprocess.SpikesRateTrace, key)
+            if key.spike_method == 5 && key.extract_method ~= 2
+                disp 'NMF spikes exist only under NMF extraction!'
+                disp 'skipping'
+                return
+            else
+                self.insert(key)
+                makeTuples(preprocess.SpikesRateTrace, key)
+            end
 
         end
     end
