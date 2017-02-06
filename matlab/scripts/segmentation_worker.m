@@ -1,7 +1,7 @@
-r  = experiment.Session & 'session_date>"2016-02"' & experiment.AutoProcessing;
+r  = experiment.Session * experiment.AutoProcessing & 'session_date>"2016-02"';
 
 while true
-    while count((preprocess.ExtractRaw().popRel & r) - preprocess.ExtractRaw)
+    while progress(preprocess.ExtractRaw, r)
     	  parpopulate(preprocess.ExtractRaw, r)
     end
     pause(1000)

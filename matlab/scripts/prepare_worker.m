@@ -1,10 +1,10 @@
-r  = experiment.Session & 'session_date>"2016-02"' & experiment.AutoProcessing;
+r  = experiment.Session * experiment.AutoProcessing & 'session_date>"2016-02"';
 
 while true
-    while count((preprocess.Prepare().popRel & r) - preprocess.Prepare)
+    while progress(preprocess.Prepare(), r)
     	  parpopulate(preprocess.Prepare, r)
     end
-    while count((preprocess.Sync().popRel & r) - preprocess.Sync)
+    while progress(preprocess.Sync, r)
     	  parpopulate(preprocess.Sync, r)
     end
     pause(1000)
