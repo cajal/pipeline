@@ -13,5 +13,8 @@ while true
     while progress(preprocess.BehaviorSync, r)
     	  parpopulate(preprocess.BehaviorSync, r)
     end
+    while progress(preprocess.Spikes, r)
+    	  parpopulate(preprocess.Spikes, r)
+    end
     pause(1000)
 end
