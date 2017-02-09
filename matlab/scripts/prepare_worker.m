@@ -7,5 +7,11 @@ while true
     while progress(preprocess.Sync, r)
     	  parpopulate(preprocess.Sync, r)
     end
+    while progress(preprocess.Treadmill, r)
+    	  parpopulate(preprocess.Treadmill, r)
+    end
+    while progress(preprocess.BehaviorSync, r)
+    	  parpopulate(preprocess.BehaviorSync, r)
+    end
     pause(1000)
 end
