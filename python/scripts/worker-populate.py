@@ -10,7 +10,8 @@ import sys
 from argparse import ArgumentParser
 import time
 import numpy as np
-
+from pipeline.experiment import AutoProcessing
+import datajoint as dj
 
 def main(argv):
     parser = ArgumentParser(argv[0], description=__doc__)
@@ -19,7 +20,7 @@ def main(argv):
     parser.add_argument('--t_min', type=int, help="Minimal waiting time for daemon in sec.", default=5*60)
     parser.add_argument('--t_max', type=int, help="Maximal waiting time for daemon in sec.", default=15*60)
     parser.add_argument('--restrictions','-r', type=str, help="Restrictions as a string.", default=None)
-
+    parser.add_argument('--autoprocessing', '-a', action='store_true', help="Restrict by autoprocessing.", default=False)
     args = parser.parse_args(argv[1:])
 
     rels_cls = {}
@@ -43,15 +44,21 @@ def main(argv):
     while run_daemon:
         for name, rel in rels_cls.items():
             if args.restrictions is not None:
-                rel().populate(args.restrictions, reserve_jobs=True, suppress_errors=True)
+                if args.autoprocessing:
+                    rel().populate(dj.AndList([AutoProcessing() , args.restrictions]), reserve_jobs=True, suppress_errors=True)
+                else:
+                    rel().populate(args.restrictions, reserve_jobs=True, suppress_errors=True)
             else:
-                rel().populate(reserve_jobs=True, suppress_errors=True)
+                if args.autoprocessing:
+                    rel().populate(AutoProcessing(), reserve_jobs=True, suppress_errors=True)
+                else:
+                    rel().populate(reserve_jobs=True, suppress_errors=True)
 
         run_daemon = args.daemon
         if run_daemon:
             t = np.random.randint(args.t_min, args.t_max)
             print('Going to sleeping for', t, 'seconds')
-            time.sleep()
+            time.sleep(t)
 
     return 0
 
