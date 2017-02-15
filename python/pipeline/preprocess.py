@@ -4,6 +4,7 @@ from warnings import warn
 import numpy as np
 import sh
 import os
+from commons import lab
 try:
     import pyfnnd
 except ImportError:
@@ -12,10 +13,16 @@ from .utils.dsp import mirrconv
 from .utils.eye_tracking import ROIGrabber, ts2sec, read_video_hdf5, PupilTracker, CVROIGrabber
 from . import config
 from distutils.version import StrictVersion
+from .utils import galvo_corrections
+from .experiment import Session, Scan
+import imreg_dft as ird
+
+# import caiman.source_extraction.cnmf as cnmf
 
 assert StrictVersion(dj.__version__) >= StrictVersion('0.2.8')
 
 schema = dj.schema('pipeline_preprocess', locals())
+
 
 
 def notnan(x, start=0, increment=1):
@@ -88,6 +95,16 @@ class Prepare(dj.Imported):
         raster_phase            : float             # shift of odd vs even raster lines
         """
 
+        def get_fix_raster(self):
+            """
+            :return: a function that perform raster correction on image [x, y, nchannel, nslice, nframe].
+            """
+            raster_phase, fill_fraction = self.fetch1['raster_phase', 'fill_fraction']
+            if raster_phase == 0:
+                return lambda img: np.double(img)
+            else:
+                return lambda img: galvo_corrections.correct_raster(np.double(img), raster_phase, fill_fraction)
+
     class GalvoMotion(dj.Part):
         definition = """   # motion correction for galvo scans
         -> Prepare.Galvo
@@ -99,6 +116,13 @@ class Prepare(dj.Imported):
         motion_rms                  : float          # (um) stdev of motion
         align_times=CURRENT_TIMESTAMP: timestamp     # automatic
         """
+
+        def get_fix_motion(self):
+            """
+            :return: a function that performs motion correction on image [x, y].
+            """
+            xy = self.fetch['motion_xy']
+            return lambda frame, i: galvo_corrections.correct_motion(frame, xy[:, i])
 
     class GalvoAverageFrame(dj.Part):
         definition = """   # average frame for each slice and channel after corrections
@@ -166,8 +190,11 @@ class ExtractRaw(dj.Imported):
 
     @property
     def key_source(self):
-        return Prepare() * Method().proj() & dj.OrList(
-            Prepare.Aod() * Method.Aod(), Prepare.Galvo() * Method.Galvo())
+        return Prepare() * Method() \
+               & dj.OrList([(Prepare.Galvo() * Method.Galvo() - 'segmentation="manual"'), \
+                            Prepare.Galvo() * Method.Galvo() * ManualSegment(), \
+                            Prepare.Aod() * Method.Aod()]) \
+                 - (Session.TargetStructure() & 'compartment="axon"')
 
     class Trace(dj.Part):
         definition = """  # raw trace, common to Galvo
@@ -279,7 +306,7 @@ class ExtractRaw(dj.Imported):
             mask_px, mask_w, spikes, traces, ids = (
                 self.GalvoROI() * self.SpikeRate() *
                 ComputeTraces.Trace() & key & dict(segmentation=2)).fetch.order_by('trace_id')[
-                    'mask_pixels', 'mask_weights', 'spike_trace', 'trace', 'trace_id']
+                'mask_pixels', 'mask_weights', 'spike_trace', 'trace', 'trace_id']
 
             template = np.stack([normalize(t)
                                  for t in (Prepare.GalvoAverageFrame() & key).fetch['frame']], axis=2).max(axis=2)
@@ -357,8 +384,7 @@ class ExtractRaw(dj.Imported):
                 plt.close(fig)
 
     def _make_tuples(self, key):
-        """ implemented in matlab """
-        raise NotImplementedError("Implemented in Matlab")
+        raise NotImplementedError('ExtractRaw is populated in Matlab')
 
 
 @schema
@@ -605,7 +631,9 @@ class Spikes(dj.Computed):
         if method == 'stm':
             prep = (Prepare() * Prepare.Aod() & key) or (Prepare() * Prepare.Galvo() & key)
             fps = prep.fetch1['fps']
-            X = (ComputeTraces.Trace() & key).proj('trace').fetch.as_dict()
+            X = [dict(trace=fill_nans(x['trace'].astype('float64'))) for x in
+                        (ComputeTraces.Trace() & key).proj('trace').fetch.as_dict]
+
             self.insert1(key)
             for x in (SpikeMethod() & key).spike_traces(X, fps):
                 self.RateTrace().insert1(dict(key, **x))
@@ -622,7 +650,7 @@ class Spikes(dj.Computed):
             fps = prep.fetch1['fps']
             part = self.RateTrace()
             for trace, trace_key in zip(*(ComputeTraces.Trace() & key).fetch['trace', dj.key]):
-                trace = pyfnnd.deconvolve(fill_nans(np.float64(trace.flatten())), dt=1/fps)[0]
+                trace = pyfnnd.deconvolve(fill_nans(np.float64(trace.flatten())), dt=1 / fps)[0]
                 part.insert1(dict(trace_key, rate_trace=trace.astype(np.float32)[:, np.newaxis], **key))
         else:
             raise NotImplementedError('Method {spike_method} not implemented.'.format(**key))
@@ -689,28 +717,22 @@ class Eye(dj.Imported):
     def grab_timestamps_and_frames(self, key, n_sample_frames=10):
 
         import cv2
-        path_prefix = config['path.mounts']
+
 
         rel = experiment.Session() * experiment.Scan.EyeVideo() * experiment.Scan.BehaviorFile().proj(
             hdf_file='filename')
 
-
         info = (rel & key).fetch1()
-        avi_path = "{path_prefix}/{behavior_path}/{filename}".format(path_prefix=path_prefix, **info)
 
+
+        avi_path = lab.Paths().get_local_path("{behavior_path}/{filename}".format(**info))
         # replace number by %d for hdf-file reader
 
-
         tmp = info['hdf_file'].split('.')
-
-        if '%d' in tmp[0]:
-            # new version
-            info['hdf_file'] = tmp[0][:-2] + '%d.' + tmp[-1]
-        else:
+        if not '%d' in tmp[0]:
             info['hdf_file'] = tmp[0][:-1] + '%d.' + tmp[-1]
-        # info['hdf_file'] = tmp[0][:-1] + '%d.' + tmp[-1]
 
-        hdf_path = "{path_prefix}/{behavior_path}/{hdf_file}".format(path_prefix=path_prefix, **info)
+        hdf_path = lab.Paths().get_local_path("{behavior_path}/{hdf_file}".format(**info))
 
         data = read_video_hdf5(hdf_path)
         packet_length = data['analogPacketLen']
@@ -891,7 +913,7 @@ class EyeTracking(dj.Computed):
         roi = (Eye() & key).fetch1['eye_roi']
 
         video_info = (experiment.Session() * experiment.Scan.EyeVideo() & key).fetch1()
-        avi_path = "{path_prefix}/{behavior_path}/{filename}".format(path_prefix=config['path.mounts'], **video_info)
+        avi_path = lab.Paths().get_local_path("{behavior_path}/{filename}".format(**video_info))
 
         tr = PupilTracker(param)
         traces = tr.track(avi_path, roi - 1, display=config['display.tracking'])  # -1 because of matlab indices
@@ -997,11 +1019,176 @@ class EyeTracking(dj.Computed):
                 cv2.ellipse(gray, ellipse, (0, 0, 255), 2)
             cv2.imshow('frame', gray)
 
-            if (cv2.waitKey(int(1000/framerate)) & 0xFF == ord('q')):
+            if (cv2.waitKey(int(1000 / framerate)) & 0xFF == ord('q')):
                 break
 
         cap.release()
         cv2.destroyAllWindows()
+
+
+@schema
+class MatchedScanSite(dj.Manual):
+    definition = """
+    # an entry in this table indicates that two scans have been recorded at the same location
+
+    -> ExtractRaw
+    other_scan_idx             : smallint      # second dependent scan idx
+    ---
+    match_threshold=0.7        : float         # minimal cosine between masks for match
+    """
+
+
+@schema
+class MatchedMasks(dj.Computed):
+    definition = """
+    # grouping table for matched masks
+
+    -> MatchedScanSite
+    -> Slice
+    ---
+    translation_correction      : longblob # translation correction to account for shifts between scans
+    """
+
+    class MatchedID(dj.Part):
+        definition = """
+        -> MatchedMasks
+        -> ExtractRaw.GalvoROI
+        other_trace_id          : smallint # index of the other scan
+        ---
+            """
+
+    @property
+    def key_source(self):
+        return MatchedScanSite() * Slice() & ExtractRaw.GalvoROI()
+
+    def _make_tuples(self, key):
+        # --- get keys that identify scans and get channels for motion correction of templates between scans
+        other_key = dict(key)
+        other_key['scan_idx'] = other_key.pop('other_scan_idx')
+
+        for slice in (dj.U('slice') & (ExtractRaw.GalvoROI() & key)).fetch['slice']:
+            print("Matching masks in slice {:02d}".format(slice), flush=True)
+            masks, trace_ids, templates = self.load_unmatched(key, slice)
+
+            # --- estimate translation between two motion correction templates
+            tvec = ird.translation(*templates)['tvec']
+
+            masks[1] = self.motion_correct(masks[1], tvec=tvec)
+
+            m = [m.reshape([-1, m.shape[-1]]) for m in masks]
+            D, D1, D0 = m[0].T @ m[1], m[1].T @ m[1], m[0].T @ m[0]
+            C = D / np.sqrt(np.diag(D0)[:, np.newaxis] * np.diag(D1)[np.newaxis, :])
+
+            thres = (MatchedScanSite() & key).fetch1['match_threshold']
+
+            if not np.all((C > thres).sum(axis=0) < 2) or not np.all((C > thres).sum(axis=1) < 2):
+                raise PipelineException('threshold does not give unique assignments')
+            self.insert1(dict(other_key, translation_correction=tvec, **key))
+            pairs = self.MatchedID()
+            for i, (d, ti) in enumerate(zip(C, trace_ids[0])):
+                idx = d > thres
+
+                if idx.sum() == 1:
+                    tmp = dict(key, **ti)
+                    j = int(np.where(idx)[0])
+                    match = dict(other_key, other_trace_id=trace_ids[1][j]['trace_id'], **tmp)
+                    pairs.insert1(match)
+
+    @staticmethod
+    def load_unmatched(key, slice):
+        other_key = dict(key)
+        other_key['scan_idx'] = other_key.pop('other_scan_idx')
+
+        masks, trace_ids, templates = [], [], []
+
+        channel = (dj.U('channel') & (ExtractRaw.GalvoROI() & key)).fetch1['channel']
+
+        for scan_key in [key, other_key]:
+            rel = ExtractRaw.GalvoROI() & scan_key & dict(slice=slice)
+            d1, d2, fps = tuple(map(int, (Prepare.Galvo() & scan_key).fetch1['px_height', 'px_width', 'fps']))
+            mask_px, mask_w, trace_id_set = rel.fetch.order_by('trace_id')['mask_pixels', 'mask_weights', dj.key]
+            trace_ids.append(trace_id_set)
+            masks.append(ExtractRaw.GalvoROI.reshape_masks(mask_px, mask_w, d1, d2))
+            template = np.stack((normalize(t) for t in (Prepare.GalvoAverageFrame() & scan_key).fetch['frame'])
+                                , axis=2)[..., channel - 1]
+            templates.append(template)
+        if templates[0].shape != template[1].shape:
+            i = np.argmax([t.shape[0] for t in templates])
+            stride = int(templates[i].shape[0]/templates[1-i].shape[0])
+            templates[i] = templates[i][::stride,::stride]
+            masks[i] = masks[i][::stride, ::stride, :]
+
+        return masks, trace_ids, templates
+
+    def load_matched(self, downsample=True):
+        rel = ExtractRaw.GalvoROI() * MatchedMasks.MatchedID() * self * ExtractRaw.GalvoROI().proj(
+            other_scan_idx='scan_idx',
+            other_trace_id='trace_id',
+            other_mask_weights='mask_weights',
+            other_mask_pixels='mask_pixels')
+        d1, d2, fps = [int(elem) for elem in
+                       (Prepare.Galvo() & self).fetch1['px_height', 'px_width', 'fps']]
+        mask_px, mask_w = rel.fetch['mask_pixels', 'mask_weights']
+        other_mask_px, other_mask_w = rel.fetch['other_mask_pixels', 'other_mask_weights']
+        mask_channel = (dj.U('channel') & (ExtractRaw.GalvoROI() & self)).fetch1['channel']
+        masks = ExtractRaw.GalvoROI.reshape_masks(mask_px, mask_w, d1, d2)
+        other_masks = ExtractRaw.GalvoROI.reshape_masks(other_mask_px, other_mask_w, d1, d2)
+        other_masks = self.motion_correct(other_masks)
+        template = np.stack((normalize(t) for t in (Prepare.GalvoAverageFrame() & self).fetch['frame'])
+                            , axis=2)[..., mask_channel - 1]
+        if other_masks.shape[0] > masks.shape[0] and downsample:
+            print('Downsampling matched masks')
+            stride = int(other_masks.shape[0]/masks.shape[0])
+            other_masks = other_masks[::stride, ::stride, :]
+        return masks, other_masks, template
+
+    def motion_correct(self, masks, tvec=None):
+        if tvec is None:
+            tvec = self.fetch1['translation_correction']
+        masks = np.stack([ird.transform_img(m, tvec=tvec) for m in masks.transpose([2, 0, 1])], axis=2)
+        return masks
+
+    def plot(self):
+        import seaborn as sns
+        import matplotlib.pyplot as plt
+
+        masks, other_masks, template = self.load_matched()
+        with sns.axes_style('white'):
+            fig, ax = plt.subplots()
+        color = ['RdBu', 'gray']
+        for m, c in zip([masks, other_masks], color):
+            m = m.mean(axis=2)
+            m[m == 0] = np.nan
+            ax.matshow(m, cmap=c, alpha=.5)
+        return fig, ax
+
+    def plot_single(self, outdir='./'):
+        import seaborn as sns
+        import matplotlib.pyplot as plt
+
+        masks, other_masks, template = self.load_matched()
+        color = ['RdBu', 'gray']
+
+        for i, (m0, m1) in enumerate(zip(masks.transpose([2,0,1]), other_masks.transpose([2,0,1]))):
+            print('Mask {:03d}'.format(i), flush=True)
+            with sns.axes_style('white'):
+                fig, ax = plt.subplots()
+            m = m0 + m1
+            m0[m0 == 0] = np.nan
+            m1[m1 == 0] = np.nan
+
+            ifro = np.where(m.sum(axis=1) > 0)[0].min() - 5
+            ito = np.where(m.sum(axis=1) > 0)[0].max() + 5
+            jfro = np.where(m.sum(axis=0) > 0)[0].min() - 5
+            jto = np.where(m.sum(axis=0) > 0)[0].max() + 5
+            ax.imshow(template[ifro:ito, jfro:jto], cmap='gray')
+            ax.matshow(m0[ifro:ito, jfro:jto], cmap='viridis', alpha=.5)
+            ax.matshow(m1[ifro:ito, jfro:jto], cmap='magma', alpha=.5)
+            ax.contour((m0[ifro:ito, jfro:jto] > 0)*1.,V=[.5], colors='orange')
+            ax.contour((m1[ifro:ito, jfro:jto] > 0)*1.,V=[.5], colors='dodgerblue')
+            fig.savefig('{outdir}/{num:03d}'.format(outdir=outdir, num=i))
+            plt.close(fig)
+
 
 
 schema.spawn_missing_classes()

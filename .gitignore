@@ -1,7 +1,12 @@
+.DS_Store
+
 # pipeline configuration
 .env
 pipeline_config.json
 
+
+# Docker files
+docker-compose.yml
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

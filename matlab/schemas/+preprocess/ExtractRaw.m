@@ -100,7 +100,10 @@ classdef ExtractRaw < dj.Relvar & dj.AutoPopulate
                             key.slice = islice;
                             insert(preprocess.ExtractRawGalvoSegmentation, key);
                             mask_image = fetch1(preprocess.ManualSegment & key, 'mask');
-                            regions = regionprops(bwlabel(mask_image, 4),'PixelIdxList'); %#ok<MRPBW>
+                            if max(mask_image(:))==1 % adds backwards compatibility with drawCells
+                                mask_image = bwlabel(mask_image, 4);
+                            end
+                            regions = regionprops(mask_image,'PixelIdxList');
                             mask_pixels = {regions(:).PixelIdxList};
                             trace_key = rmfield(key,'slice');
                             traces = zeros(length(mask_pixels), length(channel), nframes);
