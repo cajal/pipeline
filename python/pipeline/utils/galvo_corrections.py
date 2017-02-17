@@ -3,7 +3,6 @@ from pipeline import PipelineException
 from scipy.interpolate import interp1d, interp2d
 import numpy as np
 
-
 def correct_motion(img, xymotion):
     """
     motion correction for 2P scans.
@@ -23,7 +22,7 @@ def correct_motion(img, xymotion):
     return img
 
 
-def correct_raster(scan, raster_phase, fill_fraction):
+def correct_raster(scan, raster_phase, fill_fraction, in_place=True):
     """ Raster correction for resonant scanners.
 
     Corrects EM images in n-dimensional scans, usual shape is [image_height, image_width,
@@ -34,16 +33,19 @@ def correct_raster(scan, raster_phase, fill_fraction):
     :param float raster_phase: Phase difference beetween odd and even lines.
     :param float fill_fraction: Ratio between active acquisition and total length of the
     scan line.
+    :param bool in_place: If True (default), the original array is modified in memory.
     :return: Raster-corrected scan.
     :rtype: Same as scan.
     :raises: PipelineException: Scan is not an np.array with at least 2 dimensions.
     """
     # Basic checks
-    # scan = np.double(scan[:,:,:,:,:]) # from TIFFReader object to np array
     if not isinstance(scan, np.ndarray):
         raise PipelineException('Scan needs to be a numpy array.')
     if scan.ndim < 2:
         raise PipelineException('Scan with less than 2 dimensions.')
+    if not np.issubdtype(scan.dtype, np.float):
+        print('Changing scan from', str(scan.dtype), 'to double')
+        scan = np.double(scan)
 
     # Get some dimensions
     original_shape = scan.shape
@@ -56,6 +58,10 @@ def correct_raster(scan, raster_phase, fill_fraction):
     time_index = np.arcsin(index * fill_fraction)
     interp_points_even = np.sin(time_index + raster_phase) / fill_fraction
     interp_points_odd = np.sin(time_index - raster_phase) / fill_fraction
+
+    # If copy is needed
+    if not in_place:
+        scan = scan.copy()
 
     # We iterate over every image in the scan (first 2 dimensions). Same correction
     # regardless of what channel, slice or frame they belong to.
