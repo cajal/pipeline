@@ -9,7 +9,7 @@ params = struct(...
     'pattern_width', 64, ...    cannot exceed 128
     'pattern_aspect', 16/9, ...  the aspect ratio of the pattern -- should match the screen
     'pattern_upscale', 3, ... integer upscale factor of the pattern
-    'ori', 0:30:179, ... degrees. 0=horizontal, then clockwise
+    'ori', 0:15:179, ... degrees. 0=horizontal, then clockwise
     'outer_ori_delta', -90:45:89, ...  degrees. Differerence of outer ori from inner.
     'ori_coherence', [1.5 4], ...   1=unoriented noise. pi/ori_coherence = bandwidth of orientations.
     'aperture_x', -0.2, ... x position of the aperture in units of pattern widths: 0=center, 0.5=right edge

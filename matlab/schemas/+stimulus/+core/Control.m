@@ -12,15 +12,15 @@ classdef Control < handle
     properties(SetAccess=protected)
         conditionTable = stimulus.Condition
         trialTable = stimulus.Trial
-        selectConditionTable = stimulus.SelectCondition
-        cachedConditions = containers.Map('KeyType', 'char', 'ValueType', 'any')
-        trialQueue = CQueue
+        condCache = containers.Map
+        trialQueue = stimulus.core.FIFO
     end
     
     
     methods
         
         function hashes = makeConditions(self, specialTable, params)
+            % makes conditions and stores them the specialTable
             assert(isstruct(params), 'params must be a struct')
             
             cleanup = onCleanup(@() self.conditionTable.schema.conn.cancelTransaction);
@@ -35,26 +35,28 @@ classdef Control < handle
                 hash = dj.DataHash(dj.struct.join(condition, param), ...
                     struct('Format','base64', 'Method', 'md5'));
                 hash = hash(1:self.hashLength);
-                condition.condition_hash = hash;
-                if exists(self.conditionTable & condition)
-                    fprintf *
-                    param = fetch(specialTable & condition,'*');
-                else
-                    fprintf .
-                    param = specialTable.make(param);
-                    dbConn.startTransaction
-                    try
-                        self.conditionTable.insert(condition)
+                if ~self.condCache.isKey(hash)
+                    condition.condition_hash = hash;
+                    if exists(self.conditionTable & condition)
+                        fprintf *
+                        param = fetch(specialTable & condition,'*');
+                    else
+                        fprintf .
                         param = specialTable.make(param);
-                        param.condition_hash = hash;
-                        specialTable.insert(param)
-                        dbConn.commitTransaction
-                    catch err
-                        dbConn.cancelTransaction
-                        rethrow(err)
+                        dbConn.startTransaction
+                        try
+                            self.conditionTable.insert(condition)
+                            param = specialTable.make(param);
+                            param.condition_hash = hash;
+                            specialTable.insert(param)
+                            dbConn.commitTransaction
+                        catch err
+                            dbConn.cancelTransaction
+                            rethrow(err)
+                        end
                     end
+                    self.condCache(hash) = setfield(param, 'obj___', specialTable); %#ok<SFLD>
                 end
-                self.cachedConditions(hash) = setfield(param, 'obj___', specialTable); %#ok<SFLD>
                 hashes{i} = hash;
             end
             fprintf \n
@@ -67,11 +69,11 @@ classdef Control < handle
         
         
         function clearTrials(self)
-            self.trialQueue.empty();
+            self.trialQueue.reset
         end
         
         function clearCachedConditions(self)
-            self.cachedConditions.remove(self.cachedConditions.keys);
+            self.condCache.remove(self.condCache.keys);
         end
         
         function clearAll(self)
@@ -90,9 +92,6 @@ classdef Control < handle
         function close(self)
             self.screen.close
         end
-        
-        
-        
         
         function run(self, scanKey)
             % play the trials on the trialQueue
@@ -131,16 +130,16 @@ classdef Control < handle
                 PsychPortAudio('Start', audioHandle, 1, 0)
                 
                 %%%% SHOW TRIAL %%%%
-                condition = self.cachedConditions(self.trialQueue.pop);
-
+                condition = self.condCache(self.trialQueue.pop);
+                
                 condition.obj___.showTrial(condition)
                 
                 % save trial
-                trialRecord = scanKey;                
+                trialRecord = scanKey;
                 trialRecord.trial_idx = trialId;
                 trialRecord.condition_hash = condition.condition_hash;
                 trialRecord.flip_times = self.screen.clearFlipTimes();
-                trialRecord.last_flip = trialRecord.flip_times(1);                
+                trialRecord.last_flip = trialRecord.flip_times(1);
                 self.trialTable.insertParallel(trialRecord)
                 trialId = trialId + 1;
             end
@@ -150,7 +149,7 @@ classdef Control < handle
     end
     
     
-    methods(Access=private)        
+    methods(Access=private)
         function cleanupRun(self)
             % used only for cleanup in run
             self.screen.flip(struct('logFlips', false, 'checkDroppedFrames', false))
@@ -161,6 +160,5 @@ classdef Control < handle
         end
         
     end
-    
     
 end

@@ -94,7 +94,7 @@ classdef Matisse < dj.Relvar & stimulus.core.Visual
             tex = Screen('MakeTexture', self.win, cond.image);
             Screen('DrawTexture', self.win, tex, [], self.rect)
             self.screen.flip(opts)
-            Screen('close', tex)
+            Screen('close', tex);
             WaitSecs(cond.duration);
         end
     end
