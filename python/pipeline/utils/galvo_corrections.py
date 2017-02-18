@@ -1,4 +1,4 @@
-from pipeline import PipelineException
+from .. import PipelineException
 from scipy.interpolate import interp1d, RectBivariateSpline, interp2d
 import numpy as np
 
