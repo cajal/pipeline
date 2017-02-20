@@ -97,13 +97,13 @@ class Prepare(dj.Imported):
 
         def get_fix_raster(self):
             """
-            :return: a function that perform raster correction on image [x, y, nchannel, nslice, nframe].
+             :return: a function that perform raster correction on scan [x, y, num_channels, num_slices, num_frames].
             """
             raster_phase, fill_fraction = self.fetch1['raster_phase', 'fill_fraction']
             if raster_phase == 0:
-                return lambda img: np.double(img)
+                return lambda scan: np.double(scan)
             else:
-                return lambda img: galvo_corrections.correct_raster(np.double(img), raster_phase, fill_fraction)
+                return lambda scan: galvo_corrections.correct_raster(np.double(scan), raster_phase, fill_fraction)
 
     class GalvoMotion(dj.Part):
         definition = """   # motion correction for galvo scans
@@ -122,7 +122,7 @@ class Prepare(dj.Imported):
             :return: a function that performs motion correction on image [x, y].
             """
             xy = self.fetch['motion_xy']
-            return lambda frame, i: galvo_corrections.correct_motion(frame, xy[:, i])
+            return lambda scan, indices: galvo_corrections.correct_motion(scan, xy[:, indices])
 
     class GalvoAverageFrame(dj.Part):
         definition = """   # average frame for each slice and channel after corrections

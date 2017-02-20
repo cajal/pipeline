@@ -41,7 +41,7 @@ RUN git clone https://github.com/Itseez/opencv.git && \
 
 
 # --- install HDF5 reader
-RUN pip3 install h5py
+RUN pip3 install h5py nose
 #
 #
 ## --- install Spike Triggered Mixture Model for deconvolution
@@ -85,4 +85,3 @@ RUN git clone https://github.com/atlab/commons.git && \
     pip3 install imreg_dft
 
 ENTRYPOINT ["worker"]
-
