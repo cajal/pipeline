@@ -160,7 +160,7 @@ class IntegratedResponse(dj.Computed):
 
     -> PreSpikes.RateTrace
     -> Sync
-    -> IntegrationBins
+    -> IntegrationWindow
     ---
     """
 
