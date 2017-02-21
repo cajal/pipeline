@@ -190,6 +190,11 @@ class IntegratedResponse(dj.Computed):
         trials = Sync() * vis.Trial() * vis.MovieStillCond() * vis.Movie.Still() \
                  & key & 'trial_idx between first_trial and last_trial'
         frame_times, nslices = (Sync() * Prepare.Galvo() & key).fetch1['frame_times', 'nslices']
+        #------ TODO remove when done -----------
+        from IPython import embed
+        embed()
+        # exit()
+        #----------------------------------------
         sli = (ExtractRaw.GalvoSegmentation() & key).fetch1['slice']
         frame_times = frame_times.squeeze()[sli - 1::nslices]
         flip_times, still_frames, image_ids, trial_keys = trials.fetch['flip_times', 'still_frame', 'still_id', dj.key]
