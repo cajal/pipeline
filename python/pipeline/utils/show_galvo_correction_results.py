@@ -1,9 +1,9 @@
 # Written by: Erick Cobos
 # Date: 20-Feb-2017
 
-""" Little script to load, correct, show and save a scan"""
-from pipeline import preprocess
-from pipeline import experiment
+""" Little script to load, correct, show and save a scan."""
+from .. import preprocess
+from .. import experiment
 from commons import lab
 import os.path
 from tiffreader import TIFFReader
@@ -63,12 +63,10 @@ plt.show()
 video.save('galvo_corrections.mp4')
 
 ## For Andrea
-# Put time in first axis (array ends up being t x w x h)
-final_scan = motion_corrected.swapaxes(0,-1)
+# Make it 3-d, put time in first axis (array ends up being t x w x h)
+final_scan = motion_corrected[:,:,0,0,:].swapaxes(0,-1) # has only one channel
 
-#TODO: This scan is 5-D need to be 3-D, but should we select only one slice/channel?,
-#       or should each channel get saved as a different scan
-# np.reshape(-1)
+assert(final_scan.ndim == 3)
 
 # Save to h5
 #import h5py
