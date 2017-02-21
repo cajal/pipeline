@@ -157,8 +157,8 @@ class IntegratedResponse(dj.Computed):
     definition = """
     # responses of one neuron to MadAntolik stimulus
 
-    -> pre.Spikes.RateTrace
-    -> pre.Sync
+    -> Spikes.RateTrace
+    -> Sync
     -> IntegrationBins
     ---
     """
