@@ -96,7 +96,7 @@ def correct_raster(scan, raster_phase, fill_fraction, in_place=True):
     if not in_place:
         scan = scan.copy()
 
-    # ??
+    # Create interpolation points for sinusoidal raster
     index  = np.linspace(-half_width + 0.5, half_width - 0.5, image_width) / half_width
     time_index = np.arcsin(index * fill_fraction)
     interp_points_even = np.sin(time_index + raster_phase) / fill_fraction
