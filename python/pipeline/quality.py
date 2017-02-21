@@ -187,6 +187,11 @@ class IntegratedResponse(dj.Computed):
     @staticmethod
     def _slice(key):
         seg = (Method.Galvo() & key).fetch1['segmentation']
+        #------ TODO remove when done -----------
+        from IPython import embed
+        embed()
+        # exit()
+        #----------------------------------------
         if seg == 'manual':
             return (ManualSegment() & key).fetch1['slice']
         elif seg == 'nmf':
