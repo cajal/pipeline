@@ -2,7 +2,7 @@ from itertools import count
 
 import datajoint as dj
 from scipy.interpolate import InterpolatedUnivariateSpline
-from .preprocess import Sync, fill_nans, SpikeMethod, Prepare, BehaviorSync, ExtractRaw
+from .preprocess import Sync, fill_nans, SpikeMethod, Prepare, BehaviorSync, ExtractRaw, ManualSegment, Method
 from .preprocess import Spikes as PreSpikes
 from . import preprocess, vis
 import numpy as np
@@ -177,7 +177,7 @@ class IntegratedResponse(dj.Computed):
 
     @property
     def key_source(self):
-        return PreSpikes.RateTrace() * Sync() * IntegrationWindow()
+        return PreSpikes.RateTrace() * Sync() * IntegrationWindow() & 'extract_method in (1,2)'
 
     @staticmethod
     def _get_spike_trace(key):
@@ -185,17 +185,21 @@ class IntegratedResponse(dj.Computed):
         return fill_nans(trace0).squeeze()
 
     @staticmethod
+    def _slice(key):
+        seg = (Method.Galvo() & key).fetch1['segmentation']
+        if seg == 'manual':
+            return (ManualSegment() & key).fetch1['slice']
+        elif seg == 'nmf':
+            return (ExtractRaw.GalvoROI() & key).fetch1['slice']
+
+    @staticmethod
     def _get_stimulus_timiming(key):
         # --- get timing information
         trials = Sync() * vis.Trial() * vis.MovieStillCond() * vis.Movie.Still() \
                  & key & 'trial_idx between first_trial and last_trial'
         frame_times, nslices = (Sync() * Prepare.Galvo() & key).fetch1['frame_times', 'nslices']
-        #------ TODO remove when done -----------
-        from IPython import embed
-        embed()
-        # exit()
-        #----------------------------------------
-        sli = (ExtractRaw.GalvoSegmentation() & key).fetch1['slice']
+
+        sli = IntegratedResponse._slice(key)
         frame_times = frame_times.squeeze()[sli - 1::nslices]
         flip_times, still_frames, image_ids, trial_keys = trials.fetch['flip_times', 'still_frame', 'still_id', dj.key]
 
@@ -214,7 +218,7 @@ class IntegratedResponse(dj.Computed):
     @staticmethod
     def _get_behavior_timiming(key):
         fr_to_behav, nslices = (BehaviorSync() * Prepare.Galvo() & key).fetch1['frame_times', 'nslices']
-        sli = (ExtractRaw.GalvoSegmentation() & key).fetch1['slice']
+        sli = IntegratedResponse._slice(key)
         return fr_to_behav.squeeze()[sli - 1::nslices]
 
     def _make_tuples(self, key):
