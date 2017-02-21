@@ -2,7 +2,7 @@ from itertools import count
 
 import datajoint as dj
 from scipy.interpolate import InterpolatedUnivariateSpline
-from .preprocess import Sync, fill_nans, SpikeMethod, Prepare, BehaviorSync
+from .preprocess import Sync, fill_nans, SpikeMethod, Prepare, BehaviorSync, ExtractRaw
 from .preprocess import Spikes as PreSpikes
 from . import preprocess, vis
 import numpy as np
@@ -177,7 +177,7 @@ class IntegratedResponse(dj.Computed):
 
     @property
     def key_source(self):
-        return PreSpikes.RateTrace() * Sync() * IntegrationWindow() & dict(spike_method=5)
+        return PreSpikes.RateTrace() * Sync() * IntegrationWindow()
 
     @staticmethod
     def _get_spike_trace(key):
@@ -190,7 +190,8 @@ class IntegratedResponse(dj.Computed):
         trials = Sync() * vis.Trial() * vis.MovieStillCond() * vis.Movie.Still() \
                  & key & 'trial_idx between first_trial and last_trial'
         frame_times, nslices = (Sync() * Prepare.Galvo() & key).fetch1['frame_times', 'nslices']
-        frame_times = frame_times.squeeze()[key['slice'] - 1::nslices]
+        sli = (ExtractRaw.GalvoSegmentation() & key).fetch1['slice']
+        frame_times = frame_times.squeeze()[sli - 1::nslices]
         flip_times, still_frames, image_ids, trial_keys = trials.fetch['flip_times', 'still_frame', 'still_id', dj.key]
 
         assert np.all([ft.size == 2 for ft in flip_times]), "Fliptimes do not have length 2"
@@ -208,7 +209,8 @@ class IntegratedResponse(dj.Computed):
     @staticmethod
     def _get_behavior_timiming(key):
         fr_to_behav, nslices = (BehaviorSync() * Prepare.Galvo() & key).fetch1['frame_times', 'nslices']
-        return fr_to_behav.squeeze()[key['slice'] - 1::nslices]
+        sli = (ExtractRaw.GalvoSegmentation() & key).fetch1['slice']
+        return fr_to_behav.squeeze()[sli - 1::nslices]
 
     def _make_tuples(self, key):
         print('Populating', key)
@@ -235,6 +237,7 @@ class IntegratedResponse(dj.Computed):
         assert len(stimulus_onset) == len(trial_keys), 'len of onset and trial_keys does not match'
 
         n = len(stimulus_onset)
+
         self.insert1(key)
         trial_table = self.Trial()
         for i, on, k in zip(count(), stimulus_onset, trial_keys):
