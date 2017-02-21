@@ -31,7 +31,7 @@ fps = (preprocess.Prepare.Galvo() & key).fetch1['fps'] # for video showing
 
 # Load it
 reader = TIFFReader(local_filename)
-scan = np.double(reader[:, :, :, :, :]) # not generalizable
+scan = np.double(reader)
 #original_shape = reader.shape
 #scan = np.double(reader).reshape( (original_shape[0], original_shape[1], :) )
 
