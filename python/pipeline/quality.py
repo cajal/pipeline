@@ -2,7 +2,8 @@ from itertools import count
 
 import datajoint as dj
 from scipy.interpolate import InterpolatedUnivariateSpline
-from .preprocess import Spikes, Sync, fill_nans, SpikeMethod, Prepare, BehaviorSync
+from .preprocess import Sync, fill_nans, SpikeMethod, Prepare, BehaviorSync
+from .preprocess import Spikes as PreSpikes
 from . import preprocess, vis
 import numpy as np
 import pandas as pd
@@ -157,7 +158,7 @@ class IntegratedResponse(dj.Computed):
     definition = """
     # responses of one neuron to MadAntolik stimulus
 
-    -> Spikes.RateTrace
+    -> PreSpikes.RateTrace
     -> Sync
     -> IntegrationBins
     ---
@@ -176,11 +177,11 @@ class IntegratedResponse(dj.Computed):
 
     @property
     def key_source(self):
-        return Spikes.RateTrace() * Sync() * IntegrationWindow() & dict(spike_method=5)
+        return PreSpikes.RateTrace() * Sync() * IntegrationWindow() & dict(spike_method=5)
 
     @staticmethod
     def _get_spike_trace(key):
-        trace0 = (Spikes.RateTrace() * SpikeMethod() & key).fetch1['rate_trace'].astype(np.float64)
+        trace0 = (PreSpikes.RateTrace() * SpikeMethod() & key).fetch1['rate_trace'].astype(np.float64)
         return fill_nans(trace0).squeeze()
 
     @staticmethod
