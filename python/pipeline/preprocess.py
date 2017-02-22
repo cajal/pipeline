@@ -180,6 +180,7 @@ class Prepare(dj.Imported):
         reader = TIFFReader(local_filename)
         scan = np.double(reader[:, :, channel-1, slice-1,
                          start_index : start_index + num_video_frames]).squeeze()
+        xy_motion = xy_motion[..., start_index : start_index + num_video_frames]
         original_scan = scan.copy()
 
         # Correct the scan
