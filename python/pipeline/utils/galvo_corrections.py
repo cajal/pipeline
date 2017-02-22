@@ -11,7 +11,7 @@ def correct_motion(scan, xy_motion, in_place=True):
 
     :param np.array scan: Volume with images to be corrected in the first two dimensions.
     :param list/np.aray xy_motion: Volume with x, y motion offsets for each image in the
-    first two dimensions
+    first dimension: usually [2 x num_frames].
     :param bool in_place: If True (default), the original array is modified in memory.
 
     :return: Motion corrected scan
