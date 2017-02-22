@@ -42,6 +42,9 @@ def correct_motion(scan, xy_motion, in_place=True):
     num_images = reshaped_scan.shape[-1]
     reshaped_xy = np.reshape(xy_motion, (2, -1))
 
+    if reshaped_xy.shape[-1] != reshaped_scan.shape[-1]:
+        raise PipelineException('Scan and motion arrays have different dimensions')
+
     # Over every image (as long as the x and y offset is defined)
     for i in range(num_images):
         [x_offset, y_offset] = reshaped_xy[:, i]
