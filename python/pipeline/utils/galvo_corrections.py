@@ -13,8 +13,10 @@ def correct_motion(scan, xy_motion, in_place=True):
     :param list/np.aray xy_motion: Volume with x, y motion offsets for each image in the
     first two dimensions
     :param bool in_place: If True (default), the original array is modified in memory.
+
     :return: Motion corrected scan
     :rtype: Same as scan if scan.dtype is subtype of np.float, else np.double.
+
     :raises: PipelineException
     """
     # Basic checks
@@ -73,8 +75,10 @@ def correct_raster(scan, raster_phase, fill_fraction, in_place=True):
     :param float fill_fraction: Ratio between active acquisition and total length of the
     scan line.
     :param bool in_place: If True (default), the original array is modified in memory.
+
     :return: Raster-corrected scan.
     :rtype: Same as scan if scan.dtype is subtype of np.float, else np.double.
+
     :raises: PipelineException
     """
     # Basic checks
