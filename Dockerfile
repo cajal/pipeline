@@ -19,8 +19,9 @@ RUN \
     bzip2 \
     git
 
-RUN apt-get install -y build-essential cmake pkg-config libjpeg8-dev libtiff5-dev libjasper-dev libpng12-dev \
-    libavcodec-dev libavformat-dev libswscale-dev libv4l-dev libxvidcore-dev libx264-dev libgtk-3-dev libatlas-base-dev
+RUN apt-get install -y build-essential cmake pkg-config libjpeg8-dev libtiff5-dev libjasper-dev \
+    libpng12-dev libavcodec-dev libavformat-dev libswscale-dev libv4l-dev libxvidcore-dev libx264-dev \
+    libgtk-3-dev libatlas-base-dev ffmpeg
 
 RUN git clone https://github.com/Itseez/opencv.git && \
     cd opencv && git checkout 3.1.0 && \
@@ -40,7 +41,7 @@ RUN git clone https://github.com/Itseez/opencv.git && \
     apt-get clean
 
 
-# --- install HDF5 reader
+# --- install HDF5 reader and nose
 RUN pip3 install h5py nose
 #
 #
@@ -59,14 +60,20 @@ RUN pip3 install git+https://github.com/cajal/c2s.git
 
 # --- install CaImAn
 RUN apt-get update -y -q && \
-    apt-get install -y libc6-i386  libsuitesparse-dev libllvm3.8 llvm-3.8-dev && \
-    export LLVM_CONFIG=/usr/lib/llvm-3.8/bin/llvm-config && \ 
-    git clone --recursive https://github.com/fabiansinz/CaImAn.git && \
+    apt-get install -y software-properties-common && \
+    wget -O - http://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add - && \
+    apt-add-repository "deb http://apt.llvm.org/xenial/ llvm-toolchain-xenial-3.9 main" && \
+    apt-get update -y -q && \
+    apt-get install -y clang-3.9 lldb-3.9 && \
+    apt-get install -y libc6-i386  libsuitesparse-dev && \
+    export LLVM_CONFIG=/usr/lib/llvm-3.9/bin/llvm-config && \ 
+    git clone --recursive https://github.com/simonsfoundation/CaImAn.git && \
     pip3 install cython scikit-image ipyparallel psutil numba && \
     pip3 install -r CaImAn/requirements_pip.txt && \
     pip3 install git+https://github.com/j-friedrich/OASIS.git
 
-RUN pip3 install -e CaImAn/
+RUN grep -vwE "install_requires=" CaImAn/setup.py > tmp && mv tmp CaImAn/setup.py &&\
+    pip3 install -e CaImAn/
 
 # --- install tiffreader
 RUN \

@@ -11,10 +11,12 @@ def correct_motion(scan, xy_motion, in_place=True):
 
     :param np.array scan: Volume with images to be corrected in the first two dimensions.
     :param list/np.aray xy_motion: Volume with x, y motion offsets for each image in the
-    first two dimensions
+    first dimension: usually [2 x num_frames].
     :param bool in_place: If True (default), the original array is modified in memory.
+
     :return: Motion corrected scan
     :rtype: Same as scan if scan.dtype is subtype of np.float, else np.double.
+
     :raises: PipelineException
     """
     # Basic checks
@@ -39,6 +41,9 @@ def correct_motion(scan, xy_motion, in_place=True):
     reshaped_scan = np.reshape(scan, (image_height, image_width, -1))
     num_images = reshaped_scan.shape[-1]
     reshaped_xy = np.reshape(xy_motion, (2, -1))
+
+    if reshaped_xy.shape[-1] != reshaped_scan.shape[-1]:
+        raise PipelineException('Scan and motion arrays have different dimensions')
 
     # Over every image (as long as the x and y offset is defined)
     for i in range(num_images):
@@ -73,8 +78,10 @@ def correct_raster(scan, raster_phase, fill_fraction, in_place=True):
     :param float fill_fraction: Ratio between active acquisition and total length of the
     scan line.
     :param bool in_place: If True (default), the original array is modified in memory.
+
     :return: Raster-corrected scan.
     :rtype: Same as scan if scan.dtype is subtype of np.float, else np.double.
+
     :raises: PipelineException
     """
     # Basic checks
@@ -96,7 +103,7 @@ def correct_raster(scan, raster_phase, fill_fraction, in_place=True):
     if not in_place:
         scan = scan.copy()
 
-    # ??
+    # Create interpolation points for sinusoidal raster
     index  = np.linspace(-half_width + 0.5, half_width - 0.5, image_width) / half_width
     time_index = np.arcsin(index * fill_fraction)
     interp_points_even = np.sin(time_index + raster_phase) / fill_fraction
