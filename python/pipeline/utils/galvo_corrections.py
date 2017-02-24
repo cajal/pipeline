@@ -55,7 +55,7 @@ def correct_motion(scan, xy_motion, in_place=True):
 
             # Create interpolation function
             interp_function = interp2d(range(image_width), range(image_height), image,
-                                      kind= 'cubic')
+                                      kind= 'cubic', copy=False)
 
             # Evaluate on the original image plus offsets
             reshaped_scan[:, :, i] = interp_function(np.arange(image_width) + x_offset,
