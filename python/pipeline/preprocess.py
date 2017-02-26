@@ -1,4 +1,5 @@
 import datajoint as dj
+from tiffreader import TIFFReader
 from . import experiment, vis, PipelineException
 from warnings import warn
 import numpy as np
@@ -97,13 +98,13 @@ class Prepare(dj.Imported):
 
         def get_fix_raster(self):
             """
-            :return: a function that perform raster correction on image [x, y, nchannel, nslice, nframe].
+             :return: a function that perform raster correction on scan [x, y, num_channels, num_slices, num_frames].
             """
             raster_phase, fill_fraction = self.fetch1['raster_phase', 'fill_fraction']
             if raster_phase == 0:
-                return lambda img: np.double(img)
+                return lambda scan: np.double(scan)
             else:
-                return lambda img: galvo_corrections.correct_raster(np.double(img), raster_phase, fill_fraction)
+                return lambda scan: galvo_corrections.correct_raster(np.double(scan), raster_phase, fill_fraction)
 
     class GalvoMotion(dj.Part):
         definition = """   # motion correction for galvo scans
@@ -122,7 +123,7 @@ class Prepare(dj.Imported):
             :return: a function that performs motion correction on image [x, y].
             """
             xy = self.fetch['motion_xy']
-            return lambda frame, i: galvo_corrections.correct_motion(frame, xy[:, i])
+            return lambda scan, indices: galvo_corrections.correct_motion(scan, xy[:, indices])
 
     class GalvoAverageFrame(dj.Part):
         definition = """   # average frame for each slice and channel after corrections
@@ -147,6 +148,68 @@ class Prepare(dj.Imported):
         z: float   # (um)
         """
 
+    def save_video(self, filename='galvo_corrections.mp4', slice=1, channel=1,
+                   start_index=0, seconds=30):
+        """ Creates an animation video showing the original vs corrected scan.
+
+        :param string filename: Output filename (path + filename)
+        :param int slice: Slice to use for plotting (key for GalvoMotion). Starts at 1
+        :param int start_index: Where in the scan to start the video.
+        :param int seconds: How long in seconds should the animation run.
+        :param int channel: What channel from the scan to use. Starts at 1
+
+        :returns Figure. You can call show() on it.
+        :rtype: matplotlib.figure.Figure
+        """
+        # Get local filename
+        scan_path = (Session() & self).fetch1['scan_path']
+        local_path = lab.Paths().get_local_path(scan_path)
+        scan_name = (Scan() & self).fetch['filename'][0]  # not sure why the 0
+        local_filename = os.path.join(local_path, scan_name) + '_*.tif' # all parts
+
+        # Get raster_correction and motion_correction params
+        raster_phase, fill_fraction = (Prepare.Galvo() & self).fetch1['raster_phase',
+                                                                      'fill_fraction']
+        xy_motion = (Prepare.GalvoMotion() & self & {'slice': slice}).fetch1['motion_xy']
+
+        # Get fps and total_num_frames
+        fps = (Prepare.Galvo() & self).fetch1['fps']
+        num_video_frames = int(fps * seconds)
+
+        # Load the scan
+        reader = TIFFReader(local_filename)
+        scan = np.double(reader[:, :, channel-1, slice-1,
+                         start_index : start_index + num_video_frames]).squeeze()
+        xy_motion = xy_motion[..., start_index : start_index + num_video_frames]
+        original_scan = scan.copy()
+
+        # Correct the scan
+        raster_corrected = galvo_corrections.correct_raster(scan, raster_phase,
+                                                            fill_fraction)
+        motion_corrected = galvo_corrections.correct_motion(raster_corrected, xy_motion)
+        corrected_scan = motion_corrected
+
+        # Create animation
+        import matplotlib.pyplot as plt
+        import matplotlib.animation as animation
+
+        fig = plt.figure()
+        plt.subplot(1, 2, 1); plt.title('Original')
+        im1 = plt.imshow(original_scan[:, :, 0])  # just a placeholder
+        plt.subplot(1, 2, 2); plt.title('Corrected')
+        im2 = plt.imshow(original_scan[:, :, 0])  # just a placeholder
+
+        def update_img(i):
+            im1.set_data(original_scan[:, :, i])
+            im2.set_data(corrected_scan[:, :, i])
+        video = animation.FuncAnimation(fig, update_img, num_video_frames,
+                                        interval=1000/fps)
+
+        # Save animation
+        video.save(filename)
+        print('Video saved at:', filename)
+
+        return fig
 
 @schema
 class Method(dj.Lookup):

@@ -1,78 +1,132 @@
-from scipy.interpolate import interp1d, interp2d
+from .. import PipelineException
+from scipy.interpolate import interp1d, RectBivariateSpline, interp2d
 import numpy as np
 
+def correct_motion(scan, xy_motion, in_place=True):
+    """ Motion correction for two-photon scans.
 
-def correct_motion(img, xymotion):
+    Moves each image in the scan x number of pixels to the left, y number of pixels up and
+    resamples. Works for 2-d arrays and up. Only for square images (neither interp2d nor
+    RectBivariateSpline can deal with non-rectangular grids).
+
+    :param np.array scan: Volume with images to be corrected in the first two dimensions.
+    :param list/np.aray xy_motion: Volume with x, y motion offsets for each image in the
+    first dimension: usually [2 x num_frames].
+    :param bool in_place: If True (default), the original array is modified in memory.
+
+    :return: Motion corrected scan
+    :rtype: Same as scan if scan.dtype is subtype of np.float, else np.double.
+
+    :raises: PipelineException
     """
-    motion correction for 2P scans.
-    :param img: 2D image [x, y]
-    :param xymotion: x, y motion offsets
-    :return: motion corrected image [x, y]
+    # Basic checks
+    if not isinstance(scan, np.ndarray):
+        raise PipelineException('Scan needs to be a numpy array.')
+    if scan.ndim < 2:
+        raise PipelineException('Scan with less than 2 dimensions.')
+    if not np.issubdtype(scan.dtype, np.float):
+        print('Changing scan type from', str(scan.dtype), 'to double')
+        scan = np.double(scan)
+
+    # Get some dimensions
+    original_shape = scan.shape
+    image_height = original_shape[0]
+    image_width = original_shape[1]
+
+    # If copy is needed
+    if not in_place:
+        scan = scan.copy()
+
+    # Reshape input (to deal with more than 2-D volumes)
+    reshaped_scan = np.reshape(scan, (image_height, image_width, -1))
+    num_images = reshaped_scan.shape[-1]
+    reshaped_xy = np.reshape(xy_motion, (2, -1))
+
+    if reshaped_xy.shape[-1] != reshaped_scan.shape[-1]:
+        raise PipelineException('Scan and motion arrays have different dimensions')
+
+    # Over every image (as long as the x and y offset is defined)
+    for i in range(num_images):
+        [x_offset, y_offset] = reshaped_xy[:, i]
+        if not np.isnan(x_offset) and not np.isnan(y_offset):
+
+            # Get current image
+            image = reshaped_scan[:, :, i]
+
+            # Create interpolation function
+            interp_function = interp2d(range(image_width), range(image_height), image,
+                                      kind= 'cubic')
+
+            # Evaluate on the original image plus offsets
+            reshaped_scan[:, :, i] = interp_function(np.arange(image_width) + x_offset,
+                                                     np.arange(image_height) + y_offset)
+
+    scan = np.reshape(reshaped_scan, original_shape)
+    return scan
+
+
+def correct_raster(scan, raster_phase, fill_fraction, in_place=True):
+    """ Raster correction for resonant scanners.
+
+    Corrects two-photon images in n-dimensional scans, usual shape is [image_height,
+    image_width, channels, slices, num_frames]. Works for 2-d arrays and up (assuming
+    images are in the first two dimensions). Based on Matlab implementation of
+    ne7.ip.correctRaster()
+
+    :param np.array scan: Volume with images to be corrected in the first two dimensions.
+    :param float raster_phase: Phase difference beetween odd and even lines.
+    :param float fill_fraction: Ratio between active acquisition and total length of the
+    scan line.
+    :param bool in_place: If True (default), the original array is modified in memory.
+
+    :return: Raster-corrected scan.
+    :rtype: Same as scan if scan.dtype is subtype of np.float, else np.double.
+
+    :raises: PipelineException
     """
-    assert isinstance(img, np.ndarray) and len(xymotion) == 2, 'Cannot correct stacks. Only 2D images please.'
-    sz = img.shape
-    y1, x1 = np.ogrid[0: sz[0], 0: sz[1]]
-    y2, x2 = [np.arange(sz[0]) + xymotion[1], np.arange(sz[1]) + xymotion[0]]
+    # Basic checks
+    if not isinstance(scan, np.ndarray):
+        raise PipelineException('Scan needs to be a numpy array.')
+    if scan.ndim < 2:
+        raise PipelineException('Scan with less than 2 dimensions.')
+    if not np.issubdtype(scan.dtype, np.float):
+        print('Changing scan type from', str(scan.dtype), 'to double')
+        scan = np.double(scan)
 
-    interp = interp2d(x1, y1, img, kind='cubic')
-    img = interp(x2, y2)
+    # Get some dimensions
+    original_shape = scan.shape
+    image_height = original_shape[0]
+    image_width = original_shape[1]
+    half_width = image_width / 2
 
-    return img
+    # If copy is needed
+    if not in_place:
+        scan = scan.copy()
 
+    # Create interpolation points for sinusoidal raster
+    index  = np.linspace(-half_width + 0.5, half_width - 0.5, image_width) / half_width
+    time_index = np.arcsin(index * fill_fraction)
+    interp_points_even = np.sin(time_index + raster_phase) / fill_fraction
+    interp_points_odd = np.sin(time_index - raster_phase) / fill_fraction
 
-def correct_raster(img, raster_phase, fill_fraction):
-    """
-    raster correction for resonant scanners.
-    :param img: 5D image [x, y, nchannel, nslice, nframe].
-    :param raster_phase: phase difference beetween odd and even lines.
-    :param fill_fraction: ratio between active acquisition and total length of the scan line. see scanimage.
-    :return: raster-corrected image [x, y, nchannel, nslice, nframe].
-    """
-    img = np.array(img)
-    assert img.ndim <= 5, 'Image size greater than 5D.'
-    ix = np.arange(-img.shape[1]/2 + 0.5, img.shape[1]/2 + 0.5) / (img.shape[1]/2)
+    # We iterate over every image in the scan (first 2 dimensions). Same correction
+    # regardless of what channel, slice or frame they belong to.
+    reshaped_scan = np.reshape(scan, (image_height, image_width, -1))
+    num_images = reshaped_scan.shape[-1]
+    for i in range(num_images):
+        # Get current image
+        image = reshaped_scan[:, :, i]
+        mean_intensity = np.mean(image)  # to fill outside the interpolation range
 
-    tx = np.arcsin(ix * fill_fraction)
-    for ichannel in range(img.shape[2]):
-        for islice in range(img.shape[3]):
-            for iframe in range(img.shape[4]):
-                im = img[:, :, ichannel, islice, iframe].copy()
-                extrapval = np.mean(im)
-                img[::2, :, ichannel, islice, iframe] = interp1d(ix, im[::2, :], kind='linear', bounds_error=False,
-                                                                  fill_value=extrapval)(np.sin(tx +
-                                                                                        raster_phase)/fill_fraction)
+        # Correct even rows of the image (0, 2, ...)
+        interp_function = interp1d(index, image[::2, :], copy=False, bounds_error=False,
+                                   fill_value=mean_intensity)
+        reshaped_scan[::2, :, i] = interp_function(interp_points_even)
 
-                img[1::2, :, ichannel, islice, iframe] = interp1d(ix, im[1::2, :], kind='linear', bounds_error=-False,
-                                                                  fill_value=extrapval)(np.sin(tx -
-                                                                                        raster_phase)/fill_fraction)
-    return img
+        # Correct odd rows of the image (1, 3, ...)
+        interp_function = interp1d(index, image[1::2, :], copy=False, bounds_error=False,
+                                   fill_value=mean_intensity)
+        reshaped_scan[1::2, :, i] = interp_function(interp_points_odd)
 
-
-def plot_raster(filename, key):
-    """
-    plot origin frame, raster-corrected frame, and reversed raster-corrected frame.
-    :param filename:  full file path for tiff file.
-    :param key: scan key for the tiff file.
-    """
-    import matplotlib.pyplot as plt
-    import seaborn as sns
-    from pipeline import preprocess, experiment
-    from tiffreader import TIFFReader
-    reader = TIFFReader(filename)
-    img=reader[:, :, 0, 0, 100]
-    raster_phase = (preprocess.Prepare.Galvo() & key).fetch1['raster_phase']
-    newim = correct_raster(img, raster_phase, reader.fill_fraction)
-    nnewim = correct_raster(newim, -raster_phase, reader.fill_fraction)
-    print(np.mean(img - nnewim))
-
-    plt.close()
-    with sns.axes_style('white'):
-        fig=plt.figure(figsize=(15,8))
-        gs=plt.GridSpec(1,3)
-        ax1=fig.add_subplot(gs[0,0])
-        ax1.imshow(img[:,:,0,0,0], cmap=plt.cm.gray)
-        ax2=fig.add_subplot(gs[0,1])
-        ax2.imshow(newim[:,:,0,0,0],cmap=plt.cm.gray)
-        ax3=fig.add_subplot(gs[0,2])
-        ax3.imshow(nnewim[:,:,0,0,0], cmap=plt.cm.gray)
-    plt.show()
+    scan = np.reshape(reshaped_scan, original_shape)
+    return scan
