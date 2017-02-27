@@ -237,7 +237,6 @@ class CorrelationImage(dj.Computed):
         local_path = lab.Paths().get_local_path(scan_path)
         scan_name = (Scan() & key).fetch1['filename']
         local_filename = os.path.join(local_path, scan_name) + '_*.tif'  # all parts
-        channel = Prepare.GalvoMotion() &
         # Get raster_correction and motion_correction params
         raster_phase, fill_fraction = (Prepare.Galvo() & key).fetch1['raster_phase', 'fill_fraction']
 
