@@ -246,7 +246,7 @@ class CorrelationImage(dj.Computed):
 
             for channel in range(reader.shape[2]):
                 xy_motion = (Prepare.GalvoMotion() & key & dict(slice=sli+1, channel=channel+1)).fetch1['motion_xy']
-                print('Processing channel {} of slice {}'.format(channel, sli))
+                print('Processing channel {} of slice {}'.format(channel, sli), flush=True)
                 scan = np.double(reader[:, :, channel, sli, :]).squeeze()
 
                 # Correct the scan
