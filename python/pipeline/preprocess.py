@@ -194,10 +194,14 @@ class Prepare(dj.Imported):
         import matplotlib.animation as animation
 
         fig = plt.figure()
-        plt.subplot(1, 2, 1); plt.title('Original')
-        im1 = plt.imshow(original_scan[:, :, 0])  # just a placeholder
+        plt.subplot(1, 2, 1); plt.title('Original');
+        im1 = plt.imshow(original_scan[:, :, 0], vmin=original_scan.min(),
+                         vmax=original_scan.max())  # just a placeholder
+        plt.colorbar()
         plt.subplot(1, 2, 2); plt.title('Corrected')
-        im2 = plt.imshow(original_scan[:, :, 0])  # just a placeholder
+        im2 = plt.imshow(corrected_scan[:, :, 0], vmin=corrected_scan.min(),
+                         vmax=corrected_scan.max())  # just a placeholder
+        plt.colorbar()
 
         def update_img(i):
             im1.set_data(original_scan[:, :, i])
