@@ -241,18 +241,11 @@ class CorrelationImage(dj.Computed):
         raster_phase, fill_fraction = (Prepare.Galvo() & key).fetch1['raster_phase', 'fill_fraction']
 
         # Load the scan
-        # reader = TIFFReader(local_filename)
-        # for sli in range(reader.shape[3]):
-        #     for channel in range(reader.shape[2]):
-        for sli in range(3):
-            for channel in range(2):
-                #------ TODO remove when done -----------
-                from IPython import embed
-                embed()
-                # exit()
-                #----------------------------------------
+        reader = TIFFReader(local_filename)
+        for sli in range(reader.shape[3]):
+            for channel in range(reader.shape[2]):
                 xy_motion = (Prepare.GalvoMotion() & key & dict(slice=sli+1, channel=channel+1)).fetch1['motion_xy']
-                print('Processing channel {} of slice {}'.format(channel, sli), flush=True)
+                print('Processing channel {} of slice {}'.format(channel+1, sli+1), flush=True)
                 scan = np.double(reader[:, :, channel, sli, :]).squeeze()
 
                 # Correct the scan
