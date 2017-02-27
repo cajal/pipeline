@@ -242,21 +242,20 @@ class CorrelationImage(dj.Computed):
 
         # Load the scan
         reader = TIFFReader(local_filename)
-        for sli in range(reader.shape[3]):
-            for channel in range(reader.shape[2]):
-                xy_motion = (Prepare.GalvoMotion() & key & dict(slice=sli+1, channel=channel+1)).fetch1['motion_xy']
-                print('Processing channel {} of slice {}'.format(channel+1, sli+1), flush=True)
-                scan = np.double(reader[:, :, channel, sli, :]).squeeze()
+        for sli, channel in  (Prepare.GalvoMotion() & key).fetch['slice', 'channel']:
+            xy_motion = (Prepare.GalvoMotion() & key & dict(slice=sli+1, channel=channel+1)).fetch1['motion_xy']
+            print('Processing channel {} of slice {}'.format(channel+1, sli+1), flush=True)
+            scan = np.double(reader[:, :, channel, sli, :]).squeeze()
 
-                # Correct the scan
-                raster_corrected = galvo_corrections.correct_raster(scan, raster_phase, fill_fraction)
-                motion_corrected = galvo_corrections.correct_motion(raster_corrected, xy_motion)
+            # Correct the scan
+            raster_corrected = galvo_corrections.correct_raster(scan, raster_phase, fill_fraction)
+            motion_corrected = galvo_corrections.correct_motion(raster_corrected, xy_motion)
 
-                m = cmn.movie(motion_corrected)
-                key['correlation_image'] = m.local_correlations()
-                key['slice'] = sli + 1
-                key['channel'] = channel + 1
-                self.insert1(key)
+            m = cmn.movie(motion_corrected)
+            key['correlation_image'] = m.local_correlations()
+            key['slice'] = sli + 1
+            key['channel'] = channel + 1
+            self.insert1(key)
 
 
 @schema
