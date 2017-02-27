@@ -230,7 +230,7 @@ class CorrelationImage(dj.Computed):
 
     key_source = Prepare() & Prepare.GalvoMotion()
 
-    def make_tuples(self, key):
+    def _make_tuples(self, key):
         print('Processing', key, flush=True)
 
         scan_path = (Session() & key).fetch1['scan_path']
