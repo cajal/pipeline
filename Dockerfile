@@ -70,7 +70,8 @@ RUN apt-get update -y -q && \
     git clone --recursive https://github.com/simonsfoundation/CaImAn.git && \
     pip3 install cython scikit-image ipyparallel psutil numba && \
     pip3 install -r CaImAn/requirements_pip.txt && \
-    pip3 install git+https://github.com/j-friedrich/OASIS.git
+    pip3 install git+https://github.com/j-friedrich/OASIS.git && \
+    pip3 install future
 
 RUN grep -vwE "install_requires=" CaImAn/setup.py > tmp && mv tmp CaImAn/setup.py &&\
     pip3 install -e CaImAn/
