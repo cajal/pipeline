@@ -244,8 +244,8 @@ class CorrelationImage(dj.Computed):
         reader = TIFFReader(local_filename)
         for sli in range(reader.shape[3]):
 
-            xy_motion = (Prepare.GalvoMotion() & key & dict(slice=sli+1, channel=channel+1)).fetch1['motion_xy']
             for channel in range(reader.shape[2]):
+                xy_motion = (Prepare.GalvoMotion() & key & dict(slice=sli+1, channel=channel+1)).fetch1['motion_xy']
                 print('Processing channel {} of slice {}'.format(channel, sli))
                 scan = np.double(reader[:, :, channel, sli, :]).squeeze()
 
