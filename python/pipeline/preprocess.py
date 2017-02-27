@@ -243,13 +243,8 @@ class CorrelationImage(dj.Computed):
         # Load the scan
         reader = TIFFReader(local_filename)
         for sli, channel in  zip(*(Prepare.GalvoMotion() & key).fetch['slice', 'channel']):
-            #------ TODO remove when done -----------
-            from IPython import embed
-            embed()
-            # exit()
-            #----------------------------------------
-            xy_motion = (Prepare.GalvoMotion() & key & dict(slice=sli, channel=channel)).fetch1['motion_xy']
             print('Processing channel {} of slice {}'.format(channel, sli), flush=True)
+            xy_motion = (Prepare.GalvoMotion() & key & dict(slice=sli, channel=channel)).fetch1['motion_xy']
             scan = np.double(reader[:, :, channel-1, sli-1, :]).squeeze()
 
             # Correct the scan
@@ -257,10 +252,9 @@ class CorrelationImage(dj.Computed):
             motion_corrected = galvo_corrections.correct_motion(raster_corrected, xy_motion)
 
             m = cmn.movie(motion_corrected)
-            key['correlation_image'] = m.local_correlations()
-            key['slice'] = sli
-            key['channel'] = channel
-            self.insert1(key)
+            self.insert1(dict(key,
+                              correlation_image = m.local_correlations(),
+                              slice=sli, channel=channel))
 
 
 @schema
