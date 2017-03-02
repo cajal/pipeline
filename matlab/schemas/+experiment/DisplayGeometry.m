@@ -8,7 +8,17 @@ monitor_aspect              : decimal(4,3)                  # physical aspect ra
 resolution_x                : smallint                      # (pixels) display resolution along x
 resolution_y                : smallint                      # (pixels) display resolution along y
 fps                         : decimal(5,2)                  # display refresh rate
+display_timestamp = CURRENT_TIMESTAMP  : timestamp  # automatic
 %}
 
 classdef DisplayGeometry < dj.Relvar
+    
+    methods
+        function migrate(self)
+            data = rmfield(fetch(vis.Session*experiment.Session & preprocess.Sync, ...
+                'monitor_distance', 'monitor_size', 'monitor_aspect', ...
+                'resolution_x', 'resolution_y', '60->fps', 'psy_ts->display_timestamp'), 'psy_id');
+            self.inserti(data)
+        end
+    end
 end
