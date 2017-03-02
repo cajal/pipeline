@@ -195,13 +195,13 @@ class Prepare(dj.Imported):
         import matplotlib.animation as animation
 
         fig = plt.figure()
-        plt.subplot(1, 2, 1);
-        plt.title('Original');
+        plt.subplot(1, 2, 1)
+        plt.title('Original')
         im1 = plt.imshow(original_scan[:, :, 0], vmin=original_scan.min(),
                          vmax=original_scan.max())  # just a placeholder
         plt.colorbar()
 
-        plt.subplot(1, 2, 2);
+        plt.subplot(1, 2, 2)
         plt.title('Corrected')
         im2 = plt.imshow(corrected_scan[:, :, 0], vmin=corrected_scan.min(),
                          vmax=corrected_scan.max())  # just a placeholder
@@ -242,7 +242,7 @@ class CorrelationImage(dj.Computed):
         local_path = lab.Paths().get_local_path(scan_path)
         scan_name = (Scan() & key).fetch1['filename']
         local_filename = os.path.join(local_path, scan_name) + '_*.tif'  # all parts
-        # Get raster_correction and motion_correction params
+         # Get raster_correction and motion_correction params
         raster_phase, fill_fraction = (Prepare.Galvo() & key).fetch1['raster_phase', 'fill_fraction']
 
         # Load the scan
@@ -498,6 +498,10 @@ class ExtractRaw(dj.Imported):
                 plt.close(fig)
 
     def _make_tuples(self, key):
+        # Estimate the number of components from the size of the scan
+        # Set some parameters.
+        # Extract traces
+        # Save traces in their apropiate schemas.
         raise NotImplementedError('ExtractRaw is populated in Matlab')
 
 
