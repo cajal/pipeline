@@ -1,10 +1,12 @@
 import datajoint as dj
+from tiffreader import TIFFReader
 from . import experiment, vis, PipelineException
 from warnings import warn
 import numpy as np
 import sh
 import os
 from commons import lab
+
 try:
     import pyfnnd
 except ImportError:
@@ -16,13 +18,13 @@ from distutils.version import StrictVersion
 from .utils import galvo_corrections
 from .experiment import Session, Scan
 import imreg_dft as ird
+import caiman as cmn
 
 # import caiman.source_extraction.cnmf as cnmf
 
 assert StrictVersion(dj.__version__) >= StrictVersion('0.2.8')
 
 schema = dj.schema('pipeline_preprocess', locals())
-
 
 
 def notnan(x, start=0, increment=1):
@@ -97,13 +99,13 @@ class Prepare(dj.Imported):
 
         def get_fix_raster(self):
             """
-            :return: a function that perform raster correction on image [x, y, nchannel, nslice, nframe].
+             :return: a function that perform raster correction on scan [x, y, num_channels, num_slices, num_frames].
             """
             raster_phase, fill_fraction = self.fetch1['raster_phase', 'fill_fraction']
             if raster_phase == 0:
-                return lambda img: np.double(img)
+                return lambda scan: np.double(scan)
             else:
-                return lambda img: galvo_corrections.correct_raster(np.double(img), raster_phase, fill_fraction)
+                return lambda scan: galvo_corrections.correct_raster(np.double(scan), raster_phase, fill_fraction)
 
     class GalvoMotion(dj.Part):
         definition = """   # motion correction for galvo scans
@@ -122,7 +124,7 @@ class Prepare(dj.Imported):
             :return: a function that performs motion correction on image [x, y].
             """
             xy = self.fetch['motion_xy']
-            return lambda frame, i: galvo_corrections.correct_motion(frame, xy[:, i])
+            return lambda scan, indices: galvo_corrections.correct_motion(scan, xy[:, indices])
 
     class GalvoAverageFrame(dj.Part):
         definition = """   # average frame for each slice and channel after corrections
@@ -146,6 +148,113 @@ class Prepare(dj.Imported):
         y: float   # (um)
         z: float   # (um)
         """
+
+    def save_video(self, filename='galvo_corrections.mp4', slice=1, channel=1,
+                   start_index=0, seconds=30):
+        """ Creates an animation video showing the original vs corrected scan.
+
+        :param string filename: Output filename (path + filename)
+        :param int slice: Slice to use for plotting (key for GalvoMotion). Starts at 1
+        :param int start_index: Where in the scan to start the video.
+        :param int seconds: How long in seconds should the animation run.
+        :param int channel: What channel from the scan to use. Starts at 1
+
+        :returns Figure. You can call show() on it.
+        :rtype: matplotlib.figure.Figure
+        """
+        # Get local filename
+        scan_path = (Session() & self).fetch1['scan_path']
+        local_path = lab.Paths().get_local_path(scan_path)
+        scan_name = (Scan() & self).fetch1['filename']
+        local_filename = os.path.join(local_path, scan_name) + '_*.tif'  # all parts
+
+        # Get raster_correction and motion_correction params
+        raster_phase, fill_fraction = (Prepare.Galvo() & self).fetch1['raster_phase',
+                                                                      'fill_fraction']
+        xy_motion = (Prepare.GalvoMotion() & self & {'slice': slice}).fetch1['motion_xy']
+
+        # Get fps and total_num_frames
+        fps = (Prepare.Galvo() & self).fetch1['fps']
+        num_video_frames = int(fps * seconds)
+
+        # Load the scan
+        reader = TIFFReader(local_filename)
+        scan = np.double(reader[:, :, channel - 1, slice - 1,
+                         start_index: start_index + num_video_frames]).squeeze()
+        xy_motion = xy_motion[..., start_index: start_index + num_video_frames]
+        original_scan = scan.copy()
+
+        # Correct the scan
+        raster_corrected = galvo_corrections.correct_raster(scan, raster_phase,
+                                                            fill_fraction)
+        motion_corrected = galvo_corrections.correct_motion(raster_corrected, xy_motion)
+        corrected_scan = motion_corrected
+
+        # Create animation
+        import matplotlib.pyplot as plt
+        import matplotlib.animation as animation
+
+        fig = plt.figure()
+        plt.subplot(1, 2, 1);
+        plt.title('Original')
+        im1 = plt.imshow(original_scan[:, :, 0])  # just a placeholder
+        plt.subplot(1, 2, 2);
+        plt.title('Corrected')
+        im2 = plt.imshow(original_scan[:, :, 0])  # just a placeholder
+
+        def update_img(i):
+            im1.set_data(original_scan[:, :, i])
+            im2.set_data(corrected_scan[:, :, i])
+
+        video = animation.FuncAnimation(fig, update_img, num_video_frames,
+                                        interval=1000 / fps)
+
+        # Save animation
+        video.save(filename)
+        print('Video saved at:', filename)
+
+        return fig
+
+
+@schema
+class CorrelationImage(dj.Computed):
+    definition = """
+    # correlation image to identify responsive parts
+
+    -> Prepare
+    -> Slice
+    -> Channel
+    ---
+    correlation_image   : longblob # correlation image
+    """
+
+    key_source = Prepare() & Prepare.GalvoMotion()
+
+    def _make_tuples(self, key):
+        print('Processing', key, flush=True)
+
+        scan_path = (Session() & key).fetch1['scan_path']
+        local_path = lab.Paths().get_local_path(scan_path)
+        scan_name = (Scan() & key).fetch1['filename']
+        local_filename = os.path.join(local_path, scan_name) + '_*.tif'  # all parts
+        # Get raster_correction and motion_correction params
+        raster_phase, fill_fraction = (Prepare.Galvo() & key).fetch1['raster_phase', 'fill_fraction']
+
+        # Load the scan
+        reader = TIFFReader(local_filename)
+        for sli, channel in  zip(*(Prepare.GalvoMotion() & key).fetch['slice', 'channel']):
+            print('Processing channel {} of slice {}'.format(channel, sli), flush=True)
+            xy_motion = (Prepare.GalvoMotion() & key & dict(slice=sli, channel=channel)).fetch1['motion_xy']
+            scan = np.double(reader[:, :, channel-1, sli-1, :]).squeeze()
+
+            # Correct the scan
+            raster_corrected = galvo_corrections.correct_raster(scan, raster_phase, fill_fraction)
+            motion_corrected = galvo_corrections.correct_motion(raster_corrected, xy_motion)
+
+            m = cmn.movie(motion_corrected)
+            self.insert1(dict(key,
+                              correlation_image = m.local_correlations(),
+                              slice=sli, channel=channel))
 
 
 @schema
@@ -632,7 +741,7 @@ class Spikes(dj.Computed):
             prep = (Prepare() * Prepare.Aod() & key) or (Prepare() * Prepare.Galvo() & key)
             fps = prep.fetch1['fps']
             X = [dict(trace=fill_nans(x['trace'].astype('float64'))) for x in
-                        (ComputeTraces.Trace() & key).proj('trace').fetch.as_dict]
+                 (ComputeTraces.Trace() & key).proj('trace').fetch.as_dict]
 
             self.insert1(key)
             for x in (SpikeMethod() & key).spike_traces(X, fps):
@@ -718,12 +827,10 @@ class Eye(dj.Imported):
 
         import cv2
 
-
         rel = experiment.Session() * experiment.Scan.EyeVideo() * experiment.Scan.BehaviorFile().proj(
             hdf_file='filename')
 
         info = (rel & key).fetch1()
-
 
         avi_path = lab.Paths().get_local_path("{behavior_path}/{filename}".format(**info))
         # replace number by %d for hdf-file reader
@@ -1114,8 +1221,8 @@ class MatchedMasks(dj.Computed):
             templates.append(template)
         if templates[0].shape != template[1].shape:
             i = np.argmax([t.shape[0] for t in templates])
-            stride = int(templates[i].shape[0]/templates[1-i].shape[0])
-            templates[i] = templates[i][::stride,::stride]
+            stride = int(templates[i].shape[0] / templates[1 - i].shape[0])
+            templates[i] = templates[i][::stride, ::stride]
             masks[i] = masks[i][::stride, ::stride, :]
 
         return masks, trace_ids, templates
@@ -1138,7 +1245,7 @@ class MatchedMasks(dj.Computed):
                             , axis=2)[..., mask_channel - 1]
         if other_masks.shape[0] > masks.shape[0] and downsample:
             print('Downsampling matched masks')
-            stride = int(other_masks.shape[0]/masks.shape[0])
+            stride = int(other_masks.shape[0] / masks.shape[0])
             other_masks = other_masks[::stride, ::stride, :]
         return masks, other_masks, template
 
@@ -1169,7 +1276,7 @@ class MatchedMasks(dj.Computed):
         masks, other_masks, template = self.load_matched()
         color = ['RdBu', 'gray']
 
-        for i, (m0, m1) in enumerate(zip(masks.transpose([2,0,1]), other_masks.transpose([2,0,1]))):
+        for i, (m0, m1) in enumerate(zip(masks.transpose([2, 0, 1]), other_masks.transpose([2, 0, 1]))):
             print('Mask {:03d}'.format(i), flush=True)
             with sns.axes_style('white'):
                 fig, ax = plt.subplots()
@@ -1184,11 +1291,10 @@ class MatchedMasks(dj.Computed):
             ax.imshow(template[ifro:ito, jfro:jto], cmap='gray')
             ax.matshow(m0[ifro:ito, jfro:jto], cmap='viridis', alpha=.5)
             ax.matshow(m1[ifro:ito, jfro:jto], cmap='magma', alpha=.5)
-            ax.contour((m0[ifro:ito, jfro:jto] > 0)*1.,V=[.5], colors='orange')
-            ax.contour((m1[ifro:ito, jfro:jto] > 0)*1.,V=[.5], colors='dodgerblue')
+            ax.contour((m0[ifro:ito, jfro:jto] > 0) * 1., V=[.5], colors='orange')
+            ax.contour((m1[ifro:ito, jfro:jto] > 0) * 1., V=[.5], colors='dodgerblue')
             fig.savefig('{outdir}/{num:03d}'.format(outdir=outdir, num=i))
             plt.close(fig)
-
 
 
 schema.spawn_missing_classes()
