@@ -150,14 +150,15 @@ class Prepare(dj.Imported):
         """
 
     def save_video(self, filename='galvo_corrections.mp4', slice=1, channel=1,
-                   start_index=0, seconds=30):
+                   start_index=0, seconds=30, dpi=200):
         """ Creates an animation video showing the original vs corrected scan.
 
         :param string filename: Output filename (path + filename)
         :param int slice: Slice to use for plotting (key for GalvoMotion). Starts at 1
+        :param int channel: What channel from the scan to use. Starts at 1
         :param int start_index: Where in the scan to start the video.
         :param int seconds: How long in seconds should the animation run.
-        :param int channel: What channel from the scan to use. Starts at 1
+        :param int dpi: Dots per inch, controls the quality of the video.
 
         :returns Figure. You can call show() on it.
         :rtype: matplotlib.figure.Figure
@@ -194,19 +195,24 @@ class Prepare(dj.Imported):
         import matplotlib.pyplot as plt
         import matplotlib.animation as animation
 
+        ## Set the figure
         fig = plt.figure()
+
         plt.subplot(1, 2, 1)
         plt.title('Original')
         im1 = plt.imshow(original_scan[:, :, 0], vmin=original_scan.min(),
                          vmax=original_scan.max())  # just a placeholder
+        plt.axis('off')
         plt.colorbar()
 
         plt.subplot(1, 2, 2)
         plt.title('Corrected')
         im2 = plt.imshow(corrected_scan[:, :, 0], vmin=corrected_scan.min(),
                          vmax=corrected_scan.max())  # just a placeholder
+        plt.axis('off')
         plt.colorbar()
 
+        ## Make the animation
         def update_img(i):
             im1.set_data(original_scan[:, :, i])
             im2.set_data(corrected_scan[:, :, i])
@@ -215,8 +221,9 @@ class Prepare(dj.Imported):
                                         interval=1000 / fps)
 
         # Save animation
-        video.save(filename)
-        print('Video saved at:', filename)
+        print('Saving video at:', filename)
+        print('If this takes too long, stop it and call again with dpi < 200 (default)')
+        video.save(filename, dpi=dpi)
 
         return fig
 
@@ -504,6 +511,14 @@ class ExtractRaw(dj.Imported):
         # Save traces in their apropiate schemas.
         raise NotImplementedError('ExtractRaw is populated in Matlab')
 
+    def cnmf_save_video(self):
+        # Acces location_matrix, activity_matrix, and all that's needed
+        # Copy from caiman_interface save video.
+        pass
+    def cnmf_plot_contours(self):
+        # Load location matrix for this scan
+        # Call caiman_interface.plot_contours
+        pass
 
 @schema
 class Sync(dj.Imported):
