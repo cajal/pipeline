@@ -153,6 +153,27 @@ class BrainArea(dj.Lookup):
 
 
 @schema
+class Layer(dj.Lookup):
+    definition = """
+    layer                : char(12)     # short name for cortical area
+    ---
+    layer_description    : varchar(255)
+    z_start=null         : float        # starting depth
+    z_end=null           : float        # deepest point
+    """
+    contents = [
+        ('L2/3', '', 100, 370),
+        ('L4', '', 370, 500),
+    ]
+
+    def get_layers(self, z):
+        l, fr, to = self.fetch['layer', 'z_start', 'z_end']
+        m = np.vstack([(z > f) & (z < t) for f,t in zip(fr, to)]).T
+        return np.hstack([l[mm] for mm in m]).squeeze()
+
+
+
+@schema
 class Software(dj.Lookup):
     definition = """
     # recording software information
