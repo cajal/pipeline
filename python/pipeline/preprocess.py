@@ -783,6 +783,7 @@ class EyeQuality(dj.Lookup):
         (2, 'very poor quality (not well centered, pupil not fully visible)'),
         (3, 'good (but pupil is not the brightest spot)'),
         (4, 'very dark'),
+        (5, 'like 4 but more slack in ratio'),
     ]
 
 
