@@ -5,9 +5,10 @@ import caiman
 import glob, os
 import matplotlib.pyplot as plt
 
+
 def demix_and_deconvolve_with_cnmf(scan, num_components=100, is_somatic=True,
                                    merge_threshold=0.8, num_background_components=4,
-                                   num_processes=None, init_on_patches=False):
+                                   num_processes=None, init_on_patches=True):
     """ Extract spike train activity directly from the scan using CNMF.
 
     Uses constrained non-negative matrix factorization to find all neurons/components in
@@ -28,11 +29,14 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, is_somatic=True,
 
     :returns Location matrix (image_height x image_width x num_components). Inferred
             location of each component.
-    :returns Activity matrix (num_components x timesteps). Inferred fluorescence traces.
+    :returns Activity matrix (num_components x timesteps). Inferred fluorescence traces
+            (spike train convolved with the fitted impulse response function).
     :returns: Inferred location matrix for background components (image_height x
             image_width x num_background_components). Usually just one component.
     :returns: Inferred activity matrix for background components (image_height x
             image_width x num_background_components). Usually just one component
+    :returns: Raw fluorescence traces (num_components x timesteps) obtained from the scan
+            minus activity from background and other components.
     :returns: Spike matrix (num_components x timesteps). Deconvolved spike activity.
     :returns: Params (num_components x 2 or [] for dendrites) for the autoregressive
             process used to model the calcium impulse response of each component:
@@ -46,23 +50,23 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, is_somatic=True,
     # Set initialization_params (as recommended by the authors)
     if is_somatic:
         AR_order = 2  # Use an autoregressive process of order 2 (rise + exponential decay)
-        init_method = 'greedy_roi' # Look for a gaussian-shaped patch, apply rank-1 NMF,
+        init_method = 'greedy_roi'  # Look for a gaussian-shaped patch, apply rank-1 NMF,
         # store the components, calculate residual scan and repeat for num_components.
-        neuron_size_in_pixels = 10 # an estimate of the neuron size in pixels
+        neuron_size_in_pixels = 10  # an estimate of the neuron size in pixels
         gaussian_std_dev = [neuron_size_in_pixels // 2, neuron_size_in_pixels // 2]
 
-        alpha_snmf = None # unused
+        alpha_snmf = None  # unused
     else:
         AR_order = 0  # do not model the calcium response impulse function
-        init_method = 'sparse_nmf' # use sparse NMF to initialize components
-        alpha_snmf = 10e2 # regularization parameter for SNMF
+        init_method = 'sparse_nmf'  # use sparse NMF to initialize components
+        alpha_snmf = 10e2  # regularization parameter for SNMF
 
-        gaussian_std_dev = None # unused
+        gaussian_std_dev = None  # unused
 
     # Set execution params (heuristically)
-    memory_usage_in_GB = 20 # how much memory to use (may not be exact)
-    num_pixels_per_process = 5000 # how many pixels will each process handle
-    block_size = 5000 # 'number of pixels to process at the same time for dot product.'
+    memory_usage_in_GB = 30  # how much memory to use (may not be exact)
+    num_pixels_per_process = 10000  # how many pixels will each process handle
+    block_size = 10000  # 'number of pixels to process at the same time for dot product.'
 
     # Deal with negative values in the scan.
     min_value_in_scan = np.min(scan)
@@ -75,7 +79,7 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, is_somatic=True,
     for i in range(0, timesteps, save_size):
         filename = 'corrected_scan_{}.npy'.format(i)
         chunk = scan[:, :, i: min(i + save_size, timesteps)]
-        np.save(filename, chunk.transpose([2,0,1])) # save in t x w x h format
+        np.save(filename, chunk.transpose([2, 0, 1]))  # save in t x w x h format
         filenames.append(filename)
 
     # Start the ipyparallel cluster
@@ -96,23 +100,25 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, is_somatic=True,
     initial_A = None
     initial_C = None
     initial_f = None
-    if is_somatic and init_on_patches: # does not make sense for dendrites
+    if is_somatic and init_on_patches:  # does not make sense for dendrites
 
         # Set parameters to initialize on patches
-        patch_downscaling_factor = 5
+        patch_downscaling_factor = 4
         percentage_of_overlap = .2
 
         # Calculate some params
-        patch_size = round(image_height  / patch_downscaling_factor) # only square windows
-        components_per_patch = round(num_components / patch_downscaling_factor**2)
+        patch_size = round(image_height / patch_downscaling_factor)  # only square windows
+        components_per_patch = max(1,
+                                   round(num_components / patch_downscaling_factor ** 2))
         overlap_in_pixels = round(patch_size * percentage_of_overlap)
 
-        # Run CNMF on patches
-        cnmf = caiman.cnmf.CNMF(num_processes, k=components_per_patch, p=AR_order,
-                                method_init=init_method, gnb=num_background_components,
-                                gSig=gaussian_std_dev, rf=round(patch_size / 2),
-                                stride=overlap_in_pixels, merge_thresh=merge_threshold,
-                                check_nan=False, memory_fact=memory_usage_in_GB / 16,
+        # Run CNMF on patches (only for initialization, no impulse response modelling p=0)
+        cnmf = caiman.cnmf.CNMF(num_processes, only_init_patch=True, p=0,
+                                k=components_per_patch, gnb=num_background_components,
+                                gSig=gaussian_std_dev, method_init=init_method,
+                                rf=round(patch_size / 2), stride=overlap_in_pixels,
+                                merge_thresh=merge_threshold, check_nan=False,
+                                memory_fact=memory_usage_in_GB / 16,
                                 n_pixels_per_process=num_pixels_per_process,
                                 block_size=block_size, dview=direct_view)
         cnmf = cnmf.fit(images)
@@ -133,12 +139,14 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, is_somatic=True,
     cnmf = cnmf.fit(images)
 
     # Get final results
-    location_matrix = cnmf.A # pixels x num_components
-    activity_matrix = cnmf.C # num_components x timesteps
-    background_location_matrix = cnmf.b # pixels x num_background_components
-    background_activity_matrix = cnmf.f # num_background_components x timesteps
-    spikes_matrix = cnmf.S # num_components x timesteps, spike_ traces
-    AR_params = cnmf.g # AR_order x num_components
+    location_matrix = cnmf.A  # pixels x num_components
+    activity_matrix = cnmf.C  # num_components x timesteps
+    background_location_matrix = cnmf.b  # pixels x num_background_components
+    background_activity_matrix = cnmf.f  # num_background_components x timesteps
+    spikes_matrix = cnmf.S  # num_components x timesteps, spike_ traces
+    raw_traces = cnmf.C + cnmf.YrA  # num_components x timesteps
+    AR_params = cnmf.g  # AR_order x num_components
+
 
     # Reshape spatial matrices to be image_height x image_width x timesteps
     new_shape = (image_height, image_width, -1)
@@ -152,7 +160,7 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, is_somatic=True,
     # Stop ipyparallel cluster
     caiman.stop_server()
 
-    # Delete log files
+    # Delete log files (one per patch)
     log_files = glob.glob('caiman*_LOG_*')
     for log_file in log_files:
         os.remove(log_file)
@@ -162,7 +170,8 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, is_somatic=True,
         os.remove(filename)
 
     return (location_matrix, activity_matrix, background_location_matrix,
-            background_activity_matrix, spikes_matrix, AR_params)
+            background_activity_matrix, raw_traces, spikes_matrix, AR_params)
+
 
 def compute_correlation_image(scan):
     """ Compute the correlation image for the given scan.
@@ -183,24 +192,26 @@ def compute_correlation_image(scan):
 
 
 def plot_contours(location_matrix, background_image=None):
-        """ Plot each component in location matrix over a background image.
+    """ Plot each component in location matrix over a background image.
 
-        :param np.array location_matrix: (image_height x image_width x timesteps)
-        :param np.array background_image: (image_height x image_width).
-               Mean or correlation image will look fine.
-        """
-        # Reshape location_matrix
-        image_height, image_width, timesteps = location_matrix.shape
-        location_matrix = location_matrix.reshape(-1, timesteps, order='F')
+    :param np.array location_matrix: (image_height x image_width x timesteps)
+    :param np.array background_image: (image_height x image_width).
+           Mean or correlation image will look fine.
+    """
+    # Reshape location_matrix
+    image_height, image_width, timesteps = location_matrix.shape
+    location_matrix = location_matrix.reshape(-1, timesteps, order='F')
 
-        # Plot contours
-        if background_image is None:
-            background_image = np.zeros([image_height, image_width])
+    # Check background matrix was provided, black background otherwise
+    if background_image is None:
+        background_image = np.zeros([image_height, image_width])
 
-        plt.figure()
-        caiman.utils.visualization.plot_contours(location_matrix, background_image,
-                                                 vmin=background_image.min(),
-                                                 vmax=background_image.max())
+    # Plot contours
+    plt.figure()
+    caiman.utils.visualization.plot_contours(location_matrix, background_image,
+                                             vmin=background_image.min(),
+                                             vmax=background_image.max())
+
 
 def save_video(scan, location_matrix, activity_matrix, background_location_matrix,
                background_activity_matrix, fps, filename='cnmf_extraction.mp4',
@@ -231,10 +242,10 @@ def save_video(scan, location_matrix, activity_matrix, background_location_matri
     background_activity_matrix = background_activity_matrix[:, start_index: stop_index]
 
     # Calculate matrices
-    denoised = np.dot(location_matrix.reshape(num_pixels,-1), activity_matrix)
+    denoised = np.dot(location_matrix.reshape(num_pixels, -1), activity_matrix)
     denoised = denoised.reshape(image_height, image_width, -1)
     background = np.dot(background_location_matrix.reshape(num_pixels, -1),
-                  background_activity_matrix)
+                        background_activity_matrix)
     background = background.reshape(image_height, image_width, -1)
     residual = scan - denoised - background
 
@@ -246,7 +257,8 @@ def save_video(scan, location_matrix, activity_matrix, background_location_matri
 
     plt.subplot(2, 2, 1)
     plt.title('Original (Y)')
-    im1 = plt.imshow(scan[:, :, 0], vmin=scan.min(), vmax=scan.max()) # just a placeholder
+    im1 = plt.imshow(scan[:, :, 0], vmin=scan.min(),
+                     vmax=scan.max())  # just a placeholder
     plt.axis('off')
     plt.colorbar()
 
@@ -285,23 +297,32 @@ def save_video(scan, location_matrix, activity_matrix, background_location_matri
 
     return fig
 
+
 def plot_impulse_responses(AR_params, num_timepoints=100):
-    """ Plots the individual impulse response functions assuming an AR(2) process."""
+    """ Plots the individual impulse response functions assuming an AR(2) process.
+
+    :param np.array AR_params: Parameters (num_components x 2) for the autoregressive process.
+    :param int num_timepoints: The number of points after impulse to usse for plotting.
+
+    :returns Figure. You can call show() on it.
+    :rtype: matplotlib.figure.Figure
+     """
 
     fig = plt.figure()
-    for g1, g2 in AR_params: # for each component
+    for g1, g2 in AR_params:  # for each component
 
         # Build impulse response function
         output = np.zeros(num_timepoints)
-        output[0] = 1 # initial spike
+        output[0] = 1  # initial spike
         output[1] = g1 * output[0]
         for i in range(2, num_timepoints):
-            output[i] = g1 * output[i-1] + g2 * output[i-2]
+            output[i] = g1 * output[i - 1] + g2 * output[i - 2]
 
         # Plot
         plt.plot(output)
 
     return fig
+
 
 def order_components(location_matrix, activity_matrix):
     """Based on caiman.source_extraction.cnmf.utilities.order_components"""
@@ -317,7 +338,7 @@ def order_components(location_matrix, activity_matrix):
     # new_order = np.argsort(final_measure)[::-1]
 
     # This is good enough (just order them based on the size of the spatial components)
-    density_measure = np.linalg.norm(location_matrix, axis=(0,1))
+    density_measure = np.linalg.norm(location_matrix, axis=(0, 1))
     new_order = np.argsort(density_measure)[::-1]
 
     return location_matrix[:, :, new_order], activity_matrix[new_order, :]
