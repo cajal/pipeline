@@ -6,9 +6,14 @@ import glob, os
 import matplotlib.pyplot as plt
 
 
-def demix_and_deconvolve_with_cnmf(scan, num_components=100, is_somatic=True,
-                                   merge_threshold=0.8, num_background_components=4,
-                                   num_processes=None, init_on_patches=True):
+def demix_and_deconvolve_with_cnmf(scan, num_components=100, merge_threshold=0.8,
+                                   num_background_components=4, init_on_patches=False,
+                                   num_processes=None, memory_usage_in_GB=20,
+                                   num_pixels_per_process=10000, block_size=10000,
+                                   init_method='greedy_roi', AR_order=2,
+                                   neuron_size_in_pixels=10, alpha_snmf=None,
+                                   patch_downscaling_factor=4,
+                                   percentage_of_patch_overlap=0.2):
     """ Extract spike train activity directly from the scan using CNMF.
 
     Uses constrained non-negative matrix factorization to find all neurons/components in
@@ -16,25 +21,43 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, is_somatic=True,
     deconvolves them using an autoregressive model of the calcium impulse response
     function (not used for dendrites). See Pnevmatikakis et al., 2016 for details.
 
+    Default values work fine for somatic images.
+
     :param np.array scan: 3-dimensional scan (image_height, image_width, timesteps).
     :param int num_components: An estimate of neurons/spatial components in the scan FOV.
-    :param boolean is_somatic: True if processing somatic images, False for dendritic.
+    :param bool is_somatic: True for somatic scan, False for axonal/dendritic.
     :param int merge_threshold: Maximum temporal correlation allowed between activity of
                                 overlapping components before merging them.
     :param int num_background_components:  Number of background components to use.
+    :param bool init_on_patches: If True, run the initialization methods on small patches
+            of the scan rather than on the whole image.
     :param int num_processes: How many processes to run in parallel. None for as many
             processes as available cores.
-    :param int init_on_patches: If somatic, run greedy initialization on small patches in
-            the scan rather than in the whole image.
+    :param int memory_usage_in_GB: How much memory to use (may not be exact).
+    :param int num_pixels_per_process: How many pixels will a process handle each time.
+    :param int block_size: 'number of pixels to process at the same time for dot product.'
+    :param string init_method: Initialization method for the components.
+        'greedy_roi':Look for a gaussian-shaped patch, apply rank-1 NMF, store components,
+            calculate residual scan and repeat for num_components.
+        'sparse_nmf': Regularized non-negative matrix factorization (as impl. in sklearn)
+    :param int AR_order: Order of the autoregressive process used to model the impulse
+        response function, e.g., 0 = no modelling; 2 = model rise plus exponential decay.
+    :param int neuron_size_in_pixels: Estimated size of a neuron in the scan (used for
+        'greedy_roi' initialization to define the size of the gaussian window)
+    :param int alpha_snmf: Regularization parameter (alpha) for the sparse NMF (if used).
+    :param int patch_downscaling factor: Divisions to the image dimensions to obtain patch
+        dimensions, e.g., if original size is 256 and factor is 10, patches will be 26x26
+    :param int percentage_of_patch_overlap: Patches are sampled in a sliding window. This
+        controls how much overlap is between adjacent patches (0 for none, 0.9 for 90%)
 
     :returns Location matrix (image_height x image_width x num_components). Inferred
             location of each component.
     :returns Activity matrix (num_components x timesteps). Inferred fluorescence traces
             (spike train convolved with the fitted impulse response function).
     :returns: Inferred location matrix for background components (image_height x
-            image_width x num_background_components). Usually just one component.
+            image_width x num_background_components).
     :returns: Inferred activity matrix for background components (image_height x
-            image_width x num_background_components). Usually just one component
+            image_width x num_background_components).
     :returns: Raw fluorescence traces (num_components x timesteps) obtained from the scan
             minus activity from background and other components.
     :returns: Spike matrix (num_components x timesteps). Deconvolved spike activity.
@@ -47,26 +70,9 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, is_somatic=True,
             some components will be merged or deleted.
     ..warning:: Computation- and memory-intensive for big scans.
     """
-    # Set initialization_params (as recommended by the authors)
-    if is_somatic:
-        AR_order = 2  # Use an autoregressive process of order 2 (rise + exponential decay)
-        init_method = 'greedy_roi'  # Look for a gaussian-shaped patch, apply rank-1 NMF,
-        # store the components, calculate residual scan and repeat for num_components.
-        neuron_size_in_pixels = 10  # an estimate of the neuron size in pixels
+    # Calculate standard deviation of the gaussian window used for greedy ROI search
+    if init_method == 'greedy_roi':
         gaussian_std_dev = [neuron_size_in_pixels // 2, neuron_size_in_pixels // 2]
-
-        alpha_snmf = None  # unused
-    else:
-        AR_order = 0  # do not model the calcium response impulse function
-        init_method = 'sparse_nmf'  # use sparse NMF to initialize components
-        alpha_snmf = 10e2  # regularization parameter for SNMF
-
-        gaussian_std_dev = None  # unused
-
-    # Set execution params (heuristically)
-    memory_usage_in_GB = 30  # how much memory to use (may not be exact)
-    num_pixels_per_process = 10000  # how many pixels will each process handle
-    block_size = 10000  # 'number of pixels to process at the same time for dot product.'
 
     # Deal with negative values in the scan.
     min_value_in_scan = np.min(scan)
@@ -96,21 +102,15 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, is_somatic=True,
     image_height, image_width = scan_dims
     images = np.reshape(mmap_scan.T, (timesteps, *scan_dims), order='F')
 
-    # Optionally, initialize components by running CNMF in small patches first
+    # Optionally, run the initialization method in small patches to initialize components
     initial_A = None
     initial_C = None
     initial_f = None
-    if is_somatic and init_on_patches:  # does not make sense for dendrites
-
-        # Set parameters to initialize on patches
-        patch_downscaling_factor = 4
-        percentage_of_overlap = .2
-
+    if init_on_patches:
         # Calculate some params
         patch_size = round(image_height / patch_downscaling_factor)  # only square windows
-        components_per_patch = max(1,
-                                   round(num_components / patch_downscaling_factor ** 2))
-        overlap_in_pixels = round(patch_size * percentage_of_overlap)
+        components_per_patch = max(1, round(num_components / patch_downscaling_factor**2))
+        overlap_in_pixels = round(patch_size * percentage_of_patch_overlap)
 
         # Run CNMF on patches (only for initialization, no impulse response modelling p=0)
         cnmf = caiman.cnmf.CNMF(num_processes, only_init_patch=True, p=0,
@@ -146,7 +146,6 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, is_somatic=True,
     spikes_matrix = cnmf.S  # num_components x timesteps, spike_ traces
     raw_traces = cnmf.C + cnmf.YrA  # num_components x timesteps
     AR_params = cnmf.g  # AR_order x num_components
-
 
     # Reshape spatial matrices to be image_height x image_width x timesteps
     new_shape = (image_height, image_width, -1)
@@ -327,6 +326,7 @@ def plot_impulse_responses(AR_params, num_timepoints=100):
 def order_components(location_matrix, activity_matrix):
     """Based on caiman.source_extraction.cnmf.utilities.order_components"""
     # This is the original version from caiman
+    # num_components = location_matrix.shape[-1]
     # linear_location = location_matrix.reshape(-1, num_components)
     # density_measure = np.sum(linear_location**4, axis = 0)**(1/4) # small dense masks better
     # norm_density = density_measure / np.linalg.norm(linear_location, axis=0)
