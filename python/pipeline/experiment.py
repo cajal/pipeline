@@ -6,6 +6,7 @@ from distutils.version import StrictVersion
 import numpy as np
 import inspect
 import os
+from commons import lab
 
 assert StrictVersion(dj.__version__) >= StrictVersion('0.2.7')
 
@@ -361,6 +362,16 @@ class Scan(dj.Manual):
         power: float  # (mW) to brain
         gdd: float  # gdd setting
         """
+
+    def get_local_filename(self):
+        """Returns the local filename for all parts of this scan (ends in *.tif)."""
+        scan_path = (Session() & self).fetch1['scan_path']
+        local_path = lab.Paths().get_local_path(scan_path)
+
+        scan_name = (Scan() & self).fetch1['filename']
+        local_filename = os.path.join(local_path, scan_name) + '_*.tif'  # all parts
+
+        return local_filename
 
 
 @schema
