@@ -18,9 +18,8 @@ from distutils.version import StrictVersion
 from .utils import galvo_corrections
 from .experiment import Session, Scan
 import imreg_dft as ird
-import caiman as cmn
+from .utils import caiman_interface as cmn
 
-# import caiman.source_extraction.cnmf as cnmf
 
 assert StrictVersion(dj.__version__) >= StrictVersion('0.2.8')
 
@@ -97,15 +96,17 @@ class Prepare(dj.Imported):
         raster_phase            : float             # shift of odd vs even raster lines
         """
 
-        def get_fix_raster(self):
+        def get_correct_raster(self):
             """
-             :return: a function that perform raster correction on scan [x, y, num_channels, num_slices, num_frames].
+             :returns: A function to perform raster correction on the scan
+                    [image_height, image_width, channels, slices, num_frames].
             """
             raster_phase, fill_fraction = self.fetch1['raster_phase', 'fill_fraction']
             if raster_phase == 0:
                 return lambda scan: np.double(scan)
             else:
-                return lambda scan: galvo_corrections.correct_raster(np.double(scan), raster_phase, fill_fraction)
+                return lambda scan: galvo_corrections.correct_raster(scan, raster_phase,
+                                                                     fill_fraction)
 
     class GalvoMotion(dj.Part):
         definition = """   # motion correction for galvo scans
@@ -119,12 +120,20 @@ class Prepare(dj.Imported):
         align_times=CURRENT_TIMESTAMP: timestamp     # automatic
         """
 
-        def get_fix_motion(self):
+        def get_correct_motion(self):
             """
-            :return: a function that performs motion correction on image [x, y].
+            :returns: A function to performs motion correction on scans
+                      [image_height, image_width, channels, slices, num_frames].
             """
-            xy = self.fetch['motion_xy']
-            return lambda scan, indices: galvo_corrections.correct_motion(scan, xy[:, indices])
+            xy_motion = self.fetch1['motion_xy']
+
+            def my_lambda_function(scan, indices=None):
+                if indices is None:
+                    return galvo_corrections.correct_motion(scan, xy_motion)
+                else:
+                    return galvo_corrections.correct_motion(scan, xy_motion[:, indices])
+
+            return my_lambda_function
 
     class GalvoAverageFrame(dj.Part):
         definition = """   # average frame for each slice and channel after corrections
@@ -163,32 +172,26 @@ class Prepare(dj.Imported):
         :returns Figure. You can call show() on it.
         :rtype: matplotlib.figure.Figure
         """
-        # Get local filename
-        scan_path = (Session() & self).fetch1['scan_path']
-        local_path = lab.Paths().get_local_path(scan_path)
-        scan_name = (Scan() & self).fetch1['filename']
-        local_filename = os.path.join(local_path, scan_name) + '_*.tif'  # all parts
-
-        # Get raster_correction and motion_correction params
-        raster_phase, fill_fraction = (Prepare.Galvo() & self).fetch1['raster_phase',
-                                                                      'fill_fraction']
-        xy_motion = (Prepare.GalvoMotion() & self & {'slice': slice}).fetch1['motion_xy']
+        # Get scan filename
+        filename = (Scan() & self).get_local_filename()
 
         # Get fps and total_num_frames
         fps = (Prepare.Galvo() & self).fetch1['fps']
         num_video_frames = int(fps * seconds)
+        stop_index = start_index + num_video_frames
 
         # Load the scan
-        reader = TIFFReader(local_filename)
-        scan = np.double(reader[:, :, channel - 1, slice - 1,
-                         start_index: start_index + num_video_frames]).squeeze()
-        xy_motion = xy_motion[..., start_index: start_index + num_video_frames]
+        reader = TIFFReader(filename)
+        scan = np.double(reader[:, :, channel - 1, slice - 1, start_index: stop_index])
+        scan = scan.squeeze()
         original_scan = scan.copy()
 
         # Correct the scan
-        raster_corrected = galvo_corrections.correct_raster(scan, raster_phase,
-                                                            fill_fraction)
-        motion_corrected = galvo_corrections.correct_motion(raster_corrected, xy_motion)
+        correct_motion = (Prepare.GalvoMotion() & self &
+                          {'slice': slice, 'channel': channel}).get_correct_motion()
+        correct_raster = (Prepare.Galvo() & self).get_correct_raster()
+        raster_corrected = correct_raster(scan)
+        motion_corrected = correct_motion(raster_corrected, range(start_index, stop_index))
         corrected_scan = motion_corrected
 
         # Create animation
@@ -244,29 +247,30 @@ class CorrelationImage(dj.Computed):
 
     def _make_tuples(self, key):
         print('Processing', key, flush=True)
+        # Get scan filename
+        filename = (Scan() & key).get_local_filename()
 
-        scan_path = (Session() & key).fetch1['scan_path']
-        local_path = lab.Paths().get_local_path(scan_path)
-        scan_name = (Scan() & key).fetch1['filename']
-        local_filename = os.path.join(local_path, scan_name) + '_*.tif'  # all parts
-         # Get raster_correction and motion_correction params
-        raster_phase, fill_fraction = (Prepare.Galvo() & key).fetch1['raster_phase', 'fill_fraction']
+        # Read the scan
+        reader = TIFFReader(filename)
 
-        # Load the scan
-        reader = TIFFReader(local_filename)
-        for sli, channel in  zip(*(Prepare.GalvoMotion() & key).fetch['slice', 'channel']):
-            print('Processing channel {} of slice {}'.format(channel, sli), flush=True)
-            xy_motion = (Prepare.GalvoMotion() & key & dict(slice=sli, channel=channel)).fetch1['motion_xy']
-            scan = np.double(reader[:, :, channel-1, sli-1, :]).squeeze()
+        # Over each slice and channel
+        scan_slices, scan_channels = (Prepare.GalvoMotion() & key).fetch['slice', 'channel']
+        for slice, channel in zip(scan_slices, scan_channels):
+            # Load the current data
+            scan = np.double(reader[:, :, channel - 1, slice - 1, :]).squeeze()
+            correct_motion = (Prepare.GalvoMotion() & key &
+                              {'slice': slice, 'channel': channel}).get_correct_motion()
+            correct_raster = (Prepare.Galvo() & key).get_correct_raster()
 
             # Correct the scan
-            raster_corrected = galvo_corrections.correct_raster(scan, raster_phase, fill_fraction)
-            motion_corrected = galvo_corrections.correct_motion(raster_corrected, xy_motion)
+            corrected_scan = correct_motion(correct_raster(scan))
 
-            m = cmn.movie(motion_corrected)
-            self.insert1(dict(key,
-                              correlation_image = m.local_correlations(),
-                              slice=sli, channel=channel))
+            # Calculate correlation image
+            correlation_image = cmn.compute_correlation_image(corrected_scan)
+
+            # Insert image
+            self.insert1(dict(key, correlation_image=correlation_image, slice=slice,
+                              channel=channel))
 
 
 @schema
@@ -304,7 +308,7 @@ class Method(dj.Lookup):
 
 @schema
 class ExtractRaw(dj.Imported):
-    definition = """  # pre-processing of a twp-photon scan
+    definition = """  # corection, source extraction and trace deconvolution of a two-photon scan
     -> Prepare
     -> Method
     """
@@ -505,16 +509,100 @@ class ExtractRaw(dj.Imported):
                 plt.close(fig)
 
     def _make_tuples(self, key):
-        # Estimate the number of components from the size of the scan
-        # Set some parameters.
-        # Extract traces
-        # Save traces in their apropiate schemas.
-        raise NotImplementedError('ExtractRaw is populated in Matlab')
+        """ Load scan one slice & channel at a time, correct for raster and motion
+        artifacts and use CNMF to extract sources and deconvolve spike traces."""
+        print('ExtractRaw: Processing scan {}'.format(key))
+        # Get scan filename
+        filename = (Scan() & key).get_local_filename()
+
+        # Read the scan
+        reader = TIFFReader(filename)
+
+        # Estimate number of components per slice
+        num_components = self._estimate_num_components_per_slice()
+        num_components = num_components * 2  # double it just to be sure
+
+        # Set parameters
+        kwargs = {}
+        kwargs['num_components'] = num_components
+        kwargs['merge_threshold'] = 0.8
+        kwargs['num_background_components'] = 4
+        kwargs['init_on_patches'] = False
+
+        # Set performance/execution parameters (heuristically)
+        kwargs['num_processes'] = None  # all cores available
+        kwargs['memory_usage_in_GB'] = 20
+        kwargs['num_pixels_per_process'] = 10000
+        kwargs['block_size'] = 10000
+
+        # Set params specific to somatic or axonal/dendritic scans
+        is_somatic = not (Session.TargetStructure() & key)
+        if is_somatic:
+            kwargs['init_method'] = 'greedy_roi'
+            kwargs['AR_order'] = 2
+            kwargs['neuron_size_in_pixels'] = 10
+        else:
+            kwargs['init_method'] = 'sparse_nmf'
+            kwargs['AR_order'] = 0  # no impulse response function modelling
+            kwargs['alpha_snmf'] = 10e-2
+
+        # Set params specific to initialization on patches
+        if kwargs['init_on_patches']:
+            kwargs['patch_downscaling_factor'] = 4
+            kwargs['percentage_of_overlap'] = .2
+
+        # Over each slice and channel in the scan
+        scan_slices, scan_channels = (Prepare.GalvoMotion() & key).fetch['slice', 'channel']
+        for slice, channel in zip(scan_slices, scan_channels):
+            # Load the scan
+            scan = np.double(reader[:, :, channel - 1, slice - 1, :]).squeeze()
+
+            # Correct scan
+            correct_motion = (Prepare.GalvoMotion() & key &
+                              {'slice': slice, 'channel': channel}).get_correct_motion()
+            correct_raster = (Prepare.Galvo() & key).get_correct_raster()
+            corrected_scan = correct_motion(correct_raster(scan))
+
+            # Extract traces
+            cnmf_result = cmn.demix_and_deconvolve_with_cnmf(scan, **kwargs)
+
+            # Insert results in the appropriate tables
+            pass
+
+        # Save NMF parameters to permanent storage (one per scan)
+        pass
+
+    def _estimate_num_components_per_slice(self):
+        """ Estimates the number of components per scan slice using simple rules of thumb.
+
+        For somatic scans, estimate number of neurons based on:
+        (100x100x100)um^3 = 1e6 um^3 -> 1e2 neurons; (1x1x1)mm^3 = 1e9 um^3 -> 1e5 neurons
+
+        For axonal/dendritic scans, just ten times as our estimate of neurons.
+
+        :returns: Number of components
+        :rtype: int
+        """
+
+        # Get some slice dimensions
+        slice_height, slice_width = (Prepare.Galvo() & self).fetch1['um_height',
+                                                                    'um_width']
+        slice_thickness = 10  # assumption
+        slice_volume = slice_width * slice_height * slice_thickness
+
+        # Estimate number of components
+        if Session.TargetStructure() & self:  # scan is axonal/dendritic
+            num_components = slice_volume * 0.001 # ten times as many neurons
+        else:
+            num_components = slice_volume * 0.0001
+
+        return round(num_components)
 
     def cnmf_save_video(self):
         # Acces location_matrix, activity_matrix, and all that's needed
         # Copy from caiman_interface save video.
         pass
+
     def cnmf_plot_contours(self):
         # Load location matrix for this scan
         # Call caiman_interface.plot_contours
