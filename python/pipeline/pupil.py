@@ -4,7 +4,7 @@ from . import experiment, vis, PipelineException
 
 from warnings import warn
 import numpy as np
-import sh
+import json
 import os
 from commons import lab
 
@@ -19,16 +19,21 @@ from . import config
 schema = dj.schema('pipeline_pupil', locals())
 
 DEFAULT_PARAMETERS = dict(perc_high=95,
-                            perc_low=2,
-                            perc_weight=0.3,
-                            relaive_area_threshold=0.01,
-                            ratio_threshold=1.3,
-                            error_threshold=0.1,
-                            min_contour_len=5,
-                            margin=0.02,
-                            contrast_threshold=3,
-                            spreed_threshold=0.1,
-                            dr_threshold=0.05)
+                          perc_low=2,
+                          max_low_perc_weight=0.8,
+                          relative_area_threshold=0.01,
+                          ratio_threshold=1.4,
+                          error_threshold=0.1,
+                          min_contour_len=5,
+                          margin=0.02,
+                          contrast_threshold=5,
+                          speed_threshold=0.1,
+                          dr_threshold=0.05,
+                          threshold_adapt_margin=10,
+                          threshold_adapt_factor=1.01,
+                          threshold_adapt_lag = 3,
+                          median_blur=3)
+
 
 @schema
 class Eye(dj.Imported):
@@ -48,7 +53,7 @@ class Eye(dj.Imported):
         # manual tracking parameters overwriting the default settings
         -> Eye
         ---
-        tracking_parameters  : longblob  # tracking parameters
+        tracking_parameters  : varchar(512)  # tracking parameters
         """
 
     class Ignore(dj.Part):
@@ -58,6 +63,13 @@ class Eye(dj.Imported):
         ---
         """
 
+    @staticmethod
+    def _get_modified_parameters():
+        new_param = dict(DEFAULT_PARAMETERS)
+        for k, v in new_param.items():
+            nv = input("{} (default: {}): ".format(k, v))
+            new_param[k] = float(nv) if nv else v
+        return json.dumps(new_param)
 
     def unpopulated(self):
         """
@@ -138,155 +150,166 @@ class Eye(dj.Imported):
         except ImportError:
             rg = ROIGrabber(frames.mean(axis=2))
 
-        with dj.config(display__width=50):
-            print(EyeQuality())
-        key['eye_quality'] = int(input("Enter the quality of the eye: "))
         key['eye_roi'] = rg.roi
         self.insert1(key)
-        print('[Done]')
-        if input('Do you want to stop? y/N: ') == 'y':
-            self.connection.commit_transaction()
-            raise PipelineException('User interrupted population.')
+
+        trackable = input('Is the quality good enough to be tracked? [Y/n]')
+        if trackable.lower() == 'n':
+            self.insert1(key)
+            self.Ignore().insert1(key, ignore_extra_field=True)
+        else:
+            extra_parameters = input('Do you want to use modified tracking parameters? [N/y]')
+            if extra_parameters.lower() == 'y':
+                self.ManualParameters().insert1(dict(key, tracking_parameters=self._get_modified_parameters()),
+                                                ignore_extra_fields=True)
 
 
-#
-#
-# @schema
-# class TrackedVideo(dj.Computed):
-#     definition = """
-#     -> Eye
-#     ---
-#     tracking_parameters              : longblob  # tracking parameters
-#     tracking_ts=CURRENT_TIMESTAMP    : timestamp  # automatic
-#     """
-#
-#     class Frame(dj.Part):
-#         definition = """
-#         -> TrackedVideo
-#         frame_id                 : int           # frame id with matlab based 1 indexing
-#         ---
-#         rotated_rect=NULL        : tinyblob      # rotated rect (center, sidelength, angle) containing the ellipse
-#         contour=NULL             : longblob      # eye contour relative to ROI
-#         center=NULL              : tinyblob      # center of the ellipse in (x, y) of image
-#         major_r=NULL             : float         # major radius of the ellipse
-#         frame_intensity=NULL     : float         # std of the frame
-#         """
-#
-#     # def _make_tuples(self, key):
-#     #     print("Populating", key)
-#     #     param = (TrackingParameters() & key).fetch1()
-#     #
-#     #     roi = (Eye() & key).fetch1['eye_roi']
-#     #
-#     #     video_info = (experiment.Session() * experiment.Scan.EyeVideo() & key).fetch1()
-#     #     avi_path = lab.Paths().get_local_path("{behavior_path}/{filename}".format(**video_info))
-#     #
-#     #     tr = PupilTracker(param)
-#     #     traces = tr.track(avi_path, roi - 1, display=config['display.tracking'])  # -1 because of matlab indices
-#     #
-#     #     self.insert1(key)
-#     #     fr = self.Frame()
-#     #     for trace in traces:
-#     #         trace.update(key)
-#     #         fr.insert1(trace)
-#     #
-#     # def plot_traces(self, outdir='./', show=False):
-#     #     """
-#     #     Plot existing traces to output directory.
-#     #
-#     #     :param outdir: destination of plots
-#     #     """
-#     #     import seaborn as sns
-#     #     import matplotlib.pyplot as plt
-#     #     plt.switch_backend('GTK3Agg')
-#     #
-#     #     for key in self.fetch.keys():
-#     #         print('Processing', key)
-#     #         with sns.axes_style('ticks'):
-#     #             fig, ax = plt.subplots(3, 1, figsize=(10, 6), sharex=True)
-#     #
-#     #         r, center, contrast = (EyeTracking.Frame() & key).fetch.order_by('frame_id')[
-#     #             'major_r', 'center', 'frame_intensity']
-#     #         ax[0].plot(r)
-#     #         ax[0].set_title('Major Radius')
-#     #         c = np.vstack([cc if cc is not None else np.NaN * np.ones(2) for cc in center])
-#     #
-#     #         ax[1].plot(c[:, 0], label='x')
-#     #         ax[1].plot(c[:, 1], label='y')
-#     #         ax[1].set_title('Pupil Center Coordinates')
-#     #         ax[1].legend()
-#     #
-#     #         ax[2].plot(contrast)
-#     #         ax[2].set_title('Contrast (frame std)')
-#     #         ax[2].set_xlabel('Frames')
-#     #         try:
-#     #             sh.mkdir('-p', os.path.expanduser(outdir) + '/{animal_id}/'.format(**key))
-#     #         except:
-#     #             pass
-#     #
-#     #         fig.suptitle(
-#     #             'animal id {animal_id} session {session} scan_idx {scan_idx} eye quality {eye_quality}'.format(**key))
-#     #         fig.tight_layout()
-#     #         sns.despine(fig)
-#     #         fig.savefig(outdir + '/{animal_id}/AI{animal_id}SE{session}SI{scan_idx}EQ{eye_quality}.png'.format(**key))
-#     #         if show:
-#     #             plt.show()
-#     #         else:
-#     #             plt.close(fig)
-#     #
-#     # def show_video(self, from_frame, to_frame, framerate=1000):
-#     #     """
-#     #     Shows the video from from_frame to to_frame (1-based) and the corrsponding tracking results.
-#     #     Needs opencv installation.
-#     #
-#     #     :param from_frame: start frame (1 based)
-#     #     :param to_frame:  end frame (1 based)
-#     #     """
-#     #     if not len(self) == 1:
-#     #         raise PipelineException("Restrict EyeTracking to one video only.")
-#     #     import cv2
-#     #     video_info = (experiment.Session() * experiment.Scan.EyeVideo() & self).fetch1()
-#     #     videofile = "{path_prefix}/{behavior_path}/{filename}".format(path_prefix=config['path.mounts'], **video_info)
-#     #     eye_roi = (Eye() & self).fetch1['eye_roi'] - 1
-#     #
-#     #     contours, ellipses = ((EyeTracking.Frame() & self) \
-#     #                           & 'frame_id between {0} and {1}'.format(from_frame, to_frame)
-#     #                           ).fetch.order_by('frame_id')['contour', 'rotated_rect']
-#     #     cap = cv2.VideoCapture(videofile)
-#     #     no_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-#     #     font = cv2.FONT_HERSHEY_SIMPLEX
-#     #     if not from_frame < no_frames:
-#     #         raise PipelineException('Starting frame exceeds number of frames')
-#     #
-#     #     cap.set(cv2.CAP_PROP_POS_FRAMES, from_frame - 1)
-#     #     fr_count = from_frame - 1
-#     #
-#     #     elem_count = 0
-#     #     while cap.isOpened():
-#     #         fr_count += 1
-#     #         ret, frame = cap.read()
-#     #         if fr_count < from_frame:
-#     #             continue
-#     #
-#     #         if fr_count >= to_frame or fr_count >= no_frames:
-#     #             print("Reached end of videofile ", videofile)
-#     #             break
-#     #         contour = contours[elem_count]
-#     #         ellipse = ellipses[elem_count]
-#     #         elem_count += 1
-#     #
-#     #         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-#     #
-#     #         cv2.putText(gray, str(fr_count), (10, 30), font, 1, (127, 127, 127), 2)
-#     #
-#     #         if contour is not None:
-#     #             ellipse = (tuple(eye_roi[::-1, 0] + ellipse[:2]), tuple(ellipse[2:4]), ellipse[4])
-#     #             cv2.drawContours(gray, [contour.astype(np.int32)], 0, (255, 0, 0), 1, offset=tuple(eye_roi[::-1, 0]))
-#     #             cv2.ellipse(gray, ellipse, (0, 0, 255), 2)
-#     #         cv2.imshow('frame', gray)
-#     #
-#     #         if (cv2.waitKey(int(1000 / framerate)) & 0xFF == ord('q')):
-#     #             break
-#     #
-#     #     cap.release()
-#     #     cv2.destroyAllWindows()
+    def get_video_path(self):
+        video_info = (experiment.Session() * experiment.Scan.EyeVideo() & self).fetch1()
+        return lab.Paths().get_local_path("{behavior_path}/{filename}".format(**video_info))
+
+
+
+@schema
+class TrackedVideo(dj.Computed):
+    definition = """
+    -> Eye
+    ---
+    tracking_parameters              : longblob  # tracking parameters
+    tracking_ts=CURRENT_TIMESTAMP    : timestamp  # automatic
+    """
+
+    class Frame(dj.Part):
+        definition = """
+        -> TrackedVideo
+        frame_id                 : int           # frame id with matlab based 1 indexing
+        ---
+        rotated_rect=NULL        : tinyblob      # rotated rect (center, sidelength, angle) containing the ellipse
+        contour=NULL             : longblob      # eye contour relative to ROI
+        center=NULL              : tinyblob      # center of the ellipse in (x, y) of image
+        major_r=NULL             : float         # major radius of the ellipse
+        frame_intensity=NULL     : float         # std of the frame
+        """
+
+    key_source = Eye() - Eye.Ignore()
+
+    def _make_tuples(self, key):
+        print("Populating", key)
+        param = DEFAULT_PARAMETERS
+        if Eye.ManualParameters() & key:
+            param = json.loads((Eye.ManualParameters() & key).fetch1['tracking_parameters'])
+
+        roi = (Eye() & key).fetch1['eye_roi']
+
+        avi_path = (Eye() & key).get_video_path()
+        print(avi_path)
+
+        tr = PupilTracker(param)
+        traces = tr.track(avi_path, roi - 1, display=config['display.tracking'])  # -1 because of matlab indices
+        key['tracking_parameters'] = json.dumps(param)
+        self.insert1(key)
+        fr = self.Frame()
+        for trace in traces:
+            trace.update(key)
+            fr.insert1(trace, ignore_extra_fields=True)
+
+    def plot_traces(self, outdir='./', show=False):
+        """
+        Plot existing traces to output directory.
+
+        :param outdir: destination of plots
+        """
+        import seaborn as sns
+        import matplotlib.pyplot as plt
+        plt.switch_backend('GTK3Agg')
+
+        for key in self.fetch.keys():
+            print('Processing', key)
+            with sns.axes_style('ticks'):
+                fig, ax = plt.subplots(3, 1, figsize=(10, 6), sharex=True)
+
+            r, center, contrast = (EyeTracking.Frame() & key).fetch.order_by('frame_id')[
+                'major_r', 'center', 'frame_intensity']
+            ax[0].plot(r)
+            ax[0].set_title('Major Radius')
+            c = np.vstack([cc if cc is not None else np.NaN * np.ones(2) for cc in center])
+
+            ax[1].plot(c[:, 0], label='x')
+            ax[1].plot(c[:, 1], label='y')
+            ax[1].set_title('Pupil Center Coordinates')
+            ax[1].legend()
+
+            ax[2].plot(contrast)
+            ax[2].set_title('Contrast (frame std)')
+            ax[2].set_xlabel('Frames')
+            try:
+                sh.mkdir('-p', os.path.expanduser(outdir) + '/{animal_id}/'.format(**key))
+            except:
+                pass
+
+            fig.suptitle(
+                'animal id {animal_id} session {session} scan_idx {scan_idx} eye quality {eye_quality}'.format(**key))
+            fig.tight_layout()
+            sns.despine(fig)
+            fig.savefig(outdir + '/{animal_id}/AI{animal_id}SE{session}SI{scan_idx}EQ{eye_quality}.png'.format(**key))
+            if show:
+                plt.show()
+            else:
+                plt.close(fig)
+
+    def show_video(self, from_frame, to_frame, framerate=1000):
+        """
+        Shows the video from from_frame to to_frame (1-based) and the corrsponding tracking results.
+        Needs opencv installation.
+
+        :param from_frame: start frame (1 based)
+        :param to_frame:  end frame (1 based)
+        """
+        if not len(self) == 1:
+            raise PipelineException("Restrict EyeTracking to one video only.")
+        import cv2
+        video_info = (experiment.Session() * experiment.Scan.EyeVideo() & self).fetch1()
+        videofile = "{path_prefix}/{behavior_path}/{filename}".format(path_prefix=config['path.mounts'], **video_info)
+        eye_roi = (Eye() & self).fetch1['eye_roi'] - 1
+
+        contours, ellipses = ((EyeTracking.Frame() & self) \
+                              & 'frame_id between {0} and {1}'.format(from_frame, to_frame)
+                              ).fetch.order_by('frame_id')['contour', 'rotated_rect']
+        cap = cv2.VideoCapture(videofile)
+        no_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        if not from_frame < no_frames:
+            raise PipelineException('Starting frame exceeds number of frames')
+
+        cap.set(cv2.CAP_PROP_POS_FRAMES, from_frame - 1)
+        fr_count = from_frame - 1
+
+        elem_count = 0
+        while cap.isOpened():
+            fr_count += 1
+            ret, frame = cap.read()
+            if fr_count < from_frame:
+                continue
+
+            if fr_count >= to_frame or fr_count >= no_frames:
+                print("Reached end of videofile ", videofile)
+                break
+            contour = contours[elem_count]
+            ellipse = ellipses[elem_count]
+            elem_count += 1
+
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+            cv2.putText(gray, str(fr_count), (10, 30), font, 1, (127, 127, 127), 2)
+
+            if contour is not None:
+                ellipse = (tuple(eye_roi[::-1, 0] + ellipse[:2]), tuple(ellipse[2:4]), ellipse[4])
+                cv2.drawContours(gray, [contour.astype(np.int32)], 0, (255, 0, 0), 1, offset=tuple(eye_roi[::-1, 0]))
+                cv2.ellipse(gray, ellipse, (0, 0, 255), 2)
+            cv2.imshow('frame', gray)
+
+            if (cv2.waitKey(int(1000 / framerate)) & 0xFF == ord('q')):
+                break
+
+        cap.release()
+        cv2.destroyAllWindows()
