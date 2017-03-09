@@ -7,6 +7,7 @@ import numpy as np
 import json
 import os
 from commons import lab
+import sh
 
 try:
     import pyfnnd
@@ -18,21 +19,15 @@ from . import config
 
 schema = dj.schema('pipeline_pupil', locals())
 
-DEFAULT_PARAMETERS = dict(perc_high=95,
-                          perc_low=2,
-                          max_low_perc_weight=0.8,
-                          relative_area_threshold=0.01,
-                          ratio_threshold=1.4,
+DEFAULT_PARAMETERS = dict(relative_area_threshold=0.01,
+                          ratio_threshold=1.5,
                           error_threshold=0.1,
                           min_contour_len=5,
                           margin=0.02,
                           contrast_threshold=5,
                           speed_threshold=0.1,
-                          dr_threshold=0.05,
-                          threshold_adapt_margin=10,
-                          threshold_adapt_factor=1.01,
-                          threshold_adapt_lag = 3,
-                          median_blur=3)
+                          dr_threshold=0.1,
+                          gaussian_blur=5)
 
 
 @schema
@@ -198,6 +193,7 @@ class TrackedVideo(dj.Computed):
         param = DEFAULT_PARAMETERS
         if Eye.ManualParameters() & key:
             param = json.loads((Eye.ManualParameters() & key).fetch1['tracking_parameters'])
+            print('Using manual set parameters', param, flush=True)
 
         roi = (Eye() & key).fetch1['eye_roi']
 
@@ -228,7 +224,7 @@ class TrackedVideo(dj.Computed):
             with sns.axes_style('ticks'):
                 fig, ax = plt.subplots(3, 1, figsize=(10, 6), sharex=True)
 
-            r, center, contrast = (EyeTracking.Frame() & key).fetch.order_by('frame_id')[
+            r, center, contrast = (TrackedVideo.Frame() & key).fetch.order_by('frame_id')[
                 'major_r', 'center', 'frame_intensity']
             ax[0].plot(r)
             ax[0].set_title('Major Radius')
@@ -272,7 +268,7 @@ class TrackedVideo(dj.Computed):
         videofile = "{path_prefix}/{behavior_path}/{filename}".format(path_prefix=config['path.mounts'], **video_info)
         eye_roi = (Eye() & self).fetch1['eye_roi'] - 1
 
-        contours, ellipses = ((EyeTracking.Frame() & self) \
+        contours, ellipses = ((TrackedVideo.Frame() & self) \
                               & 'frame_id between {0} and {1}'.format(from_frame, to_frame)
                               ).fetch.order_by('frame_id')['contour', 'rotated_rect']
         cap = cv2.VideoCapture(videofile)

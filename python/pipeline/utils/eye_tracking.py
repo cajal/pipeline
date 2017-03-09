@@ -243,7 +243,6 @@ class PupilTracker:
         self._center = None
         self._radius = None
         self._last_detection = 1
-        self._thres = None
 
     @staticmethod
     def goodness_of_fit(contour, ellipse):
@@ -277,7 +276,7 @@ class PupilTracker:
         err = np.inf
         best_ellipse = None
         best_contour = None
-        results = defaultdict(list)
+        results, cond  = defaultdict(list), defaultdict(list)
 
         for j, cnt in enumerate(contours):
             if len(contours[j]) < min_contour:  # otherwise fitEllipse won't work
@@ -291,6 +290,7 @@ class PupilTracker:
             ratio = max(axes) / min(axes)
             area = np.prod(ellipse[1]) / np.prod(small_gray.shape)
             curr_err = self.goodness_of_fit(cnt, ellipse)
+
             results['ratio'].append(ratio)
             results['area'].append(area)
             results['rmse'].append(curr_err)
@@ -311,8 +311,17 @@ class PupilTracker:
                                   + 1 * (margin < center[1] < 1 - margin) \
                                   + 1 * (dx < speed_thres * self._last_detection) \
                                   + 1 * (dr < dr_thres * self._last_detection)
+            cond['ratio'].append(ratio <= ratio_thres)
+            cond['area'].append(area >= area_threshold)
+            cond['rmse'].append(curr_err < error_threshold)
+            cond['x coord'].append(margin < center[0] < 1 - margin)
+            cond['y coord'].append(margin < center[1] < 1 - margin)
+            cond['dx'].append(dx < speed_thres * self._last_detection)
+            cond['dr/r'].append(dr < dr_thres * self._last_detection)
 
             results['conditions'] = matching_conditions
+            cond['conditions'].append(True)
+
             if curr_err < err and matching_conditions == 7:
                 best_ellipse = ellipse
                 best_contour = cnt
@@ -322,9 +331,17 @@ class PupilTracker:
                 cv2.ellipse(small_gray, ellipse, (255, 0, 0), 2)
 
         if best_ellipse is None:
+            df = pd.DataFrame(results)
+            df2 = pd.DataFrame(cond)
+
             print('-', end="", flush=True)
-            if len(results) > 0 and np.any(results['conditions'] >= show_matching):
-                print("\n", results[results['conditions'] >= show_matching], flush=True)
+            if np.any(df['conditions'] >= show_matching):
+
+                idx = df['conditions'] >= show_matching
+                df = df[idx]
+                df2 = df2[idx]
+                df[df2] = np.nan
+                print("\n", df, flush=True)
             self._last_detection += 1
         else:
             self._last_detection = 1
@@ -332,27 +349,24 @@ class PupilTracker:
         return best_contour, best_ellipse
 
     def preprocess_image(self, frame, eye_roi):
-        p_high, p_low = self._params['perc_high'], self._params['perc_low']
-
-        w = self._thres
-
+        h = int(self._params['gaussian_blur'])
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         img_std = np.std(gray)
 
         small_gray = gray[slice(*eye_roi[0]), slice(*eye_roi[1])]
-        blur = cv2.medianBlur(small_gray, self._params['median_blur'])
-        th = (1 - w) * np.percentile(blur, p_high) + w * np.percentile(blur, p_low)
-        _, thres = cv2.threshold(blur, th, 255, cv2.THRESH_BINARY)
+        blur = cv2.GaussianBlur(small_gray, (h, h), 0)
+        _, thres = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         return gray, small_gray, img_std, thres, blur
 
     @staticmethod
-    def display(gray, blur, thres, eye_roi, fr_count, n_frames,  contour=None, ellipse=None, eye_center=None,
+    def display(gray, blur, thres, eye_roi, fr_count, n_frames, ncontours = 0, contour=None, ellipse=None, eye_center=None,
                 font=cv2.FONT_HERSHEY_SIMPLEX):
         cv2.imshow('blur', blur)
         cv2.imshow('threshold', thres)
 
         if contour is not None and ellipse is not None and eye_center is not None:
-            cv2.putText(gray, "{fr_count}/{frames}".format(fr_count=fr_count, frames=n_frames),
+            cv2.putText(gray, "{fr_count}/{frames} {ncontours}".format(fr_count=fr_count, frames=n_frames,
+                                                                       ncontours=ncontours),
                         (10, 30), font, 1, (127, 127, 127), 2)
             ellipse = list(ellipse)
             ellipse[0] = tuple(eye_center)
@@ -363,23 +377,7 @@ class PupilTracker:
             gray[epx - 3:epx + 3, epy - 3:epy + 3] = 0
         cv2.imshow('frame', gray)
 
-    def _adapt_threshold(self, adapt_upwards, ncontours):
-        threshold_adapt_margin = self._params['threshold_adapt_margin']
-        threshold_adapt_factor = self._params['threshold_adapt_factor']
-        threshold_adapt_lag = self._params['threshold_adapt_lag']
-        max_low_perc_weight = self._params['max_low_perc_weight']
-
-        if adapt_upwards and self._last_detection > threshold_adapt_lag:
-            self._thres = min(self._thres * threshold_adapt_factor, max_low_perc_weight)
-            print('-{} {}'.format(ncontours, self._thres), flush=True)
-        elif ncontours > threshold_adapt_margin:
-            self._thres /= threshold_adapt_factor
-            print('+{} {}'.format(ncontours, self._thres), flush=True)
-
     def track(self, videofile, eye_roi, display=False):
-
-
-        self._thres = self._params['max_low_perc_weight']
         contrast_low = self._params['contrast_threshold']
 
         print("Tracking videofile", videofile)
@@ -406,8 +404,8 @@ class PupilTracker:
             if fr_count % 500 == 0:
                 print("\tframe ({}/{})".format(fr_count, n_frames))
 
+            # --- preprocess and treshold images
             gray, small_gray, img_std, thres, blur = self.preprocess_image(frame, eye_roi)
-
 
             # --- if contrast is too low, skip it
             if img_std < contrast_low:
@@ -418,13 +416,13 @@ class PupilTracker:
                     self.display(gray, blur, thres, eye_roi, fr_count, n_frames)
                 continue
 
-
             # --- detect contours
+            ellipse, eye_center, contour = None, None, None
             _, contours, hierarchy1 = cv2.findContours(thres, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
             contour, ellipse = self.get_pupil_from_contours(contours, small_gray)
-            self.display(gray, blur, thres, eye_roi, fr_count, n_frames)
+            self.display(gray, blur, thres, eye_roi, fr_count, n_frames, ncontours=len(contours))
 
-            self._adapt_threshold(contour is None, len(contours))
+
             if contour is None:
                 traces.append(dict(frame_id=fr_count, frame_intensity=img_std))
             else:
@@ -441,7 +439,7 @@ class PupilTracker:
                                    ))
             if display:
                 self.display(gray, blur, thres, eye_roi, fr_count, n_frames, ellipse=ellipse,
-                                eye_center=eye_center, contour=contour)
+                             eye_center=eye_center, contour=contour, ncontours=len(contours))
             if (cv2.waitKey(1) & 0xFF == ord('q')):
                 raise PipelineException('Tracking aborted')
 
