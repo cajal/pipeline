@@ -6,7 +6,6 @@ import numpy as np
 import sh
 import os
 from commons import lab
-
 try:
     import pyfnnd
 except ImportError:
@@ -18,7 +17,6 @@ from distutils.version import StrictVersion
 from .utils import galvo_corrections
 from .experiment import Session, Scan
 import imreg_dft as ird
-from .utils import caiman_interface as cmn
 
 
 assert StrictVersion(dj.__version__) >= StrictVersion('0.2.8')
@@ -230,49 +228,6 @@ class Prepare(dj.Imported):
 
         return fig
 
-
-@schema
-class CorrelationImage(dj.Computed):
-    definition = """
-    # correlation image to identify responsive parts
-
-    -> Prepare
-    -> Slice
-    -> Channel
-    ---
-    correlation_image   : longblob # correlation image
-    """
-
-    key_source = Prepare() & Prepare.GalvoMotion()
-
-    def _make_tuples(self, key):
-        print('Processing', key, flush=True)
-        # Get scan filename
-        filename = (Scan() & key).get_local_filename()
-
-        # Read the scan
-        reader = TIFFReader(filename)
-
-        # Over each slice and channel
-        scan_slices, scan_channels = (Prepare.GalvoMotion() & key).fetch['slice', 'channel']
-        for slice, channel in zip(scan_slices, scan_channels):
-            # Load the current data
-            scan = np.double(reader[:, :, channel - 1, slice - 1, :]).squeeze()
-            correct_motion = (Prepare.GalvoMotion() & key &
-                              {'slice': slice, 'channel': channel}).get_correct_motion()
-            correct_raster = (Prepare.Galvo() & key).get_correct_raster()
-
-            # Correct the scan
-            corrected_scan = correct_motion(correct_raster(scan))
-
-            # Calculate correlation image
-            correlation_image = cmn.compute_correlation_image(corrected_scan)
-
-            # Insert image
-            self.insert1(dict(key, correlation_image=correlation_image, slice=slice,
-                              channel=channel))
-
-
 @schema
 class Method(dj.Lookup):
     definition = """  #  methods for extraction from raw data for either AOD or Galvo data
@@ -381,17 +336,28 @@ class ExtractRaw(dj.Imported):
         spike_trace :longblob
         """
 
+    class GalvoCorrelationImage(dj.Part):
+        definition = """
+        # Each pixel shows the (average) temporal correlation between that pixel and its four neighbors
+        -> ExtractRaw
+        -> Channel
+        -> Slice
+        ---
+        correlation_image   : longblob # correlation image
+        """
+
     class BackgroundComponents(dj.Part):
         definition = """
         # Inferred background components with the CNMF algorithm
-        -> ExtractRaw.Trace
+        -> ExtractRaw
+        -> Channel
         -> Slice
         ----------------
         masks    : longblob # array (im_width x im_height x num_background_components)
         activity : longblob # array (num_background_components x timesteps)
         """
 
-    class ARParameters(dj.Part):
+    class ARCoefficients(dj.Part):
         definition = """
         # Fitted parameters for the autoregressive process (CNMF)
         -> ExtractRaw.Trace
@@ -399,7 +365,7 @@ class ExtractRaw(dj.Imported):
         g: longblob # array with g1, g2, ... values for the AR process
         """
 
-    class CNMFArguments(dj.Part):
+    class CNMFParameters(dj.Part):
         definition = """
         # Arguments used to demix and deconvolve the scan with CNMF
         -> ExtractRaw
@@ -571,6 +537,8 @@ class ExtractRaw(dj.Imported):
         See caiman_interface.demix_and_deconvolve_with_cnmf for an explanation of params
         """
         print('ExtractRaw: Processing scan {}'.format(key))
+        from .utils import caiman_interface as cmn # only used here
+
         # Get scan filename
         filename = (Scan() & key).get_local_filename()
 
@@ -625,8 +593,14 @@ class ExtractRaw(dj.Imported):
                 correct_raster = (Prepare.Galvo() & key).get_correct_raster()
                 corrected_scan = correct_motion(correct_raster(scan))
 
+                # Compute and insert correlation image
+                correlation_image = cmn.compute_correlation_image(corrected_scan)
+                ExtractRaw.GalvoCorrelationImage().insert1({**key, 'slice': slice,
+                                                            'channel': channel,
+                                                            'correlation_image': correlation_image})
+
                 # Extract traces
-                cnmf_result = cmn.demix_and_deconvolve_with_cnmf(scan, **kwargs)
+                cnmf_result = cmn.demix_and_deconvolve_with_cnmf(corrected_scan, **kwargs)
                 (location_matrix, activity_matrix, background_location_matrix,
                 background_activity_matrix, raw_traces, spikes, AR_params) = cnmf_result
 
@@ -635,7 +609,7 @@ class ExtractRaw(dj.Imported):
                 for i in range(final_num_components):
                     # Create new trace key
                     trace_id = num_traces_until_now + i + 1
-                    trace_key = {**key, trace_id=trace_id, channel=channel}
+                    trace_key = {**key, 'trace_id': trace_id, 'channel': channel}
 
                     # Insert traces and spikes
                     ExtractRaw.Trace().insert1({**trace_key, 'raw_trace': raw_traces[i, :]})
@@ -643,7 +617,7 @@ class ExtractRaw(dj.Imported):
 
                     # Insert fitted AR parameters
                     if kwargs['AR_order'] > 0:
-                        ExtractRaw.ARParameters().insert1({**trace_key, 'g': AR_params[i,:]})
+                        ExtractRaw.ARCoefficients().insert1({**trace_key, 'g': AR_params[i, :]})
 
                     # Get indices and weights of defined pixels in mask (matlab-like)
                     mask_as_F_ordered_vector = location_matrix[:, :, i].ravel(order='F')
@@ -657,19 +631,17 @@ class ExtractRaw(dj.Imported):
                     ExtractRaw.GalvoROI().insert1({**trace_key, 'slice': slice,
                                                    'mask_pixels': defined_mask_indices,
                                                    'mask_weights': defined_mask_weights})
+                num_traces_until_now += final_num_components # increase trace count
 
-                # Insert background components (all in one)
+                # Insert background components
                 background_dict = {**key, 'channel': channel, 'slice': slice,
                                    'masks': background_location_matrix,
                                    'activity': background_activity_matrix}
                 ExtractRaw.BackgroundComponents().insert1(background_dict)
 
-                # Increase trace count
-                num_traces_until_now += final_num_components
-
         # Insert CNMF parameters (one per scan)
         lowercase_kwargs = {(key.lower(), value) for key, value in kwargs.items()}
-        ExtractRaw.CNMFArguments().insert1({**key, **lowercase_kwargs})
+        ExtractRaw.CNMFParameters().insert1({**key, **lowercase_kwargs})
 
     def _estimate_num_components_per_slice(self):
         """ Estimates the number of components per scan slice using simple rules of thumb.
@@ -677,7 +649,7 @@ class ExtractRaw(dj.Imported):
         For somatic scans, estimate number of neurons based on:
         (100x100x100)um^3 = 1e6 um^3 -> 1e2 neurons; (1x1x1)mm^3 = 1e9 um^3 -> 1e5 neurons
 
-        For axonal/dendritic scans, just ten times as our estimate of neurons.
+        For axonal/dendritic scans, just ten times our estimate of neurons.
 
         :returns: Number of components
         :rtype: int
@@ -704,6 +676,7 @@ class ExtractRaw(dj.Imported):
 
     def cnmf_plot_contours(self):
         # Load location matrix for this scan
+        # Load correlation_image
         # Call caiman_interface.plot_contours
         pass
 
