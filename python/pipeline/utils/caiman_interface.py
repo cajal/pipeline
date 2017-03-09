@@ -179,6 +179,10 @@ def compute_correlation_image(scan):
     coefficients (taken over time) of each pixel with its four immediate neighbors."
     (Pnevmatikakis et al., 2016)
 
+    In reality, each pixel trace is normalized through time, traces for one pixel is
+    multiplied with that of its four neighbors, this value is averaged over time and
+    then averaged over the number of pair multiplications.
+
     :param np.array scan: 3-dimensional scan (image_height, image_width, timesteps).
 
     :returns: Correlation image. 2-dimensional array shaped (image_height x image_width).
@@ -321,7 +325,6 @@ def plot_impulse_responses(AR_params, num_timepoints=100):
         plt.plot(output)
 
     return fig
-
 
 def order_components(location_matrix, activity_matrix):
     """Based on caiman.source_extraction.cnmf.utilities.order_components"""
