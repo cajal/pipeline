@@ -1,5 +1,4 @@
 """Interface to the CaImAn package (https://github.com/simonsfoundation/CaImAn)"""
-from .. import PipelineException
 import numpy as np
 import caiman
 import glob, os
@@ -12,7 +11,7 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, merge_threshold=0.8
                                    num_pixels_per_process=10000, block_size=10000,
                                    init_method='greedy_roi', AR_order=2,
                                    neuron_size_in_pixels=10, alpha_snmf=None,
-                                   patch_downscaling_factor=4,
+                                   patch_downsampling_factor=4,
                                    percentage_of_patch_overlap=0.2):
     """ Extract spike train activity directly from the scan using CNMF.
 
@@ -45,7 +44,7 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, merge_threshold=0.8
     :param int neuron_size_in_pixels: Estimated size of a neuron in the scan (used for
         'greedy_roi' initialization to define the size of the gaussian window)
     :param int alpha_snmf: Regularization parameter (alpha) for the sparse NMF (if used).
-    :param int patch_downscaling factor: Divisions to the image dimensions to obtain patch
+    :param int patch_downsampling factor: Division to the image dimensions to obtain patch
         dimensions, e.g., if original size is 256 and factor is 10, patches will be 26x26
     :param int percentage_of_patch_overlap: Patches are sampled in a sliding window. This
         controls how much overlap is between adjacent patches (0 for none, 0.9 for 90%)
@@ -108,8 +107,8 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, merge_threshold=0.8
     initial_f = None
     if init_on_patches:
         # Calculate some params
-        patch_size = round(image_height / patch_downscaling_factor)  # only square windows
-        components_per_patch = max(1, round(num_components / patch_downscaling_factor**2))
+        patch_size = round(image_height / patch_downsampling_factor)  # only square windows
+        components_per_patch = max(1, round(num_components / patch_downsampling_factor**2))
         overlap_in_pixels = round(patch_size * percentage_of_patch_overlap)
 
         # Run CNMF on patches (only for initialization, no impulse response modelling p=0)
@@ -143,7 +142,7 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, merge_threshold=0.8
     activity_matrix = cnmf.C  # num_components x timesteps
     background_location_matrix = cnmf.b  # pixels x num_background_components
     background_activity_matrix = cnmf.f  # num_background_components x timesteps
-    spikes_matrix = cnmf.S  # num_components x timesteps, spike_ traces
+    spikes = cnmf.S  # num_components x timesteps, spike_ traces
     raw_traces = cnmf.C + cnmf.YrA  # num_components x timesteps
     AR_params = cnmf.g  # AR_order x num_components
 
@@ -169,7 +168,7 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, merge_threshold=0.8
         os.remove(filename)
 
     return (location_matrix, activity_matrix, background_location_matrix,
-            background_activity_matrix, raw_traces, spikes_matrix, AR_params)
+            background_activity_matrix, raw_traces, spikes, AR_params)
 
 
 def compute_correlation_image(scan):
