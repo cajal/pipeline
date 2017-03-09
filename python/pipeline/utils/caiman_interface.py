@@ -24,7 +24,6 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, merge_threshold=0.8
 
     :param np.array scan: 3-dimensional scan (image_height, image_width, timesteps).
     :param int num_components: An estimate of neurons/spatial components in the scan FOV.
-    :param bool is_somatic: True for somatic scan, False for axonal/dendritic.
     :param int merge_threshold: Maximum temporal correlation allowed between activity of
                                 overlapping components before merging them.
     :param int num_background_components:  Number of background components to use.
@@ -44,7 +43,7 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, merge_threshold=0.8
     :param int neuron_size_in_pixels: Estimated size of a neuron in the scan (used for
         'greedy_roi' initialization to define the size of the gaussian window)
     :param int alpha_snmf: Regularization parameter (alpha) for the sparse NMF (if used).
-    :param int patch_downsampling factor: Division to the image dimensions to obtain patch
+    :param int patch_downsampling_factor: Division to the image dimensions to obtain patch
         dimensions, e.g., if original size is 256 and factor is 10, patches will be 26x26
     :param int percentage_of_patch_overlap: Patches are sampled in a sliding window. This
         controls how much overlap is between adjacent patches (0 for none, 0.9 for 90%)
@@ -72,6 +71,8 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, merge_threshold=0.8
     # Calculate standard deviation of the gaussian window used for greedy ROI search
     if init_method == 'greedy_roi':
         gaussian_std_dev = [neuron_size_in_pixels // 2, neuron_size_in_pixels // 2]
+    else:
+        gaussian_std_dev=None
 
     # Deal with negative values in the scan.
     min_value_in_scan = np.min(scan)
