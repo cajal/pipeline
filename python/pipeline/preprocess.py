@@ -322,7 +322,8 @@ class ExtractRaw(dj.Imported):
                  - (Session.TargetStructure() & 'compartment="axon"')
 
     class Trace(dj.Part):
-        definition = """  # raw trace, common to Galvo
+        definition = """
+        # Raw trace, common to Galvo
         -> ExtractRaw
         -> Channel
         trace_id  : smallint
@@ -331,7 +332,8 @@ class ExtractRaw(dj.Imported):
         """
 
     class GalvoSegmentation(dj.Part):
-        definition = """  # segmentation of galvo movies
+        definition = """
+        # Segmentation of galvo movies
         -> ExtractRaw
         -> Slice
         ---
@@ -339,7 +341,8 @@ class ExtractRaw(dj.Imported):
         """
 
     class GalvoROI(dj.Part):
-        definition = """  # region of interest produced by segmentation
+        definition = """
+        # Region of interest produced by segmentation
         -> ExtractRaw.GalvoSegmentation
         -> ExtractRaw.Trace
         ---
@@ -356,12 +359,65 @@ class ExtractRaw(dj.Imported):
                 ret[..., i] = mask.reshape(px_height, px_width, order='F')
             return ret
 
+        def get_mask_as_image(self):
+            """Return the mask for this single ROI as  an image (2-d array)"""
+            # Get params
+            pixel_indices, weights = (ExtractRaw.GalvoROI() & self).fetch1['mask_pixels',
+                                                                           'mask_weights']
+            image_height, image_width = (Prepare.Galvo() & self).fetch1['px_height',
+                                                                        'px_width']
+            # Calculate and reshape mask
+            mask_as_vector = np.zeros(image_height * image_width)
+            mask_as_vector[pixel_indices - 1] = weights
+            spatial_mask = mask_as_vector.reshape(image_height, image_width, order='F')
+
+            return spatial_mask
+
     class SpikeRate(dj.Part):
         definition = """
-        # spike trace extracted while segmentation
+        # Spike trace deconvolved during CNMF
         -> ExtractRaw.Trace
         ---
         spike_trace :longblob
+        """
+
+    class BackgroundComponents(dj.Part):
+        definition = """
+        # Inferred background components with the CNMF algorithm
+        -> ExtractRaw.Trace
+        -> Slice
+        ----------------
+        masks    : longblob # array (im_width x im_height x num_background_components)
+        activity : longblob # array (num_background_components x timesteps)
+        """
+
+    class ARParameters(dj.Part):
+        definition = """
+        # Fitted parameters for the autoregressive process (CNMF)
+        -> ExtractRaw.Trace
+        ----------------
+        g: longblob # array with g1, g2, ... values for the AR process
+        """
+
+    class CNMFArguments(dj.Part):
+        definition = """
+        # Arguments used to demix and deconvolve the scan with CNMF
+        -> ExtractRaw
+        --------------
+        num_components      : smallint # estimated number of components
+        merge_threshold     : float # overlapping masks are merged if temporal correlation greater than this
+        num_background_components   : smallint # estimated number of background components
+        init_on_patches     : boolean   # wheter to run initialization on patches
+        num_processes = null    : smallint # number of processes to run in parallel, null=all possible
+        memory_usage_in_gb  : int # how much memory to use
+        num_pixels_per_process  : int # number of pixels processed at a time
+        block_size          : int # number of pixels per each dot product
+        init_method         : enum("greedy_roi", "sparse_nmf") # type of initialization used
+        ar_order            : tinyint # order of the autoregressive process for impulse function response
+        neuron_size_in_pixels = null   :   tinyint
+        alpha_snmf = null   : float   # Regularization parameter for SNMF
+        patch_downsampling_factor = null : tinyint # how to downsample the scan
+        percentage_of_patch_overlap = null : float # overlap between adjacent patches
         """
 
     def plot_traces_and_masks(self, traces, slice, mask_channel=1, outfile='traces.pdf'):
@@ -510,7 +566,10 @@ class ExtractRaw(dj.Imported):
 
     def _make_tuples(self, key):
         """ Load scan one slice & channel at a time, correct for raster and motion
-        artifacts and use CNMF to extract sources and deconvolve spike traces."""
+        artifacts and use CNMF to extract sources and deconvolve spike traces.
+
+        See caiman_interface.demix_and_deconvolve_with_cnmf for an explanation of params
+        """
         print('ExtractRaw: Processing scan {}'.format(key))
         # Get scan filename
         filename = (Scan() & key).get_local_filename()
@@ -522,7 +581,7 @@ class ExtractRaw(dj.Imported):
         num_components = self._estimate_num_components_per_slice()
         num_components = num_components * 2  # double it just to be sure
 
-        # Set parameters
+        # Set general parameters
         kwargs = {}
         kwargs['num_components'] = num_components
         kwargs['merge_threshold'] = 0.8
@@ -548,29 +607,69 @@ class ExtractRaw(dj.Imported):
 
         # Set params specific to initialization on patches
         if kwargs['init_on_patches']:
-            kwargs['patch_downscaling_factor'] = 4
-            kwargs['percentage_of_overlap'] = .2
+            kwargs['patch_downsampling_factor'] = 4
+            kwargs['percentage_of_patch_overlap'] = .2
 
-        # Over each slice and channel in the scan
+        # Over each channel and slice in the scan
         scan_slices, scan_channels = (Prepare.GalvoMotion() & key).fetch['slice', 'channel']
-        for slice, channel in zip(scan_slices, scan_channels):
-            # Load the scan
-            scan = np.double(reader[:, :, channel - 1, slice - 1, :]).squeeze()
+        for channel in scan_channels:
+            num_traces_until_now = 0 # count traces over one channel
 
-            # Correct scan
-            correct_motion = (Prepare.GalvoMotion() & key &
-                              {'slice': slice, 'channel': channel}).get_correct_motion()
-            correct_raster = (Prepare.Galvo() & key).get_correct_raster()
-            corrected_scan = correct_motion(correct_raster(scan))
+            for slice in scan_slices:
+                # Load the scan
+                scan = np.double(reader[:, :, channel - 1, slice - 1, :]).squeeze()
 
-            # Extract traces
-            cnmf_result = cmn.demix_and_deconvolve_with_cnmf(scan, **kwargs)
+                # Correct scan
+                correct_motion = (Prepare.GalvoMotion() & key &
+                                  {'slice': slice, 'channel': channel}).get_correct_motion()
+                correct_raster = (Prepare.Galvo() & key).get_correct_raster()
+                corrected_scan = correct_motion(correct_raster(scan))
 
-            # Insert results in the appropriate tables
-            pass
+                # Extract traces
+                cnmf_result = cmn.demix_and_deconvolve_with_cnmf(scan, **kwargs)
+                (location_matrix, activity_matrix, background_location_matrix,
+                background_activity_matrix, raw_traces, spikes, AR_params) = cnmf_result
 
-        # Save NMF parameters to permanent storage (one per scan)
-        pass
+                # Insert traces, spikes and spatial masks
+                final_num_components = raw_traces.shape[0]
+                for i in range(final_num_components):
+                    # Create new trace key
+                    trace_id = num_traces_until_now + i + 1
+                    trace_key = {**key, trace_id=trace_id, channel=channel}
+
+                    # Insert traces and spikes
+                    ExtractRaw.Trace().insert1({**trace_key, 'raw_trace': raw_traces[i, :]})
+                    ExtractRaw.SpikeRate().insert1({**trace_key, 'spike_trace': spikes[i, :]})
+
+                    # Insert fitted AR parameters
+                    if kwargs['AR_order'] > 0:
+                        ExtractRaw.ARParameters().insert1({**trace_key, 'g': AR_params[i,:]})
+
+                    # Get indices and weights of defined pixels in mask (matlab-like)
+                    mask_as_F_ordered_vector = location_matrix[:, :, i].ravel(order='F')
+                    defined_mask_indices = np.where(mask_as_F_ordered_vector)
+                    defined_mask_weights = mask_as_F_ordered_vector(defined_mask_indices)
+                    defined_mask_indices += 1 # matlab indices start at 1
+
+                    # Insert spatial mask
+                    ExtractRaw.GalvoSegmentation().insert1({**key, 'slice': slice},
+                                                           skip_duplicates=True)
+                    ExtractRaw.GalvoROI().insert1({**trace_key, 'slice': slice,
+                                                   'mask_pixels': defined_mask_indices,
+                                                   'mask_weights': defined_mask_weights})
+
+                # Insert background components (all in one)
+                background_dict = {**key, 'channel': channel, 'slice': slice,
+                                   'masks': background_location_matrix,
+                                   'activity': background_activity_matrix}
+                ExtractRaw.BackgroundComponents().insert1(background_dict)
+
+                # Increase trace count
+                num_traces_until_now += final_num_components
+
+        # Insert CNMF parameters (one per scan)
+        lowercase_kwargs = {(key.lower(), value) for key, value in kwargs.items()}
+        ExtractRaw.CNMFArguments().insert1({**key, **lowercase_kwargs})
 
     def _estimate_num_components_per_slice(self):
         """ Estimates the number of components per scan slice using simple rules of thumb.
