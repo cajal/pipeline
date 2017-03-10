@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 
 def demix_and_deconvolve_with_cnmf(scan, num_components=100, merge_threshold=0.8,
                                    num_background_components=4, init_on_patches=False,
-                                   num_processes=None, memory_usage_in_GB=20,
+                                   num_processes=None, memory_usage_in_GB=30,
                                    num_pixels_per_process=10000, block_size=10000,
                                    init_method='greedy_roi', AR_order=2,
                                    neuron_size_in_pixels=10, alpha_snmf=None,
@@ -59,9 +59,9 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, merge_threshold=0.8
     :returns: Raw fluorescence traces (num_components x timesteps) obtained from the scan
             minus activity from background and other components.
     :returns: Spike matrix (num_components x timesteps). Deconvolved spike activity.
-    :returns: Params (num_components x 2 or [] for dendrites) for the autoregressive
-            process used to model the calcium impulse response of each component:
-                   c(t) = c(t-1) * AR_params[0] + c(t-2) * AR_params[1]
+    :returns: Params (num_components x AR_order) for the autoregressive process used to
+            model the calcium impulse response of each component:
+                   c(t) = c(t-1) * AR_params[0] + c(t-2) * AR_params[1] + ...
 
     ..note:: Based on code provided by Andrea Giovanucci.
     ..note:: The produced number of components is not exactly what you ask for because
@@ -154,7 +154,7 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, merge_threshold=0.8
     AR_params = np.array(list(AR_params))  # unwrapping it (num_components x 2)
 
     # Order components by quality (densely distributed in space and high firing)
-    location_matrix, activity_matrix = order_components(location_matrix, activity_matrix)
+    location_matrix, activity_matrix = _order_components(location_matrix, activity_matrix)
 
     # Stop ipyparallel cluster
     caiman.stop_server()
@@ -216,6 +216,31 @@ def plot_contours(location_matrix, background_image=None):
                                              vmax=background_image.max())
 
 
+def _order_components(location_matrix, activity_matrix):
+    """Based on caiman.source_extraction.cnmf.utilities.order_components"""
+    # This is the original version from caiman
+    # num_components = location_matrix.shape[-1]
+    # linear_location = location_matrix.reshape(-1, num_components)
+    # density_measure = np.sum(linear_location**4, axis = 0)**(1/4) # small dense masks better
+    # norm_density = density_measure / np.linalg.norm(linear_location, axis=0)
+    #
+    # firing_measure = np.max(activity_matrix.T * np.linalg.norm(linear_location, axis=0),
+    #                         axis=0)
+    #
+    # final_measure = norm_density * firing_measure
+    # new_order = np.argsort(final_measure)[::-1]
+
+    # This is good enough (just order them based on the size of the spatial components)
+    density_measure = np.linalg.norm(location_matrix, axis=(0, 1))
+    new_order = np.argsort(density_measure)[::-1]
+
+    return location_matrix[:, :, new_order], activity_matrix[new_order, :]
+
+
+
+
+
+#TODO: Delete this one, already in ExtractRaw
 def save_video(scan, location_matrix, activity_matrix, background_location_matrix,
                background_activity_matrix, fps, filename='cnmf_extraction.mp4',
                start_index=0, seconds=30, dpi=200):
@@ -236,7 +261,7 @@ def save_video(scan, location_matrix, activity_matrix, background_location_matri
     # Some variables used below
     image_height, image_width, _ = scan.shape
     num_pixels = image_height * image_width
-    num_video_frames = int(fps * seconds)
+    num_video_frames = round(fps * seconds)
 
     # Restrict computations to the necessary video frames
     stop_index = start_index + num_video_frames
@@ -300,7 +325,7 @@ def save_video(scan, location_matrix, activity_matrix, background_location_matri
 
     return fig
 
-
+#TODO: Delete. ALready in ExtractRaw
 def plot_impulse_responses(AR_params, num_timepoints=100):
     """ Plots the individual impulse response functions assuming an AR(2) process.
 
@@ -325,23 +350,3 @@ def plot_impulse_responses(AR_params, num_timepoints=100):
         plt.plot(output)
 
     return fig
-
-def order_components(location_matrix, activity_matrix):
-    """Based on caiman.source_extraction.cnmf.utilities.order_components"""
-    # This is the original version from caiman
-    # num_components = location_matrix.shape[-1]
-    # linear_location = location_matrix.reshape(-1, num_components)
-    # density_measure = np.sum(linear_location**4, axis = 0)**(1/4) # small dense masks better
-    # norm_density = density_measure / np.linalg.norm(linear_location, axis=0)
-    #
-    # firing_measure = np.max(activity_matrix.T * np.linalg.norm(linear_location, axis=0),
-    #                         axis=0)
-    #
-    # final_measure = norm_density * firing_measure
-    # new_order = np.argsort(final_measure)[::-1]
-
-    # This is good enough (just order them based on the size of the spatial components)
-    density_measure = np.linalg.norm(location_matrix, axis=(0, 1))
-    new_order = np.argsort(density_measure)[::-1]
-
-    return location_matrix[:, :, new_order], activity_matrix[new_order, :]
