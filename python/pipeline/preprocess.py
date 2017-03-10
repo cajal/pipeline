@@ -17,6 +17,8 @@ from distutils.version import StrictVersion
 from .utils import galvo_corrections
 from .experiment import Session, Scan
 import imreg_dft as ird
+import matplotlib.pyplot as plt
+from .utils import caiman_interface as cmn
 
 
 assert StrictVersion(dj.__version__) >= StrictVersion('0.2.8')
@@ -171,15 +173,15 @@ class Prepare(dj.Imported):
         :rtype: matplotlib.figure.Figure
         """
         # Get scan filename
-        filename = (Scan() & self).get_local_filename()
+        scan_filename = (Scan() & self).get_local_filename()
 
         # Get fps and total_num_frames
         fps = (Prepare.Galvo() & self).fetch1['fps']
-        num_video_frames = int(fps * seconds)
+        num_video_frames = round(fps * seconds)
         stop_index = start_index + num_video_frames
 
         # Load the scan
-        reader = TIFFReader(filename)
+        reader = TIFFReader(scan_filename)
         scan = np.double(reader[:, :, channel - 1, slice - 1, start_index: stop_index])
         scan = scan.squeeze()
         original_scan = scan.copy()
@@ -193,7 +195,6 @@ class Prepare(dj.Imported):
         corrected_scan = motion_corrected
 
         # Create animation
-        import matplotlib.pyplot as plt
         import matplotlib.animation as animation
 
         ## Set the figure
@@ -537,7 +538,6 @@ class ExtractRaw(dj.Imported):
         See caiman_interface.demix_and_deconvolve_with_cnmf for an explanation of params
         """
         print('ExtractRaw: Processing scan {}'.format(key))
-        from .utils import caiman_interface as cmn # only used here
 
         # Get scan filename
         filename = (Scan() & key).get_local_filename()
@@ -546,7 +546,7 @@ class ExtractRaw(dj.Imported):
         reader = TIFFReader(filename)
 
         # Estimate number of components per slice
-        num_components = self._estimate_num_components_per_slice()
+        num_components = self.estimate_num_components_per_slice()
         num_components = num_components * 2  # double it just to be sure
 
         # Set general parameters
@@ -558,7 +558,7 @@ class ExtractRaw(dj.Imported):
 
         # Set performance/execution parameters (heuristically)
         kwargs['num_processes'] = None  # all cores available
-        kwargs['memory_usage_in_GB'] = 20
+        kwargs['memory_usage_in_GB'] = 30
         kwargs['num_pixels_per_process'] = 10000
         kwargs['block_size'] = 10000
 
@@ -571,7 +571,7 @@ class ExtractRaw(dj.Imported):
         else:
             kwargs['init_method'] = 'sparse_nmf'
             kwargs['AR_order'] = 0  # no impulse response function modelling
-            kwargs['alpha_snmf'] = 10e-2
+            kwargs['alpha_snmf'] = 0.1
 
         # Set params specific to initialization on patches
         if kwargs['init_on_patches']:
@@ -643,7 +643,7 @@ class ExtractRaw(dj.Imported):
         lowercase_kwargs = {(key.lower(), value) for key, value in kwargs.items()}
         ExtractRaw.CNMFParameters().insert1({**key, **lowercase_kwargs})
 
-    def _estimate_num_components_per_slice(self):
+    def estimate_num_components_per_slice(self):
         """ Estimates the number of components per scan slice using simple rules of thumb.
 
         For somatic scans, estimate number of neurons based on:
@@ -669,16 +669,193 @@ class ExtractRaw(dj.Imported):
 
         return round(num_components)
 
-    def cnmf_save_video(self):
-        # Acces location_matrix, activity_matrix, and all that's needed
-        # Copy from caiman_interface save video.
-        pass
+    def save_video(self, filename='cnmf_extraction.mp4', slice=1, channel=1,
+                   start_index=0, seconds=30, dpi=200):
+        """ Creates an animation video showing the original vs corrected scan.
 
-    def cnmf_plot_contours(self):
-        # Load location matrix for this scan
-        # Load correlation_image
-        # Call caiman_interface.plot_contours
-        pass
+        :param string filename: Output filename (path + filename)
+        :param int slice: Slice to use for plotting. Starts at 1
+        :param int channel: What channel from the scan to use. Starts at 1
+        :param int start_index: Where in the scan to start the video.
+        :param int seconds: How long in seconds should the animation run.
+        :param int dpi: Dots per inch, controls the quality of the video.
+
+        :returns Figure. You can call show() on it.
+        :rtype: matplotlib.figure.Figure
+        """
+        # Get scan filename
+        scan_filename = (Scan() & self).get_local_filename()
+
+        # Get fps and calculate total number of frames
+        fps = (Prepare.Galvo() & self).fetch1['fps']
+        num_video_frames = round(fps * seconds)
+        stop_index = start_index + num_video_frames
+
+        # Load the scan
+        reader = TIFFReader(scan_filename)
+        scan = np.double(reader[:, :, channel - 1, slice - 1, start_index: stop_index])
+        scan = scan.squeeze()
+
+        # Correct the scan
+        correct_motion = (Prepare.GalvoMotion() & self &
+                          {'slice': slice, 'channel': channel}).get_correct_motion()
+        correct_raster = (Prepare.Galvo() & self).get_correct_raster()
+        raster_corrected = correct_raster(scan)
+        motion_corrected = correct_motion(raster_corrected, range(start_index, stop_index))
+        scan = motion_corrected
+
+        # Get scan dimensions
+        image_height, image_width, _ = scan.shape
+        num_pixels = image_height * image_width
+
+        # Get location and activity matrices
+        location_matrix = self.get_all_masks(slice, channel)
+        activity_matrix = self.get_all_traces(slice, channel)
+        background_rel = ExtractRaw.BackgroundComponents() & self & {'slice': slice,
+                                                                     'channel': channel}
+        background_location_matrix, background_activity_matrix = \
+            background_rel.fetch1['masks', 'activity']
+
+        # Restrict computations to the necessary video frames
+        activity_matrix = activity_matrix[:, start_index: stop_index]
+        background_activity_matrix = background_activity_matrix[:, start_index: stop_index]
+
+        # Calculate matrices
+        extracted = np.dot(location_matrix.reshape(num_pixels, -1), activity_matrix)
+        extracted = extracted.reshape(image_height, image_width, -1)
+        background = np.dot(background_location_matrix.reshape(num_pixels, -1),
+                            background_activity_matrix)
+        background = background.reshape(image_height, image_width, -1)
+        residual = scan - extracted - background
+
+        # Create animation
+        import matplotlib.animation as animation
+
+        ## Set the figure
+        fig = plt.figure()
+
+        plt.subplot(2, 2, 1)
+        plt.title('Original (Y)')
+        im1 = plt.imshow(scan[:, :, 0], vmin=scan.min(), vmax=scan.max())  # just a placeholder
+        plt.axis('off')
+        plt.colorbar()
+
+        plt.subplot(2, 2, 2)
+        plt.title('Extracted (A*C)')
+        im2 = plt.imshow(extracted[:, :, 0], vmin=extracted.min(), vmax=extracted.max())
+        plt.axis('off')
+        plt.colorbar()
+
+        plt.subplot(2, 2, 3)
+        plt.title('Background (B*F)')
+        im3 = plt.imshow(background[:, :, 0], vmin=background.min(),
+                         vmax=background.max())
+        plt.axis('off')
+        plt.colorbar()
+
+        plt.subplot(2, 2, 4)
+        plt.title('Residual (Y - A*C - B*F)')
+        im4 = plt.imshow(residual[:, :, 0], vmin=residual.min(), vmax=residual.max())
+        plt.axis('off')
+        plt.colorbar()
+
+        ## Make the animation
+        def update_img(i):
+            im1.set_data(scan[:, :, i])
+            im2.set_data(extracted[:, :, i])
+            im3.set_data(background[:, :, i])
+            im4.set_data(residual[:, :, i])
+
+        video = animation.FuncAnimation(fig, update_img, num_video_frames,
+                                        interval=1000 / fps)
+
+        # Save animation
+        print('Saving video at:', filename)
+        print('If this takes too long, stop it and call again with dpi < 200 (default)')
+        video.save(filename, dpi=dpi)
+
+        return fig
+
+    def plot_contours(self, slice=1, channel=1):
+        """ Draw contours of all masks over the correlation image.
+
+        :param slice: Scan slice to use
+        :param channel: Scan channel to use
+        :returns: None
+        """
+        # Get location matrix
+        location_matrix = self.get_all_masks(slice, channel)
+
+        # Get correlation image if defined
+        image_rel = ExtractRaw.GalvoCorrelationImage() & self & {'slice': slice,
+                                                                 'channel': channel}
+        correlation_image = image_rel.fetch1['correlation_image'] if image_rel else None
+
+        # Draw contours
+        cmn.plot_contours(location_matrix, correlation_image)
+
+    def plot_impulse_responses(self, slice=1, channel=1, num_timepoints=100):
+        """ Plots the individual impulse response functions for all traces assuming an
+        autoregressive process (p > 0).
+
+        Assumes p (AR_order) <  num_timepoints. Otherwise, it still works but results are
+        wrong.
+
+        :param int num_timepoints: The number of points after impulse to use for plotting.
+
+        :returns Figure. You can call show() on it.
+        :rtype: matplotlib.figure.Figure
+        """
+        ar_rel = ExtractRaw.ARCoefficients() & self & {'slice': slice, 'channel': channel}
+        fps = (Prepare.Galvo() & self).fetch1['fps']
+
+        # Get AR coefficients
+        ar_coefficients = ar_rel.fetch['g'] if ar_rel else None
+
+        if ar_coefficients is not None:
+            fig = plt.figure()
+            x_axis = np.arange(num_timepoints) / fps # make it seconds
+
+            # Over each trace
+            for g in ar_coefficients:
+                AR_order = len(g)
+                output = np.zeros(num_timepoints)
+                output[0] = 1  # initial spike
+                for i in range(1, num_timepoints):
+                    output[i] = np.sum(g * output[i - 1: i - AR_order: -1])
+
+                # Plot
+                plt.plot(x_axis, output)
+
+            return fig
+
+    def get_all_masks(self, slice, channel):
+        """Returns an image_width x image_height x num_masks matrix with all masks."""
+        mask_rel = ExtractRaw.GalvoROI() & self & {'slice': slice, 'channel': channel}
+
+        # Get masks
+        image_height, image_width = (Prepare.Galvo() & self).fetch1['px_height',
+                                                                    'px_width']
+        mask_pixels, mask_weights = mask_rel.fetch.order_by('trace_id')['mask_pixels',
+                                                                        'mask_weights']
+
+        # Reshape masks
+        location_matrix = ExtractRaw.GalvoROI.reshape_masks(mask_pixels, mask_weights,
+                                                            image_height, image_width)
+
+        return location_matrix
+
+    def get_all_traces(self, slice, channel):
+        """ Returns a num_traces x num_timesteps matrix with all traces."""
+        trace_rel = ExtractRaw.Trace()*ExtractRaw.GalvoROI & self & {'slice': slice,
+                                                                     'channel': channel}
+        # Get traces
+        raw_traces = trace_rel.fetch.order_by('trace_id')['raw_trace']
+
+        # Reshape traces
+        raw_traces = np.array([x.squeeze() for x in raw_traces])
+
+        return raw_traces
 
 @schema
 class Sync(dj.Imported):
