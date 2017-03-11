@@ -108,6 +108,33 @@ class Prepare(dj.Imported):
                 return lambda scan: galvo_corrections.correct_raster(scan, raster_phase,
                                                                      fill_fraction)
 
+        def estimate_num_components_per_slice(self):
+            """ Estimates the number of components per scan slice using simple rules of thumb.
+
+            For somatic scans, estimate number of neurons based on:
+            (100x100x100)um^3 = 1e6 um^3 -> 1e2 neurons; (1x1x1)mm^3 = 1e9 um^3 -> 1e5 neurons
+
+            For axonal/dendritic scans, just ten times our estimate of neurons.
+
+            :returns: Number of components
+            :rtype: int
+            """
+
+            # Get slice dimensions (in micrometers)
+            slice_height, slice_width = (Prepare.Galvo() & self).fetch1['um_height',
+                                                                       'um_width']
+            slice_thickness = 10  # assumption
+            slice_volume = slice_width * slice_height * slice_thickness
+
+            # Estimate number of components
+            if Session.TargetStructure() & self:  # scan is axonal/dendritic
+                num_components = slice_volume * 0.001  # ten times as many neurons
+            else:
+                num_components = slice_volume * 0.0001
+
+            return int(round(num_components))
+
+
     class GalvoMotion(dj.Part):
         definition = """   # motion correction for galvo scans
         -> Prepare.Galvo
@@ -177,7 +204,7 @@ class Prepare(dj.Imported):
 
         # Get fps and total_num_frames
         fps = (Prepare.Galvo() & self).fetch1['fps']
-        num_video_frames = round(fps * seconds)
+        num_video_frames = int(round(fps * seconds))
         stop_index = start_index + num_video_frames
 
         # Load the scan
@@ -268,14 +295,14 @@ class ExtractRaw(dj.Imported):
     -> Prepare
     -> Method
     """
-
     @property
     def key_source(self):
-        return Prepare() * Method() \
-               & dj.OrList([(Prepare.Galvo() * Method.Galvo() - 'segmentation="manual"'), \
-                            Prepare.Galvo() * Method.Galvo() * ManualSegment(), \
-                            Prepare.Aod() * Method.Aod()]) \
-                 - (Session.TargetStructure() & 'compartment="axon"')
+
+        return (Prepare() * Method() & dj.OrList([
+                            (Prepare.Galvo() * Method.Galvo() - 'segmentation="manual"'),
+                            Prepare.Galvo() * Method.Galvo() * ManualSegment(),
+                            Prepare.Aod() * Method.Aod()]) ) \
+            - (Session.TargetStructure() & 'compartment="axon"')
 
     class Trace(dj.Part):
         definition = """
@@ -539,14 +566,17 @@ class ExtractRaw(dj.Imported):
         """
         print('ExtractRaw: Processing scan {}'.format(key))
 
+        # Insert key in ExtractRaw
+        self.insert1(key)
+
         # Get scan filename
-        filename = (Scan() & key).get_local_filename()
+        scan_filename = (Scan() & key).get_local_filename()
 
         # Read the scan
-        reader = TIFFReader(filename)
+        reader = TIFFReader(scan_filename)
 
         # Estimate number of components per slice
-        num_components = self.estimate_num_components_per_slice()
+        num_components = (Prepare.Galvo() & key).estimate_num_components_per_slice()
         num_components = num_components * 2  # double it just to be sure
 
         # Set general parameters
@@ -557,7 +587,7 @@ class ExtractRaw(dj.Imported):
         kwargs['init_on_patches'] = False
 
         # Set performance/execution parameters (heuristically)
-        kwargs['num_processes'] = None  # all cores available
+        kwargs['num_processes'] = None  # None for all cores available
         kwargs['memory_usage_in_GB'] = 30
         kwargs['num_pixels_per_process'] = 10000
         kwargs['block_size'] = 10000
@@ -571,7 +601,7 @@ class ExtractRaw(dj.Imported):
         else:
             kwargs['init_method'] = 'sparse_nmf'
             kwargs['AR_order'] = 0  # no impulse response function modelling
-            kwargs['alpha_snmf'] = 0.1
+            kwargs['alpha_snmf'] = 100
 
         # Set params specific to initialization on patches
         if kwargs['init_on_patches']:
@@ -621,8 +651,8 @@ class ExtractRaw(dj.Imported):
 
                     # Get indices and weights of defined pixels in mask (matlab-like)
                     mask_as_F_ordered_vector = location_matrix[:, :, i].ravel(order='F')
-                    defined_mask_indices = np.where(mask_as_F_ordered_vector)
-                    defined_mask_weights = mask_as_F_ordered_vector(defined_mask_indices)
+                    defined_mask_indices = np.where(mask_as_F_ordered_vector)[0]
+                    defined_mask_weights = mask_as_F_ordered_vector[defined_mask_indices]
                     defined_mask_indices += 1 # matlab indices start at 1
 
                     # Insert spatial mask
@@ -643,32 +673,6 @@ class ExtractRaw(dj.Imported):
         lowercase_kwargs = {(key.lower(), value) for key, value in kwargs.items()}
         ExtractRaw.CNMFParameters().insert1({**key, **lowercase_kwargs})
 
-    def estimate_num_components_per_slice(self):
-        """ Estimates the number of components per scan slice using simple rules of thumb.
-
-        For somatic scans, estimate number of neurons based on:
-        (100x100x100)um^3 = 1e6 um^3 -> 1e2 neurons; (1x1x1)mm^3 = 1e9 um^3 -> 1e5 neurons
-
-        For axonal/dendritic scans, just ten times our estimate of neurons.
-
-        :returns: Number of components
-        :rtype: int
-        """
-
-        # Get some slice dimensions
-        slice_height, slice_width = (Prepare.Galvo() & self).fetch1['um_height',
-                                                                    'um_width']
-        slice_thickness = 10  # assumption
-        slice_volume = slice_width * slice_height * slice_thickness
-
-        # Estimate number of components
-        if Session.TargetStructure() & self:  # scan is axonal/dendritic
-            num_components = slice_volume * 0.001 # ten times as many neurons
-        else:
-            num_components = slice_volume * 0.0001
-
-        return round(num_components)
-
     def save_video(self, filename='cnmf_extraction.mp4', slice=1, channel=1,
                    start_index=0, seconds=30, dpi=200):
         """ Creates an animation video showing the original vs corrected scan.
@@ -688,7 +692,7 @@ class ExtractRaw(dj.Imported):
 
         # Get fps and calculate total number of frames
         fps = (Prepare.Galvo() & self).fetch1['fps']
-        num_video_frames = round(fps * seconds)
+        num_video_frames = int(round(fps * seconds))
         stop_index = start_index + num_video_frames
 
         # Load the scan
