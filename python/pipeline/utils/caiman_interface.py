@@ -72,7 +72,7 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, merge_threshold=0.8
     if init_method == 'greedy_roi':
         gaussian_std_dev = [neuron_size_in_pixels // 2, neuron_size_in_pixels // 2]
     else:
-        gaussian_std_dev=None
+        gaussian_std_dev = [-1, -1] # unused but if left as None will crash
 
     # Deal with negative values in the scan.
     min_value_in_scan = np.min(scan)
@@ -83,9 +83,9 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, merge_threshold=0.8
     save_size = 10000
     filenames = []
     for i in range(0, timesteps, save_size):
-        filename = 'corrected_scan_{}.npy'.format(i)
+        filename = '/tmp/corrected_scan_{}.npy'.format(i)
         chunk = scan[:, :, i: min(i + save_size, timesteps)]
-        np.save(filename, chunk.transpose([2, 0, 1]))  # save in t x w x h format
+        np.save(filename, chunk.transpose([2, 0, 1]))  # save in t x h x w format
         filenames.append(filename)
 
     # Start the ipyparallel cluster
@@ -93,8 +93,8 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, merge_threshold=0.8
         n_processes=num_processes)
 
     # Create the small memory mapped files and join them
-    mmap_names = caiman.save_memmap_each(filenames, base_name='caiman', dview=direct_view)
-    mmap_filename = caiman.save_memmap_join(sorted(mmap_names), base_name='caiman',
+    mmap_names = caiman.save_memmap_each(filenames, base_name='/tmp/caiman', dview=direct_view)
+    mmap_filename = caiman.save_memmap_join(sorted(mmap_names), base_name='/tmp/caiman',
                                             dview=direct_view)
 
     # 'Load' data
@@ -112,11 +112,16 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, merge_threshold=0.8
         components_per_patch = max(1, round(num_components / patch_downsampling_factor**2))
         overlap_in_pixels = round(patch_size * percentage_of_patch_overlap)
 
+        # Make sure they are integers
+        patch_size = int(patch_size)
+        components_per_patch = int(components_per_patch)
+        overlap_in_pixels = int(overlap_in_pixels)
+
         # Run CNMF on patches (only for initialization, no impulse response modelling p=0)
         cnmf = caiman.cnmf.CNMF(num_processes, only_init_patch=True, p=0,
                                 k=components_per_patch, gnb=num_background_components,
                                 gSig=gaussian_std_dev, method_init=init_method,
-                                rf=round(patch_size / 2), stride=overlap_in_pixels,
+                                rf=int(round(patch_size / 2)), stride=overlap_in_pixels,
                                 merge_thresh=merge_threshold, check_nan=False,
                                 memory_fact=memory_usage_in_GB / 16,
                                 n_pixels_per_process=num_pixels_per_process,
@@ -160,12 +165,12 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, merge_threshold=0.8
     caiman.stop_server()
 
     # Delete log files (one per patch)
-    log_files = glob.glob('caiman*_LOG_*')
+    log_files = glob.glob('/tmp/caiman*_LOG_*')
     for log_file in log_files:
         os.remove(log_file)
 
     # Delete intermediate files (*.mmap and *.npy)
-    for filename in filenames + mmap_names + [mmap_filename]:
+    for filename in filenames + mmap_names + [mmap_filename, '/tmp/caiman.npz']:
         os.remove(filename)
 
     return (location_matrix, activity_matrix, background_location_matrix,
@@ -240,7 +245,7 @@ def _order_components(location_matrix, activity_matrix):
 
 
 
-#TODO: Delete this one, already in ExtractRaw
+#TODO: Delete this one, already in ExtractRaw. Still used for testing now
 def save_video(scan, location_matrix, activity_matrix, background_location_matrix,
                background_activity_matrix, fps, filename='cnmf_extraction.mp4',
                start_index=0, seconds=30, dpi=200):
@@ -255,13 +260,10 @@ def save_video(scan, location_matrix, activity_matrix, background_location_matri
     :returns Figure. You can call show() on it.
     :rtype: matplotlib.figure.Figure
     """
-    # TODO: Make this function a part of ExtractRaw (similar to save_video in Prepare)...
-    # all required variables from scan to fps could be accessed there from the db
-
     # Some variables used below
     image_height, image_width, _ = scan.shape
     num_pixels = image_height * image_width
-    num_video_frames = round(fps * seconds)
+    num_video_frames = int(round(fps * seconds))
 
     # Restrict computations to the necessary video frames
     stop_index = start_index + num_video_frames
@@ -325,7 +327,7 @@ def save_video(scan, location_matrix, activity_matrix, background_location_matri
 
     return fig
 
-#TODO: Delete. ALready in ExtractRaw
+#TODO: Delete. ALready in ExtractRaw. Still used for testing now
 def plot_impulse_responses(AR_params, num_timepoints=100):
     """ Plots the individual impulse response functions assuming an AR(2) process.
 
