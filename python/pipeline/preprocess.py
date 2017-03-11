@@ -670,7 +670,7 @@ class ExtractRaw(dj.Imported):
                 ExtractRaw.BackgroundComponents().insert1(background_dict)
 
         # Insert CNMF parameters (one per scan)
-        lowercase_kwargs = {(key.lower(), value) for key, value in kwargs.items()}
+        lowercase_kwargs = {key.lower(): value for key, value in kwargs.items()}
         ExtractRaw.CNMFParameters().insert1({**key, **lowercase_kwargs})
 
     def save_video(self, filename='cnmf_extraction.mp4', slice=1, channel=1,
