@@ -7,19 +7,19 @@ import sh
 from commons import lab
 from tiffreader import TIFFReader
 
-from . import experiment, PipelineException
+from . import experiment
+from . import PipelineException
+from . import config
 
 try:
     import pyfnnd
 except ImportError:
-    warn(
-        'Could not load pyfnnd.  Oopsi spike inference will fail. Install from https://github.com/cajal/PyFNND.git')
+    warn('Could not load pyfnnd. Oopsi spike inference will fail. '
+         'Install from https://github.com/cajal/PyFNND.git')
 from .utils.dsp import mirrconv
 from .utils.eye_tracking import ROIGrabber, ts2sec, read_video_hdf5, CVROIGrabber
-from . import config
 from distutils.version import StrictVersion
 from .utils import galvo_corrections
-from .experiment import Session, Scan
 import matplotlib.pyplot as plt
 from .utils import caiman_interface as cmn
 
@@ -130,7 +130,7 @@ class Prepare(dj.Imported):
             slice_volume = slice_width * slice_height * slice_thickness
 
             # Estimate number of components
-            if Session.TargetStructure() & self:  # scan is axonal/dendritic
+            if experiment.Session.TargetStructure() & self:  # scan is axonal/dendritic
                 num_components = slice_volume * 0.001  # ten times as many neurons
             else:
                 num_components = slice_volume * 0.0001
@@ -203,7 +203,7 @@ class Prepare(dj.Imported):
         :rtype: matplotlib.figure.Figure
         """
         # Get scan filename
-        scan_filename = (Scan() & self).get_local_filename()
+        scan_filename = (experiment.Scan() & self).get_local_filename()
 
         # Get fps and total_num_frames
         fps = (Prepare.Galvo() & self).fetch1['fps']
@@ -305,7 +305,7 @@ class ExtractRaw(dj.Imported):
                             (Prepare.Galvo() * Method.Galvo() - 'segmentation="manual"'),
                             Prepare.Galvo() * Method.Galvo() * ManualSegment(),
                             Prepare.Aod() * Method.Aod()]) ) \
-            - (Session.TargetStructure() & 'compartment="axon"')
+            - (experiment.Session.TargetStructure() & 'compartment="axon"')
 
     class Trace(dj.Part):
         definition = """
@@ -573,7 +573,7 @@ class ExtractRaw(dj.Imported):
         self.insert1(key)
 
         # Get scan filename
-        scan_filename = (Scan() & key).get_local_filename()
+        scan_filename = (experiment.Scan() & key).get_local_filename()
 
         # Read the scan
         reader = TIFFReader(scan_filename)
@@ -596,7 +596,7 @@ class ExtractRaw(dj.Imported):
         kwargs['block_size'] = 10000
 
         # Set params specific to somatic or axonal/dendritic scans
-        is_somatic = not (Session.TargetStructure() & key)
+        is_somatic = not (experiment.Session.TargetStructure() & key)
         if is_somatic:
             kwargs['init_method'] = 'greedy_roi'
             kwargs['AR_order'] = 2
@@ -691,7 +691,7 @@ class ExtractRaw(dj.Imported):
         :rtype: matplotlib.figure.Figure
         """
         # Get scan filename
-        scan_filename = (Scan() & self).get_local_filename()
+        scan_filename = (experiment.Scan() & self).get_local_filename()
 
         # Get fps and calculate total number of frames
         fps = (Prepare.Galvo() & self).fetch1['fps']
