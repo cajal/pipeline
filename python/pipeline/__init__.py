@@ -5,6 +5,12 @@ _report_on = {
     'reso pipeline': ['pre', 'rf', 'trk', 'trippy', 'monet']
 }
 
+#--- switch matplotlib backend if there is no way to display things.
+if os.getenv('DISPLAY') is None:
+    import matplotlib
+    print('No display found. Switching matplotlib backend to "Agg"')
+    matplotlib.rcParams['backend'] = 'Agg'
+
 class PipelineException(Exception):
     """Base pipeline exception. Prints the message plus any passed info."""
     def __init__(self, message, info=None):
