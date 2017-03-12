@@ -805,9 +805,6 @@ class ExtractRaw(dj.Imported):
         """ Plots the individual impulse response functions for all traces assuming an
         autoregressive process (p > 0).
 
-        Assumes p (AR_order) <  num_timepoints. Otherwise, it still works but results are
-        wrong.
-
         :param int num_timepoints: The number of points after impulse to use for plotting.
 
         :returns Figure. You can call show() on it.
@@ -826,10 +823,15 @@ class ExtractRaw(dj.Imported):
             # Over each trace
             for g in ar_coefficients:
                 AR_order = len(g)
+
+                # Calculate impulse response function
                 output = np.zeros(num_timepoints)
                 output[0] = 1  # initial spike
                 for i in range(1, num_timepoints):
-                    output[i] = np.sum(g * output[i - 1: i - AR_order: -1])
+                    if i <= AR_order: # start of the array needs special care
+                        output[i] = np.sum(g[:i] * output[i - 1:: -1])
+                    else:
+                        output[i] = np.sum(g * output[i - 1: i - AR_order - 1: -1])
 
                 # Plot
                 plt.plot(x_axis, output)
@@ -854,8 +856,8 @@ class ExtractRaw(dj.Imported):
 
     def get_all_traces(self, slice, channel):
         """ Returns a num_traces x num_timesteps matrix with all traces."""
-        trace_rel = ExtractRaw.Trace()*ExtractRaw.GalvoROI & self & {'slice': slice,
-                                                                     'channel': channel}
+        trace_rel = ExtractRaw.Trace() * ExtractRaw.GalvoROI() & self & {'slice': slice,
+                                                                         'channel': channel}
         # Get traces
         raw_traces = trace_rel.fetch.order_by('trace_id')['raw_trace']
 
