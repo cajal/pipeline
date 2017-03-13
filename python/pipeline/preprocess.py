@@ -1,5 +1,4 @@
 import datajoint as dj
-from tiffreader import TIFFReader
 from . import experiment, vis, PipelineException
 from warnings import warn
 import numpy as np
@@ -18,7 +17,6 @@ from distutils.version import StrictVersion
 from .utils import galvo_corrections
 from .experiment import Session, Scan
 import imreg_dft as ird
-import caiman as cmn
 
 # import caiman.source_extraction.cnmf as cnmf
 
@@ -163,6 +161,8 @@ class Prepare(dj.Imported):
         :returns Figure. You can call show() on it.
         :rtype: matplotlib.figure.Figure
         """
+        from tiffreader import TIFFReader
+
         # Get local filename
         scan_path = (Session() & self).fetch1['scan_path']
         local_path = lab.Paths().get_local_path(scan_path)
@@ -253,6 +253,9 @@ class CorrelationImage(dj.Computed):
         raster_phase, fill_fraction = (Prepare.Galvo() & key).fetch1['raster_phase', 'fill_fraction']
 
         # Load the scan
+        from tiffreader import TIFFReader
+        import caiman as cmn
+
         reader = TIFFReader(local_filename)
         for sli, channel in zip(*(Prepare.GalvoMotion() & key).fetch['slice', 'channel']):
             print('Processing channel {} of slice {}'.format(channel, sli), flush=True)
@@ -311,10 +314,10 @@ class ExtractRaw(dj.Imported):
 
     @property
     def key_source(self):
-        return Prepare() * Method() \
+        return (Prepare() * Method() \
                & dj.OrList([(Prepare.Galvo() * Method.Galvo() - 'segmentation="manual"'), \
                             Prepare.Galvo() * Method.Galvo() * ManualSegment(), \
-                            Prepare.Aod() * Method.Aod()]) \
+                            Prepare.Aod() * Method.Aod()])) \
                  - (Session.TargetStructure() & 'compartment="axon"')
 
     class Trace(dj.Part):

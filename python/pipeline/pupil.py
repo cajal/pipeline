@@ -1,6 +1,5 @@
 import datajoint as dj
-from tiffreader import TIFFReader
-from . import experiment, vis, PipelineException
+from . import experiment, PipelineException
 
 from warnings import warn
 import numpy as np
