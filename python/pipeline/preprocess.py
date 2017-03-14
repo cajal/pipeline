@@ -825,16 +825,16 @@ class ExtractRaw(dj.Imported):
                 AR_order = len(g)
 
                 # Calculate impulse response function
-                output = np.zeros(num_timepoints)
-                output[0] = 1  # initial spike
+                irf = np.zeros(num_timepoints)
+                irf[0] = 1  # initial spike
                 for i in range(1, num_timepoints):
                     if i <= AR_order: # start of the array needs special care
-                        output[i] = np.sum(g[:i] * output[i - 1:: -1])
+                        irf[i] = np.sum(g[:i] * irf[i - 1:: -1])
                     else:
-                        output[i] = np.sum(g * output[i - 1: i - AR_order - 1: -1])
+                        irf[i] = np.sum(g * irf[i - 1: i - AR_order - 1: -1])
 
                 # Plot
-                plt.plot(x_axis, output)
+                plt.plot(x_axis, irf)
 
             return fig
 
