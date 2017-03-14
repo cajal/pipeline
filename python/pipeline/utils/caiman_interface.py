@@ -190,13 +190,9 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, merge_threshold=0.8
 def compute_correlation_image(scan):
     """ Compute the correlation image for the given scan.
 
-    "The correlation image for each pixel is computed by averaging the correlation
-    coefficients (taken over time) of each pixel with its four immediate neighbors."
-    (Pnevmatikakis et al., 2016)
-
-    In reality, each pixel trace is normalized through time, traces for one pixel are
-    multiplied with those of its four neighbors, these are averaged over time and then
-    averaged over the number of pair multiplications.
+    Each pixel trace is normalized through time, traces for one pixel are multiplied with
+    those of its eight neighbours, these are averaged over time and then averaged over the
+    number of pair multiplications (8).
 
     :param np.array scan: 3-dimensional scan (image_height, image_width, timesteps).
 
@@ -204,7 +200,8 @@ def compute_correlation_image(scan):
     :rtype np.array
     """
     scan_as_movie = caiman.movie(scan)
-    correlation_image = scan_as_movie.local_correlations(swap_dim=True)
+    correlation_image = scan_as_movie.local_correlations(swap_dim=True,
+                                                         eight_neighbours=True)
 
     return correlation_image
 
