@@ -420,7 +420,8 @@ class PupilTracker:
             ellipse, eye_center, contour = None, None, None
             _, contours, hierarchy1 = cv2.findContours(thres, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
             contour, ellipse = self.get_pupil_from_contours(contours, small_gray)
-            self.display(gray, blur, thres, eye_roi, fr_count, n_frames, ncontours=len(contours))
+            if display:
+                self.display(gray, blur, thres, eye_roi, fr_count, n_frames, ncontours=len(contours))
 
 
             if contour is None:

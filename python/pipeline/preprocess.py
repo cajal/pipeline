@@ -1,29 +1,22 @@
 import os
 from warnings import warn
-
 import datajoint as dj
 import numpy as np
 import sh
 from commons import lab
-from tiffreader import TIFFReader
-
-from . import experiment
-from . import PipelineException
-from . import config
-
 try:
     import pyfnnd
 except ImportError:
-    warn('Could not load pyfnnd. Oopsi spike inference will fail. '
-         'Install from https://github.com/cajal/PyFNND.git')
+    warn('Could not load pyfnnd.  Oopsi spike inference will fail. Install from https://github.com/cajal/PyFNND.git')
+
+from . import experiment, config, PipelineException
 from .utils.dsp import mirrconv
 from .utils.eye_tracking import ROIGrabber, ts2sec, read_video_hdf5, CVROIGrabber
-from distutils.version import StrictVersion
 from .utils import galvo_corrections
 import matplotlib.pyplot as plt
-from .utils import caiman_interface as cmn
 
 
+from distutils.version import StrictVersion
 assert StrictVersion(dj.__version__) >= StrictVersion('0.2.9')
 
 schema = dj.schema('pipeline_preprocess', locals())
@@ -211,6 +204,7 @@ class Prepare(dj.Imported):
         stop_index = start_index + num_video_frames
 
         # Load the scan
+        from tiffreader import TIFFReader
         reader = TIFFReader(scan_filename)
         scan = np.double(reader[:, :, channel - 1, slice - 1, start_index: stop_index])
         scan = scan.squeeze()
@@ -259,6 +253,7 @@ class Prepare(dj.Imported):
 
         return fig
 
+
 @schema
 class Method(dj.Lookup):
     definition = """  #  methods for extraction from raw data for either AOD or Galvo data
@@ -300,7 +295,6 @@ class ExtractRaw(dj.Imported):
     """
     @property
     def key_source(self):
-
         return (Prepare() * Method() & dj.OrList([
                             (Prepare.Galvo() * Method.Galvo() - 'segmentation="manual"'),
                             Prepare.Galvo() * Method.Galvo() * ManualSegment(),
@@ -420,7 +414,6 @@ class ExtractRaw(dj.Imported):
     def plot_traces_and_masks(self, traces, slice, mask_channel=1, outfile='traces.pdf'):
 
         import seaborn as sns
-        import matplotlib.pyplot as plt
 
         key = (self * self.GalvoSegmentation().proj() * Method.Galvo() & dict(segmentation='nmf', slice=slice))
         trace_selection = 'trace_id in ({})'.format(','.join([str(s) for s in traces]))
@@ -474,7 +467,6 @@ class ExtractRaw(dj.Imported):
 
     def plot_galvo_ROIs(self, outdir='./'):
         import seaborn as sns
-        import matplotlib.pyplot as plt
 
         sns.set_context('paper')
         theCM = sns.blend_palette(['lime', 'gold', 'deeppink'], n_colors=10)  # plt.cm.RdBu_r
@@ -567,6 +559,8 @@ class ExtractRaw(dj.Imported):
 
         See caiman_interface.demix_and_deconvolve_with_cnmf for an explanation of params
         """
+        from .utils import caiman_interface as cmn
+
         print('-'*50)
         print('ExtractRaw: Processing scan {}'.format(key))
 
@@ -577,6 +571,7 @@ class ExtractRaw(dj.Imported):
         scan_filename = (experiment.Scan() & key).get_local_filename()
 
         # Read the scan
+        from tiffreader import TIFFReader
         reader = TIFFReader(scan_filename)
 
         # Estimate number of components per slice
@@ -700,6 +695,7 @@ class ExtractRaw(dj.Imported):
         stop_index = start_index + num_video_frames
 
         # Load the scan
+        from tiffreader import TIFFReader
         reader = TIFFReader(scan_filename)
         scan = np.double(reader[:, :, channel - 1, slice - 1, start_index: stop_index])
         scan = scan.squeeze()
@@ -791,6 +787,8 @@ class ExtractRaw(dj.Imported):
         :param channel: Scan channel to use
         :returns: None
         """
+        from .utils import caiman_interface as cmn
+
         # Get location matrix
         location_matrix = self.get_all_masks(slice, channel)
 
@@ -1052,7 +1050,6 @@ class Spikes(dj.Computed):
 
     def plot_traces(self, outdir='./'):
 
-        import matplotlib.pyplot as plt
         gs = plt.GridSpec(2, 5)
         for key in (ComputeTraces.Trace() & self).fetch.keys():
             print('Processing', key)
