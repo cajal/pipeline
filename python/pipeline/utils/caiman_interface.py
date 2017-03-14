@@ -107,15 +107,24 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, merge_threshold=0.8
     initial_C = None
     initial_f = None
     if init_on_patches:
-        # Calculate some params
-        patch_size = round(image_height / patch_downsampling_factor)  # only square windows
-        components_per_patch = max(1, round(num_components / patch_downsampling_factor**2))
-        overlap_in_pixels = round(patch_size * percentage_of_patch_overlap)
+        # Calculate patch size (only square patches allowed)
+        bigger_dimension = max(image_height, image_width)
+        smaller_dimension = min(image_height, image_width)
+        patch_size = bigger_dimension / patch_downsampling_factor
+        patch_size = min(patch_size, smaller_dimension) # smaller than smaller dimension
+
+        # Calculate num_components_per_patch
+        num_nonoverlapping_patches = (image_height/patch_size) * (image_width/patch_size)
+        components_per_patch = num_components / num_nonoverlapping_patches
+        components_per_patch = max(components_per_patch, 1) # at least 1
+
+        # Calculate patch overlap in pixels
+        overlap_in_pixels = patch_size * percentage_of_patch_overlap
 
         # Make sure they are integers
-        patch_size = int(patch_size)
-        components_per_patch = int(components_per_patch)
-        overlap_in_pixels = int(overlap_in_pixels)
+        patch_size = int(round(patch_size))
+        components_per_patch = int(round(components_per_patch))
+        overlap_in_pixels = int(round(overlap_in_pixels))
 
         # Run CNMF on patches (only for initialization, no impulse response modelling p=0)
         cnmf = caiman.cnmf.CNMF(num_processes, only_init_patch=True, p=0,
@@ -162,6 +171,7 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, merge_threshold=0.8
     location_matrix, activity_matrix = _order_components(location_matrix, activity_matrix)
 
     # Stop ipyparallel cluster
+    client.close()
     caiman.stop_server()
 
     # Delete log files (one per patch)
