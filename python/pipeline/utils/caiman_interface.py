@@ -194,9 +194,9 @@ def compute_correlation_image(scan):
     coefficients (taken over time) of each pixel with its four immediate neighbors."
     (Pnevmatikakis et al., 2016)
 
-    In reality, each pixel trace is normalized through time, traces for one pixel is
-    multiplied with that of its four neighbors, this value is averaged over time and
-    then averaged over the number of pair multiplications.
+    In reality, each pixel trace is normalized through time, traces for one pixel are
+    multiplied with those of its four neighbors, these are averaged over time and then
+    averaged over the number of pair multiplications.
 
     :param np.array scan: 3-dimensional scan (image_height, image_width, timesteps).
 
