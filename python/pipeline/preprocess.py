@@ -567,7 +567,7 @@ class ExtractRaw(dj.Imported):
 
         See caiman_interface.demix_and_deconvolve_with_cnmf for an explanation of params
         """
-        print('-----------------------------------------------------')
+        print('-'*50)
         print('ExtractRaw: Processing scan {}'.format(key))
 
         # Insert key in ExtractRaw
