@@ -196,7 +196,7 @@ class Prepare(dj.Imported):
         :rtype: matplotlib.figure.Figure
         """
         # Get scan filename
-        scan_filename = (experiment.Scan() & self).get_local_filename()
+        scan_filename = (experiment.Scan() & self).local_filename_with_tif_wildcard
 
         # Get fps and total_num_frames
         fps = (Prepare.Galvo() & self).fetch1['fps']
@@ -568,7 +568,7 @@ class ExtractRaw(dj.Imported):
         self.insert1(key)
 
         # Get scan filename
-        scan_filename = (experiment.Scan() & key).get_local_filename()
+        scan_filename = (experiment.Scan() & key).local_filename_with_tif_wildcard
 
         # Read the scan
         from tiffreader import TIFFReader
@@ -692,7 +692,7 @@ class ExtractRaw(dj.Imported):
         :rtype: matplotlib.figure.Figure
         """
         # Get scan filename
-        scan_filename = (experiment.Scan() & self).get_local_filename()
+        scan_filename = (experiment.Scan() & self).local_filename_with_tif_wildcard
 
         # Get fps and calculate total number of frames
         fps = (Prepare.Galvo() & self).fetch1['fps']

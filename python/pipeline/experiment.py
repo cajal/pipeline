@@ -384,7 +384,8 @@ class Scan(dj.Manual):
         gdd: float  # gdd setting
         """
 
-    def get_local_filename(self):
+    @property
+    def local_filename_with_tif_wilcard(self):
         """Returns the local filename for all parts of this scan (ends in *.tif)."""
         scan_path = (Session() & self).fetch1['scan_path']
         local_path = lab.Paths().get_local_path(scan_path)
