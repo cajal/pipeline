@@ -578,6 +578,11 @@ class ExtractRaw(dj.Imported):
         num_components = (Prepare.Galvo() & key).estimate_num_components_per_slice()
         num_components = num_components * 2  # double it just to be sure
 
+        # Compute number of parameters to set alpha_snmf (not needed for somatic scans)
+        image_height, image_width, num_timesteps = reader.shape
+        num_pixels = image_height * image_width
+        num_parameters = num_pixels * num_components + num_components * num_timesteps
+
         # Set general parameters
         kwargs = {}
         kwargs['num_components'] = num_components
@@ -600,7 +605,7 @@ class ExtractRaw(dj.Imported):
         else:
             kwargs['init_method'] = 'sparse_nmf'
             kwargs['AR_order'] = 0  # no impulse response function modelling
-            kwargs['alpha_snmf'] = 100
+            kwargs['alpha_snmf'] = 1e-5 * num_parameters # 1e-7 to 1e-4 is a good range
 
         # Set params specific to initialization on patches
         if kwargs['init_on_patches']:
