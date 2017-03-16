@@ -196,7 +196,7 @@ class Prepare(dj.Imported):
         :rtype: matplotlib.figure.Figure
         """
         # Get scan filename
-        scan_filename = (experiment.Scan() & self).local_filename_with_tif_wildcard
+        scan_filename = (experiment.Scan() & self).local_filenames_as_wildcard
 
         # Get fps and total_num_frames
         fps = (Prepare.Galvo() & self).fetch1['fps']
@@ -406,7 +406,7 @@ class ExtractRaw(dj.Imported):
         init_method         : enum("greedy_roi", "sparse_nmf") # type of initialization used
         ar_order            : tinyint # order of the autoregressive process for impulse function response
         neuron_size_in_pixels = null   :   tinyint
-        alpha_snmf = null   : float   # Regularization parameter for SNMF
+        alpha_per_param = null   : float   # Regularization value for sparse NMF (per parameter)
         patch_downsampling_factor = null : tinyint # how to downsample the scan
         percentage_of_patch_overlap = null : float # overlap between adjacent patches
         """
@@ -568,7 +568,7 @@ class ExtractRaw(dj.Imported):
         self.insert1(key)
 
         # Get scan filename
-        scan_filename = (experiment.Scan() & key).local_filename_with_tif_wildcard
+        scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
 
         # Read the scan
         from tiffreader import TIFFReader
@@ -577,11 +577,6 @@ class ExtractRaw(dj.Imported):
         # Estimate number of components per slice
         num_components = (Prepare.Galvo() & key).estimate_num_components_per_slice()
         num_components = num_components * 2  # double it just to be sure
-
-        # Compute number of parameters to set alpha_snmf (not needed for somatic scans)
-        image_height, image_width, num_timesteps = reader.shape
-        num_pixels = image_height * image_width
-        num_parameters = num_pixels * num_components + num_components * num_timesteps
 
         # Set general parameters
         kwargs = {}
@@ -605,7 +600,7 @@ class ExtractRaw(dj.Imported):
         else:
             kwargs['init_method'] = 'sparse_nmf'
             kwargs['AR_order'] = 0  # no impulse response function modelling
-            kwargs['alpha_snmf'] = 1e-5 * num_parameters # 1e-7 to 1e-4 is a good range
+            kwargs['alpha_per_param'] = 5e-5 # 1e-7 to 1e-4 is a good range
 
         # Set params specific to initialization on patches
         if kwargs['init_on_patches']:
@@ -692,7 +687,7 @@ class ExtractRaw(dj.Imported):
         :rtype: matplotlib.figure.Figure
         """
         # Get scan filename
-        scan_filename = (experiment.Scan() & self).local_filename_with_tif_wildcard
+        scan_filename = (experiment.Scan() & self).local_filenames_as_wildcard
 
         # Get fps and calculate total number of frames
         fps = (Prepare.Galvo() & self).fetch1['fps']

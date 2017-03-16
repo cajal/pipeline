@@ -3,6 +3,7 @@ import numpy as np
 import caiman
 import glob, os
 import matplotlib.pyplot as plt
+from .. import PipelineException
 
 
 def demix_and_deconvolve_with_cnmf(scan, num_components=100, merge_threshold=0.8,
@@ -10,7 +11,7 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, merge_threshold=0.8
                                    num_processes=None, memory_usage_in_GB=30,
                                    num_pixels_per_process=10000, block_size=10000,
                                    init_method='greedy_roi', AR_order=2,
-                                   neuron_size_in_pixels=10, alpha_snmf=None,
+                                   neuron_size_in_pixels=10, alpha_per_param=None,
                                    patch_downsampling_factor=4,
                                    percentage_of_patch_overlap=0.2):
     """ Extract spike train activity directly from the scan using CNMF.
@@ -42,7 +43,8 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, merge_threshold=0.8
         response function, e.g., 0 = no modelling; 2 = model rise plus exponential decay.
     :param int neuron_size_in_pixels: Estimated size of a neuron in the scan (used for
         'greedy_roi' initialization to define the size of the gaussian window)
-    :param int alpha_snmf: Regularization parameter (alpha) for the sparse NMF (if used).
+    :param float alpha_per_param: Regularization parameter (alpha) per parameter for the
+        sparse NMF (if used).
     :param int patch_downsampling_factor: Division to the image dimensions to obtain patch
         dimensions, e.g., if original size is 256 and factor is 10, patches will be 26x26
     :param int percentage_of_patch_overlap: Patches are sampled in a sliding window. This
@@ -68,23 +70,33 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, merge_threshold=0.8
             some components will be merged or deleted.
     ..warning:: Computation- and memory-intensive for big scans.
     """
-    # Calculate standard deviation of the gaussian window used for greedy ROI search
-    if init_method == 'greedy_roi':
+    # Get scan dimensions
+    image_height, image_width, num_timesteps = scan.shape
+    num_pixels = image_height * image_width
+
+    # Calculate some method specific parameters
+    if init_method == 'greedy_roi': # needs standard deviation of the gaussian window
         gaussian_std_dev = [neuron_size_in_pixels // 2, neuron_size_in_pixels // 2]
+
+        snmf_alpha = None # unused
+    elif init_method == 'sparse_nmf': # needs regularization parameter for snmf
+        num_parameters = num_pixels * num_components + num_components * num_timesteps
+        snmf_alpha = num_parameters * alpha_per_param
+
+        gaussian_std_dev = None # unused
     else:
-        gaussian_std_dev = [-1, -1] # unused but if left as None will crash
+        raise PipelineException('Unrecognized method {} passed to cnmf'.format(init_method))
 
     # Deal with negative values in the scan.
     min_value_in_scan = np.min(scan)
     scan = scan + abs(min_value_in_scan) if min_value_in_scan < 0 else scan
 
     # Save scan to files (needed to create the memory mapped views below)
-    timesteps = scan.shape[-1]
     save_size = 10000
     filenames = []
-    for i in range(0, timesteps, save_size):
+    for i in range(0, num_timesteps, save_size):
         filename = '/tmp/corrected_scan_{}.npy'.format(i)
-        chunk = scan[:, :, i: min(i + save_size, timesteps)]
+        chunk = scan[:, :, i: min(i + save_size, num_timesteps)]
         np.save(filename, chunk.transpose([2, 0, 1]))  # save in t x h x w format
         filenames.append(filename)
 
@@ -94,13 +106,13 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, merge_threshold=0.8
 
     # Create the small memory mapped files and join them
     mmap_names = caiman.save_memmap_each(filenames, base_name='/tmp/caiman', dview=direct_view)
-    mmap_filename = caiman.save_memmap_join(sorted(mmap_names), base_name='/tmp/caiman',
+    mmap_filename = caiman.save_memmap_join(sorted(mmap_names), base_name='caiman_somatic',
                                             dview=direct_view)
 
     # 'Load' data
-    mmap_scan, scan_dims, timesteps = caiman.load_memmap(mmap_filename)
+    mmap_scan, scan_dims, num_timesteps = caiman.load_memmap(mmap_filename)
     image_height, image_width = scan_dims
-    images = np.reshape(mmap_scan.T, (timesteps, *scan_dims), order='F')
+    images = np.reshape(mmap_scan.T, (num_timesteps, *scan_dims), order='F')
 
     # Optionally, run the initialization method in small patches to initialize components
     initial_A = None
@@ -115,24 +127,33 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, merge_threshold=0.8
 
         # Calculate num_components_per_patch
         num_nonoverlapping_patches = (image_height/patch_size) * (image_width/patch_size)
-        components_per_patch = num_components / num_nonoverlapping_patches
-        components_per_patch = max(components_per_patch, 1) # at least 1
+        num_components_per_patch = num_components / num_nonoverlapping_patches
+        num_components_per_patch = max(num_components_per_patch, 1) # at least 1
 
         # Calculate patch overlap in pixels
         overlap_in_pixels = patch_size * percentage_of_patch_overlap
 
         # Make sure they are integers
         patch_size = int(round(patch_size))
-        components_per_patch = int(round(components_per_patch))
+        num_components_per_patch = int(round(num_components_per_patch))
         overlap_in_pixels = int(round(overlap_in_pixels))
+
+        # Calculate appropiate alpha_snmf
+        if init_method == 'sparse_nmf':
+            num_parameters_per_patch = (patch_size**2 * num_components_per_patch +
+                                       num_components_per_patch * num_timesteps)
+            patch_snmf_alpha = num_parameters_per_patch * alpha_per_param
+        else:
+            patch_snmf_alpha = None
+
 
         # Run CNMF on patches (only for initialization, no impulse response modelling p=0)
         cnmf = caiman.cnmf.CNMF(num_processes, only_init_patch=True, p=0,
-                                k=components_per_patch, gnb=num_background_components,
-                                gSig=gaussian_std_dev, method_init=init_method,
-                                rf=int(round(patch_size / 2)), stride=overlap_in_pixels,
-                                merge_thresh=merge_threshold, check_nan=False,
-                                memory_fact=memory_usage_in_GB / 16,
+                                k=num_components_per_patch, gnb=num_background_components,
+                                method_init=init_method, gSig=gaussian_std_dev,
+                                alpha_snmf=patch_snmf_alpha, rf=int(round(patch_size / 2)),
+                                stride=overlap_in_pixels, merge_thresh=merge_threshold,
+                                check_nan=False, memory_fact=memory_usage_in_GB / 16,
                                 n_pixels_per_process=num_pixels_per_process,
                                 block_size=block_size, dview=direct_view)
         cnmf = cnmf.fit(images)
@@ -144,7 +165,7 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, merge_threshold=0.8
 
     # Run CNMF
     cnmf = caiman.cnmf.CNMF(num_processes, k=num_components, method_init=init_method,
-                            gSig=gaussian_std_dev, alpha_snmf=alpha_snmf, p=AR_order,
+                            gSig=gaussian_std_dev, alpha_snmf=snmf_alpha, p=AR_order,
                             merge_thresh=merge_threshold, gnb=num_background_components,
                             memory_fact=memory_usage_in_GB / 16, block_size=block_size,
                             n_pixels_per_process=num_pixels_per_process, check_nan=False,
@@ -225,7 +246,7 @@ def plot_contours(location_matrix, background_image=None):
     plt.figure()
     caiman.utils.visualization.plot_contours(location_matrix, background_image,
                                              vmin=background_image.min(),
-                                             vmax=background_image.max())
+                                             vmax=background_image.max(), maxthr=0.1)
 
 
 def _order_components(location_matrix, activity_matrix):
