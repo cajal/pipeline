@@ -6,10 +6,15 @@ _report_on = {
 }
 
 #--- switch matplotlib backend if there is no way to display things.
-if os.getenv('DISPLAY') is None:
-    import matplotlib
+import matplotlib
+from tkinter import TclError
+try:
+    import matplotlib.pyplot as plt
+    del plt  # don't really wanted to import it, just testing
+except TclError:
     print('No display found. Switching matplotlib backend to "Agg"')
-    matplotlib.rcParams['backend'] = 'Agg'
+    matplotlib.use('Agg', warn=False, force=True)
+
 
 class PipelineException(Exception):
     """Base pipeline exception. Prints the message plus any passed info."""
