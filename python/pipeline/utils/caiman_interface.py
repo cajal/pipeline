@@ -3,7 +3,6 @@ import numpy as np
 import caiman
 import glob, os
 import matplotlib.pyplot as plt
-from .. import PipelineException
 
 
 def demix_and_deconvolve_with_cnmf(scan, num_components=100, merge_threshold=0.8,
@@ -11,7 +10,7 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, merge_threshold=0.8
                                    num_processes=None, memory_usage_in_GB=30,
                                    num_pixels_per_process=10000, block_size=10000,
                                    init_method='greedy_roi', AR_order=2,
-                                   neuron_size_in_pixels=10, alpha_per_param=None,
+                                   neuron_size_in_pixels=10, snmf_alpha=None,
                                    patch_downsampling_factor=4,
                                    percentage_of_patch_overlap=0.2):
     """ Extract spike train activity directly from the scan using CNMF.
@@ -19,7 +18,7 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, merge_threshold=0.8
     Uses constrained non-negative matrix factorization to find all neurons/components in
     a timeseries of images (locations) and their fluorescence traces (activity) and
     deconvolves them using an autoregressive model of the calcium impulse response
-    function (not used for dendrites). See Pnevmatikakis et al., 2016 for details.
+    function. See Pnevmatikakis et al., 2016 for details.
 
     Default values work fine for somatic images.
 
@@ -43,8 +42,7 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, merge_threshold=0.8
         response function, e.g., 0 = no modelling; 2 = model rise plus exponential decay.
     :param int neuron_size_in_pixels: Estimated size of a neuron in the scan (used for
         'greedy_roi' initialization to define the size of the gaussian window)
-    :param float alpha_per_param: Regularization parameter (alpha) per parameter for the
-        sparse NMF (if used).
+    :param int snmf_alpha: Regularization parameter (alpha) for the sparse NMF (if used).
     :param int patch_downsampling_factor: Division to the image dimensions to obtain patch
         dimensions, e.g., if original size is 256 and factor is 10, patches will be 26x26
     :param int percentage_of_patch_overlap: Patches are sampled in a sliding window. This
@@ -70,28 +68,18 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, merge_threshold=0.8
             some components will be merged or deleted.
     ..warning:: Computation- and memory-intensive for big scans.
     """
-    # Get scan dimensions
-    image_height, image_width, num_timesteps = scan.shape
-    num_pixels = image_height * image_width
-
-    # Calculate some method specific parameters
-    if init_method == 'greedy_roi': # needs standard deviation of the gaussian window
+    # Set standard deviation of the gaussian window used in greedy ROI search
+    if init_method == 'greedy_roi':
         gaussian_std_dev = [neuron_size_in_pixels // 2, neuron_size_in_pixels // 2]
-
-        snmf_alpha = None # unused
-    elif init_method == 'sparse_nmf': # needs regularization parameter for snmf
-        num_parameters = num_pixels * num_components + num_components * num_timesteps
-        snmf_alpha = num_parameters * alpha_per_param
-
-        gaussian_std_dev = None # unused
     else:
-        raise PipelineException('Unrecognized method {} passed to cnmf'.format(init_method))
+        gaussian_std_dev = None # unused
 
-    # Deal with negative values in the scan.
+    # Make scan nonnegative
     min_value_in_scan = np.min(scan)
     scan = scan + abs(min_value_in_scan) if min_value_in_scan < 0 else scan
 
     # Save scan to files (needed to create the memory mapped views below)
+    num_timesteps = scan.shape[-1]
     save_size = 10000
     filenames = []
     for i in range(0, num_timesteps, save_size):
@@ -106,7 +94,7 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, merge_threshold=0.8
 
     # Create the small memory mapped files and join them
     mmap_names = caiman.save_memmap_each(filenames, base_name='/tmp/caiman', dview=direct_view)
-    mmap_filename = caiman.save_memmap_join(sorted(mmap_names), base_name='caiman_somatic',
+    mmap_filename = caiman.save_memmap_join(sorted(mmap_names), base_name='/tmp/caiman',
                                             dview=direct_view)
 
     # 'Load' data
@@ -138,20 +126,11 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, merge_threshold=0.8
         num_components_per_patch = int(round(num_components_per_patch))
         overlap_in_pixels = int(round(overlap_in_pixels))
 
-        # Calculate appropiate alpha_snmf
-        if init_method == 'sparse_nmf':
-            num_parameters_per_patch = (patch_size**2 * num_components_per_patch +
-                                       num_components_per_patch * num_timesteps)
-            patch_snmf_alpha = num_parameters_per_patch * alpha_per_param
-        else:
-            patch_snmf_alpha = None
-
-
         # Run CNMF on patches (only for initialization, no impulse response modelling p=0)
         cnmf = caiman.cnmf.CNMF(num_processes, only_init_patch=True, p=0,
                                 k=num_components_per_patch, gnb=num_background_components,
                                 method_init=init_method, gSig=gaussian_std_dev,
-                                alpha_snmf=patch_snmf_alpha, rf=int(round(patch_size / 2)),
+                                alpha_snmf=snmf_alpha, rf=int(round(patch_size / 2)),
                                 stride=overlap_in_pixels, merge_thresh=merge_threshold,
                                 check_nan=False, memory_fact=memory_usage_in_GB / 16,
                                 n_pixels_per_process=num_pixels_per_process,
