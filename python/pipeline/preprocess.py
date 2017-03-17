@@ -398,15 +398,15 @@ class ExtractRaw(dj.Imported):
         num_components      : smallint # estimated number of components
         merge_threshold     : float # overlapping masks are merged if temporal correlation greater than this
         num_background_components   : smallint # estimated number of background components
-        init_on_patches     : boolean   # wheter to run initialization on patches
         num_processes = null    : smallint # number of processes to run in parallel, null=all possible
         memory_usage_in_gb  : int # how much memory to use
         num_pixels_per_process  : int # number of pixels processed at a time
         block_size          : int # number of pixels per each dot product
-        init_method         : enum("greedy_roi", "sparse_nmf") # type of initialization used
         ar_order            : tinyint # order of the autoregressive process for impulse function response
+        init_method         : enum("greedy_roi", "sparse_nmf") # type of initialization used
         neuron_size_in_pixels = null   :   tinyint
-        alpha_per_param = null   : float   # Regularization value for sparse NMF (per parameter)
+        snmf_alpha = null   : float   # Regularization parameter for SNMF
+        init_on_patches     : boolean   # whether to run initialization on patches
         patch_downsampling_factor = null : tinyint # how to downsample the scan
         percentage_of_patch_overlap = null : float # overlap between adjacent patches
         """
@@ -583,24 +583,25 @@ class ExtractRaw(dj.Imported):
         kwargs['num_components'] = num_components
         kwargs['merge_threshold'] = 0.8
         kwargs['num_background_components'] = 4
-        kwargs['init_on_patches'] = False
 
         # Set performance/execution parameters (heuristically)
         kwargs['num_processes'] = None  # None for all cores available
-        kwargs['memory_usage_in_GB'] = 30
+        kwargs['memory_usage_in_GB'] = 60
         kwargs['num_pixels_per_process'] = 10000
         kwargs['block_size'] = 10000
 
         # Set params specific to somatic or axonal/dendritic scans
         is_somatic = not (experiment.Session.TargetStructure() & key)
         if is_somatic:
-            kwargs['init_method'] = 'greedy_roi'
             kwargs['AR_order'] = 2
+            kwargs['init_method'] = 'greedy_roi'
             kwargs['neuron_size_in_pixels'] = 10
+            kwargs['init_on_patches'] = False
         else:
-            kwargs['init_method'] = 'sparse_nmf'
             kwargs['AR_order'] = 0  # no impulse response function modelling
-            kwargs['alpha_per_param'] = 5e-5 # 1e-7 to 1e-4 is a good range
+            kwargs['init_method'] = 'sparse_nmf'
+            kwargs['snmf_alpha'] = 1000 # 100 to 10000 is a good range
+            kwargs['init_on_patches'] = True
 
         # Set params specific to initialization on patches
         if kwargs['init_on_patches']:
