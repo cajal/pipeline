@@ -600,7 +600,7 @@ class ExtractRaw(dj.Imported):
         else:
             kwargs['AR_order'] = 0  # no impulse response function modelling
             kwargs['init_method'] = 'sparse_nmf'
-            kwargs['snmf_alpha'] = 1000 # 100 to 10000 is a good range
+            kwargs['snmf_alpha'] = 500 # 50 to 5000 is a good range
             kwargs['init_on_patches'] = True
 
         # Set params specific to initialization on patches
