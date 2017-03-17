@@ -225,7 +225,8 @@ def plot_contours(location_matrix, background_image=None):
     plt.figure()
     caiman.utils.visualization.plot_contours(location_matrix, background_image,
                                              vmin=background_image.min(),
-                                             vmax=background_image.max(), maxthr=0.1)
+                                             vmax=background_image.max(),
+                                             thr_method='nrg', nrgthr=0.99)
 
 
 def _order_components(location_matrix, activity_matrix):
