@@ -576,7 +576,7 @@ class ExtractRaw(dj.Imported):
 
         # Estimate number of components per slice
         num_components = (Prepare.Galvo() & key).estimate_num_components_per_slice()
-        num_components *= 1.4 # add a little bit more just to be sure
+        num_components += int(0.4 * num_components) # add 40% more just to be sure
 
         # Set general parameters
         kwargs = {}
