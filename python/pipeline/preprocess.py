@@ -130,6 +130,21 @@ class Prepare(dj.Imported):
 
             return int(round(num_components))
 
+        def estimate_neuron_size_in_pixels(self):
+            """ Estimates the size of a neuron in the scan (in pixels). Assumes neurons
+             are 15 x 15 microns."""
+            neuron_size_in_microns = 15 # assumption
+
+            # Calculate size in pixels
+            um_width, px_width = (Prepare.Galvo() & self).fetch1['um_width', 'px_width']
+            one_micron_in_pixels = px_width / um_width
+            neuron_size_in_pixels = neuron_size_in_microns * one_micron_in_pixels
+
+            # Make sure it is int and at least 1.
+            neuron_size_in_pixels = int(max(round(neuron_size_in_pixels), 1))
+
+            return neuron_size_in_pixels
+
 
     class GalvoMotion(dj.Part):
         definition = """   # motion correction for galvo scans
@@ -289,17 +304,17 @@ class Method(dj.Lookup):
 
 @schema
 class ExtractRaw(dj.Imported):
-    definition = """  # corection, source extraction and trace deconvolution of a two-photon scan
+    definition = """
+    # Correction, source extraction and trace deconvolution of a two-photon scan
     -> Prepare
     -> Method
     """
     @property
     def key_source(self):
-        return (Prepare() * Method() & dj.OrList([
-                            (Prepare.Galvo() * Method.Galvo() - 'segmentation="manual"'),
-                            Prepare.Galvo() * Method.Galvo() * ManualSegment(),
-                            Prepare.Aod() * Method.Aod()]) ) \
-            - (experiment.Session.TargetStructure() & 'compartment="axon"')
+        return Prepare() * Method() & dj.OrList(
+            [(Prepare.Galvo() * Method.Galvo() - 'segmentation="manual"'),
+             Prepare.Galvo() * Method.Galvo() * ManualSegment(),
+             Prepare.Aod() * Method.Aod()] )
 
     class Trace(dj.Part):
         definition = """
@@ -363,7 +378,7 @@ class ExtractRaw(dj.Imported):
 
     class GalvoCorrelationImage(dj.Part):
         definition = """
-        # Each pixel shows the (average) temporal correlation between that pixel and its four neighbors
+        # Each pixel shows the (average) temporal correlation between that pixel and its eight neighbors
         -> ExtractRaw
         -> Channel
         -> Slice
@@ -395,18 +410,17 @@ class ExtractRaw(dj.Imported):
         # Arguments used to demix and deconvolve the scan with CNMF
         -> ExtractRaw
         --------------
-        num_components      : smallint # estimated number of components
-        merge_threshold     : float # overlapping masks are merged if temporal correlation greater than this
-        num_background_components   : smallint # estimated number of background components
-        num_processes = null    : smallint # number of processes to run in parallel, null=all possible
-        memory_usage_in_gb  : int # how much memory to use
+        num_components  : smallint # estimated number of components
+        ar_order        : tinyint # order of the autoregressive process for impulse function response
+        merge_threshold : float # overlapping masks are merged if temporal correlation greater than this
+        num_processes = null    : smallint # number of processes to run in parallel, null=all available
         num_pixels_per_process  : int # number of pixels processed at a time
-        block_size          : int # number of pixels per each dot product
-        ar_order            : tinyint # order of the autoregressive process for impulse function response
-        init_method         : enum("greedy_roi", "sparse_nmf") # type of initialization used
-        neuron_size_in_pixels = null   :   tinyint
-        snmf_alpha = null   : float   # Regularization parameter for SNMF
-        init_on_patches     : boolean   # whether to run initialization on patches
+        block_size      : int # number of pixels per each dot product
+        init_method     : enum("greedy_roi", "sparse_nmf") # type of initialization used
+        neuron_size_in_pixels = null :   tinyint
+        snmf_alpha = null       : float   # Regularization parameter for SNMF
+        num_background_components : smallint # estimated number of background components
+        init_on_patches         : boolean   # whether to run initialization on small patches
         patch_downsampling_factor = null : tinyint # how to downsample the scan
         percentage_of_patch_overlap = null : float # overlap between adjacent patches
         """
@@ -576,31 +590,33 @@ class ExtractRaw(dj.Imported):
 
         # Estimate number of components per slice
         num_components = (Prepare.Galvo() & key).estimate_num_components_per_slice()
-        num_components += int(0.4 * num_components) # add 40% more just to be sure
+        num_components += int(0.5 * num_components) # add 50% more just to be sure
+
+        # Estimate the size of a neuron in the scan (used for somatic only)
+        neuron_size_in_pixels = (Prepare.Galvo() & key).estimate_neuron_size_in_pixels()
 
         # Set general parameters
         kwargs = {}
         kwargs['num_components'] = num_components
+        kwargs['AR_order'] = 2  # impulse response modelling with AR(2) process
         kwargs['merge_threshold'] = 0.8
-        kwargs['num_background_components'] = 4
 
         # Set performance/execution parameters (heuristically)
-        kwargs['num_processes'] = None  # None for all cores available
-        kwargs['memory_usage_in_GB'] = 60
+        kwargs['num_processes'] = 20  # Set to None for all cores available
         kwargs['num_pixels_per_process'] = 10000
         kwargs['block_size'] = 10000
 
         # Set params specific to somatic or axonal/dendritic scans
         is_somatic = not (experiment.Session.TargetStructure() & key)
         if is_somatic:
-            kwargs['AR_order'] = 2
             kwargs['init_method'] = 'greedy_roi'
-            kwargs['neuron_size_in_pixels'] = 10
+            kwargs['neuron_size_in_pixels'] = neuron_size_in_pixels
+            kwargs['num_background_components'] = 4
             kwargs['init_on_patches'] = False
         else:
-            kwargs['AR_order'] = 0  # no impulse response function modelling
             kwargs['init_method'] = 'sparse_nmf'
-            kwargs['snmf_alpha'] = 500 # 50 to 5000 is a good range
+            kwargs['snmf_alpha'] = 500  # 10^2 to 10^3.5 is a good range
+            kwargs['num_background_components'] = 1
             kwargs['init_on_patches'] = True
 
         # Set params specific to initialization on patches
