@@ -76,29 +76,16 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=200, merge_threshold=0.8
     min_value_in_scan = np.min(scan)
     scan = scan + abs(min_value_in_scan) if min_value_in_scan < 0 else scan
 
-    # Save scan to files (needed to create the memory mapped views below)
-    num_timesteps = scan.shape[-1]
-    save_size = 10000
-    filenames = []
-    for i in range(0, num_timesteps, save_size):
-        filename = '/tmp/corrected_scan_{}.npy'.format(i)
-        chunk = scan[:, :, i: min(i + save_size, num_timesteps)]
-        np.save(filename, chunk.transpose([2, 0, 1]))  # save in t x h x w format
-        filenames.append(filename)
+    # Save as memory mapped file
+    mmap_filename = save_as_memmap(scan, base_name='/tmp/caiman')
+
+    # 'Load' scan and put it in Fortran order (that's how they want it)
+    mmap_scan, (image_height, image_width), num_timesteps = caiman.load_memmap(mmap_filename)
+    images = np.reshape(mmap_scan.T, (num_timesteps, image_width, image_height), order='F')
 
     # Start the ipyparallel cluster
     client, direct_view, num_processes = caiman.cluster.setup_cluster(
         n_processes=num_processes)
-
-    # Create the small memory mapped files and join them
-    mmap_names = caiman.save_memmap_each(filenames, base_name='/tmp/caiman', dview=direct_view)
-    mmap_filename = caiman.save_memmap_join(sorted(mmap_names), base_name='/tmp/caiman',
-                                            dview=direct_view)
-
-    # 'Load' data
-    mmap_scan, scan_dims, num_timesteps = caiman.load_memmap(mmap_filename)
-    image_height, image_width = scan_dims
-    images = np.reshape(mmap_scan.T, (num_timesteps, *scan_dims), order='F')
 
     # Optionally, run the initialization method in small patches to initialize components
     initial_A = None
@@ -159,8 +146,8 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=200, merge_threshold=0.8
 
     # Reshape spatial matrices to be image_height x image_width x timesteps
     new_shape = (image_height, image_width, -1)
-    location_matrix = location_matrix.toarray().reshape(new_shape, order='F')
-    background_location_matrix = background_location_matrix.reshape(new_shape, order='F')
+    location_matrix = np.reshape(location_matrix.toarray(), new_shape)
+    background_location_matrix = np.reshape(background_location_matrix, new_shape)
     AR_params = np.array(list(AR_params))  # unwrapping it (num_components x 2)
 
     # Order components by quality (densely distributed in space and high firing)
@@ -170,14 +157,13 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=200, merge_threshold=0.8
     client.close()
     caiman.stop_server()
 
+    # Delete memory mapped scan
+    os.remove(mmap_filename)
+
     # Delete log files (one per patch)
     log_files = glob.glob('/tmp/caiman*_LOG_*')
     for log_file in log_files:
         os.remove(log_file)
-
-    # Delete intermediate files (*.mmap and *.npy)
-    for filename in filenames + mmap_names + [mmap_filename, '/tmp/caiman.npz']:
-        os.remove(filename)
 
     return (location_matrix, activity_matrix, background_location_matrix,
             background_activity_matrix, raw_traces, spikes, AR_params)
@@ -244,3 +230,31 @@ def _order_components(location_matrix, activity_matrix):
     new_order = np.argsort(density_measure)[::-1]
 
     return location_matrix[:, :, new_order], activity_matrix[new_order, :]
+
+
+def save_as_memmap(scan, base_name='caiman', order='C'):
+    """Save the scan as a memory mapped file as expected by caiman
+
+    :param np.array scan: Scan to save shaped (image_height, image_width, num_timesteps)
+    :param string base_name: Base file name for the scan.
+    :param string order: Order of the array (usually C). Not tested for F.
+
+    :returns: Filename of the mmap file.
+    :rtype: string
+
+    """
+    # Get some params
+    image_height, image_width, num_timesteps = scan.shape
+    num_pixels = image_height * image_width
+
+    # Build filename
+    filename = '{}_d1_{}_d2_{}_d3_1_order_{}_frames_{}_.mmap'.format(base_name, image_height,
+                                                               image_width, order, num_timesteps)
+
+    # Create memory mapped file
+    mmap_file = np.memmap(filename, mode='w+', dtype=np.float32, order=order,
+                          shape=(num_pixels, num_timesteps))
+    mmap_file[:] = scan.reshape(num_pixels, num_timesteps, order=order)
+    del mmap_file # flushes changes
+
+    return filename
