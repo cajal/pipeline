@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 
 
 def demix_and_deconvolve_with_cnmf(scan, num_components=200, merge_threshold=0.8,
-                                   AR_order=2, num_processes=20, block_size=10000,
+                                   AR_order=2, num_processes=20, block_size=5000,
                                    num_pixels_per_process=10000, init_method='greedy_roi',
                                    neuron_size_in_pixels=10, snmf_alpha=None,
                                    num_background_components=4, init_on_patches=False,
