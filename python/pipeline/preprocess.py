@@ -604,7 +604,7 @@ class ExtractRaw(dj.Imported):
         # Set performance/execution parameters (heuristically)
         kwargs['num_processes'] = 20  # Set to None for all cores available
         kwargs['num_pixels_per_process'] = 10000
-        kwargs['block_size'] = 10000
+        kwargs['block_size'] = 5000
 
         # Set params specific to somatic or axonal/dendritic scans
         is_somatic = not (experiment.Session.TargetStructure() & key)
