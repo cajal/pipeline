@@ -624,12 +624,15 @@ class ExtractRaw(dj.Imported):
             kwargs['patch_downsampling_factor'] = 4
             kwargs['percentage_of_patch_overlap'] = .2
 
-        # Over each channel and slice in the scan
-        scan_slices, scan_channels = (Prepare.GalvoMotion() & key).fetch['slice', 'channel']
+        # Over each channel
+        scan_channels = (Prepare.GalvoMotion() & key).fetch['channel']
+        scan_channels = np.unique(scan_channels)
         for channel in scan_channels:
-            num_traces_until_now = 0 # count traces over one channel
+            num_traces_until_now = 0 # to count traces over one channel
+            channel_slices = (Prepare.GalvoMotion() & key & {'channel': channel}).fetch['slice']
 
-            for slice in scan_slices:
+            # Over each slice in the channel
+            for slice in channel_slices:
                 # Load the scan
                 scan = np.double(reader[:, :, channel - 1, slice - 1, :]).squeeze()
 
