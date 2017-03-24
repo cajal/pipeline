@@ -592,7 +592,7 @@ class ExtractRaw(dj.Imported):
         num_components = (Prepare.Galvo() & key).estimate_num_components_per_slice()
         num_components += int(0.5 * num_components) # add 50% more just to be sure
 
-        # Estimate the size of a neuron in the scan (used for somatic only)
+        # Estimate the size of a neuron in the scan (used for somatic scans)
         neuron_size_in_pixels = (Prepare.Galvo() & key).estimate_neuron_size_in_pixels()
 
         # Set general parameters
