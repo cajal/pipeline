@@ -575,8 +575,10 @@ class ExtractRaw(dj.Imported):
         """
         from .utils import caiman_interface as cmn
 
-        print('-'*50)
-        print('ExtractRaw: Processing scan {}'.format(key))
+        print('')
+        print('*' * 70)
+        print('Processing scan {}'.format(key))
+        print('*' * 70)
 
         # Insert key in ExtractRaw
         self.insert1(key)
@@ -634,26 +636,32 @@ class ExtractRaw(dj.Imported):
             # Over each slice in the channel
             for slice in channel_slices:
                 # Load the scan
+                print('Loading scan...')
                 scan = np.double(reader[:, :, channel - 1, slice - 1, :]).squeeze()
 
                 # Correct scan
+                print('Correcting scan...')
                 correct_motion = (Prepare.GalvoMotion() & key &
                                   {'slice': slice, 'channel': channel}).get_correct_motion()
                 correct_raster = (Prepare.Galvo() & key).get_correct_raster()
                 corrected_scan = correct_motion(correct_raster(scan))
 
                 # Compute and insert correlation image
+                print('Computing correlation image...')
                 correlation_image = cmn.compute_correlation_image(corrected_scan)
                 ExtractRaw.GalvoCorrelationImage().insert1({**key, 'slice': slice,
                                                             'channel': channel,
                                                             'correlation_image': correlation_image})
 
                 # Extract traces
+                print('Extracting mask, traces and spikes (cnmf)...')
                 cnmf_result = cmn.demix_and_deconvolve_with_cnmf(corrected_scan, **kwargs)
                 (location_matrix, activity_matrix, background_location_matrix,
                 background_activity_matrix, raw_traces, spikes, AR_params) = cnmf_result
 
                 # Insert traces, spikes and spatial masks
+                print('Inserting masks, traces, spikes, ar parameters and background'
+                      ' components...')
                 final_num_components = raw_traces.shape[0]
                 for i in range(final_num_components):
                     # Create new trace key
