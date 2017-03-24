@@ -76,12 +76,12 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=200, merge_threshold=0.8
     min_value_in_scan = np.min(scan)
     scan = scan + abs(min_value_in_scan) if min_value_in_scan < 0 else scan
 
-    # Save as memory mapped file
-    mmap_filename = save_as_memmap(scan, base_name='/tmp/caiman')
+    # Save as memory mapped file in F order (that's how caiman wants it)
+    mmap_filename = save_as_memmap(scan, base_name='/tmp/caiman', order='F')
 
-    # 'Load' scan and put it in Fortran order (that's how they want it)
+    # 'Load' scan
     mmap_scan, (image_height, image_width), num_timesteps = caiman.load_memmap(mmap_filename)
-    images = np.reshape(mmap_scan.T, (num_timesteps, image_width, image_height), order='F')
+    images = np.reshape(mmap_scan.T, (num_timesteps, image_height, image_width), order='F')
 
     # Start the ipyparallel cluster
     client, direct_view, num_processes = caiman.cluster.setup_cluster(
@@ -118,7 +118,8 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=200, merge_threshold=0.8
                                 method_init=init_method, gSig=gaussian_std_dev,
                                 alpha_snmf=snmf_alpha, gnb=num_background_components,
                                 n_pixels_per_process=num_pixels_per_process,
-                                block_size=block_size, check_nan=False, dview=direct_view)
+                                block_size=block_size, check_nan=False, dview=direct_view,
+                                method_deconvolution='cvxpy')
         cnmf = cnmf.fit(images)
 
         # Get results
@@ -132,7 +133,7 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=200, merge_threshold=0.8
                             merge_thresh=merge_threshold, gnb=num_background_components,
                             check_nan=False, n_pixels_per_process=num_pixels_per_process,
                             block_size=block_size, dview=direct_view, Ain=initial_A,
-                            Cin=initial_C, f_in=initial_f)
+                            Cin=initial_C, f_in=initial_f, method_deconvolution='cvxpy')
     cnmf = cnmf.fit(images)
 
     # Get final results
@@ -146,8 +147,8 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=200, merge_threshold=0.8
 
     # Reshape spatial matrices to be image_height x image_width x timesteps
     new_shape = (image_height, image_width, -1)
-    location_matrix = np.reshape(location_matrix.toarray(), new_shape)
-    background_location_matrix = np.reshape(background_location_matrix, new_shape)
+    location_matrix = location_matrix.toarray().reshape(new_shape, order='F')
+    background_location_matrix = background_location_matrix.reshape(new_shape, order='F')
     AR_params = np.array(list(AR_params))  # unwrapping it (num_components x 2)
 
     # Order components by quality (densely distributed in space and high firing)
@@ -232,12 +233,12 @@ def _order_components(location_matrix, activity_matrix):
     return location_matrix[:, :, new_order], activity_matrix[new_order, :]
 
 
-def save_as_memmap(scan, base_name='caiman', order='C'):
+def save_as_memmap(scan, base_name='caiman', order='F'):
     """Save the scan as a memory mapped file as expected by caiman
 
     :param np.array scan: Scan to save shaped (image_height, image_width, num_timesteps)
     :param string base_name: Base file name for the scan.
-    :param string order: Order of the array (usually C). Not tested for F.
+    :param string order: Order of the array: either 'C' or 'F'.
 
     :returns: Filename of the mmap file.
     :rtype: string
