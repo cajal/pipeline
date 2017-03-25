@@ -151,9 +151,6 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=200, merge_threshold=0.8
     background_location_matrix = background_location_matrix.reshape(new_shape, order='F')
     AR_params = np.array(list(AR_params))  # unwrapping it (num_components x 2)
 
-    # Order components by quality (densely distributed in space and high firing)
-    location_matrix, activity_matrix = _order_components(location_matrix, activity_matrix)
-
     # Stop ipyparallel cluster
     client.close()
     caiman.stop_server()
@@ -168,6 +165,28 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=200, merge_threshold=0.8
 
     return (location_matrix, activity_matrix, background_location_matrix,
             background_activity_matrix, raw_traces, spikes, AR_params)
+
+
+def order_components(location_matrix, correlation_image):
+    """ Order masks according to brightness and density in the correlation image.
+
+    :param np.array location_matrix: Masks (image_height x image_width x num_components).
+    :param array correlation_image: Correlation image (image_height x image_width).
+
+    :return: Indices that would order the location matrix (num_components).
+    :rtype: np.array
+    """
+    # Reshape and normalize masks to sum 1 (num_pixels x num_components)
+    reshaped_masks = location_matrix.reshape(-1, location_matrix.shape[-1])
+    norm_masks = reshaped_masks / reshaped_masks.sum(axis=0)
+
+    # Calculate correlation_image value weighted by the mask
+    quality_measure = (correlation_image.ravel()).dot(norm_masks)
+
+    # Calculate new order according to this measure
+    new_order = np.flipud(quality_measure.argsort())  # highest first
+
+    return new_order
 
 
 def compute_correlation_image(scan):
@@ -189,18 +208,22 @@ def compute_correlation_image(scan):
     return correlation_image
 
 
-def plot_contours(location_matrix, background_image=None):
+def plot_contours(location_matrix, background_image=None, first_n=None):
     """ Plot each component in location matrix over a background image.
 
-    :param np.array location_matrix: (image_height x image_width x timesteps)
+    :param np.array location_matrix: (image_height x image_width x num_components)
     :param np.array background_image: (image_height x image_width).
            Mean or correlation image will look fine.
     """
-    # Reshape location_matrix
-    image_height, image_width, timesteps = location_matrix.shape
-    location_matrix = location_matrix.reshape(-1, timesteps, order='F')
+    # Select first n components
+    if first_n:
+        location_matrix = location_matrix[:, :, :first_n]
 
-    # Check background matrix was provided, black background otherwise
+    # Reshape location_matrix
+    image_height, image_width, num_components = location_matrix.shape
+    location_matrix = location_matrix.reshape(-1, num_components, order='F')
+
+    # Set black background if not provided
     if background_image is None:
         background_image = np.zeros([image_height, image_width])
 
@@ -210,27 +233,6 @@ def plot_contours(location_matrix, background_image=None):
                                              vmin=background_image.min(),
                                              vmax=background_image.max(),
                                              thr_method='nrg', nrgthr=0.99)
-
-
-def _order_components(location_matrix, activity_matrix):
-    """Based on caiman.source_extraction.cnmf.utilities.order_components"""
-    # This is the original version from caiman
-    # num_components = location_matrix.shape[-1]
-    # linear_location = location_matrix.reshape(-1, num_components)
-    # density_measure = np.sum(linear_location**4, axis = 0)**(1/4) # small dense masks better
-    # norm_density = density_measure / np.linalg.norm(linear_location, axis=0)
-    #
-    # firing_measure = np.max(activity_matrix.T * np.linalg.norm(linear_location, axis=0),
-    #                         axis=0)
-    #
-    # final_measure = norm_density * firing_measure
-    # new_order = np.argsort(final_measure)[::-1]
-
-    # This is good enough (just order them based on the size of the spatial components)
-    density_measure = np.linalg.norm(location_matrix, axis=(0, 1))
-    new_order = np.argsort(density_measure)[::-1]
-
-    return location_matrix[:, :, new_order], activity_matrix[new_order, :]
 
 
 def save_as_memmap(scan, base_name='caiman', order='F'):
