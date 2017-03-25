@@ -576,9 +576,9 @@ class ExtractRaw(dj.Imported):
         from .utils import caiman_interface as cmn
 
         print('')
-        print('*' * 70)
+        print('*' * 80)
         print('Processing scan {}'.format(key))
-        print('*' * 70)
+        print('*' * 80)
 
         # Insert key in ExtractRaw
         self.insert1(key)
