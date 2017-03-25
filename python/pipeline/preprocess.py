@@ -630,7 +630,7 @@ class ExtractRaw(dj.Imported):
         scan_channels = (Prepare.GalvoMotion() & key).fetch['channel']
         scan_channels = np.unique(scan_channels)
         for channel in scan_channels:
-            num_traces_until_now = 0 # to count traces over one channel
+            current_trace_id = 1 # to count traces over one channel, ids start at 1
             channel_slices = (Prepare.GalvoMotion() & key & {'channel': channel}).fetch['slice']
 
             # Over each slice in the channel
@@ -659,14 +659,15 @@ class ExtractRaw(dj.Imported):
                 (location_matrix, activity_matrix, background_location_matrix,
                 background_activity_matrix, raw_traces, spikes, AR_params) = cnmf_result
 
-                # Insert traces, spikes and spatial masks
+                # Obtain new mask order based on their brightness in the correlation image
+                new_order = cmn.order_components(location_matrix, correlation_image)
+
+                # Insert traces, spikes and spatial masks (preserving new order)
                 print('Inserting masks, traces, spikes, ar parameters and background'
                       ' components...')
-                final_num_components = raw_traces.shape[0]
-                for i in range(final_num_components):
+                for i  in new_order:
                     # Create new trace key
-                    trace_id = num_traces_until_now + i + 1
-                    trace_key = {**key, 'trace_id': trace_id, 'channel': channel}
+                    trace_key = {**key, 'trace_id': current_trace_id, 'channel': channel}
 
                     # Insert traces and spikes
                     ExtractRaw.Trace().insert1({**trace_key, 'raw_trace': raw_traces[i, :]})
@@ -688,7 +689,9 @@ class ExtractRaw(dj.Imported):
                     ExtractRaw.GalvoROI().insert1({**trace_key, 'slice': slice,
                                                    'mask_pixels': defined_mask_indices,
                                                    'mask_weights': defined_mask_weights})
-                num_traces_until_now += final_num_components # increase trace count
+
+                    # Increase trace_id counter
+                    current_trace_id+=1
 
                 # Insert background components
                 background_dict = {**key, 'channel': channel, 'slice': slice,
@@ -699,6 +702,7 @@ class ExtractRaw(dj.Imported):
         # Insert CNMF parameters (one per scan)
         lowercase_kwargs = {key.lower(): value for key, value in kwargs.items()}
         ExtractRaw.CNMFParameters().insert1({**key, **lowercase_kwargs})
+
 
     def save_video(self, filename='cnmf_extraction.mp4', slice=1, channel=1,
                    start_index=0, seconds=30, dpi=200):
@@ -808,11 +812,12 @@ class ExtractRaw(dj.Imported):
 
         return fig
 
-    def plot_contours(self, slice=1, channel=1):
-        """ Draw contours of all masks over the correlation image.
+    def plot_contours(self, slice=1, channel=1, first_n=None):
+        """ Draw contours of masks over the correlation image.
 
         :param slice: Scan slice to use
         :param channel: Scan channel to use
+        :param first_n: Number of masks to plot. None for all.
         :returns: None
         """
         from .utils import caiman_interface as cmn
@@ -826,7 +831,7 @@ class ExtractRaw(dj.Imported):
         correlation_image = image_rel.fetch1['correlation_image'] if image_rel else None
 
         # Draw contours
-        cmn.plot_contours(location_matrix, correlation_image)
+        cmn.plot_contours(location_matrix, correlation_image, first_n)
 
     def plot_impulse_responses(self, slice=1, channel=1, num_timepoints=100):
         """ Plots the individual impulse response functions for all traces assuming an
