@@ -705,7 +705,7 @@ class ExtractRaw(dj.Imported):
 
 
     def save_video(self, filename='cnmf_extraction.mp4', slice=1, channel=1,
-                   start_index=0, seconds=30, dpi=200):
+                   start_index=0, seconds=30, dpi=200, first_n=None):
         """ Creates an animation video showing the original vs corrected scan.
 
         :param string filename: Output filename (path + filename)
@@ -714,6 +714,7 @@ class ExtractRaw(dj.Imported):
         :param int start_index: Where in the scan to start the video.
         :param int seconds: How long in seconds should the animation run.
         :param int dpi: Dots per inch, controls the quality of the video.
+        :param int first_n: Consider only the first n components.
 
         :returns Figure. You can call show() on it.
         :rtype: matplotlib.figure.Figure
@@ -751,6 +752,11 @@ class ExtractRaw(dj.Imported):
                                                                      'channel': channel}
         background_location_matrix, background_activity_matrix = \
             background_rel.fetch1['masks', 'activity']
+
+        # Select first n components
+        if first_n:
+            location_matrix = location_matrix[:, :, :first_n]
+            activity_matrix = activity_matrix[:first_n, :]
 
         # Restrict computations to the necessary video frames
         activity_matrix = activity_matrix[:, start_index: stop_index]
@@ -806,6 +812,8 @@ class ExtractRaw(dj.Imported):
                                         interval=1000 / fps)
 
         # Save animation
+        if not filename.endswith('.mp4'):
+            filename += '.mp4'
         print('Saving video at:', filename)
         print('If this takes too long, stop it and call again with dpi < 200 (default)')
         video.save(filename, dpi=dpi)
@@ -824,6 +832,10 @@ class ExtractRaw(dj.Imported):
 
         # Get location matrix
         location_matrix = self.get_all_masks(slice, channel)
+
+        # Select first n components
+        if first_n:
+            location_matrix = location_matrix[:, :, :first_n]
 
         # Get correlation image if defined
         image_rel = ExtractRaw.GalvoCorrelationImage() & self & {'slice': slice,
@@ -871,7 +883,7 @@ class ExtractRaw(dj.Imported):
             return fig
 
     def get_all_masks(self, slice, channel):
-        """Returns an image_width x image_height x num_masks matrix with all masks."""
+        """Returns an image_height x image_width x num_masks matrix with all masks."""
         mask_rel = ExtractRaw.GalvoROI() & self & {'slice': slice, 'channel': channel}
 
         # Get masks
