@@ -208,17 +208,13 @@ def compute_correlation_image(scan):
     return correlation_image
 
 
-def plot_contours(location_matrix, background_image=None, first_n=None):
+def plot_contours(location_matrix, background_image=None):
     """ Plot each component in location matrix over a background image.
 
     :param np.array location_matrix: (image_height x image_width x num_components)
-    :param np.array background_image: (image_height x image_width).
-           Mean or correlation image will look fine.
+    :param np.array background_image: (image_height x image_width). Image for the
+        background. Mean or correlation image look fine.
     """
-    # Select first n components
-    if first_n:
-        location_matrix = location_matrix[:, :, :first_n]
-
     # Reshape location_matrix
     image_height, image_width, num_components = location_matrix.shape
     location_matrix = location_matrix.reshape(-1, num_components, order='F')
