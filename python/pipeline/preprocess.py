@@ -665,6 +665,7 @@ class ExtractRaw(dj.Imported):
                 # Insert traces, spikes and spatial masks (preserving new order)
                 print('Inserting masks, traces, spikes, ar parameters and background'
                       ' components...')
+                dj.conn() # make sure connection is active
                 for i  in new_order:
                     # Create new trace key
                     trace_key = {**key, 'trace_id': current_trace_id, 'channel': channel}
