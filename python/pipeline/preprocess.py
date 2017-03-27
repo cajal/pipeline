@@ -166,10 +166,11 @@ class Prepare(dj.Imported):
             xy_motion = self.fetch1['motion_xy']
 
             def my_lambda_function(scan, indices=None):
-                if indices:
-                    return galvo_corrections.correct_motion(scan, xy_motion[:, indices])
-                else:
+                if indices is None:
                     return galvo_corrections.correct_motion(scan, xy_motion)
+                else:
+                    return galvo_corrections.correct_motion(scan, xy_motion[:, indices])
+
 
             return my_lambda_function
 
@@ -845,7 +846,7 @@ class ExtractRaw(dj.Imported):
         correlation_image = image_rel.fetch1['correlation_image'] if image_rel else None
 
         # Draw contours
-        cmn.plot_contours(location_matrix, correlation_image, first_n)
+        cmn.plot_contours(location_matrix, correlation_image)
 
     def plot_impulse_responses(self, slice=1, channel=1, num_timepoints=100):
         """ Plots the individual impulse response functions for all traces assuming an
@@ -862,7 +863,7 @@ class ExtractRaw(dj.Imported):
         # Get AR coefficients
         ar_coefficients = ar_rel.fetch['g'] if ar_rel else None
 
-        if ar_coefficients:
+        if ar_coefficients is not None:
             fig = plt.figure()
             x_axis = np.arange(num_timepoints) / fps # make it seconds
 
