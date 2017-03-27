@@ -220,8 +220,7 @@ def plot_contours(location_matrix, background_image=None):
     location_matrix = location_matrix.reshape(-1, num_components, order='F')
 
     # Set black background if not provided
-    if background_image is None:
-        background_image = np.zeros([image_height, image_width])
+    background_image = background_image or np.zeros([image_height, image_width])
 
     # Plot contours
     plt.figure()

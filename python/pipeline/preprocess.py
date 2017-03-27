@@ -166,10 +166,10 @@ class Prepare(dj.Imported):
             xy_motion = self.fetch1['motion_xy']
 
             def my_lambda_function(scan, indices=None):
-                if indices is None:
-                    return galvo_corrections.correct_motion(scan, xy_motion)
-                else:
+                if indices:
                     return galvo_corrections.correct_motion(scan, xy_motion[:, indices])
+                else:
+                    return galvo_corrections.correct_motion(scan, xy_motion)
 
             return my_lambda_function
 
@@ -262,6 +262,8 @@ class Prepare(dj.Imported):
                                         interval=1000 / fps)
 
         # Save animation
+        if not filename.endswith('.mp4'):
+            filename += '.mp4'
         print('Saving video at:', filename)
         print('If this takes too long, stop it and call again with dpi < 200 (default)')
         video.save(filename, dpi=dpi)
@@ -704,7 +706,6 @@ class ExtractRaw(dj.Imported):
         lowercase_kwargs = {key.lower(): value for key, value in kwargs.items()}
         ExtractRaw.CNMFParameters().insert1({**key, **lowercase_kwargs})
 
-
     def save_video(self, filename='cnmf_extraction.mp4', slice=1, channel=1,
                    start_index=0, seconds=30, dpi=200, first_n=None):
         """ Creates an animation video showing the original vs corrected scan.
@@ -861,7 +862,7 @@ class ExtractRaw(dj.Imported):
         # Get AR coefficients
         ar_coefficients = ar_rel.fetch['g'] if ar_rel else None
 
-        if ar_coefficients is not None:
+        if ar_coefficients:
             fig = plt.figure()
             x_axis = np.arange(num_timepoints) / fps # make it seconds
 
