@@ -122,6 +122,11 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=200, merge_threshold=0.8
                                 method_deconvolution='cvxpy')
         cnmf = cnmf.fit(images)
 
+        # Delete log files (one per patch)
+        log_files = glob.glob('caiman*_LOG_*')
+        for log_file in log_files:
+            os.remove(log_file)
+
         # Get results
         initial_A = cnmf.A
         initial_C = cnmf.C
@@ -157,11 +162,6 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=200, merge_threshold=0.8
 
     # Delete memory mapped scan
     os.remove(mmap_filename)
-
-    # Delete log files (one per patch)
-    log_files = glob.glob('/tmp/caiman*_LOG_*')
-    for log_file in log_files:
-        os.remove(log_file)
 
     return (location_matrix, activity_matrix, background_location_matrix,
             background_activity_matrix, raw_traces, spikes, AR_params)
@@ -254,6 +254,6 @@ def save_as_memmap(scan, base_name='caiman', order='F'):
     mmap_file = np.memmap(filename, mode='w+', dtype=np.float32, order=order,
                           shape=(num_pixels, num_timesteps))
     mmap_file[:] = scan.reshape(num_pixels, num_timesteps, order=order)
-    del mmap_file # flushes changes
+    mmap_file.flush()
 
     return filename
