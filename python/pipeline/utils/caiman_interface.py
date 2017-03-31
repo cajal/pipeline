@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 def demix_and_deconvolve_with_cnmf(scan, num_components=200, merge_threshold=0.8,
                                    AR_order=2, num_processes=20, block_size=5000,
                                    num_pixels_per_process=5000, init_method='greedy_roi',
-                                   soma_radius_in_pixels=5, snmf_alpha=None,
+                                   soma_radius_in_pixels=(5, 5), snmf_alpha=None,
                                    num_background_components=4, init_on_patches=False,
                                    patch_downsampling_factor=None,
                                    percentage_of_patch_overlap=None):
@@ -106,12 +106,13 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=200, merge_threshold=0.8
         num_components_per_patch = int(round(num_components_per_patch))
         overlap_in_pixels = int(round(overlap_in_pixels))
 
+        print('Sup', soma_radius_in_pixels)
+
         # Run CNMF on patches (only for initialization, no impulse response modelling p=0)
         cnmf = caiman.cnmf.CNMF(num_processes, only_init_patch=True, p=0,
                                 rf=int(round(patch_size / 2)), stride=overlap_in_pixels,
                                 k=num_components_per_patch, merge_thresh=merge_threshold,
-                                method_init=init_method, gSig
-                                =soma_radius_in_pixels,
+                                method_init=init_method, gSig=soma_radius_in_pixels,
                                 alpha_snmf=snmf_alpha, gnb=num_background_components,
                                 n_pixels_per_process=num_pixels_per_process,
                                 block_size=block_size, check_nan=False, dview=direct_view,
