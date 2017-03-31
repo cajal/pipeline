@@ -130,20 +130,27 @@ class Prepare(dj.Imported):
 
             return int(round(num_components))
 
-        def estimate_neuron_size_in_pixels(self):
-            """ Estimates the size of a neuron in the scan (in pixels). Assumes neurons
-             are 15 x 15 microns."""
-            neuron_size_in_microns = 15 # assumption
+        def estimate_soma_radius_in_pixels(self):
+            """ Estimates the radius of a neuron in the scan (in pixels). Assumes soma is
+             14 x 14 microns.
+             
+             :returns: a tuple with the estimated pixel radius on the y-axis (height) and
+                x-axis (width) of the scan.
+             :rtype: tuple of floats
+            """
+            soma_radius_in_microns = 7 # assumption
 
-            # Calculate size in pixels
+            # Calculate size in pixels (height radius)
+            um_height, px_height = (Prepare.Galvo() & self).fetch1['um_height', 'px_height']
+            height_microns_per_pixel = um_height / px_height
+            height_radius_in_pixels = soma_radius_in_microns / height_microns_per_pixel
+
+            # Calculate size in pixels (width radius)
             um_width, px_width = (Prepare.Galvo() & self).fetch1['um_width', 'px_width']
-            one_micron_in_pixels = px_width / um_width
-            neuron_size_in_pixels = neuron_size_in_microns * one_micron_in_pixels
+            width_microns_per_pixel = um_width / px_width
+            width_radius_in_pixels = soma_radius_in_microns / width_microns_per_pixel
 
-            # Make sure it is int and at least 1.
-            neuron_size_in_pixels = int(max(round(neuron_size_in_pixels), 1))
-
-            return neuron_size_in_pixels
+            return (height_radius_in_pixels, width_radius_in_pixels)
 
 
     class GalvoMotion(dj.Part):
@@ -419,9 +426,9 @@ class ExtractRaw(dj.Imported):
         num_processes = null    : smallint # number of processes to run in parallel, null=all available
         num_pixels_per_process  : int # number of pixels processed at a time
         block_size      : int # number of pixels per each dot product
-        init_method     : enum("greedy_roi", "sparse_nmf") # type of initialization used
-        neuron_size_in_pixels = null :   tinyint
-        snmf_alpha = null       : float   # Regularization parameter for SNMF
+        init_method     : enum("greedy_roi", "sparse_nmf", "local_nmf") # type of initialization used
+        soma_radius_in_pixels = null :blob # estimated radius for a soma in the scan
+        snmf_alpha = null       : float   # regularization parameter for SNMF
         num_background_components : smallint # estimated number of background components
         init_on_patches         : boolean   # whether to run initialization on small patches
         patch_downsampling_factor = null : tinyint # how to downsample the scan
@@ -597,8 +604,8 @@ class ExtractRaw(dj.Imported):
         num_components = (Prepare.Galvo() & key).estimate_num_components_per_slice()
         num_components += int(0.5 * num_components) # add 50% more just to be sure
 
-        # Estimate the size of a neuron in the scan (used for somatic scans)
-        neuron_size_in_pixels = (Prepare.Galvo() & key).estimate_neuron_size_in_pixels()
+        # Estimate the radius of a neuron in the scan (used for somatic scans)
+        soma_radius_in_pixels = (Prepare.Galvo() & key).estimate_soma_radius_in_pixels()
 
         # Set general parameters
         kwargs = {}
@@ -615,7 +622,7 @@ class ExtractRaw(dj.Imported):
         is_somatic = not (experiment.Session.TargetStructure() & key)
         if is_somatic:
             kwargs['init_method'] = 'greedy_roi'
-            kwargs['neuron_size_in_pixels'] = neuron_size_in_pixels
+            kwargs['soma_radius_in_pixels'] = soma_radius_in_pixels
             kwargs['num_background_components'] = 4
             kwargs['init_on_patches'] = False
         else:
