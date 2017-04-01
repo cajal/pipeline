@@ -77,7 +77,7 @@ RUN apt-get update -y -q && \
     apt-get install -y clang-3.9 lldb-3.9 && \
     apt-get install -y libc6-i386  libsuitesparse-dev && \
     export LLVM_CONFIG=/usr/lib/llvm-3.9/bin/llvm-config && \ 
-    git clone --recursive https://github.com/ecobost/CaImAn.git && \
+    git clone --recursive https://github.com/simonsfoundation/CaImAn.git && \
     pip3 install cython scikit-image ipyparallel psutil numba && \
     pip3 install -r CaImAn/requirements_pip.txt && \
     pip3 install git+https://github.com/j-friedrich/OASIS.git && \
