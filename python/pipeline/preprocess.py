@@ -205,7 +205,7 @@ class Prepare(dj.Imported):
         """
 
     def save_video(self, filename='galvo_corrections.mp4', slice=1, channel=1,
-                   start_index=0, seconds=30, dpi=200):
+                   start_index=0, seconds=30, dpi=250):
         """ Creates an animation video showing the original vs corrected scan.
 
         :param string filename: Output filename (path + filename)
@@ -273,7 +273,7 @@ class Prepare(dj.Imported):
         if not filename.endswith('.mp4'):
             filename += '.mp4'
         print('Saving video at:', filename)
-        print('If this takes too long, stop it and call again with dpi < 200 (default)')
+        print('If this takes too long, stop it and call again with dpi < ', dpi, '(default)')
         video.save(filename, dpi=dpi)
 
         return fig
@@ -613,7 +613,7 @@ class ExtractRaw(dj.Imported):
         kwargs['AR_order'] = 2  # impulse response modelling with AR(2) process
         kwargs['merge_threshold'] = 0.8
 
-        # Set performance/execution parameters (heuristically)
+        # Set performance/execution parameters (heuristically), decrease if memory overflows
         kwargs['num_processes'] = 20  # Set to None for all cores available
         kwargs['num_pixels_per_process'] = 5000
         kwargs['block_size'] = 5000
@@ -714,8 +714,8 @@ class ExtractRaw(dj.Imported):
         lowercase_kwargs = {key.lower(): value for key, value in kwargs.items()}
         ExtractRaw.CNMFParameters().insert1({**key, **lowercase_kwargs})
 
-    def save_video(self, filename='cnmf_extraction.mp4', slice=1, channel=1,
-                   start_index=0, seconds=30, dpi=200, first_n=None):
+    def save_video(self, filename='cnmf_results.mp4', slice=1, channel=1,
+                   start_index=0, seconds=30, dpi=250, first_n=None):
         """ Creates an animation video showing the original vs corrected scan.
 
         :param string filename: Output filename (path + filename)
@@ -825,7 +825,7 @@ class ExtractRaw(dj.Imported):
         if not filename.endswith('.mp4'):
             filename += '.mp4'
         print('Saving video at:', filename)
-        print('If this takes too long, stop it and call again with dpi < 200 (default)')
+        print('If this takes too long, stop it and call again with dpi < ', dpi, '(default)')
         video.save(filename, dpi=dpi)
 
         return fig
@@ -919,6 +919,18 @@ class ExtractRaw(dj.Imported):
         raw_traces = np.array([x.squeeze() for x in raw_traces])
 
         return raw_traces
+
+    def get_all_spikes(self, slice, channel):
+        """ Returns a num_spike_traces x num_timesteps matrix with all spike rates."""
+        spike_rel = ExtractRaw.SpikeRate() * ExtractRaw.GalvoROI() & self & {'slice': slice,
+                                                                             'channel': channel}
+        # Get spike traces
+        spike_traces = spike_rel.fetch.order_by('trace_id')['spike_trace']
+
+        # Reshape them
+        spike_traces = np.array([x.squeeze() for x in spike_traces])
+
+        return spike_traces
 
 @schema
 class Sync(dj.Imported):
