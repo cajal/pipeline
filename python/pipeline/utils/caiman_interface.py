@@ -225,7 +225,7 @@ def plot_contours(location_matrix, background_image=None):
     caiman.utils.visualization.plot_contours(location_matrix, background_image,
                                              vmin=background_image.min(),
                                              vmax=background_image.max(),
-                                             thr_method='nrg', nrgthr=0.99)
+                                             thr_method='nrg', nrgthr=0.995)
 
 
 def save_as_memmap(scan, base_name='caiman', order='F'):
