@@ -106,8 +106,6 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=200, merge_threshold=0.8
         num_components_per_patch = int(round(num_components_per_patch))
         overlap_in_pixels = int(round(overlap_in_pixels))
 
-        print('Sup', soma_radius_in_pixels)
-
         # Run CNMF on patches (only for initialization, no impulse response modelling p=0)
         cnmf = caiman.cnmf.CNMF(num_processes, only_init_patch=True, p=0,
                                 rf=int(round(patch_size / 2)), stride=overlap_in_pixels,
