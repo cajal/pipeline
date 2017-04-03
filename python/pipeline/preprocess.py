@@ -764,7 +764,7 @@ class ExtractRaw(dj.Imported):
             background_rel.fetch1['masks', 'activity']
 
         # Select first n components
-        if first_n:
+        if first_n is not None:
             location_matrix = location_matrix[:, :, :first_n]
             activity_matrix = activity_matrix[:first_n, :]
 
@@ -844,7 +844,7 @@ class ExtractRaw(dj.Imported):
         location_matrix = self.get_all_masks(slice, channel)
 
         # Select first n components
-        if first_n:
+        if first_n is not None:
             location_matrix = location_matrix[:, :, :first_n]
 
         # Get correlation image if defined
