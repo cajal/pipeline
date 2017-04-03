@@ -273,7 +273,7 @@ class Prepare(dj.Imported):
         if not filename.endswith('.mp4'):
             filename += '.mp4'
         print('Saving video at:', filename)
-        print('If this takes too long, stop it and call again with dpi < ', dpi, '(default)')
+        print('If this takes too long, stop it and call again with dpi <', dpi, '(default)')
         video.save(filename, dpi=dpi)
 
         return fig
@@ -825,7 +825,7 @@ class ExtractRaw(dj.Imported):
         if not filename.endswith('.mp4'):
             filename += '.mp4'
         print('Saving video at:', filename)
-        print('If this takes too long, stop it and call again with dpi < ', dpi, '(default)')
+        print('If this takes too long, stop it and call again with dpi <', dpi, '(default)')
         video.save(filename, dpi=dpi)
 
         return fig
