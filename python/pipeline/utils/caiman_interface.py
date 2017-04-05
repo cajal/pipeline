@@ -5,33 +5,31 @@ import glob, os
 import matplotlib.pyplot as plt
 
 
-def demix_and_deconvolve_with_cnmf(scan, num_components=100, merge_threshold=0.8,
+def demix_and_deconvolve_with_cnmf(scan, num_components=200, merge_threshold=0.8,
+                                   AR_order=2, num_processes=20, block_size=5000,
+                                   num_pixels_per_process=5000, init_method='greedy_roi',
+                                   soma_radius_in_pixels=(5, 5), snmf_alpha=None,
                                    num_background_components=4, init_on_patches=False,
-                                   num_processes=None, memory_usage_in_GB=30,
-                                   num_pixels_per_process=10000, block_size=10000,
-                                   init_method='greedy_roi', AR_order=2,
-                                   neuron_size_in_pixels=10, alpha_snmf=None,
-                                   patch_downsampling_factor=4,
-                                   percentage_of_patch_overlap=0.2):
-    """ Extract spike train activity directly from the scan using CNMF.
+                                   patch_downsampling_factor=None,
+                                   percentage_of_patch_overlap=None):
+    """ Extract spike train activity from two-photon scans using CNMF.
 
     Uses constrained non-negative matrix factorization to find all neurons/components in
     a timeseries of images (locations) and their fluorescence traces (activity) and
     deconvolves them using an autoregressive model of the calcium impulse response
-    function (not used for dendrites). See Pnevmatikakis et al., 2016 for details.
+    function. See Pnevmatikakis et al., 2016 for details.
 
     Default values work fine for somatic images.
 
     :param np.array scan: 3-dimensional scan (image_height, image_width, timesteps).
     :param int num_components: An estimate of neurons/spatial components in the scan FOV.
     :param int merge_threshold: Maximum temporal correlation allowed between activity of
-                                overlapping components before merging them.
+            overlapping components before merging them.
     :param int num_background_components:  Number of background components to use.
     :param bool init_on_patches: If True, run the initialization methods on small patches
             of the scan rather than on the whole image.
     :param int num_processes: How many processes to run in parallel. None for as many
             processes as available cores.
-    :param int memory_usage_in_GB: How much memory to use (may not be exact).
     :param int num_pixels_per_process: How many pixels will a process handle each time.
     :param int block_size: 'number of pixels to process at the same time for dot product.'
     :param string init_method: Initialization method for the components.
@@ -40,9 +38,10 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, merge_threshold=0.8
         'sparse_nmf': Regularized non-negative matrix factorization (as impl. in sklearn)
     :param int AR_order: Order of the autoregressive process used to model the impulse
         response function, e.g., 0 = no modelling; 2 = model rise plus exponential decay.
-    :param int neuron_size_in_pixels: Estimated size of a neuron in the scan (used for
-        'greedy_roi' initialization to define the size of the gaussian window)
-    :param int alpha_snmf: Regularization parameter (alpha) for the sparse NMF (if used).
+    :param (float, float) soma_radius_in_pixels: Estimated neuron radius in the scan in
+            the y_axis (height) and x_axis (width). Used in'greedy_roi' initialization to 
+            define the size of the gaussian window.
+    :param int snmf_alpha: Regularization parameter (alpha) for the sparse NMF (if used).
     :param int patch_downsampling_factor: Division to the image dimensions to obtain patch
         dimensions, e.g., if original size is 256 and factor is 10, patches will be 26x26
     :param int percentage_of_patch_overlap: Patches are sampled in a sliding window. This
@@ -68,39 +67,20 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, merge_threshold=0.8
             some components will be merged or deleted.
     ..warning:: Computation- and memory-intensive for big scans.
     """
-    # Calculate standard deviation of the gaussian window used for greedy ROI search
-    if init_method == 'greedy_roi':
-        gaussian_std_dev = [neuron_size_in_pixels // 2, neuron_size_in_pixels // 2]
-    else:
-        gaussian_std_dev = [-1, -1] # unused but if left as None will crash
-
-    # Deal with negative values in the scan.
+    # Make scan nonnegative
     min_value_in_scan = np.min(scan)
     scan = scan + abs(min_value_in_scan) if min_value_in_scan < 0 else scan
 
-    # Save scan to files (needed to create the memory mapped views below)
-    timesteps = scan.shape[-1]
-    save_size = 10000
-    filenames = []
-    for i in range(0, timesteps, save_size):
-        filename = '/tmp/corrected_scan_{}.npy'.format(i)
-        chunk = scan[:, :, i: min(i + save_size, timesteps)]
-        np.save(filename, chunk.transpose([2, 0, 1]))  # save in t x h x w format
-        filenames.append(filename)
+    # Save as memory mapped file in F order (that's how caiman wants it)
+    mmap_filename = save_as_memmap(scan, base_name='/tmp/caiman', order='F')
+
+    # 'Load' scan
+    mmap_scan, (image_height, image_width), num_timesteps = caiman.load_memmap(mmap_filename)
+    images = np.reshape(mmap_scan.T, (num_timesteps, image_height, image_width), order='F')
 
     # Start the ipyparallel cluster
     client, direct_view, num_processes = caiman.cluster.setup_cluster(
         n_processes=num_processes)
-
-    # Create the small memory mapped files and join them
-    mmap_names = caiman.save_memmap_each(filenames, base_name='/tmp/caiman', dview=direct_view)
-    mmap_filename = caiman.save_memmap_join(sorted(mmap_names), base_name='/tmp/caiman',
-                                            dview=direct_view)
-
-    # 'Load' data
-    mmap_scan, scan_dims, timesteps = caiman.load_memmap(mmap_filename)
-    image_height, image_width = scan_dims
-    images = np.reshape(mmap_scan.T, (timesteps, *scan_dims), order='F')
 
     # Optionally, run the initialization method in small patches to initialize components
     initial_A = None
@@ -115,27 +95,32 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, merge_threshold=0.8
 
         # Calculate num_components_per_patch
         num_nonoverlapping_patches = (image_height/patch_size) * (image_width/patch_size)
-        components_per_patch = num_components / num_nonoverlapping_patches
-        components_per_patch = max(components_per_patch, 1) # at least 1
+        num_components_per_patch = num_components / num_nonoverlapping_patches
+        num_components_per_patch = max(num_components_per_patch, 1) # at least 1
 
         # Calculate patch overlap in pixels
         overlap_in_pixels = patch_size * percentage_of_patch_overlap
 
         # Make sure they are integers
         patch_size = int(round(patch_size))
-        components_per_patch = int(round(components_per_patch))
+        num_components_per_patch = int(round(num_components_per_patch))
         overlap_in_pixels = int(round(overlap_in_pixels))
 
         # Run CNMF on patches (only for initialization, no impulse response modelling p=0)
         cnmf = caiman.cnmf.CNMF(num_processes, only_init_patch=True, p=0,
-                                k=components_per_patch, gnb=num_background_components,
-                                gSig=gaussian_std_dev, method_init=init_method,
                                 rf=int(round(patch_size / 2)), stride=overlap_in_pixels,
-                                merge_thresh=merge_threshold, check_nan=False,
-                                memory_fact=memory_usage_in_GB / 16,
+                                k=num_components_per_patch, merge_thresh=merge_threshold,
+                                method_init=init_method, gSig=soma_radius_in_pixels,
+                                alpha_snmf=snmf_alpha, gnb=num_background_components,
                                 n_pixels_per_process=num_pixels_per_process,
-                                block_size=block_size, dview=direct_view)
+                                block_size=block_size, check_nan=False, dview=direct_view,
+                                method_deconvolution='cvxpy')
         cnmf = cnmf.fit(images)
+
+        # Delete log files (one per patch)
+        log_files = glob.glob('caiman*_LOG_*')
+        for log_file in log_files:
+            os.remove(log_file)
 
         # Get results
         initial_A = cnmf.A
@@ -144,12 +129,11 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, merge_threshold=0.8
 
     # Run CNMF
     cnmf = caiman.cnmf.CNMF(num_processes, k=num_components, method_init=init_method,
-                            gSig=gaussian_std_dev, alpha_snmf=alpha_snmf, p=AR_order,
+                            gSig=soma_radius_in_pixels, alpha_snmf=snmf_alpha, p=AR_order,
                             merge_thresh=merge_threshold, gnb=num_background_components,
-                            memory_fact=memory_usage_in_GB / 16, block_size=block_size,
-                            n_pixels_per_process=num_pixels_per_process, check_nan=False,
-                            dview=direct_view, Ain=initial_A, Cin=initial_C,
-                            f_in=initial_f)
+                            check_nan=False, n_pixels_per_process=num_pixels_per_process,
+                            block_size=block_size, dview=direct_view, Ain=initial_A,
+                            Cin=initial_C, f_in=initial_f, method_deconvolution='cvxpy')
     cnmf = cnmf.fit(images)
 
     # Get final results
@@ -167,24 +151,37 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=100, merge_threshold=0.8
     background_location_matrix = background_location_matrix.reshape(new_shape, order='F')
     AR_params = np.array(list(AR_params))  # unwrapping it (num_components x 2)
 
-    # Order components by quality (densely distributed in space and high firing)
-    location_matrix, activity_matrix = _order_components(location_matrix, activity_matrix)
-
     # Stop ipyparallel cluster
     client.close()
     caiman.stop_server()
 
-    # Delete log files (one per patch)
-    log_files = glob.glob('/tmp/caiman*_LOG_*')
-    for log_file in log_files:
-        os.remove(log_file)
-
-    # Delete intermediate files (*.mmap and *.npy)
-    for filename in filenames + mmap_names + [mmap_filename, '/tmp/caiman.npz']:
-        os.remove(filename)
+    # Delete memory mapped scan
+    os.remove(mmap_filename)
 
     return (location_matrix, activity_matrix, background_location_matrix,
             background_activity_matrix, raw_traces, spikes, AR_params)
+
+
+def order_components(location_matrix, correlation_image):
+    """ Order masks according to brightness and density in the correlation image.
+
+    :param np.array location_matrix: Masks (image_height x image_width x num_components).
+    :param array correlation_image: Correlation image (image_height x image_width).
+
+    :return: Indices that would order the location matrix (num_components).
+    :rtype: np.array
+    """
+    # Reshape and normalize masks to sum 1 (num_pixels x num_components)
+    reshaped_masks = location_matrix.reshape(-1, location_matrix.shape[-1])
+    norm_masks = reshaped_masks / reshaped_masks.sum(axis=0)
+
+    # Calculate correlation_image value weighted by the mask
+    quality_measure = (correlation_image.ravel()).dot(norm_masks)
+
+    # Calculate new order according to this measure
+    new_order = np.flipud(quality_measure.argsort())  # highest first
+
+    return new_order
 
 
 def compute_correlation_image(scan):
@@ -209,15 +206,15 @@ def compute_correlation_image(scan):
 def plot_contours(location_matrix, background_image=None):
     """ Plot each component in location matrix over a background image.
 
-    :param np.array location_matrix: (image_height x image_width x timesteps)
-    :param np.array background_image: (image_height x image_width).
-           Mean or correlation image will look fine.
+    :param np.array location_matrix: (image_height x image_width x num_components)
+    :param np.array background_image: (image_height x image_width). Image for the
+        background. Mean or correlation image look fine.
     """
     # Reshape location_matrix
-    image_height, image_width, timesteps = location_matrix.shape
-    location_matrix = location_matrix.reshape(-1, timesteps, order='F')
+    image_height, image_width, num_components = location_matrix.shape
+    location_matrix = location_matrix.reshape(-1, num_components, order='F')
 
-    # Check background matrix was provided, black background otherwise
+    # Set black background if not provided
     if background_image is None:
         background_image = np.zeros([image_height, image_width])
 
@@ -225,137 +222,33 @@ def plot_contours(location_matrix, background_image=None):
     plt.figure()
     caiman.utils.visualization.plot_contours(location_matrix, background_image,
                                              vmin=background_image.min(),
-                                             vmax=background_image.max())
+                                             vmax=background_image.max(),
+                                             thr_method='nrg', nrgthr=0.995)
 
 
-def _order_components(location_matrix, activity_matrix):
-    """Based on caiman.source_extraction.cnmf.utilities.order_components"""
-    # This is the original version from caiman
-    # num_components = location_matrix.shape[-1]
-    # linear_location = location_matrix.reshape(-1, num_components)
-    # density_measure = np.sum(linear_location**4, axis = 0)**(1/4) # small dense masks better
-    # norm_density = density_measure / np.linalg.norm(linear_location, axis=0)
-    #
-    # firing_measure = np.max(activity_matrix.T * np.linalg.norm(linear_location, axis=0),
-    #                         axis=0)
-    #
-    # final_measure = norm_density * firing_measure
-    # new_order = np.argsort(final_measure)[::-1]
+def save_as_memmap(scan, base_name='caiman', order='F'):
+    """Save the scan as a memory mapped file as expected by caiman
 
-    # This is good enough (just order them based on the size of the spatial components)
-    density_measure = np.linalg.norm(location_matrix, axis=(0, 1))
-    new_order = np.argsort(density_measure)[::-1]
+    :param np.array scan: Scan to save shaped (image_height, image_width, num_timesteps)
+    :param string base_name: Base file name for the scan.
+    :param string order: Order of the array: either 'C' or 'F'.
 
-    return location_matrix[:, :, new_order], activity_matrix[new_order, :]
+    :returns: Filename of the mmap file.
+    :rtype: string
 
-
-
-
-
-#TODO: Delete this one, already in ExtractRaw. Still used for testing now
-def save_video(scan, location_matrix, activity_matrix, background_location_matrix,
-               background_activity_matrix, fps, filename='cnmf_extraction.mp4',
-               start_index=0, seconds=30, dpi=200):
-    """ Creates an animation video showing the original scan, denoised version, background
-    activity and residual scan.
-
-    :param string filename: Output filename (path + filename)
-    :param int start_index: Where in the scan to start the video.
-    :param int seconds: How long in seconds should the animation run.
-    :param int dpi: Dots per inch, controls the quality of the video.
-
-    :returns Figure. You can call show() on it.
-    :rtype: matplotlib.figure.Figure
     """
-    # Some variables used below
-    image_height, image_width, _ = scan.shape
+    # Get some params
+    image_height, image_width, num_timesteps = scan.shape
     num_pixels = image_height * image_width
-    num_video_frames = int(round(fps * seconds))
 
-    # Restrict computations to the necessary video frames
-    stop_index = start_index + num_video_frames
-    scan = scan[:, :, start_index: stop_index]
-    activity_matrix = activity_matrix[:, start_index:stop_index]
-    background_activity_matrix = background_activity_matrix[:, start_index: stop_index]
+    # Build filename
+    filename = '{}_d1_{}_d2_{}_d3_1_order_{}_frames_{}_.mmap'.format(base_name, image_height,
+                                                               image_width, order, num_timesteps)
 
-    # Calculate matrices
-    denoised = np.dot(location_matrix.reshape(num_pixels, -1), activity_matrix)
-    denoised = denoised.reshape(image_height, image_width, -1)
-    background = np.dot(background_location_matrix.reshape(num_pixels, -1),
-                        background_activity_matrix)
-    background = background.reshape(image_height, image_width, -1)
-    residual = scan - denoised - background
+    # Create memory mapped file
+    mmap_file = np.memmap(filename, mode='w+', dtype=np.float32, order=order,
+                          shape=(num_pixels, num_timesteps))
+    mmap_file[:] = scan.reshape(num_pixels, num_timesteps, order=order)
+    mmap_file.flush()
 
-    # Create animation
-    import matplotlib.animation as animation
-
-    ## Set the figure
-    fig = plt.figure()
-
-    plt.subplot(2, 2, 1)
-    plt.title('Original (Y)')
-    im1 = plt.imshow(scan[:, :, 0], vmin=scan.min(),
-                     vmax=scan.max())  # just a placeholder
-    plt.axis('off')
-    plt.colorbar()
-
-    plt.subplot(2, 2, 2)
-    plt.title('Denoised (A*C)')
-    im2 = plt.imshow(denoised[:, :, 0], vmin=denoised.min(), vmax=denoised.max())
-    plt.axis('off')
-    plt.colorbar()
-
-    plt.subplot(2, 2, 3)
-    plt.title('Background (B*F)')
-    im3 = plt.imshow(background[:, :, 0], vmin=background.min(), vmax=background.max())
-    plt.axis('off')
-    plt.colorbar()
-
-    plt.subplot(2, 2, 4)
-    plt.title('Residual (Y - A*C - B*F)')
-    im4 = plt.imshow(residual[:, :, 0], vmin=residual.min(), vmax=residual.max())
-    plt.axis('off')
-    plt.colorbar()
-
-    ## Make the animation
-    def update_img(i):
-        im1.set_data(scan[:, :, i])
-        im2.set_data(denoised[:, :, i])
-        im3.set_data(background[:, :, i])
-        im4.set_data(residual[:, :, i])
-
-    video = animation.FuncAnimation(fig, update_img, num_video_frames,
-                                    interval=1000 / fps)
-
-    # Save animation
-    print('Saving video at:', filename)
-    print('If this takes too long, stop it and call again with dpi < 200 (default)')
-    video.save(filename, dpi=dpi)
-
-    return fig
-
-#TODO: Delete. ALready in ExtractRaw. Still used for testing now
-def plot_impulse_responses(AR_params, num_timepoints=100):
-    """ Plots the individual impulse response functions assuming an AR(2) process.
-
-    :param np.array AR_params: Parameters (num_components x 2) for the autoregressive process.
-    :param int num_timepoints: The number of points after impulse to usse for plotting.
-
-    :returns Figure. You can call show() on it.
-    :rtype: matplotlib.figure.Figure
-     """
-
-    fig = plt.figure()
-    for g1, g2 in AR_params:  # for each component
-
-        # Build impulse response function
-        output = np.zeros(num_timepoints)
-        output[0] = 1  # initial spike
-        output[1] = g1 * output[0]
-        for i in range(2, num_timepoints):
-            output[i] = g1 * output[i - 1] + g2 * output[i - 2]
-
-        # Plot
-        plt.plot(output)
-
-    return fig
+    return filename
