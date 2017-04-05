@@ -1,5 +1,5 @@
 %{
-stimulus.Matisse (manual)  # conditions for the matisse stimulus
+# conditions for the matisse stimulus
 -> stimulus.Condition
 ----
 noise_seed             :smallint      #  controls the base noise pattern
@@ -22,7 +22,7 @@ outer_contrast         :decimal(4,3)  #  pattern contrast in outer region
 image                  :longblob      #  actual image to present
 %}
 
-classdef Matisse < dj.Relvar & stimulus.core.Visual
+classdef Matisse < dj.Manual & stimulus.core.Visual
     
     properties(Constant)
         variation = '2'
@@ -48,7 +48,6 @@ classdef Matisse < dj.Relvar & stimulus.core.Visual
             tic
             cond = stimulus.Matisse.make(cond);
             cache = stimulus.Matisse.prepare(cond);
-            
             toc
             imshow(cache.img)
             imwrite(cache.img, '~/Desktop/im2.png')
@@ -72,25 +71,27 @@ classdef Matisse < dj.Relvar & stimulus.core.Visual
                 cond.aperture_x, cond.aperture_y, cond.aperture_r, cond.aperture_transition, cond.annulus_alpha);
             cond.image = uint8((img+0.5)*255);
         end
-
+        
     end
     
     
     methods
         function showTrial(self, cond)
-            
-            opts.clearScreen = true;
-            opts.checkDroppedFrames = false;
+  
+            % verify that pattern parameters match display settings
+            assert((self.rect(3)/self.rect(4) - cond.pattern_aspect)/cond.pattern_aspect < 0.05, 'incorrect pattern aspect')
             
             % blank the screen if there is a blanking period
+            opts.clearScreen = true;
+            opts.checkDroppedFrames = false;
             if cond.pre_blank_period>0
                 opts.logFlips = false;
                 self.screen.flip(opts)
                 WaitSecs(cond.pre_blank_period);
             end
             
+            % display the texture
             opts.logFlips = true;
-    
             tex = Screen('MakeTexture', self.win, cond.image);
             Screen('DrawTexture', self.win, tex, [], self.rect)
             self.screen.flip(opts)

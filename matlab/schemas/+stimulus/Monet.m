@@ -1,5 +1,5 @@
 %{
-stimulus.Monet (manual) # pink noise with periods of motion and orientation
+# pink noise with periods of motion and orientation
 -> stimulus.Condition
 ---
 rng_seed                    : double                        # random number generate seed
@@ -20,5 +20,5 @@ frame_downsample            : tinyint                       # 1=60 fps, 2=30 fps
 %}
 
 
-classdef Monet < dj.Relvar
+classdef Monet < dj.Manual
 end
