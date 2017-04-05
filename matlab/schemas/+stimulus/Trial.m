@@ -1,5 +1,5 @@
 %{
-stimulus.Trial (manual) # visual stimulus trial
+# visual stimulus trial
 -> experiment.Scan
 trial_idx       : int                    # trial index within sessions
 ---
@@ -10,5 +10,5 @@ trial_ts=CURRENT_TIMESTAMP  : timestamp                     # automatic
 %}
 
 
-classdef Trial < dj.Relvar
+classdef Trial < dj.Manual
 end

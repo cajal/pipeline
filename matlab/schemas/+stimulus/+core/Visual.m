@@ -20,9 +20,15 @@ classdef Visual < handle
     properties(Dependent)
         win     % PsychToolbox window object to use in showTrial
         rect    % PsychToolbox window rect object to use in showTrial
+        fps     % hardware frame rate
     end
     
     methods
+        
+        function fps = get.fps(self)
+            fps = self.screen.fps;
+        end
+        
         function win = get.win(self)
             win = self.screen.win;
         end
