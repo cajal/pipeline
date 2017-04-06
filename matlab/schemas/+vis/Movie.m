@@ -50,7 +50,9 @@ classdef Movie < dj.Relvar
                 tuple = fetch(obj);
                 tuple.clip_number = iclip;
                 tuple.file_name = sprintf(file_temp,iclip);
-                if exists(psy.MovieClipStore & tuple);continue;end
+                if exists(vis.MovieClip & tuple)
+                    continue
+                end
                
                 % create file
                 start = (iclip-1)*dur;
