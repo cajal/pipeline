@@ -1,4 +1,4 @@
-function Varma()
+function Varma
 control = stimulus.getControl;
 control.clearAll()   % clear trial queue and cached conditions.
 
