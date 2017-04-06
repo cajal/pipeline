@@ -16,7 +16,7 @@ n_dirs                      : smallint                      # number of directio
 ori_bands                   : tinyint                       # orientation width expressed in units of 2*pi/n_dirs
 ori_modulation              : float                         # mixin-coefficient of orientation biased noise
 speed                       : float                         # (degrees/s)
-frame_downsample            : tinyint                       # 1=60 fps, 2=30 fps, 3=20 fps, 4=15 fps, etc
+movie                       :ed
 %}
 
 
