@@ -85,7 +85,7 @@ classdef Matisse < dj.Manual & stimulus.core.Visual
             opts.checkDroppedFrames = false;
             if cond.pre_blank_period>0
                 opts.logFlips = false;
-                self.screen.flip(opts)
+                self.flip(opts)
                 WaitSecs(cond.pre_blank_period);
             end
             
@@ -93,7 +93,7 @@ classdef Matisse < dj.Manual & stimulus.core.Visual
             opts.logFlips = true;
             tex = Screen('MakeTexture', self.win, cond.image);
             Screen('DrawTexture', self.win, tex, [], self.rect)
-            self.screen.flip(opts)
+            self.flip(opts)
             Screen('close', tex);
             WaitSecs(cond.duration);
         end

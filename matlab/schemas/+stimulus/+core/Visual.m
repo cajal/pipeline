@@ -36,20 +36,31 @@ classdef Visual < handle
         function rect = get.rect(self)
             rect = self.screen.rect;
         end
+        
+        function flip(varargin)
+            self.screen.flip(varargin{:})
+        end
     end
     
     
     methods(Static)
-        function [condition, cache] = make(condition)
+        function cond = make(cond)
             % override to compute additional fields in condition and to
             % pre-compute additional attributes that are not stored and
-            % are not computed on the fly in showTrial()
-            cache = struct;
+            % are not computed on the fly in showTrial.
+            % make() is only called once for each condition before caching.
+        end
+        
+        function cond = prepare(cond)
+            % similiar to make but is called after caching and is called
+            % every time even if the condition was already hashed.  
+            % prepare() is used to compute attributes that are not cached.
         end
     end
     
     methods(Abstract)
         showTrial(self, condition)  % implement in subclass
     end
+    
     
 end

@@ -57,6 +57,7 @@ classdef Control < handle
                             rethrow(err)
                         end
                     end
+                    param = specialTable.prepare(param);
                     self.condCache(hash) = setfield(param, 'obj___', specialTable); %#ok<SFLD>
                 end
                 hashes{i} = hash;
