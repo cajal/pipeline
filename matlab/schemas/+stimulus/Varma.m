@@ -226,7 +226,7 @@ classdef Varma < dj.Manual & stimulus.core.Visual
             opts.checkDroppedFrames = false;
             if cond.pre_blank_period>0
                 opts.logFlips = false;
-                self.screen.flip(opts)
+                self.flip(opts)
                 WaitSecs(cond.pre_blank_period);
             end
             
@@ -235,7 +235,8 @@ classdef Varma < dj.Manual & stimulus.core.Visual
             for i=1:size(cond.movie,3)
                 tex = Screen('MakeTexture', self.win, cond.movie(:,:,i));
                 Screen('DrawTexture',self.win, tex, [], self.rect)
-                self.screen.flip(opts)
+                self.flip(opts)
+                opts.checkDroppedFrames = true;
                 Screen('close',tex)
             end
         end
