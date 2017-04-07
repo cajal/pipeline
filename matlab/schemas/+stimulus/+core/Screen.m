@@ -16,7 +16,7 @@ classdef Screen < handle
         fps               % frames per second
         frameInterval     % (seconds)
         flipCount         % the index of the last flip
-        prevFlip          % (seconds)
+        prevFlipTime      % (seconds)
         contrastEnabled   %  when false, disables contrast and brightness settings and uses default monitor settings
     end
 
@@ -138,8 +138,7 @@ classdef Screen < handle
             clearScreen = true;
             checkDroppedFrames = true;
             assign(options)
-            
-            
+                        
             if logFlips
                 self.flipCount = self.flipCount + 1;
             end
@@ -151,7 +150,7 @@ classdef Screen < handle
                     [0 0 self.flipRect(1) self.flipRect(2)]);
             end
             % update screen
-            when = self.prevFlip+self.frameInterval;
+            when = self.prevFlipTime+self.frameInterval;
             flipTime = Screen('Flip', self.win, when - 0.5*self.frameInterval, double(~clearScreen));
             if ~isempty(when)
                 droppedFrames = round((flipTime - when)/self.frameInterval);
@@ -164,7 +163,7 @@ classdef Screen < handle
                     end
                 end
             end
-            self.prevFlip = flipTime;
+            self.prevFlipTime = flipTime;
             if logFlips
                 self.flipTimes(end+1) = flipTime;
             end
