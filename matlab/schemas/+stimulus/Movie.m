@@ -1,9 +1,9 @@
 %{
-vis.Movie (lookup) # movies used for generating clips and stills
+# movies used for generating clips and stills
 movie_name      : char(8)                # short movie title
 ---
 path                        : varchar(255)                  # 
-movie_class                 : enum('mousecam','object3d','madmax') # 
+-> stimulus.MovieClass
 original_file               : varchar(255)                  # 
 file_template               : varchar(255)                  # filename template with full path
 file_duration               : float                         # (s) duration of each file (must be equal)
@@ -12,11 +12,10 @@ movie_description           : varchar(255)                  # full movie title
 frame_rate=30               : float                         # frames per second
 frame_width=256             : int                           # pixels
 frame_height=144            : int                           # pixels
-params=null                 : longblob                      # movie parameters for parametric models
 %}
 
 
-classdef Movie < dj.Relvar
+classdef Movie < dj.Lookup
     
     methods 
         function createClips(obj)
@@ -50,7 +49,7 @@ classdef Movie < dj.Relvar
                 tuple = fetch(obj);
                 tuple.clip_number = iclip;
                 tuple.file_name = sprintf(file_temp,iclip);
-                if exists(vis.MovieClip & tuple)
+                if exists(stimulus.MovieClip & tuple)
                     continue
                 end
                
@@ -66,7 +65,7 @@ classdef Movie < dj.Relvar
                 fid = fopen(getLocalPath(fullfile(path,tuple.file_name)));
                 tuple.clip = fread(fid,'*int8');
                 fclose(fid);
-                insert(vis.MovieClip,tuple)
+                insert(stimulus.MovieClip, tuple)
                 delete(outfile)
             end
         end
