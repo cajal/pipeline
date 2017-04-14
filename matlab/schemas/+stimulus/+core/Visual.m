@@ -37,7 +37,7 @@ classdef Visual < handle
             rect = self.screen.rect;
         end
         
-        function flip(varargin)
+        function flip(self, varargin)
             self.screen.flip(varargin{:})
         end
     end
