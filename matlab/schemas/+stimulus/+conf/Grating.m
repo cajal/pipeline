@@ -13,7 +13,7 @@ params = struct(...
     'aperture_radius', 0.15, ... in units of half-diagonal, 0=no aperture
     'aperture_x', [-0.4 0.2], ...  aperture x coordinate, in units of half-diagonal, 0 = center
     'aperture_y', [-0.36 0.32], ... aperture y coordinate, in units of half-diagonal, 0 = center
-    'grating', 'sqr', ... sinusoidal or square, etc.
+    'shape', 'sin', ... sin or square, etc.
     'init_phase', 0, ... 0..1
     'trial_duration', 2, ...  s, does not include pre_blank duration
     'phase2_fraction', 0, ... fraction of trial spent in phase 2

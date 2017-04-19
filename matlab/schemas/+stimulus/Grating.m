@@ -1,23 +1,24 @@
 %{
+# legacy grating stimulus from the visual_stimulus repo
 -> stimulus.Condition
 ---
 monitor_distance_ratio      : float                         # the distance to the screen measured in screen diagonals
+pre_blank                   : decimal(4,2)                  # (s) blank period preceding trials
 direction                   : decimal(4,1)                  # 0-360 degrees
 spatial_freq                : decimal(4,2)                  # cycles/degree
 temp_freq                   : decimal(4,2)                  # Hz
-pre_blank=0                 : float                         # (s) blank period preceding trials
 luminance                   : float                         # cd/m^2 mean
 contrast                    : float                         # Michelson contrast 0-1
-aperture_radius=0           : float                         # in units of half-diagonal, 0=no aperture
-aperture_x=0                : float                         # aperture x coordinate, in units of half-diagonal, 0 = center
-aperture_y=0                : float                         # aperture y coordinate, in units of half-diagonal, 0 = center
+aperture_radius             : float                         # in units of half-diagonal, 0=no aperture
+aperture_x                  : float                         # aperture x coordinate, in units of half-diagonal, 0 = center
+aperture_y                  : float                         # aperture y coordinate, in units of half-diagonal, 0 = center
 grating                     : enum('sqr','sin')             # sinusoidal or square, etc.
 init_phase                  : float                         # 0..1
 trial_duration              : float                         # s, does not include pre_blank duration
 phase2_fraction=0           : float                         # fraction of trial spent in phase 2
 phase2_temp_freq=0          : float                         # (Hz)
 second_photodiode=0         : tinyint                       # 1=paint a photodiode patch in the upper right corner
-second_photodiode_time=0.0  : decimal(4,1)                  # time delay of the second photodiode relative to the stimulus onset
+second_photodiode_time      : decimal(4,1)                  # time delay of the second photodiode relative to the stimulus onset
 %}
 
 
@@ -48,13 +49,6 @@ classdef Grating < dj.Manual & stimulus.core.Visual
         
     end
     
-    properties(Access=private)
-        % textures
-        grating
-        mask
-    end
-    
-    
     methods
         
         
@@ -71,7 +65,7 @@ classdef Grating < dj.Manual & stimulus.core.Visual
             if cond.aperture_radius
                 radius = cond.aperture_radius * norm(self.rect(3:4))/2;
             end
-            self.grating = CreateProceduralSineGrating(self.win, self.rect(3), self.rect(4), [0.5 0.5 0.5 0.0], radius);
+            grating = CreateProceduralSineGrating(self.win, self.rect(3), self.rect(4), [0.5 0.5 0.5 0.0], radius);
             
             self.screen.setContrast(cond.luminance, cond.contrast, strcmp(cond.grating,'sqr'))
             phase = cond.init_phase;
@@ -105,24 +99,21 @@ classdef Grating < dj.Manual & stimulus.core.Visual
             direction = cond.direction + 90;
             
             % display drifting grating
-            driftFrames1 = floor(cond.trial_duration * (1-cond.phase2_fraction) * self.screen.fps);
-            driftFrames2 = floor(cond.trial_duration * cond.phase2_fraction * self.screen.fps);
-            phaseIncrement1 = cond.temp_freq/self.screen.fps;
-            phaseIncrement2 = cond.phase2_temp_freq/self.screen.fps;
+            driftFrames1 = floor(cond.trial_duration * (1-cond.phase2_fraction) * self.fps);
+            driftFrames2 = floor(cond.trial_duration * cond.phase2_fraction * self.fps);
+            phaseIncrement1 = cond.temp_freq/self.fps;
+            phaseIncrement2 = cond.phase2_temp_freq/self.fps;
             offset = [cond.aperture_x cond.aperture_y]*norm(self.rect(3:4))/2;
             destRect = self.rect + [offset offset];
             
             % display phase1 grating
             for frame = 1:driftFrames1
-                Screen('DrawTexture', self.win, self.grating, [], destRect, direction, [], [], [], [], ...
+                Screen('DrawTexture', self.win, grating, [], destRect, direction, [], [], [], [], ...
                     kPsychUseTextureMatrixForRotation, [phase*360, freq, 0.495, 0]);
-                if ~isempty(self.mask)
-                    Screen('DrawTexture', self.win, self.mask);
-                end
                 if cond.second_photodiode
                     rectSize = [0.05 0.06].*self.rect(3:4);
                     rect = [self.rect(3)-rectSize(1), 0, self.rect(3), rectSize(2)];
-                    if frame/self.screen.fps >= cond.second_photodiode_time
+                    if frame/self.fps >= cond.second_photodiode_time
                         color = (cond.second_photodiode+1)/2*255;
                         Screen('FillRect', self.win, color, rect);
                     else
@@ -135,11 +126,8 @@ classdef Grating < dj.Manual & stimulus.core.Visual
             
             % display phase2 grating
             for frame = 1:driftFrames2
-                Screen('DrawTexture', self.win, self.grating, [], destRect, direction, [], [], [], [], ...
+                Screen('DrawTexture', self.win, grating, [], destRect, direction, [], [], [], [], ...
                     kPsychUseTextureMatrixForRotation, [phase*360, freq, 0.495, 0]);
-                if ~isempty(self.mask)
-                    Screen('DrawTexture', self.win, self.mask);
-                end
                 phase = phase + phaseIncrement2;                
                 self.flip(struct('checkDroppedFrames', frame>1))
             end

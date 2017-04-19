@@ -27,7 +27,6 @@ classdef Grate < dj.Manual & stimulus.core.Visual
         function showTrial(self, cond)
             % execute a single trial with a single cond
             % See PsychToolbox DriftDemo4.m for API calls
-            % initialized grating
             radius = inf;
             if cond.aperture_radius
                 radius = cond.aperture_radius * norm(self.rect(3:4))/2;
@@ -48,8 +47,8 @@ classdef Grate < dj.Manual & stimulus.core.Visual
             direction = cond.direction + 90;
             
             % display drifting grating
-            driftFrames = floor(cond.duration * self.screen.fps);
-            phaseStep = cond.temp_freq/self.screen.fps;
+            driftFrames = floor(cond.duration * self.fps);
+            phaseStep = cond.temp_freq/self.fps;
             offset = [cond.aperture_x cond.aperture_y]*norm(self.rect(3:4))/2;
             destRect = self.rect + [offset offset];
             

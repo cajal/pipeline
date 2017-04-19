@@ -2,6 +2,7 @@ function Grate
 control = stimulus.getControl;
 control.clearAll()   % clear trial queue and cached conditions
 
+% specify conditions as factorial design
 params = struct(...
     'monitor_distance_ratio', 0.58, ...  the distance to the screen measured in screen diagonals
     'pre_blank', 0.5, ... (s) blank period preceding trials
@@ -10,21 +11,21 @@ params = struct(...
     'spatial_freq', 0.08, ... cycles/degree
     'temp_freq', 3, ...  Hz
     'aperture_radius', 0.15, ... in units of half-diagonal, 0=no aperture
-    'aperture_x', [-0.4 0.2], ...  aperture x coordinate, in units of half-diagonal, 0 = center
-    'aperture_y', [-0.36 0.32], ... aperture y coordinate, in units of half-diagonal, 0 = center
+    'aperture_x', [-0.40 0.40], ...  aperture x coordinate, in units of half-diagonal, 0 = center
+    'aperture_y', [-0.32 0.32], ... aperture y coordinate, in units of half-diagonal, 0 = center
     'init_phase', 0 ... 0..1
 );
 
+% generate conditions
 assert(isscalar(params))
 params = stimulus.utils.factorize(params);
 
-fprintf('Total time per block: %g s\n', sum([params.duration]) + sum([params.pre_blank]))
-
-% generate conditions
+% save conditions
 hashes = control.makeConditions(stimulus.Grate, params);
 
-% push trials
+% queue trials 
 nblocks = 3;
+fprintf('Total time: %g s\n', nblocks*(sum([params.duration]) + sum([params.pre_blank])))
 for i=1:nblocks
     control.pushTrials(hashes(randperm(numel(hashes))))
 end
