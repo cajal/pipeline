@@ -2,36 +2,20 @@ function Varma
 control = stimulus.getControl;
 control.clearAll()   % clear trial queue and cached conditions.
 
+paramsM.fps             = 60;
+paramsM.duration        = 180;  % to be changed to 1800s
+paramsM.rng_seed        = 1;
+paramsM.pattern_width   = 32;
+paramsM.pattern_aspect  = 1.7;
+paramsM.pattern_upscale = 10;
+paramsM.ori_coherence   = 2.5;
+paramsM.ori_fraction    = 0.4;
+paramsM.temp_bandwidth  = 4;
+paramsM.n_dirs          = 16;
+paramsM.ori_mix         = 1;
+paramsM.speed           = 0.5;
 
-cond.fps = 60;
-cond.pre_blank_period = 0.1;
-cond.noise_seed = 100;
-cond.pattern_width = 64;
-cond.pattern_upscale = 3;
-cond.duration = 1;
-cond.pattern_aspect = 1.7;
-cond.ori = 0:90:359;
-cond.outer_ori_delta = 90;
-cond.coherence = [1 1.5 2.5];
-cond.aperture_x = -0.10;
-cond.aperture_y = +0.05;
-cond.aperture_r = 0.2;
-cond.aperture_transition = 0.1;
-cond.annulus_alpha = 0;
-cond.outer_contrast = [0.1 0.2 1];
-cond.inner_contrast = [0.1 0.2 1];
-cond.outer_speed = 0.2;
-cond.inner_speed = 0.2;
-
-% assert(isscalar(cond))
-paramsM = stimulus.utils.factorize(cond);
-nblocks = 2;
-fprintf('Total duration: %4.2f s\n', nblocks*(sum([paramsM.duration]) + sum([paramsM.pre_blank_period])))
-
-% generate conditions
-hashesM = control.makeConditions(stimulus.Matisse2, paramsM);
-
-clear cond;
+hashesMonet = control.makeConditions(stimulus.Monet2, paramsM);
 
 % Stimulus sequence: 
 % S and L correpond to one major segment for short and long range
@@ -48,7 +32,9 @@ rng(0); % initial use just to generate the sequence
 NStimConds      = 2; % No. of stimulus conditions. Together they comprise one major segment
 TotalReps       = 4; % No. of repetitions of major segments
 Dur_per_Cond    = 60; % duration of stimulus for each condition in s, including the repeated clips
+% to be changed to 600s
 Dur_RepClip     = 1.5; % duration of the tiny clips that are repeated in s
+% to be changed to 15s
 No_Reps         = 5;  % no. of repetitions
 Dur_exc_reps    = Dur_per_Cond - NStimConds*Dur_RepClip*No_Reps; % duration excluding the repetitions
 
@@ -99,7 +85,6 @@ ParamVec     = ParamMat(:);
 cond.fps = 60;
 cond.pre_blank_period   = 0;
 cond.noise_seed         = 1:length(NoiseSeedVec);
-% cond.noise_seed         = 1:3;
 cond.pattern_upscale    = 10;
 cond.pattern_width      = 32;
 cond.duration           = 0;
@@ -130,21 +115,10 @@ end
 % generate conditions
 hashesVarma = control.makeConditions(stimulus.Varma, params);
 
-% fprintf('Total duration of all conditions = %3.2f s\n', sum([params.pre_blank_period]) + sum([params.duration]))
-
-
+% 
+ 
 fprintf('Total duration of all conditions = %3.2f s\n', sum([params.pre_blank_period]) + sum([params.duration]) + sum([paramsM.pre_blank_period]) + sum([paramsM.duration]))
 
-
-
-% hashes = [hashesVarma(1:84); hashesM; hashesVarma(85:end)];
-hashes = [hashesVarma(1:5); hashesM(1:10); hashesVarma(6:10)];
+hashes = [hashesVarma(1:84); hashesMonet; hashesVarma(85:end)];
 
 control.pushTrials(hashes);
-
-% % push trials
-% nblocks = 3;
-% for i=1:nblocks
-%     control.pushTrials(hashes(randperm(numel(hashes))))
-% end
-% end
