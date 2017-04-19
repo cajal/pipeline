@@ -68,7 +68,9 @@ classdef Matisse2 < dj.Manual & stimulus.core.Visual
         function cond = make(cond)
             assert(~verLessThan('matlab','9.1'), 'Please upgrade MATLAB to R2016b or better')
             nframes = round(cond.duration*cond.fps);
-            img = randn(round(cond.pattern_width/cond.pattern_aspect), cond.pattern_width);
+            r = RandStream.create('mt19937ar','NormalTransform', ...
+                'Ziggurat', 'Seed', cond.noise_seed); 
+            img = r.randn(round(cond.pattern_width/cond.pattern_aspect), cond.pattern_width);
             outer = upscale(img, cond.pattern_upscale, cond.ori + cond.outer_ori_delta, ...
                 cond.coherence, nframes, cond.outer_speed*cond.pattern_upscale*cond.pattern_width/cond.fps);
             inner = upscale(img, cond.pattern_upscale, cond.ori, ...
