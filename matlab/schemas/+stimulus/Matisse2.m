@@ -87,11 +87,9 @@ classdef Matisse2 < dj.Manual & stimulus.core.Visual
             assert((self.rect(3)/self.rect(4) - cond.pattern_aspect)/cond.pattern_aspect < 0.05, 'incorrect pattern aspect')
             
             % blank the screen if there is a blanking period
-            opts.clearScreen = true;
-            opts.checkDroppedFrames = false;
             if cond.pre_blank_period>0
                 opts.logFlips = false;
-                self.flip(opts)
+                self.flip(struct('checkDroppedFrames', false))
                 WaitSecs(cond.pre_blank_period);
             end
             
@@ -100,8 +98,7 @@ classdef Matisse2 < dj.Manual & stimulus.core.Visual
             for i=1:size(cond.movie,3)
                 tex = Screen('MakeTexture', self.win, cond.movie(:,:,i));
                 Screen('DrawTexture',self.win, tex, [], self.rect)
-                self.flip(opts)
-                opts.checkDroppedFrames = true;
+                self.flip(struct('checkDroppedFrames', i>1))
                 Screen('close',tex)
             end
         end
