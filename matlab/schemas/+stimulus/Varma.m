@@ -46,10 +46,10 @@ classdef Varma < dj.Manual & stimulus.core.Visual
             cond.gabor_wlscale      = 4;
             cond.gabor_envscale     = 6;
             cond.gabor_ell          = 1;
-            cond.gaussfilt_scale    = 1;
-            cond.gaussfilt_istd     = 2;
+            cond.gaussfilt_scale    = 1.5;
+            cond.gaussfilt_istd     = 0.5; % originally 2
             cond.gaussfiltext_scale = 1;
-            cond.gaussfiltext_istd  = 2.4;
+            cond.gaussfiltext_istd  = 1; % originally 2.4
             cond.filt_noise_bw       = 0.5;
             cond.filt_ori_bw         = 0.5;
             cond.filt_cont_bw        = 0.5;
@@ -59,14 +59,14 @@ classdef Varma < dj.Manual & stimulus.core.Visual
             rng(cond.noise_seed)
             
             tic
-            img = vanGogh2.make(cond, fps);
+            cond = stimulus.Varma.make(cond);
             toc
             
-            v = VideoWriter('vanGogh2', 'MPEG-4');
-            v.FrameRate = fps;
+            v = VideoWriter('/Users/rajdbz/Reservoir/Code/StimulusDesign/TestFiles/Varma', 'MPEG-4');
+            v.FrameRate = cond.fps;
             v.Quality = 100;
             open(v)
-            writeVideo(v, permute(img, [1 2 4 3]));
+            writeVideo(v, permute(cond.movie, [1 2 4 3]));
             close(v)
         end
         
@@ -74,8 +74,11 @@ classdef Varma < dj.Manual & stimulus.core.Visual
         function cond = make(cond)
             % fill out condition structucture -- all fields are used for computing the condition id
             
+            % intitial buffer time in seconds
+            init_buffer_period = 3; 
+            
             % video size
-            Nframes = round((cond.duration + cond.pre_blank_period)*cond.fps);
+            Nframes = round((cond.duration + init_buffer_period)*cond.fps);
             Nx = cond.pattern_width;
             Ny = round(Nx/cond.pattern_aspect);
             
@@ -96,13 +99,13 @@ classdef Varma < dj.Manual & stimulus.core.Visual
             gamma   = cond.gabor_ell;           % spatial aspect ratio of the Gabor
             
             % Gaussian filter for smoothing
-            fx          = Ny*cond.gaussfilt_scale;              % size of filter in pixels
+            fx          = round(Ny*cond.gaussfilt_scale);              % size of filter in pixels
             GaussFilt   = gausswin(fx,cond.gaussfilt_istd);
             GaussFilt   = GaussFilt*GaussFilt';
             GaussFilt   = GaussFilt/sum(GaussFilt(:));
             
             % filter for smoothing used to generate external contrast field
-            fx          = Ny*cond.gaussfiltext_scale;              % size of filter in pixels
+            fx          = round(Ny*cond.gaussfiltext_scale);              % size of filter in pixels
             GaussFiltExt   = gausswin(fx,cond.gaussfiltext_istd);
             GaussFiltExt   = GaussFiltExt*GaussFiltExt';
             GaussFiltExt   = GaussFiltExt/sum(GaussFiltExt(:));
@@ -206,9 +209,9 @@ classdef Varma < dj.Manual & stimulus.core.Visual
                 YsVid(:,:,tt) = upscale(Y(:,:,tt), fmask, f_up);
             end
             
-            Tstart  = 1 + cond.fps*cond.pre_blank_period;
+            Tstart  = 1 + cond.fps*init_buffer_period;
             YsVid   = YsVid(:,:,Tstart:end);         
-            K       = 0.03;
+            K       = 0.025;
             cond.movie = uint8(round(256*(YsVid/2/K + 0.5)));
         end
     end
