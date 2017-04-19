@@ -40,9 +40,9 @@ classdef Matisse2 < dj.Manual & stimulus.core.Visual
             cond.pattern_upscale = 3;
             cond.duration = 10;
             cond.pattern_aspect = 1.7;
-            cond.ori = 30;
-            cond.outer_ori_delta = 90;
-            cond.coherence = 2.5;
+            cond.ori = 270;
+            cond.outer_ori_delta = 135;
+            cond.coherence = 1.5;
             cond.aperture_x = 0.2;
             cond.aperture_y = 0.1;
             cond.aperture_r = 0.2;
@@ -66,7 +66,7 @@ classdef Matisse2 < dj.Manual & stimulus.core.Visual
         
         
         function cond = make(cond)
-            assert(~verLessThan('matlab','9.1'), 'Please upgrade MATLAB to R2016b or better')
+            assert(~verLessThan('matlab','9.1'), 'Please upgrade MATLAB to R2016b or better')  % required for no bsxfun
             nframes = round(cond.duration*cond.fps);
             r = RandStream.create('mt19937ar','NormalTransform', ...
                 'Ziggurat', 'Seed', cond.noise_seed); 
@@ -77,7 +77,7 @@ classdef Matisse2 < dj.Manual & stimulus.core.Visual
                 cond.coherence, nframes, cond.inner_speed*cond.pattern_upscale*cond.pattern_width/cond.fps);
             img = aperture(inner*cond.inner_contrast, outer*cond.outer_contrast, ...
                 cond.aperture_x, cond.aperture_y, cond.aperture_r, cond.aperture_transition, cond.annulus_alpha);
-            cond.movie = uint8(img*256+127.5);
+            cond.movie = uint8((img*0.7+0.5)*255);
         end
     end
     
@@ -123,20 +123,18 @@ img = upsample(img', factor, round(factor/2))*factor;
 % interpolate using gaussian kernel with DC gain = 1
 sz = size(img);
 [fy,fx] = ndgrid(...
-    (-floor(sz(1)/2):floor(sz(1)/2-0.5))*2*pi/sz(1), ...
-    (-floor(sz(2)/2):floor(sz(2)/2-0.5))*2*pi/sz(2));
+    ifftshift((-floor(sz(1)/2):floor(sz(1)/2-0.5))*2*pi/sz(1)), ...
+    ifftshift((-floor(sz(2)/2):floor(sz(2)/2-0.5))*2*pi/sz(2)));
 
 fmask = exp(-(fy.^2 + fx.^2)*kernel_sigma.^2/2);
 
 % apply orientation selectivity and orthogonal motion
-ori = ori*pi/180-pi/2;
-theta = mod(atan2(fx,fy) + ori, 2*pi) - pi/2;
-motion = exp(ifftshift(-1j*speed*(cos(ori).*fx + sin(ori).*fy)) .* reshape(0:nframes-1, 1, 1, nframes));
-fmask = ifftshift(fmask.*(1-ori_mix + ori_mix*hann(theta*coherence)));
-img = real(ifft2(motion .* (fmask.*fft2(img))));
+ori = ori*pi/180+pi/2;   % following clock directions
+theta = mod(atan2(fx,fy) + ori, pi) - pi/2;
+motion = exp(1j*speed*(cos(ori).*fx + sin(ori).*fy) .* reshape(0:nframes-1, 1, 1, nframes));
+fmask = fmask.*(1-ori_mix + sqrt(coherence)*ori_mix*hann(theta*coherence));
+img = real(ifft2(motion .* fmask .* fft2(img)));
 
-% contrast compensation for the effect of orientation selectivity
-img = img*(1 + ori_mix*(sqrt(coherence)-1));
 end
 
 
@@ -153,6 +151,6 @@ aspect = sz(1)/sz(2);
 [y, x] = ndgrid(linspace(-aspect/2,aspect/2,sz(1))-y, linspace(-.5, .5, sz(2))-x);
 r = sqrt(y.*y + x.*x);
 mask = 1./(1 + exp(-(r-radius)/(transition/4)));
-img = bsxfun(@times, inner, 1-mask) + bsxfun(@times, outer, mask);
-img = bsxfun(@times, img, 1 - annulus_alpha*(abs(r-radius)<transition/2));
+img = inner.*(1-mask) + outer.*mask;
+img = img .* (1 - annulus_alpha*(abs(r-radius)<transition/2));
 end
