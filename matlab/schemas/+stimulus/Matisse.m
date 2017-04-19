@@ -35,9 +35,9 @@ classdef Matisse < dj.Manual & stimulus.core.Visual
             cond.pattern_width = 80;
             cond.pattern_upscale = 3;
             cond.pattern_aspect = 1.7;
-            cond.ori = 0;
+            cond.ori = 30;
             cond.outer_ori_delta = 30;
-            cond.ori_coherence = 1.5;
+            cond.ori_coherence = 2.5;
             cond.aperture_x = 0.2;
             cond.aperture_y = 0.1;
             cond.aperture_r = 0.2;
@@ -122,11 +122,9 @@ fmask = exp(-(fy.^2 + fx.^2)*kernel_sigma.^2/2);
 
 % apply orientation selectivity
 theta = mod(atan2(fx,fy) + ori*pi/180 + pi/2, pi) - pi/2;
-fmask = ifftshift(fmask.*(1-ori_mix + ori_mix*hann(theta*coherence)));
+fmask = ifftshift(fmask.*(1-ori_mix + sqrt(coherence)*ori_mix*hann(theta*coherence)));
 img = real(ifft2(fmask.*fft2(img)));
 
-% contrast compensation for the effect of orientation selectivity
-img = img*(1 + ori_mix*(sqrt(coherence)-1));
 end
 
 
