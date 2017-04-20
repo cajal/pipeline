@@ -8,7 +8,6 @@ pre_blank_period       :decimal(5,3)  #  (seconds)
 duration               :decimal(5,3)  #  (seconds)
 pattern_width          :smallint      #  pixel size of the resulting pattern
 pattern_aspect         :float         #  the aspect ratio of the pattern
-pattern_upscale        :tinyint       #  integer upscale factor of the pattern
 ori                    :decimal(4,1)  #  degrees. 0=horizontal, then clockwise
 outer_ori_delta        :decimal(4,1)  #  degrees. Differerence of outer ori from inner.
 coherence              :decimal(4,1)  #  1=unoriented noise. pi/ori_coherence = bandwidth of orientations.
@@ -37,8 +36,7 @@ classdef Matisse2 < dj.Manual & stimulus.core.Visual
             cond.pre_blank_period = 1.0;
             cond.noise_seed = 100;
             cond.pattern_width = 64;
-            cond.pattern_upscale = 3;
-            cond.duration = 10;
+            cond.duration = 1;
             cond.pattern_aspect = 1.7;
             cond.ori = 270;
             cond.outer_ori_delta = 135;
@@ -55,8 +53,9 @@ classdef Matisse2 < dj.Manual & stimulus.core.Visual
             tic
             cond = stimulus.Matisse2.make(cond);
             toc
-            
-            v = VideoWriter('Matisse2', 'MPEG-4');
+            file = fullfile(pwd, 'Matisse2');
+            fprintf('saving %s\n', file)
+            v = VideoWriter(file, 'MPEG-4');
             v.FrameRate = cond.fps;
             v.Quality = 100;
             open(v)
@@ -71,10 +70,10 @@ classdef Matisse2 < dj.Manual & stimulus.core.Visual
             r = RandStream.create('mt19937ar','NormalTransform', ...
                 'Ziggurat', 'Seed', cond.noise_seed); 
             img = r.randn(round(cond.pattern_width/cond.pattern_aspect), cond.pattern_width);
-            outer = upscale(img, cond.pattern_upscale, cond.ori + cond.outer_ori_delta, ...
-                cond.coherence, nframes, cond.outer_speed*cond.pattern_upscale*cond.pattern_width/cond.fps);
-            inner = upscale(img, cond.pattern_upscale, cond.ori, ...
-                cond.coherence, nframes, cond.inner_speed*cond.pattern_upscale*cond.pattern_width/cond.fps);
+            outer = upscale(img, cond.ori + cond.outer_ori_delta, ...
+                cond.coherence, nframes, cond.outer_speed/cond.fps);
+            inner = upscale(img, cond.ori, ...
+                cond.coherence, nframes, cond.inner_speed/cond.fps);
             img = aperture(inner*cond.inner_contrast, outer*cond.outer_contrast, ...
                 cond.aperture_x, cond.aperture_y, cond.aperture_r, cond.aperture_transition, cond.annulus_alpha);
             cond.movie = uint8((img*0.7+0.5)*255);
@@ -108,12 +107,13 @@ classdef Matisse2 < dj.Manual & stimulus.core.Visual
 end
 
 
-function img = upscale(img, factor, ori, coherence, nframes, speed)
+function img = upscale(img, ori, coherence, nframes, speed)
 % Performs fast resizing of the image by the given integer factor with
 % gaussian interpolation.
-% speed is expressed in pixels per frame
+% speed is patten widths per frame
 
 ori_mix = coherence > 1;  % how much of orientation to mix in
+factor = 3;
 
 % upscale without interpolation
 kernel_sigma = factor;
@@ -125,6 +125,7 @@ sz = size(img);
 [fy,fx] = ndgrid(...
     ifftshift((-floor(sz(1)/2):floor(sz(1)/2-0.5))*2*pi/sz(1)), ...
     ifftshift((-floor(sz(2)/2):floor(sz(2)/2-0.5))*2*pi/sz(2)));
+speed = speed*sz(2);  % convert to pixels per frame
 
 fmask = exp(-(fy.^2 + fx.^2)*kernel_sigma.^2/2);
 
