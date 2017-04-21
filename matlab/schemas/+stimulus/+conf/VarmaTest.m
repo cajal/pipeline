@@ -1,10 +1,10 @@
-function Varma
+function VarmaTest
 control = stimulus.getControl;
 control.clearAll()   % clear trial queue and cached conditions.
 
 cond.fps = 60;
 cond.duration = 30;
-cond.rng_seed = 1:60; % to be changed to 1:60 to generate Monet stim for 1800 s
+cond.rng_seed = 1:6;
 cond.pattern_width = 72;
 cond.pattern_aspect = 1.7;
 cond.ori_coherence = 1.5;
@@ -33,8 +33,8 @@ rng(0); % initial use just to generate the sequence
 % Parameters
 NStimConds      = 2; % No. of stimulus conditions. Together they comprise one major segment
 TotalReps       = 4; % No. of repetitions of major segments
-Dur_per_Cond    = 600; % duration of stimulus for each condition in s, including the repeated clips
-Dur_RepClip     = 15; % duration of the tiny clips that are repeated in s
+Dur_per_Cond    = 60; % duration of stimulus for each condition in s, including the repeated clips
+Dur_RepClip     = 1.5; % duration of the tiny clips that are repeated in s
 No_Reps         = 5;  % no. of repetitions
 Dur_exc_reps    = Dur_per_Cond - NStimConds*Dur_RepClip*No_Reps; % duration excluding the repetitions
 
