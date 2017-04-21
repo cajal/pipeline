@@ -15,8 +15,6 @@ classdef Clip < dj.Manual & stimulus.core.Visual
     
     
     methods(Static)
-        function cond = make(cond)
-        end
         
         function cond = prepare(cond)
             if ~exist(stimulus.Clip.movie_dir, 'dir')
@@ -36,6 +34,7 @@ classdef Clip < dj.Manual & stimulus.core.Visual
         end
         
     end
+
     
     methods
         
