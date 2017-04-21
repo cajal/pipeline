@@ -80,7 +80,7 @@ It is populated before the stimulus is presented.
 The specialization tables below it contain parameters that are specific to each type of stimulus. 
 For example, `stimulus.Monet2` contains parameters that are specific to a single stimulus condition of the type `Monet2`.
 For each tuple in `stimulus.Condition`, exactly one of the specialization tables contains the corresponding entry.
-The name of the specialization table is indicated for each row in `stimulus.Condition`.
+The name of the specialization table is indicated in each row of `stimulus.Condition` in field `special_name`. 
 
 A preview of the `stimulus.Condition`:
 ```
@@ -93,7 +93,7 @@ Object stimulus.Condition
 
  :: stimulus condition ::
 
-    CONDITION_HASH           special_name        special_variation
+    CONDITION_HASH            special_name           special_variation
     ______________________    ___________________    _________________
 
     '+0cObnxIHpoB5RKZJVYj'    'stimulus.Matisse2'    '1'              
