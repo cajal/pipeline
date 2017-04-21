@@ -72,9 +72,11 @@ f.stimulus.close(nargout=0)  # close the stimulus screen
 The diagram below depicts the entire stimulus schema. 
 ![](erd.png)
 
+## Schema core
 The following diagram shows the core of the schema for a subset of stimulus types: 
 ![](core-erd.png)
 
+### `stimulus.Condition`
 The central table is `stimulus.Condition`, which enumerates all possible stimulus conditions to be presented. 
 It is populated before the stimulus is presented. 
 The specialization tables below it contain parameters that are specific to each type of stimulus. 
@@ -112,3 +114,5 @@ Object stimulus.Condition
 
           ...
 ```
+
+### `stimulus.Trial`
