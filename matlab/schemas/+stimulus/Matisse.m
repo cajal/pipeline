@@ -8,7 +8,6 @@ pre_blank_period       :decimal(5,3)  #  (seconds)
 duration               :decimal(5,3)  #  (seconds)
 pattern_width          :smallint      #  pixel size of the resulting pattern
 pattern_aspect         :float         #  the aspect ratio of the pattern
-pattern_upscale        :tinyint       #  integer upscale factor of the pattern
 ori                    :decimal(4,1)  #  degrees. 0=horizontal, then clockwise
 outer_ori_delta        :decimal(4,1)  #  degrees. Differerence of outer ori from inner.
 ori_coherence          :decimal(4,1)  #  1=unoriented noise. pi/ori_coherence = bandwidth of orientations.
@@ -33,11 +32,10 @@ classdef Matisse < dj.Manual & stimulus.core.Visual
         function test()
             cond.noise_seed = 100;
             cond.pattern_width = 80;
-            cond.pattern_upscale = 3;
             cond.pattern_aspect = 1.7;
-            cond.ori = 0;
+            cond.ori = 30;
             cond.outer_ori_delta = 30;
-            cond.ori_coherence = 1.5;
+            cond.ori_coherence = 2.5;
             cond.aperture_x = 0.2;
             cond.aperture_y = 0.1;
             cond.aperture_r = 0.2;
@@ -64,8 +62,8 @@ classdef Matisse < dj.Manual & stimulus.core.Visual
             % precomputed fields for the condition -- not used for computinng condition id
             assert(isscalar(cond), 'one condition at a time please')
             img = double(cond.base_noise)/127*1.5;
-            outer = upscale(img, cond.pattern_upscale, cond.ori + cond.outer_ori_delta, cond.ori_coherence);
-            inner = upscale(img, cond.pattern_upscale, cond.ori, cond.ori_coherence);
+            outer = upscale(img, cond.ori + cond.outer_ori_delta, cond.ori_coherence);
+            inner = upscale(img, cond.ori, cond.ori_coherence);
             img = aperture(inner*cond.inner_contrast, outer*cond.outer_contrast, ...
                 cond.aperture_x, cond.aperture_y, cond.aperture_r, cond.aperture_transition, cond.annulus_alpha);
             cond.image = uint8((img+0.5)*255);
@@ -102,11 +100,12 @@ classdef Matisse < dj.Manual & stimulus.core.Visual
 end
 
 
-function img = upscale(img, factor, ori, coherence)
+function img = upscale(img, ori, coherence)
 % Performs fast resizing of the image by the given integer factor with
 % gaussian interpolation.
 
 ori_mix = coherence > 1;  % how much of orientation to mix in
+factor = 3;  % upscale factor
 
 % upscale without interpolation
 kernel_sigma = factor;
@@ -122,11 +121,9 @@ fmask = exp(-(fy.^2 + fx.^2)*kernel_sigma.^2/2);
 
 % apply orientation selectivity
 theta = mod(atan2(fx,fy) + ori*pi/180 + pi/2, pi) - pi/2;
-fmask = ifftshift(fmask.*(1-ori_mix + ori_mix*hann(theta*coherence)));
+fmask = ifftshift(fmask.*(1-ori_mix + sqrt(coherence)*ori_mix*hann(theta*coherence)));
 img = real(ifft2(fmask.*fft2(img)));
 
-% contrast compensation for the effect of orientation selectivity
-img = img*(1 + ori_mix*(sqrt(coherence)-1));
 end
 
 
