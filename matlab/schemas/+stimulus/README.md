@@ -50,13 +50,17 @@ import matlab.engine as eng
 mat = eng.start_matlab()
 # step 1: Initialize screen
 mat.stimulus.open(nargout=0)            
+
 # step 2: intialize conditions and queue trials
 mat.stimulus.conf.matisse2(nargout=0)  
+
 # step 3: run stimulus for the specific scan
 f = mat.stimulus.run(dict(animal_id=0, session=0, scan_idx=0), nargout=0, async=True)
+
 # step 4. Interrupt and resume stimulus
 f.cancel()   # interrupt 
 f = mat.stimulus.run(dict(animal_id=0, session=0, scan_idx=0), nargout=0, async=True)   # resum
+
 # step 5. Exit 
 f.done()  # True if stimulus is done
 f.result()  # waits until the stimulus is done
