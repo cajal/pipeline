@@ -42,7 +42,7 @@ To close the stimulus program,
 # How to run a stimulus from Python
 The stimulus configuration and playback are written and executed in MATLAB.  However, the control software in our lab is written in Python. 
 
-To control the execution of MATLAB routines from Python, configure the MATLAB Engine API for Python as described at https://www.mathworks.com/help/matlab/matlab_external/install-the-matlab-engine-for-python.html.
+First configure the MATLAB Engine API for Python as described at https://www.mathworks.com/help/matlab/matlab_external/install-the-matlab-engine-for-python.html.
 
 Upon installation, you can reproduce the steps above in Python as 
 ```python
