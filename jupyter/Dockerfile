@@ -5,8 +5,7 @@ MAINTAINER Fabian Sinz <sinz@bcm.edu>
 
 ADD requirements.txt /requirements.txt
 
-
-    RUN pip install -r /requirements.txt \
+RUN pip install -r /requirements.txt \
     && rm /requirements.txt
 
 ADD jupyter_notebook_config.py /root/.jupyter/jupyter_notebook_config.py

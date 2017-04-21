@@ -5,17 +5,24 @@ _report_on = {
     'reso pipeline': ['pre', 'rf', 'trk', 'trippy', 'monet']
 }
 
+#--- switch matplotlib backend if there is no way to display things.
+import matplotlib
+from tkinter import TclError
+try:
+    import matplotlib.pyplot as plt
+    del plt  # don't really wanted to import it, just testing
+except TclError:
+    print('No display found. Switching matplotlib backend to "Agg"')
+    matplotlib.use('Agg', warn=False, force=True)
+
+
 class PipelineException(Exception):
-    def __init__(self, message, keys=None):
-        # Call the base class constructor with the parameters it needs
-        super(Exception, self).__init__(message)
+    """Base pipeline exception. Prints the message plus any passed info."""
+    def __init__(self, message, info=None):
+        info_message = '\nError info: ' + repr(info) if info else ''
+        super().__init__(message + info_message)
+        self.info = info
 
-        self.keys = keys
-
-    def __str__(self):
-        return """
-        Pipeline Exception raised while processing {0}
-        """.format(repr(self.keys))
 
 # ----------- loads local configuration from file ----------------
 from .settings import Config, LOCALCONFIG, GLOBALCONFIG
