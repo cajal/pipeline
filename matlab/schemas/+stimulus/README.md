@@ -78,7 +78,7 @@ The following diagram shows the core of the schema for a subset of stimulus type
 
 ### `stimulus.Condition`
 The central table is `stimulus.Condition`, which enumerates all possible stimulus conditions to be presented. 
-It is populated before the stimulus is presented. 
+It is populated before the stimulus is presented for the first time.
 The specialization tables below it contain parameters that are specific to each type of stimulus. 
 For example, `stimulus.Monet2` contains parameters that are specific to a single stimulus condition of the type `Monet2`.
 For each tuple in `stimulus.Condition`, exactly one of the specialization tables contains the corresponding entry.
@@ -116,3 +116,16 @@ Object stimulus.Condition
 ```
 
 ### `stimulus.Trial`
+The table `stimulus.Trial` contains the information about the presentation of a condition during a specific scan (from `experiment.Scan`).  
+Any number of conditions of any type can be presented during a scan and each condition may be displayed multiple times.
+
+## Example queries
+
+All scans during which the `Monet` stimulus has been played:
+```
+monetScans = experiment.Scan() & (stimulus.Trial() * stimulus.Monet())
+```
+or
+```
+monetScans = experiment.Scan() & (stimulus.Trial() * stimulus.Condition() & 'special_name="stimulus.Monet"')
+```
