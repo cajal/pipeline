@@ -165,6 +165,7 @@ class Layer(dj.Lookup):
     contents = [
         ('L2/3', '', 100, 370),
         ('L4', '', 370, 500),
+        dict(layer='unset', layer_description=''),
     ]
 
     def get_layers(self, z):
