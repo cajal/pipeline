@@ -65,9 +65,50 @@ f = mat.stimulus.run(dict(animal_id=0, session=0, scan_idx=0), nargout=0, async=
 # step 5. Exit 
 f.done()  # True if stimulus is done
 f.result()  # waits until the stimulus is done
-f.stimulus.close(nargout=0)  # close the stimulus sceren 
+f.stimulus.close(nargout=0)  # close the stimulus screen 
 ```
 
 # Data structure 
 The diagram below depicts the entire stimulus schema. 
 ![](erd.png)
+
+The following diagram shows the core of the schema for a subset of stimulus types: 
+![](core-erd.png)
+
+The central table is `stimulus.Condition`, which enumerates all possible stimulus conditions to be presented. 
+It is populated before the stimulus is presented. 
+The specialization tables below it contain parameters that are specific to each type of stimulus. 
+For example, `stimulus.Monet2` contains parameters that are specific to a single stimulus condition of the type `Monet2`.
+For each tuple in `stimulus.Condition`, exactly one of the specialization tables contains the corresponding entry.
+The name of the specialization table is indicated for each row in `stimulus.Condition`.
+
+A preview of the `stimulus.Condition`:
+```
+>> stimulus.Condition
+
+ans = 
+
+
+Object stimulus.Condition
+
+ :: stimulus condition ::
+
+    CONDITION_HASH           special_name        special_variation
+    ______________________    ___________________    _________________
+
+    '+0cObnxIHpoB5RKZJVYj'    'stimulus.Matisse2'    '1'              
+    '+3o2cquPfKnts4Gmjwr4'    'stimulus.Matisse2'    '1'              
+    '+9mOEvwZHyV2MiwRBsMy'    'stimulus.Varma'       '1'              
+    '+9nMtSVLIPAj/VEmey+6'    'stimulus.Matisse'     '2'              
+    '+9OAgABcltcbRZUw77Kt'    'stimulus.Matisse2'    '1'              
+    '+A8FfGEWQNonM6RMmrTk'    'stimulus.Matisse2'    '1'              
+    '+C/KYdzQvzn0jzQScSGy'    'stimulus.Matisse2'    '1'              
+    '+cI6EqAdQgh2tyJ1eMzy'    'stimulus.Matisse'     '2'              
+    '+eFINMa+jF58wHzuk9qQ'    'stimulus.Monet2'      'dimitri-1'      
+    '+eK4n7czWTGRVKKh4EJO'    'stimulus.Matisse2'    '1'              
+    '+f+o1UeO1AtHWPTo3vlc'    'stimulus.Matisse2'    '1'              
+    '+h1WWj2NG6mjGFobRphN'    'stimulus.Matisse2'    '1'              
+    '+HeQV7jovoXvymyCqYCP'    'stimulus.Matisse2'    '1'              
+
+          ...
+```
