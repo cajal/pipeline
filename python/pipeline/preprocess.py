@@ -1,28 +1,25 @@
-import datajoint as dj
-from . import experiment, vis, PipelineException
+import os
 from warnings import warn
+import datajoint as dj
 import numpy as np
 import sh
-import os
 from commons import lab
 try:
     import pyfnnd
 except ImportError:
     warn('Could not load pyfnnd.  Oopsi spike inference will fail. Install from https://github.com/cajal/PyFNND.git')
+
+from . import experiment, config, PipelineException
 from .utils.dsp import mirrconv
-from .utils.eye_tracking import ROIGrabber, ts2sec, read_video_hdf5, PupilTracker, CVROIGrabber
-from . import config
-from distutils.version import StrictVersion
+from .utils.eye_tracking import ROIGrabber, ts2sec, read_video_hdf5, CVROIGrabber
 from .utils import galvo_corrections
-from .experiment import Session, Scan
-import imreg_dft as ird
+import matplotlib.pyplot as plt
 
-# import caiman.source_extraction.cnmf as cnmf
 
-assert StrictVersion(dj.__version__) >= StrictVersion('0.2.8')
+from distutils.version import StrictVersion
+assert StrictVersion(dj.__version__) >= StrictVersion('0.2.9')
 
 schema = dj.schema('pipeline_preprocess', locals())
-
 
 
 def notnan(x, start=0, increment=1):
@@ -95,15 +92,66 @@ class Prepare(dj.Imported):
         raster_phase            : float             # shift of odd vs even raster lines
         """
 
-        def get_fix_raster(self):
+        def get_correct_raster(self):
             """
-            :return: a function that perform raster correction on image [x, y, nchannel, nslice, nframe].
+             :returns: A function to perform raster correction on the scan
+                    [image_height, image_width, channels, slices, num_frames].
             """
             raster_phase, fill_fraction = self.fetch1['raster_phase', 'fill_fraction']
             if raster_phase == 0:
-                return lambda img: np.double(img)
+                return lambda scan: np.double(scan)
             else:
-                return lambda img: galvo_corrections.correct_raster(np.double(img), raster_phase, fill_fraction)
+                return lambda scan: galvo_corrections.correct_raster(scan, raster_phase,
+                                                                     fill_fraction)
+
+        def estimate_num_components_per_slice(self):
+            """ Estimates the number of components per scan slice using simple rules of thumb.
+
+            For somatic scans, estimate number of neurons based on:
+            (100x100x100)um^3 = 1e6 um^3 -> 1e2 neurons; (1x1x1)mm^3 = 1e9 um^3 -> 1e5 neurons
+
+            For axonal/dendritic scans, just ten times our estimate of neurons.
+
+            :returns: Number of components
+            :rtype: int
+            """
+
+            # Get slice dimensions (in micrometers)
+            slice_height, slice_width = (Prepare.Galvo() & self).fetch1['um_height',
+                                                                       'um_width']
+            slice_thickness = 10  # assumption
+            slice_volume = slice_width * slice_height * slice_thickness
+
+            # Estimate number of components
+            if experiment.Session.TargetStructure() & self:  # scan is axonal/dendritic
+                num_components = slice_volume * 0.001  # ten times as many neurons
+            else:
+                num_components = slice_volume * 0.0001
+
+            return int(round(num_components))
+
+        def estimate_soma_radius_in_pixels(self):
+            """ Estimates the radius of a neuron in the scan (in pixels). Assumes soma is
+             14 x 14 microns.
+             
+             :returns: a tuple with the estimated pixel radius on the y-axis (height) and
+                x-axis (width) of the scan.
+             :rtype: tuple of floats
+            """
+            soma_radius_in_microns = 7 # assumption
+
+            # Calculate size in pixels (height radius)
+            um_height, px_height = (Prepare.Galvo() & self).fetch1['um_height', 'px_height']
+            height_microns_per_pixel = um_height / px_height
+            height_radius_in_pixels = soma_radius_in_microns / height_microns_per_pixel
+
+            # Calculate size in pixels (width radius)
+            um_width, px_width = (Prepare.Galvo() & self).fetch1['um_width', 'px_width']
+            width_microns_per_pixel = um_width / px_width
+            width_radius_in_pixels = soma_radius_in_microns / width_microns_per_pixel
+
+            return (height_radius_in_pixels, width_radius_in_pixels)
+
 
     class GalvoMotion(dj.Part):
         definition = """   # motion correction for galvo scans
@@ -117,12 +165,21 @@ class Prepare(dj.Imported):
         align_times=CURRENT_TIMESTAMP: timestamp     # automatic
         """
 
-        def get_fix_motion(self):
+        def get_correct_motion(self):
             """
-            :return: a function that performs motion correction on image [x, y].
+            :returns: A function to performs motion correction on scans
+                      [image_height, image_width, channels, slices, num_frames].
             """
-            xy = self.fetch['motion_xy']
-            return lambda frame, i: galvo_corrections.correct_motion(frame, xy[:, i])
+            xy_motion = self.fetch1['motion_xy']
+
+            def my_lambda_function(scan, indices=None):
+                if indices is None:
+                    return galvo_corrections.correct_motion(scan, xy_motion)
+                else:
+                    return galvo_corrections.correct_motion(scan, xy_motion[:, indices])
+
+
+            return my_lambda_function
 
     class GalvoAverageFrame(dj.Part):
         definition = """   # average frame for each slice and channel after corrections
@@ -146,6 +203,80 @@ class Prepare(dj.Imported):
         y: float   # (um)
         z: float   # (um)
         """
+
+    def save_video(self, filename='galvo_corrections.mp4', slice=1, channel=1,
+                   start_index=0, seconds=30, dpi=250):
+        """ Creates an animation video showing the original vs corrected scan.
+
+        :param string filename: Output filename (path + filename)
+        :param int slice: Slice to use for plotting (key for GalvoMotion). Starts at 1
+        :param int channel: What channel from the scan to use. Starts at 1
+        :param int start_index: Where in the scan to start the video.
+        :param int seconds: How long in seconds should the animation run.
+        :param int dpi: Dots per inch, controls the quality of the video.
+
+        :returns Figure. You can call show() on it.
+        :rtype: matplotlib.figure.Figure
+        """
+        # Get scan filename
+        scan_filename = (experiment.Scan() & self).local_filenames_as_wildcard
+
+        # Get fps and total_num_frames
+        fps = (Prepare.Galvo() & self).fetch1['fps']
+        num_video_frames = int(round(fps * seconds))
+        stop_index = start_index + num_video_frames
+
+        # Load the scan
+        from tiffreader import TIFFReader
+        reader = TIFFReader(scan_filename)
+        scan = np.double(reader[:, :, channel - 1, slice - 1, start_index: stop_index])
+        scan = scan.squeeze()
+        original_scan = scan.copy()
+
+        # Correct the scan
+        correct_motion = (Prepare.GalvoMotion() & self &
+                          {'slice': slice, 'channel': channel}).get_correct_motion()
+        correct_raster = (Prepare.Galvo() & self).get_correct_raster()
+        raster_corrected = correct_raster(scan)
+        motion_corrected = correct_motion(raster_corrected, range(start_index, stop_index))
+        corrected_scan = motion_corrected
+
+        # Create animation
+        import matplotlib.animation as animation
+
+        ## Set the figure
+        fig = plt.figure()
+
+        plt.subplot(1, 2, 1)
+        plt.title('Original')
+        im1 = plt.imshow(original_scan[:, :, 0], vmin=original_scan.min(),
+                         vmax=original_scan.max())  # just a placeholder
+        plt.axis('off')
+        plt.colorbar()
+
+        plt.subplot(1, 2, 2)
+        plt.title('Corrected')
+        im2 = plt.imshow(corrected_scan[:, :, 0], vmin=corrected_scan.min(),
+                         vmax=corrected_scan.max())  # just a placeholder
+        plt.axis('off')
+        plt.colorbar()
+
+        ## Make the animation
+        def update_img(i):
+            im1.set_data(original_scan[:, :, i])
+            im2.set_data(corrected_scan[:, :, i])
+
+        video = animation.FuncAnimation(fig, update_img, num_video_frames,
+                                        interval=1000 / fps)
+
+        # Save animation
+        if not filename.endswith('.mp4'):
+            filename += '.mp4'
+        print('Saving video at:', filename)
+        print('If this takes too long, stop it and call again with dpi <', dpi, '(default)')
+        video.save(filename, dpi=dpi)
+
+        return fig
 
 
 @schema
@@ -183,21 +314,21 @@ class Method(dj.Lookup):
 
 @schema
 class ExtractRaw(dj.Imported):
-    definition = """  # pre-processing of a twp-photon scan
+    definition = """
+    # Correction, source extraction and trace deconvolution of a two-photon scan
     -> Prepare
     -> Method
     """
-
     @property
     def key_source(self):
-        return Prepare() * Method() \
-               & dj.OrList([(Prepare.Galvo() * Method.Galvo() - 'segmentation="manual"'), \
-                            Prepare.Galvo() * Method.Galvo() * ManualSegment(), \
-                            Prepare.Aod() * Method.Aod()]) \
-                 - (Session.TargetStructure() & 'compartment="axon"')
+        return Prepare() * Method() & dj.OrList(
+            [(Prepare.Galvo() * Method.Galvo() - 'segmentation="manual"'),
+             Prepare.Galvo() * Method.Galvo() * ManualSegment(),
+             Prepare.Aod() * Method.Aod()] )
 
     class Trace(dj.Part):
-        definition = """  # raw trace, common to Galvo
+        definition = """
+        # Raw trace, common to Galvo
         -> ExtractRaw
         -> Channel
         trace_id  : smallint
@@ -206,7 +337,8 @@ class ExtractRaw(dj.Imported):
         """
 
     class GalvoSegmentation(dj.Part):
-        definition = """  # segmentation of galvo movies
+        definition = """
+        # Segmentation of galvo movies
         -> ExtractRaw
         -> Slice
         ---
@@ -214,7 +346,8 @@ class ExtractRaw(dj.Imported):
         """
 
     class GalvoROI(dj.Part):
-        definition = """  # region of interest produced by segmentation
+        definition = """
+        # Region of interest produced by segmentation
         -> ExtractRaw.GalvoSegmentation
         -> ExtractRaw.Trace
         ---
@@ -231,18 +364,80 @@ class ExtractRaw(dj.Imported):
                 ret[..., i] = mask.reshape(px_height, px_width, order='F')
             return ret
 
+        def get_mask_as_image(self):
+            """Return the mask for this single ROI as  an image (2-d array)"""
+            # Get params
+            pixel_indices, weights = (ExtractRaw.GalvoROI() & self).fetch1['mask_pixels',
+                                                                           'mask_weights']
+            image_height, image_width = (Prepare.Galvo() & self).fetch1['px_height',
+                                                                        'px_width']
+            # Calculate and reshape mask
+            mask_as_vector = np.zeros(image_height * image_width)
+            mask_as_vector[pixel_indices - 1] = weights
+            spatial_mask = mask_as_vector.reshape(image_height, image_width, order='F')
+
+            return spatial_mask
+
     class SpikeRate(dj.Part):
         definition = """
-        # spike trace extracted while segmentation
+        # Spike trace deconvolved during CNMF
         -> ExtractRaw.Trace
         ---
         spike_trace :longblob
         """
 
+    class GalvoCorrelationImage(dj.Part):
+        definition = """
+        # Each pixel shows the (average) temporal correlation between that pixel and its eight neighbors
+        -> ExtractRaw
+        -> Channel
+        -> Slice
+        ---
+        correlation_image   : longblob # correlation image
+        """
+
+    class BackgroundComponents(dj.Part):
+        definition = """
+        # Inferred background components with the CNMF algorithm
+        -> ExtractRaw
+        -> Channel
+        -> Slice
+        ----------------
+        masks    : longblob # array (im_width x im_height x num_background_components)
+        activity : longblob # array (num_background_components x timesteps)
+        """
+
+    class ARCoefficients(dj.Part):
+        definition = """
+        # Fitted parameters for the autoregressive process (CNMF)
+        -> ExtractRaw.Trace
+        ----------------
+        g: longblob # array with g1, g2, ... values for the AR process
+        """
+
+    class CNMFParameters(dj.Part):
+        definition = """
+        # Arguments used to demix and deconvolve the scan with CNMF
+        -> ExtractRaw
+        --------------
+        num_components  : smallint # estimated number of components
+        ar_order        : tinyint # order of the autoregressive process for impulse function response
+        merge_threshold : float # overlapping masks are merged if temporal correlation greater than this
+        num_processes = null    : smallint # number of processes to run in parallel, null=all available
+        num_pixels_per_process  : int # number of pixels processed at a time
+        block_size      : int # number of pixels per each dot product
+        init_method     : enum("greedy_roi", "sparse_nmf", "local_nmf") # type of initialization used
+        soma_radius_in_pixels = null :blob # estimated radius for a soma in the scan
+        snmf_alpha = null       : float   # regularization parameter for SNMF
+        num_background_components : smallint # estimated number of background components
+        init_on_patches         : boolean   # whether to run initialization on small patches
+        patch_downsampling_factor = null : tinyint # how to downsample the scan
+        percentage_of_patch_overlap = null : float # overlap between adjacent patches
+        """
+
     def plot_traces_and_masks(self, traces, slice, mask_channel=1, outfile='traces.pdf'):
 
         import seaborn as sns
-        import matplotlib.pyplot as plt
 
         key = (self * self.GalvoSegmentation().proj() * Method.Galvo() & dict(segmentation='nmf', slice=slice))
         trace_selection = 'trace_id in ({})'.format(','.join([str(s) for s in traces]))
@@ -296,7 +491,6 @@ class ExtractRaw(dj.Imported):
 
     def plot_galvo_ROIs(self, outdir='./'):
         import seaborn as sns
-        import matplotlib.pyplot as plt
 
         sns.set_context('paper')
         theCM = sns.blend_palette(['lime', 'gold', 'deeppink'], n_colors=10)  # plt.cm.RdBu_r
@@ -384,8 +578,359 @@ class ExtractRaw(dj.Imported):
                 plt.close(fig)
 
     def _make_tuples(self, key):
-        raise NotImplementedError('ExtractRaw is populated in Matlab')
+        """ Load scan one slice & channel at a time, correct for raster and motion
+        artifacts and use CNMF to extract sources and deconvolve spike traces.
 
+        See caiman_interface.demix_and_deconvolve_with_cnmf for an explanation of params
+        """
+        from .utils import caiman_interface as cmn
+
+        print('')
+        print('*' * 80)
+        print('Processing scan {}'.format(key))
+        print('*' * 80)
+
+        # Insert key in ExtractRaw
+        self.insert1(key)
+
+        # Get scan filename
+        scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
+
+        # Read the scan
+        from tiffreader import TIFFReader
+        reader = TIFFReader(scan_filename)
+
+        # Estimate number of components per slice
+        num_components = (Prepare.Galvo() & key).estimate_num_components_per_slice()
+        num_components += int(0.5 * num_components) # add 50% more just to be sure
+
+        # Estimate the radius of a neuron in the scan (used for somatic scans)
+        soma_radius_in_pixels = (Prepare.Galvo() & key).estimate_soma_radius_in_pixels()
+
+        # Set general parameters
+        kwargs = {}
+        kwargs['num_components'] = num_components
+        kwargs['AR_order'] = 2  # impulse response modelling with AR(2) process
+        kwargs['merge_threshold'] = 0.8
+
+        # Set performance/execution parameters (heuristically), decrease if memory overflows
+        kwargs['num_processes'] = 20  # Set to None for all cores available
+        kwargs['num_pixels_per_process'] = 5000
+        kwargs['block_size'] = 5000
+
+        # Set params specific to somatic or axonal/dendritic scans
+        is_somatic = not (experiment.Session.TargetStructure() & key)
+        if is_somatic:
+            kwargs['init_method'] = 'greedy_roi'
+            kwargs['soma_radius_in_pixels'] = soma_radius_in_pixels
+            kwargs['num_background_components'] = 4
+            kwargs['init_on_patches'] = False
+        else:
+            kwargs['init_method'] = 'sparse_nmf'
+            kwargs['snmf_alpha'] = 500  # 10^2 to 10^3.5 is a good range
+            kwargs['num_background_components'] = 1
+            kwargs['init_on_patches'] = True
+
+        # Set params specific to initialization on patches
+        if kwargs['init_on_patches']:
+            kwargs['patch_downsampling_factor'] = 4
+            kwargs['percentage_of_patch_overlap'] = .2
+
+        # Over each channel
+        scan_channels = (Prepare.GalvoMotion() & key).fetch['channel']
+        scan_channels = np.unique(scan_channels)
+        for channel in scan_channels:
+            current_trace_id = 1 # to count traces over one channel, ids start at 1
+            channel_slices = (Prepare.GalvoMotion() & key & {'channel': channel}).fetch['slice']
+
+            # Over each slice in the channel
+            for slice in channel_slices:
+                # Load the scan
+                print('Loading scan...')
+                scan = np.double(reader[:, :, channel - 1, slice - 1, :]).squeeze()
+
+                # Correct scan
+                print('Correcting scan...')
+                correct_motion = (Prepare.GalvoMotion() & key &
+                                  {'slice': slice, 'channel': channel}).get_correct_motion()
+                correct_raster = (Prepare.Galvo() & key).get_correct_raster()
+                corrected_scan = correct_motion(correct_raster(scan))
+
+                # Compute and insert correlation image
+                print('Computing correlation image...')
+                correlation_image = cmn.compute_correlation_image(corrected_scan)
+                ExtractRaw.GalvoCorrelationImage().insert1({**key, 'slice': slice,
+                                                            'channel': channel,
+                                                            'correlation_image': correlation_image})
+
+                # Extract traces
+                print('Extracting mask, traces and spikes (cnmf)...')
+                cnmf_result = cmn.demix_and_deconvolve_with_cnmf(corrected_scan, **kwargs)
+                (location_matrix, activity_matrix, background_location_matrix,
+                background_activity_matrix, raw_traces, spikes, AR_params) = cnmf_result
+
+                # Obtain new mask order based on their brightness in the correlation image
+                new_order = cmn.order_components(location_matrix, correlation_image)
+
+                # Insert traces, spikes and spatial masks (preserving new order)
+                print('Inserting masks, traces, spikes, ar parameters and background'
+                      ' components...')
+                dj.conn().is_connected # make sure connection is active
+                for i  in new_order:
+                    # Create new trace key
+                    trace_key = {**key, 'trace_id': current_trace_id, 'channel': channel}
+
+                    # Insert traces and spikes
+                    ExtractRaw.Trace().insert1({**trace_key, 'raw_trace': raw_traces[i, :]})
+                    ExtractRaw.SpikeRate().insert1({**trace_key, 'spike_trace': spikes[i, :]})
+
+                    # Insert fitted AR parameters
+                    if kwargs['AR_order'] > 0:
+                        ExtractRaw.ARCoefficients().insert1({**trace_key, 'g': AR_params[i, :]})
+
+                    # Get indices and weights of defined pixels in mask (matlab-like)
+                    mask_as_F_ordered_vector = location_matrix[:, :, i].ravel(order='F')
+                    defined_mask_indices = np.where(mask_as_F_ordered_vector)[0]
+                    defined_mask_weights = mask_as_F_ordered_vector[defined_mask_indices]
+                    defined_mask_indices += 1 # matlab indices start at 1
+
+                    # Insert spatial mask
+                    ExtractRaw.GalvoSegmentation().insert1({**key, 'slice': slice},
+                                                           skip_duplicates=True)
+                    ExtractRaw.GalvoROI().insert1({**trace_key, 'slice': slice,
+                                                   'mask_pixels': defined_mask_indices,
+                                                   'mask_weights': defined_mask_weights})
+
+                    # Increase trace_id counter
+                    current_trace_id+=1
+
+                # Insert background components
+                background_dict = {**key, 'channel': channel, 'slice': slice,
+                                   'masks': background_location_matrix,
+                                   'activity': background_activity_matrix}
+                ExtractRaw.BackgroundComponents().insert1(background_dict)
+
+        # Insert CNMF parameters (one per scan)
+        lowercase_kwargs = {key.lower(): value for key, value in kwargs.items()}
+        ExtractRaw.CNMFParameters().insert1({**key, **lowercase_kwargs})
+
+    def save_video(self, filename='cnmf_results.mp4', slice=1, channel=1,
+                   start_index=0, seconds=30, dpi=250, first_n=None):
+        """ Creates an animation video showing the original vs corrected scan.
+
+        :param string filename: Output filename (path + filename)
+        :param int slice: Slice to use for plotting. Starts at 1
+        :param int channel: What channel from the scan to use. Starts at 1
+        :param int start_index: Where in the scan to start the video.
+        :param int seconds: How long in seconds should the animation run.
+        :param int dpi: Dots per inch, controls the quality of the video.
+        :param int first_n: Consider only the first n components.
+
+        :returns Figure. You can call show() on it.
+        :rtype: matplotlib.figure.Figure
+        """
+        # Get scan filename
+        scan_filename = (experiment.Scan() & self).local_filenames_as_wildcard
+
+        # Get fps and calculate total number of frames
+        fps = (Prepare.Galvo() & self).fetch1['fps']
+        num_video_frames = int(round(fps * seconds))
+        stop_index = start_index + num_video_frames
+
+        # Load the scan
+        from tiffreader import TIFFReader
+        reader = TIFFReader(scan_filename)
+        scan = np.double(reader[:, :, channel - 1, slice - 1, start_index: stop_index])
+        scan = scan.squeeze()
+
+        # Correct the scan
+        correct_motion = (Prepare.GalvoMotion() & self &
+                          {'slice': slice, 'channel': channel}).get_correct_motion()
+        correct_raster = (Prepare.Galvo() & self).get_correct_raster()
+        raster_corrected = correct_raster(scan)
+        motion_corrected = correct_motion(raster_corrected, range(start_index, stop_index))
+        scan = motion_corrected
+
+        # Get scan dimensions
+        image_height, image_width, _ = scan.shape
+        num_pixels = image_height * image_width
+
+        # Get location and activity matrices
+        location_matrix = self.get_all_masks(slice, channel)
+        activity_matrix = self.get_all_traces(slice, channel)
+        background_rel = ExtractRaw.BackgroundComponents() & self & {'slice': slice,
+                                                                     'channel': channel}
+        background_location_matrix, background_activity_matrix = \
+            background_rel.fetch1['masks', 'activity']
+
+        # Select first n components
+        if first_n is not None:
+            location_matrix = location_matrix[:, :, :first_n]
+            activity_matrix = activity_matrix[:first_n, :]
+
+        # Restrict computations to the necessary video frames
+        activity_matrix = activity_matrix[:, start_index: stop_index]
+        background_activity_matrix = background_activity_matrix[:, start_index: stop_index]
+
+        # Calculate matrices
+        extracted = np.dot(location_matrix.reshape(num_pixels, -1), activity_matrix)
+        extracted = extracted.reshape(image_height, image_width, -1)
+        background = np.dot(background_location_matrix.reshape(num_pixels, -1),
+                            background_activity_matrix)
+        background = background.reshape(image_height, image_width, -1)
+        residual = scan - extracted - background
+
+        # Create animation
+        import matplotlib.animation as animation
+
+        ## Set the figure
+        fig = plt.figure()
+
+        plt.subplot(2, 2, 1)
+        plt.title('Original (Y)')
+        im1 = plt.imshow(scan[:, :, 0], vmin=scan.min(), vmax=scan.max())  # just a placeholder
+        plt.axis('off')
+        plt.colorbar()
+
+        plt.subplot(2, 2, 2)
+        plt.title('Extracted (A*C)')
+        im2 = plt.imshow(extracted[:, :, 0], vmin=extracted.min(), vmax=extracted.max())
+        plt.axis('off')
+        plt.colorbar()
+
+        plt.subplot(2, 2, 3)
+        plt.title('Background (B*F)')
+        im3 = plt.imshow(background[:, :, 0], vmin=background.min(),
+                         vmax=background.max())
+        plt.axis('off')
+        plt.colorbar()
+
+        plt.subplot(2, 2, 4)
+        plt.title('Residual (Y - A*C - B*F)')
+        im4 = plt.imshow(residual[:, :, 0], vmin=residual.min(), vmax=residual.max())
+        plt.axis('off')
+        plt.colorbar()
+
+        ## Make the animation
+        def update_img(i):
+            im1.set_data(scan[:, :, i])
+            im2.set_data(extracted[:, :, i])
+            im3.set_data(background[:, :, i])
+            im4.set_data(residual[:, :, i])
+
+        video = animation.FuncAnimation(fig, update_img, num_video_frames,
+                                        interval=1000 / fps)
+
+        # Save animation
+        if not filename.endswith('.mp4'):
+            filename += '.mp4'
+        print('Saving video at:', filename)
+        print('If this takes too long, stop it and call again with dpi <', dpi, '(default)')
+        video.save(filename, dpi=dpi)
+
+        return fig
+
+    def plot_contours(self, slice=1, channel=1, first_n=None):
+        """ Draw contours of masks over the correlation image.
+
+        :param slice: Scan slice to use
+        :param channel: Scan channel to use
+        :param first_n: Number of masks to plot. None for all.
+        :returns: None
+        """
+        from .utils import caiman_interface as cmn
+
+        # Get location matrix
+        location_matrix = self.get_all_masks(slice, channel)
+
+        # Select first n components
+        if first_n is not None:
+            location_matrix = location_matrix[:, :, :first_n]
+
+        # Get correlation image if defined
+        image_rel = ExtractRaw.GalvoCorrelationImage() & self & {'slice': slice,
+                                                                 'channel': channel}
+        correlation_image = image_rel.fetch1['correlation_image'] if image_rel else None
+
+        # Draw contours
+        cmn.plot_contours(location_matrix, correlation_image)
+
+    def plot_impulse_responses(self, slice=1, channel=1, num_timepoints=100):
+        """ Plots the individual impulse response functions for all traces assuming an
+        autoregressive process (p > 0).
+
+        :param int num_timepoints: The number of points after impulse to use for plotting.
+
+        :returns Figure. You can call show() on it.
+        :rtype: matplotlib.figure.Figure
+        """
+        ar_rel = ExtractRaw.ARCoefficients() & self & {'slice': slice, 'channel': channel}
+        fps = (Prepare.Galvo() & self).fetch1['fps']
+
+        # Get AR coefficients
+        ar_coefficients = ar_rel.fetch['g'] if ar_rel else None
+
+        if ar_coefficients is not None:
+            fig = plt.figure()
+            x_axis = np.arange(num_timepoints) / fps # make it seconds
+
+            # Over each trace
+            for g in ar_coefficients:
+                AR_order = len(g)
+
+                # Calculate impulse response function
+                irf = np.zeros(num_timepoints)
+                irf[0] = 1  # initial spike
+                for i in range(1, num_timepoints):
+                    if i <= AR_order: # start of the array needs special care
+                        irf[i] = np.sum(g[:i] * irf[i - 1:: -1])
+                    else:
+                        irf[i] = np.sum(g * irf[i - 1: i - AR_order - 1: -1])
+
+                # Plot
+                plt.plot(x_axis, irf)
+
+            return fig
+
+    def get_all_masks(self, slice, channel):
+        """Returns an image_height x image_width x num_masks matrix with all masks."""
+        mask_rel = ExtractRaw.GalvoROI() & self & {'slice': slice, 'channel': channel}
+
+        # Get masks
+        image_height, image_width = (Prepare.Galvo() & self).fetch1['px_height',
+                                                                    'px_width']
+        mask_pixels, mask_weights = mask_rel.fetch.order_by('trace_id')['mask_pixels',
+                                                                        'mask_weights']
+
+        # Reshape masks
+        location_matrix = ExtractRaw.GalvoROI.reshape_masks(mask_pixels, mask_weights,
+                                                            image_height, image_width)
+
+        return location_matrix
+
+    def get_all_traces(self, slice, channel):
+        """ Returns a num_traces x num_timesteps matrix with all traces."""
+        trace_rel = ExtractRaw.Trace() * ExtractRaw.GalvoROI() & self & {'slice': slice,
+                                                                         'channel': channel}
+        # Get traces
+        raw_traces = trace_rel.fetch.order_by('trace_id')['raw_trace']
+
+        # Reshape traces
+        raw_traces = np.array([x.squeeze() for x in raw_traces])
+
+        return raw_traces
+
+    def get_all_spikes(self, slice, channel):
+        """ Returns a num_spike_traces x num_timesteps matrix with all spike rates."""
+        spike_rel = ExtractRaw.SpikeRate() * ExtractRaw.GalvoROI() & self & {'slice': slice,
+                                                                             'channel': channel}
+        # Get spike traces
+        spike_traces = spike_rel.fetch.order_by('trace_id')['spike_trace']
+
+        # Reshape them
+        spike_traces = np.array([x.squeeze() for x in spike_traces])
+
+        return spike_traces
 
 @schema
 class Sync(dj.Imported):
@@ -572,8 +1117,6 @@ class Spikes(dj.Computed):
 
     def plot_traces(self, outdir='./'):
 
-        import matplotlib.pyplot as plt
-        import seaborn as sns
         gs = plt.GridSpec(2, 5)
         for key in (ComputeTraces.Trace() & self).fetch.keys():
             print('Processing', key)
@@ -632,7 +1175,7 @@ class Spikes(dj.Computed):
             prep = (Prepare() * Prepare.Aod() & key) or (Prepare() * Prepare.Galvo() & key)
             fps = prep.fetch1['fps']
             X = [dict(trace=fill_nans(x['trace'].astype('float64'))) for x in
-                        (ComputeTraces.Trace() & key).proj('trace').fetch.as_dict]
+                 (ComputeTraces.Trace() & key).proj('trace').fetch.as_dict]
 
             self.insert1(key)
             for x in (SpikeMethod() & key).spike_traces(X, fps):
@@ -674,6 +1217,7 @@ class EyeQuality(dj.Lookup):
         (2, 'very poor quality (not well centered, pupil not fully visible)'),
         (3, 'good (but pupil is not the brightest spot)'),
         (4, 'very dark'),
+        (5, 'like 4 but more slack in ratio'),
     ]
 
 
@@ -718,12 +1262,10 @@ class Eye(dj.Imported):
 
         import cv2
 
-
         rel = experiment.Session() * experiment.Scan.EyeVideo() * experiment.Scan.BehaviorFile().proj(
             hdf_file='filename')
 
         info = (rel & key).fetch1()
-
 
         avi_path = lab.Paths().get_local_path("{behavior_path}/{filename}".format(**info))
         # replace number by %d for hdf-file reader
@@ -790,404 +1332,6 @@ class Eye(dj.Imported):
         if input('Do you want to stop? y/N: ') == 'y':
             self.connection.commit_transaction()
             raise PipelineException('User interrupted population.')
-
-
-@schema
-class TrackingParameters(dj.Lookup):
-    definition = """
-    # table that stores the paths for the params for pupil_tracker
-
-    -> EyeQuality
-    ---
-    perc_high                    : float        # upper percentile for bright pixels
-    perc_low                     : float        # lower percentile for dark pixels
-    perc_weight                  : float        # threshold will be perc_weight*perc_low + (1- perc_weight)*perc_high
-    relative_area_threshold      : float        # enclosing rotating rectangle has to have at least that amount of area
-    ratio_threshold              : float        # ratio of major and minor radius cannot be larger than this
-    error_threshold              : float        # threshold on the RMSE of the ellipse fit
-    min_contour_len              : int          # minimal required contour length (must be at least 5)
-    margin                       : float        # relative margin the pupil center should not be in
-    contrast_threshold           : float        # contrast below that threshold are considered dark
-    speed_threshold              : float        # eye center can at most move that fraction of the roi between frames
-    dr_threshold                 : float        # maximally allow relative change in radius
-    """
-
-    contents = [
-        {'eye_quality': 0,
-         'perc_high': 98,
-         'perc_low': 2,
-         'perc_weight': 0.2,
-         'relative_area_threshold': 0.01,
-         'ratio_threshold': 1.3,
-         'error_threshold': 0.03,
-         'min_contour_len': 5,
-         'margin': 0.15,
-         'contrast_threshold': 10,
-         'speed_threshold': 0.1,
-         'dr_threshold': 0.05,
-         },
-        {'eye_quality': 1,
-         'perc_high': 98,
-         'perc_low': 2,
-         'perc_weight': 0.2,
-         'relative_area_threshold': 0.01,
-         'ratio_threshold': 1.3,
-         'error_threshold': 0.05,
-         'min_contour_len': 5,
-         'margin': 0.15,
-         'contrast_threshold': 10,
-         'speed_threshold': 0.1,
-         'dr_threshold': 0.05,
-         },
-        {'eye_quality': 2,
-         'perc_high': 98,
-         'perc_low': 2,
-         'perc_weight': 0.2,
-         'relative_area_threshold': 0.01,
-         'ratio_threshold': 1.3,
-         'error_threshold': 0.1,
-         'min_contour_len': 5,
-         'margin': 0.02,
-         'contrast_threshold': 10,
-         'speed_threshold': 0.1,
-         'dr_threshold': 0.05,
-         },
-        {'eye_quality': 3,
-         'perc_high': 95,
-         'perc_low': 2,
-         'perc_weight': 0.3,
-         'relative_area_threshold': 0.01,
-         'ratio_threshold': 1.3,
-         'error_threshold': 0.1,
-         'min_contour_len': 5,
-         'margin': 0.02,
-         'contrast_threshold': 10,
-         'speed_threshold': 0.1,
-         'dr_threshold': 0.05,
-         },
-        {'eye_quality': 4,
-         'perc_high': 95,
-         'perc_low': 2,
-         'perc_weight': 0.3,
-         'relative_area_threshold': 0.01,
-         'ratio_threshold': 1.3,
-         'error_threshold': 0.1,
-         'min_contour_len': 5,
-         'margin': 0.02,
-         'contrast_threshold': 3,
-         'speed_threshold': 0.1,
-         'dr_threshold': 0.05,
-         },
-    ]
-
-
-@schema
-class EyeTracking(dj.Computed):
-    definition = """
-    -> Eye
-    -> TrackingParameters
-    ---
-    tracking_ts=CURRENT_TIMESTAMP    : timestamp  # automatic
-    """
-
-    class Frame(dj.Part):
-        definition = """
-        -> EyeTracking
-        frame_id            : int           # frame id with matlab based 1 indexing
-        ---
-        rotated_rect=NULL        : tinyblob      # rotated rect (center, sidelength, angle) containing the ellipse
-        contour=NULL             : longblob      # eye contour relative to ROI
-        center=NULL              : tinyblob      # center of the ellipse in (x, y) of image
-        major_r=NULL             : float         # major radius of the ellipse
-        frame_intensity=NULL     : float         # std of the frame
-        """
-
-    @property
-    def key_source(self):
-        return (Eye() * TrackingParameters()).proj()
-
-    def _make_tuples(self, key):
-        print("Populating", key)
-        param = (TrackingParameters() & key).fetch1()
-
-        roi = (Eye() & key).fetch1['eye_roi']
-
-        video_info = (experiment.Session() * experiment.Scan.EyeVideo() & key).fetch1()
-        avi_path = lab.Paths().get_local_path("{behavior_path}/{filename}".format(**video_info))
-
-        tr = PupilTracker(param)
-        traces = tr.track(avi_path, roi - 1, display=config['display.tracking'])  # -1 because of matlab indices
-
-        self.insert1(key)
-        fr = self.Frame()
-        for trace in traces:
-            trace.update(key)
-            fr.insert1(trace)
-
-    def plot_traces(self, outdir='./', show=False):
-        """
-        Plot existing traces to output directory.
-
-        :param outdir: destination of plots
-        """
-        import seaborn as sns
-        import matplotlib.pyplot as plt
-        plt.switch_backend('GTK3Agg')
-
-        for key in self.fetch.keys():
-            print('Processing', key)
-            with sns.axes_style('ticks'):
-                fig, ax = plt.subplots(3, 1, figsize=(10, 6), sharex=True)
-
-            r, center, contrast = (EyeTracking.Frame() & key).fetch.order_by('frame_id')[
-                'major_r', 'center', 'frame_intensity']
-            ax[0].plot(r)
-            ax[0].set_title('Major Radius')
-            c = np.vstack([cc if cc is not None else np.NaN * np.ones(2) for cc in center])
-
-            ax[1].plot(c[:, 0], label='x')
-            ax[1].plot(c[:, 1], label='y')
-            ax[1].set_title('Pupil Center Coordinates')
-            ax[1].legend()
-
-            ax[2].plot(contrast)
-            ax[2].set_title('Contrast (frame std)')
-            ax[2].set_xlabel('Frames')
-            try:
-                sh.mkdir('-p', os.path.expanduser(outdir) + '/{animal_id}/'.format(**key))
-            except:
-                pass
-
-            fig.suptitle(
-                'animal id {animal_id} session {session} scan_idx {scan_idx} eye quality {eye_quality}'.format(**key))
-            fig.tight_layout()
-            sns.despine(fig)
-            fig.savefig(outdir + '/{animal_id}/AI{animal_id}SE{session}SI{scan_idx}EQ{eye_quality}.png'.format(**key))
-            if show:
-                plt.show()
-            else:
-                plt.close(fig)
-
-    def show_video(self, from_frame, to_frame, framerate=1000):
-        """
-        Shows the video from from_frame to to_frame (1-based) and the corrsponding tracking results.
-        Needs opencv installation.
-
-        :param from_frame: start frame (1 based)
-        :param to_frame:  end frame (1 based)
-        """
-        if not len(self) == 1:
-            raise PipelineException("Restrict EyeTracking to one video only.")
-        import cv2
-        video_info = (experiment.Session() * experiment.Scan.EyeVideo() & self).fetch1()
-        videofile = "{path_prefix}/{behavior_path}/{filename}".format(path_prefix=config['path.mounts'], **video_info)
-        eye_roi = (Eye() & self).fetch1['eye_roi'] - 1
-
-        contours, ellipses = ((EyeTracking.Frame() & self) \
-                              & 'frame_id between {0} and {1}'.format(from_frame, to_frame)
-                              ).fetch.order_by('frame_id')['contour', 'rotated_rect']
-        cap = cv2.VideoCapture(videofile)
-        no_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        font = cv2.FONT_HERSHEY_SIMPLEX
-        if not from_frame < no_frames:
-            raise PipelineException('Starting frame exceeds number of frames')
-
-        cap.set(cv2.CAP_PROP_POS_FRAMES, from_frame - 1)
-        fr_count = from_frame - 1
-
-        elem_count = 0
-        while cap.isOpened():
-            fr_count += 1
-            ret, frame = cap.read()
-            if fr_count < from_frame:
-                continue
-
-            if fr_count >= to_frame or fr_count >= no_frames:
-                print("Reached end of videofile ", videofile)
-                break
-            contour = contours[elem_count]
-            ellipse = ellipses[elem_count]
-            elem_count += 1
-
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
-            cv2.putText(gray, str(fr_count), (10, 30), font, 1, (127, 127, 127), 2)
-
-            if contour is not None:
-                ellipse = (tuple(eye_roi[::-1, 0] + ellipse[:2]), tuple(ellipse[2:4]), ellipse[4])
-                cv2.drawContours(gray, [contour.astype(np.int32)], 0, (255, 0, 0), 1, offset=tuple(eye_roi[::-1, 0]))
-                cv2.ellipse(gray, ellipse, (0, 0, 255), 2)
-            cv2.imshow('frame', gray)
-
-            if (cv2.waitKey(int(1000 / framerate)) & 0xFF == ord('q')):
-                break
-
-        cap.release()
-        cv2.destroyAllWindows()
-
-
-@schema
-class MatchedScanSite(dj.Manual):
-    definition = """
-    # an entry in this table indicates that two scans have been recorded at the same location
-
-    -> ExtractRaw
-    other_scan_idx             : smallint      # second dependent scan idx
-    ---
-    match_threshold=0.7        : float         # minimal cosine between masks for match
-    """
-
-
-@schema
-class MatchedMasks(dj.Computed):
-    definition = """
-    # grouping table for matched masks
-
-    -> MatchedScanSite
-    -> Slice
-    ---
-    translation_correction      : longblob # translation correction to account for shifts between scans
-    """
-
-    class MatchedID(dj.Part):
-        definition = """
-        -> MatchedMasks
-        -> ExtractRaw.GalvoROI
-        other_trace_id          : smallint # index of the other scan
-        ---
-            """
-
-    @property
-    def key_source(self):
-        return MatchedScanSite() * Slice() & ExtractRaw.GalvoROI()
-
-    def _make_tuples(self, key):
-        # --- get keys that identify scans and get channels for motion correction of templates between scans
-        other_key = dict(key)
-        other_key['scan_idx'] = other_key.pop('other_scan_idx')
-
-        for slice in (dj.U('slice') & (ExtractRaw.GalvoROI() & key)).fetch['slice']:
-            print("Matching masks in slice {:02d}".format(slice), flush=True)
-            masks, trace_ids, templates = self.load_unmatched(key, slice)
-
-            # --- estimate translation between two motion correction templates
-            tvec = ird.translation(*templates)['tvec']
-
-            masks[1] = self.motion_correct(masks[1], tvec=tvec)
-
-            m = [m.reshape([-1, m.shape[-1]]) for m in masks]
-            D, D1, D0 = m[0].T @ m[1], m[1].T @ m[1], m[0].T @ m[0]
-            C = D / np.sqrt(np.diag(D0)[:, np.newaxis] * np.diag(D1)[np.newaxis, :])
-
-            thres = (MatchedScanSite() & key).fetch1['match_threshold']
-
-            if not np.all((C > thres).sum(axis=0) < 2) or not np.all((C > thres).sum(axis=1) < 2):
-                raise PipelineException('threshold does not give unique assignments')
-            self.insert1(dict(other_key, translation_correction=tvec, **key))
-            pairs = self.MatchedID()
-            for i, (d, ti) in enumerate(zip(C, trace_ids[0])):
-                idx = d > thres
-
-                if idx.sum() == 1:
-                    tmp = dict(key, **ti)
-                    j = int(np.where(idx)[0])
-                    match = dict(other_key, other_trace_id=trace_ids[1][j]['trace_id'], **tmp)
-                    pairs.insert1(match)
-
-    @staticmethod
-    def load_unmatched(key, slice):
-        other_key = dict(key)
-        other_key['scan_idx'] = other_key.pop('other_scan_idx')
-
-        masks, trace_ids, templates = [], [], []
-
-        channel = (dj.U('channel') & (ExtractRaw.GalvoROI() & key)).fetch1['channel']
-
-        for scan_key in [key, other_key]:
-            rel = ExtractRaw.GalvoROI() & scan_key & dict(slice=slice)
-            d1, d2, fps = tuple(map(int, (Prepare.Galvo() & scan_key).fetch1['px_height', 'px_width', 'fps']))
-            mask_px, mask_w, trace_id_set = rel.fetch.order_by('trace_id')['mask_pixels', 'mask_weights', dj.key]
-            trace_ids.append(trace_id_set)
-            masks.append(ExtractRaw.GalvoROI.reshape_masks(mask_px, mask_w, d1, d2))
-            template = np.stack((normalize(t) for t in (Prepare.GalvoAverageFrame() & scan_key).fetch['frame'])
-                                , axis=2)[..., channel - 1]
-            templates.append(template)
-        if templates[0].shape != template[1].shape:
-            i = np.argmax([t.shape[0] for t in templates])
-            stride = int(templates[i].shape[0]/templates[1-i].shape[0])
-            templates[i] = templates[i][::stride,::stride]
-            masks[i] = masks[i][::stride, ::stride, :]
-
-        return masks, trace_ids, templates
-
-    def load_matched(self, downsample=True):
-        rel = ExtractRaw.GalvoROI() * MatchedMasks.MatchedID() * self * ExtractRaw.GalvoROI().proj(
-            other_scan_idx='scan_idx',
-            other_trace_id='trace_id',
-            other_mask_weights='mask_weights',
-            other_mask_pixels='mask_pixels')
-        d1, d2, fps = [int(elem) for elem in
-                       (Prepare.Galvo() & self).fetch1['px_height', 'px_width', 'fps']]
-        mask_px, mask_w = rel.fetch['mask_pixels', 'mask_weights']
-        other_mask_px, other_mask_w = rel.fetch['other_mask_pixels', 'other_mask_weights']
-        mask_channel = (dj.U('channel') & (ExtractRaw.GalvoROI() & self)).fetch1['channel']
-        masks = ExtractRaw.GalvoROI.reshape_masks(mask_px, mask_w, d1, d2)
-        other_masks = ExtractRaw.GalvoROI.reshape_masks(other_mask_px, other_mask_w, d1, d2)
-        other_masks = self.motion_correct(other_masks)
-        template = np.stack((normalize(t) for t in (Prepare.GalvoAverageFrame() & self).fetch['frame'])
-                            , axis=2)[..., mask_channel - 1]
-        if other_masks.shape[0] > masks.shape[0] and downsample:
-            print('Downsampling matched masks')
-            stride = int(other_masks.shape[0]/masks.shape[0])
-            other_masks = other_masks[::stride, ::stride, :]
-        return masks, other_masks, template
-
-    def motion_correct(self, masks, tvec=None):
-        if tvec is None:
-            tvec = self.fetch1['translation_correction']
-        masks = np.stack([ird.transform_img(m, tvec=tvec) for m in masks.transpose([2, 0, 1])], axis=2)
-        return masks
-
-    def plot(self):
-        import seaborn as sns
-        import matplotlib.pyplot as plt
-
-        masks, other_masks, template = self.load_matched()
-        with sns.axes_style('white'):
-            fig, ax = plt.subplots()
-        color = ['RdBu', 'gray']
-        for m, c in zip([masks, other_masks], color):
-            m = m.mean(axis=2)
-            m[m == 0] = np.nan
-            ax.matshow(m, cmap=c, alpha=.5)
-        return fig, ax
-
-    def plot_single(self, outdir='./'):
-        import seaborn as sns
-        import matplotlib.pyplot as plt
-
-        masks, other_masks, template = self.load_matched()
-        color = ['RdBu', 'gray']
-
-        for i, (m0, m1) in enumerate(zip(masks.transpose([2,0,1]), other_masks.transpose([2,0,1]))):
-            print('Mask {:03d}'.format(i), flush=True)
-            with sns.axes_style('white'):
-                fig, ax = plt.subplots()
-            m = m0 + m1
-            m0[m0 == 0] = np.nan
-            m1[m1 == 0] = np.nan
-
-            ifro = np.where(m.sum(axis=1) > 0)[0].min() - 5
-            ito = np.where(m.sum(axis=1) > 0)[0].max() + 5
-            jfro = np.where(m.sum(axis=0) > 0)[0].min() - 5
-            jto = np.where(m.sum(axis=0) > 0)[0].max() + 5
-            ax.imshow(template[ifro:ito, jfro:jto], cmap='gray')
-            ax.matshow(m0[ifro:ito, jfro:jto], cmap='viridis', alpha=.5)
-            ax.matshow(m1[ifro:ito, jfro:jto], cmap='magma', alpha=.5)
-            ax.contour((m0[ifro:ito, jfro:jto] > 0)*1.,V=[.5], colors='orange')
-            ax.contour((m1[ifro:ito, jfro:jto] > 0)*1.,V=[.5], colors='dodgerblue')
-            fig.savefig('{outdir}/{num:03d}'.format(outdir=outdir, num=i))
-            plt.close(fig)
 
 
 

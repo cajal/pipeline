@@ -1,9 +1,29 @@
+from itertools import count
+
 import datajoint as dj
+from scipy.interpolate import InterpolatedUnivariateSpline
+from .preprocess import Sync, fill_nans, SpikeMethod, Prepare, BehaviorSync, ExtractRaw, ManualSegment, Method
+from .preprocess import Spikes as PreSpikes
 from . import preprocess, vis
 import numpy as np
 import pandas as pd
+from scipy import integrate
 
 schema = dj.schema('pipeline_quality', locals())
+
+
+def integration_factory(frame_times, trace):
+    def responses(bins):
+        if not hasattr(responses, 'spline'):
+            responses.spline = InterpolatedUnivariateSpline(frame_times, trace, k=1, ext=1)
+        spline = responses.spline
+        ret = np.zeros(len(bins) - 1)
+        for j, (a, b) in enumerate(zip(bins[:-1], bins[1:])):
+            ret[j] = integrate.quad(spline, a, b)[0]
+
+        return ret
+
+    return responses
 
 
 @schema
@@ -32,63 +52,25 @@ class Spikes(dj.Computed):
         key['leading_nans'] = int(nans[0])
         key['trailing_nans'] = int(nans[1])
 
-        t = (preprocess.Sync() & key).fetch1['frame_times'] # does not need to be unique
+        t = (preprocess.Sync() & key).fetch1['frame_times']  # does not need to be unique
 
-        flip_first = (vis.Trial() * preprocess.Sync().proj('psy_id', trial_idx='first_trial') & key).fetch1['flip_times']
+        flip_first = (vis.Trial() * preprocess.Sync().proj('psy_id', trial_idx='first_trial') & key).fetch1[
+            'flip_times']
         flip_last = (vis.Trial() * preprocess.Sync().proj('psy_id', trial_idx='last_trial') & key).fetch1['flip_times']
 
         # (vis.Trial() * preprocess.Sync() & 'trial_idx between first_trial and last_trial')
         fro = np.atleast_1d(flip_first.squeeze())[0]
-        to = np.atleast_1d(flip_last.squeeze())[-1] # not necessarily where the stimulus stopped, just last presentation
-        idx_fro = np.argmin(np.abs(t-fro))
-        idx_to = np.argmin(np.abs(t-to))+1
+        to = np.atleast_1d(flip_last.squeeze())[
+            -1]  # not necessarily where the stimulus stopped, just last presentation
+        idx_fro = np.argmin(np.abs(t - fro))
+        idx_to = np.argmin(np.abs(t - to)) + 1
         key['stimulus_nans'] = int(np.any(nans[idx_fro:idx_to]))
         if np.any(nans):
             key['nan_idx'] = nans
-        key['stimulus_start'] = idx_fro+1
+        key['stimulus_start'] = idx_fro + 1
         key['stimulus_end'] = idx_to
 
         self.insert1(key)
-
-
-@schema
-class SpikeMethods(dj.Computed):
-    definition = """
-    -> preprocess.ComputeTraces
-    spike_method_1  -> preprocess.Spikes
-    spike_method_2  -> preprocess.Spikes
-    ---
-
-    """
-
-    class Correlation(dj.Part):
-        definition = """
-        -> SpikeMethods
-        -> preprocess.ComputeTraces.Trace
-        ---
-        corr=null  : float # correlation between spike method 1 and 2 on that trace
-        """
-    @property
-    def key_source(self):
-        return preprocess.Spikes().proj(spike_method_1='spike_method') \
-                        * preprocess.Spikes().proj(spike_method_2='spike_method') \
-                        & 'spike_method_1<spike_method_2'
-
-    def _make_tuples(self, key):
-        tr1 = pd.DataFrame((preprocess.Spikes.RateTrace() & key & dict(spike_method=key['spike_method_1'])).fetch())
-        tr2 = pd.DataFrame((preprocess.Spikes.RateTrace() & key & dict(spike_method=key['spike_method_2'])).fetch())
-        tr1['rate_trace'] = [np.asarray(e).squeeze() for e in tr1.rate_trace]
-        tr2['rate_trace'] = [np.asarray(e).squeeze() for e in tr2.rate_trace]
-        trs = tr1.merge(tr2, on=['animal_id',  'session',  'scan_idx',  'extract_method',  'trace_id'], how='inner',suffixes=('_1','_2'))
-
-        self.insert1(key)
-        print('Populating', key)
-        for i, row in trs.iterrows():
-            trace1, trace2 = tuple(map(np.asarray, (row.rate_trace_1, row.rate_trace_2)))
-            idx = ~np.isnan(trace1 + trace2)
-            k = row.to_dict()
-            k['corr'] = np.corrcoef(trace1[idx], trace2[idx])[0,1]
-            self.Correlation().insert1(k, ignore_extra_fields=True)
 
 
 schema.spawn_missing_classes()

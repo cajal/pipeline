@@ -6,6 +6,7 @@ from distutils.version import StrictVersion
 import numpy as np
 import inspect
 import os
+from commons import lab
 
 assert StrictVersion(dj.__version__) >= StrictVersion('0.2.7')
 
@@ -150,6 +151,27 @@ class BrainArea(dj.Lookup):
         ('POR', ''),
         ('RL', '')
     ]
+
+
+@schema
+class Layer(dj.Lookup):
+    definition = """
+    layer                : char(12)     # short name for cortical area
+    ---
+    layer_description    : varchar(255)
+    z_start=null         : float        # starting depth
+    z_end=null           : float        # deepest point
+    """
+    contents = [
+        ('L2/3', '', 100, 370),
+        ('L4', '', 370, 500),
+    ]
+
+    def get_layers(self, z):
+        l, fr, to = self.fetch['layer', 'z_start', 'z_end']
+        m = np.vstack([(z > f) & (z < t) for f,t in zip(fr, to)]).T
+        return np.hstack([l[mm] for mm in m]).squeeze()
+
 
 
 @schema
@@ -361,6 +383,17 @@ class Scan(dj.Manual):
         power: float  # (mW) to brain
         gdd: float  # gdd setting
         """
+
+    @property
+    def local_filenames_as_wildcard(self):
+        """Returns the local filename for all parts of this scan (ends in *.tif)."""
+        scan_path = (Session() & self).fetch1['scan_path']
+        local_path = lab.Paths().get_local_path(scan_path)
+
+        scan_name = (Scan() & self).fetch1['filename']
+        local_filename = os.path.join(local_path, scan_name) + '_*.tif'  # all parts
+
+        return local_filename
 
 
 @schema
