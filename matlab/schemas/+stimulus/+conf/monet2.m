@@ -5,7 +5,7 @@ control.clearAll   % clear trial queue and cached conditions.
 
 cond.fps = 60;
 cond.duration = 30;
-cond.rng_seed = 1:1;
+cond.rng_seed = 1:60;
 cond.pattern_width = 72;
 cond.pattern_aspect = 1.7;
 cond.ori_coherence = 1.5;
