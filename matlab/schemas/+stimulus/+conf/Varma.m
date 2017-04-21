@@ -2,20 +2,22 @@ function Varma
 control = stimulus.getControl;
 control.clearAll()   % clear trial queue and cached conditions.
 
-paramsM.fps             = 60;
-paramsM.duration        = 180;  % to be changed to 1800s
-paramsM.rng_seed        = 1;
-paramsM.pattern_width   = 32;
-paramsM.pattern_aspect  = 1.7;
-paramsM.pattern_upscale = 10;
-paramsM.ori_coherence   = 2.5;
-paramsM.ori_fraction    = 0.4;
-paramsM.temp_bandwidth  = 4;
-paramsM.n_dirs          = 16;
-paramsM.ori_mix         = 1;
-paramsM.speed           = 0.5;
+cond.fps = 60;
+cond.duration = 30;
+cond.rng_seed = 1:6; % to be changed to 1:60 to generate Monet stim for 1800 s
+cond.pattern_width = 72;
+cond.pattern_aspect = 1.7;
+cond.ori_coherence = 1.5;
+cond.ori_fraction = 0.4;
+cond.temp_kernel = 'half-hamming';
+cond.temp_bandwidth = 4;
+cond.n_dirs = 16;
+cond.ori_mix = 1;
+cond.speed = 0.25;
 
-hashesMonet = control.makeConditions(stimulus.Monet2, paramsM);
+paramsM = stimulus.utils.factorize(cond);
+
+clear cond
 
 % Stimulus sequence: 
 % S and L correpond to one major segment for short and long range
@@ -85,7 +87,7 @@ ParamVec     = ParamMat(:);
 cond.fps = 60;
 cond.pre_blank_period   = 0;
 cond.noise_seed         = 1:length(NoiseSeedVec);
-cond.pattern_upscale    = 10;
+cond.pattern_upscale    = 6;
 cond.pattern_width      = 32;
 cond.duration           = 0;
 cond.pattern_aspect     = 1.7;
@@ -112,12 +114,12 @@ for kk = 1:length(NoiseSeedVec)
     params(kk).gaussfilt_scale = ParamVec(kk); 
 end
 
-% generate conditions
-hashesVarma = control.makeConditions(stimulus.Varma, params);
 
-% 
- 
-fprintf('Total duration of all conditions = %3.2f s\n', sum([params.pre_blank_period]) + sum([params.duration]) + sum([paramsM.pre_blank_period]) + sum([paramsM.duration]))
+fprintf('Total duration of all conditions = %3.2f s\n', sum(sum([params.duration]) + sum([paramsM.duration])));
+
+% generate conditions
+hashesMonet = control.makeConditions(stimulus.Monet2, paramsM);
+hashesVarma = control.makeConditions(stimulus.Varma, params);
 
 hashes = [hashesVarma(1:84); hashesMonet; hashesVarma(85:end)];
 

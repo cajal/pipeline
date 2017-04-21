@@ -37,8 +37,8 @@ classdef Varma < dj.Manual & stimulus.core.Visual
         function test()
             cond.fps = 60;
             cond.pre_blank_period   = 5.0;
-            cond.noise_seed         = 100;
-            cond.pattern_upscale    = 10;
+            cond.noise_seed         = 10;
+            cond.pattern_upscale    = 6;
             cond.pattern_width      = 32;
             cond.duration           = 30;
             cond.pattern_aspect     = 1.7;
@@ -46,7 +46,7 @@ classdef Varma < dj.Manual & stimulus.core.Visual
             cond.gabor_wlscale      = 4;
             cond.gabor_envscale     = 6;
             cond.gabor_ell          = 1;
-            cond.gaussfilt_scale    = 1.5;
+            cond.gaussfilt_scale    = 0.5;
             cond.gaussfilt_istd     = 0.5; % originally 2
             cond.gaussfiltext_scale = 1;
             cond.gaussfiltext_istd  = 1; % originally 2.4
@@ -56,7 +56,7 @@ classdef Varma < dj.Manual & stimulus.core.Visual
             cond.filt_gammshape     = 0.35;
             cond.filt_gammscale     = 2;
             
-            rng(cond.noise_seed)
+            
             
             tic
             cond = stimulus.Varma.make(cond);
@@ -72,6 +72,10 @@ classdef Varma < dj.Manual & stimulus.core.Visual
         
         
         function cond = make(cond)
+            
+            rng(cond.noise_seed)
+            
+            
             % fill out condition structucture -- all fields are used for computing the condition id
             
             % intitial buffer time in seconds
@@ -210,9 +214,17 @@ classdef Varma < dj.Manual & stimulus.core.Visual
             end
             
             Tstart  = 1 + cond.fps*init_buffer_period;
-            YsVid   = YsVid(:,:,Tstart:end);         
-            K       = 0.025;
-            cond.movie = uint8(round(256*(YsVid/2/K + 0.5)));
+            YsVid   = YsVid(:,:,Tstart:end);    
+            
+            if cond.gaussfilt_scale == 1.5
+                K = 0.015;
+            elseif cond.gaussfilt_scale == 0.5
+                K = 0.03;
+            else
+                K       = 0.025;
+            end
+               
+            cond.movie = uint8(round(255*(YsVid/2/K + 0.5)));
         end
     end
 
