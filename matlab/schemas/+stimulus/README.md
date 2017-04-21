@@ -1,10 +1,10 @@
-# The Stimulus schema
+# Stimulus 
 The `stimulus` schema is a self-contained application that generates, presents, and records visual stimuli using PsychToolbox.
 
 # How to run a stimulus from MATLAB 
-*Requirements:* Some of the stimuli require MATLAB R2016b or later. 
+*Requirements:* Some of the stimuli require MATLAB R2016b+. 
 
-Although these steps can be executed manually, they are typically automated and thus serve as the application interface for the experiment control software.
+Although the following steps steps can be executed manually, they are typically automated and thus serve as the application interface for the experiment control software.
 
 ## Step 1: Initialize screen
 ```
@@ -48,6 +48,7 @@ Upon installation, you can reproduce the steps above in Python as
 ```python
 import matlab.engine as eng
 mat = eng.start_matlab()
+
 # step 1: Initialize screen
 mat.stimulus.open(nargout=0)            
 
@@ -59,7 +60,7 @@ f = mat.stimulus.run(dict(animal_id=0, session=0, scan_idx=0), nargout=0, async=
 
 # step 4. Interrupt and resume stimulus
 f.cancel()   # interrupt 
-f = mat.stimulus.run(dict(animal_id=0, session=0, scan_idx=0), nargout=0, async=True)   # resum
+f = mat.stimulus.run(dict(animal_id=0, session=0, scan_idx=0), nargout=0, async=True)   # resume
 
 # step 5. Exit 
 f.done()  # True if stimulus is done
@@ -68,4 +69,5 @@ f.stimulus.close(nargout=0)  # close the stimulus sceren
 ```
 
 # Data structure 
+The diagram below depicts the entire stimulus schema. 
 ![](erd.png)
