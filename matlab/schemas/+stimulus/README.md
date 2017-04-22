@@ -119,6 +119,36 @@ Object stimulus.Condition
 The table `stimulus.Trial` contains the information about the presentation of a condition during a specific scan (from `experiment.Scan`).  
 Any number of conditions of any type can be presented during a scan and each condition may be displayed multiple times.
 
+```
+>> stimulus.Trial
+
+ans = 
+
+
+Object stimulus.Trial
+
+ :: visual stimulus trial ::
+
+    ANIMAL_ID    SESSION    SCAN_IDX    TRIAL_IDX        condition_hash        last_flip          trial_ts           flip_times
+    _________    _______    ________    _________    ______________________    _________    _____________________    __________
+
+    0            0          0            0           'Qjz5gJN2igKvsonApHO1'    21322        '2017-04-21 16:23:40'    '=BLOB='  
+    0            0          0            1           'KMk2le1nd79vP4uhW+lG'    21324        '2017-04-21 16:23:42'    '=BLOB='  
+    0            0          0            2           'd3TMSkOO74Y2QzRngY9r'    21325        '2017-04-21 16:23:43'    '=BLOB='  
+    0            0          0            3           'EvIYjxUYNs2QOjjiXoFo'    21327        '2017-04-21 16:23:45'    '=BLOB='  
+    0            0          0            4           '8hPjQGXtiY7VJdmWBJhz'    21328        '2017-04-21 16:23:46'    '=BLOB='  
+    0            0          0            5           'koXklHGOKSXzqG4vgeKw'    21330        '2017-04-21 16:23:48'    '=BLOB='  
+    0            0          0            6           '9vYRXrkmZd1mi6oFcBAC'    21332        '2017-04-21 16:23:49'    '=BLOB='  
+    0            0          0            7           'Yj+hNG8q+V2Icr+GW5WT'    21333        '2017-04-21 16:23:51'    '=BLOB='  
+    0            0          0            8           'idP7ku8g2U51r28Hb6Nb'    21335        '2017-04-21 16:23:52'    '=BLOB='  
+    0            0          0            9           'mzrmJBasIquICcmTK8K7'    21336        '2017-04-21 16:23:54'    '=BLOB='  
+    0            0          0           10           'hp9b+CKb/QgV1O6B5gk+'    21338        '2017-04-21 16:23:55'    '=BLOB='  
+    0            0          0           11           'lA4QZVp/vl9JxiH3JH8Y'    21339        '2017-04-21 16:23:57'    '=BLOB='  
+    0            0          0           12           'H+w/IuPACeCuzUziOIfi'    21341        '2017-04-21 16:23:58'    '=BLOB='  
+
+          ...
+```
+
 ## Example queries
 If the language is unspecified, the queries run in both MATLAB and Python.
 
