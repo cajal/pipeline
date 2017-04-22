@@ -1,7 +1,7 @@
 # Stimulus 
 The `stimulus` schema is a self-contained application that generates, presents, and records visual stimuli using PsychToolbox.
 
-# How to run a stimulus from MATLAB 
+# Run in MATLAB 
 *Requirements:* Some of the stimuli require MATLAB R2016b+. 
 
 Although the following steps steps can be executed manually, they are typically automated and thus serve as the application interface for the experiment control software.
@@ -39,7 +39,7 @@ To close the stimulus program,
 >> stimulus.close
 ```
 
-# How to run a stimulus from Python
+# Run in Python
 The stimulus configuration and playback are written and executed in MATLAB.  However, the control software in our lab is written in Python. 
 
 First configure the MATLAB Engine API for Python as described at https://www.mathworks.com/help/matlab/matlab_external/install-the-matlab-engine-for-python.html.
@@ -82,7 +82,7 @@ It is populated before the stimulus is presented for the first time.
 The specialization tables below it contain parameters that are specific to each type of stimulus. 
 For example, `stimulus.Monet2` contains parameters that are specific to a single stimulus condition of the type `Monet2`.
 For each tuple in `stimulus.Condition`, exactly one of the specialization tables contains the corresponding entry.
-The name of the specialization table is indicated in each row of `stimulus.Condition` in field `special_name`. 
+The name of the specialization table is indicated in each row of `stimulus.Condition` in field `stimulus_type`. 
 
 A preview of the `stimulus.Condition`:
 ```
@@ -95,8 +95,8 @@ Object stimulus.Condition
 
  :: stimulus condition ::
 
-    CONDITION_HASH            special_name           special_variation
-    ______________________    ___________________    _________________
+    CONDITION_HASH            stimulus_type          stimulus_version
+    ______________________    ___________________    ________________
 
     '+0cObnxIHpoB5RKZJVYj'    'stimulus.Matisse2'    '1'              
     '+3o2cquPfKnts4Gmjwr4'    'stimulus.Matisse2'    '1'              
@@ -133,13 +133,13 @@ monetScans = experiment.Scan() & (stimulus.Trial() * stimulus.Monet())
 ```
 or
 ```
-monetScans = experiment.Scan() & (stimulus.Trial() * stimulus.Condition() & 'special_name="stimulus.Monet"')
+monetScans = experiment.Scan() & (stimulus.Trial() * stimulus.Condition() & 'stimulus_type="stimulus.Monet"')
 ```
 
 ### All unique conditions shown during a given scan
 
 ```python
-% python
+# python
 scan_key = dict(animal_id=7302, session=1, scan_idx=3)
 scan_conditions = stimulus.Condition() & (stimulus.Trial() & scan_key)
 ```
@@ -155,5 +155,10 @@ scanConditions = stimulus.Condition & (stimulus.Trial & scanKey);
 ```python
 # python
 scanKey = dict(animal_id=7302, session=1, scan_idx=3)
-scan_stimuli = dj.U('special_name') & (dj.Condition() * dj.Trial() & scanKey)
+scan_stimuli = dj.U('stimulus_type') & (dj.Condition() * dj.Trial() & scanKey)
 ```
+
+# Designing configurations
+TODO
+# Designing new stimuli
+TODO
