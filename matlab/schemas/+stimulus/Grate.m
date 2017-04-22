@@ -18,7 +18,7 @@ duration                    : float                         # s, does not includ
 classdef Grate < dj.Manual & stimulus.core.Visual
     
     properties(Constant)
-        variation = '1'
+        version = '1'
     end
     
     
