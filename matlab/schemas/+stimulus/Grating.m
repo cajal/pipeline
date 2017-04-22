@@ -25,7 +25,7 @@ second_photodiode_time      : decimal(4,1)                  # time delay of the 
 classdef Grating < dj.Manual & stimulus.core.Visual
     
     properties(Constant)
-        variation = '1'
+        version = '1'
     end
     
     
