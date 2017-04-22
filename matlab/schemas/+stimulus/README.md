@@ -139,11 +139,13 @@ monetScans = experiment.Scan() & (stimulus.Trial() * stimulus.Condition() & 'spe
 ### All unique conditions shown during a given scan
 
 ```python
+% python
 scan_key = dict(animal_id=7302, session=1, scan_idx=3)
 scan_conditions = stimulus.Condition() & (stimulus.Trial() & scan_key)
 ```
 
 ```matlab
+% matlab
 scanKey = struct('animal_id', 7302, 'session', 1, 'scan_idx', 3);
 scanConditions = stimulus.Condition & (stimulus.Trial & scanKey);
 ```
