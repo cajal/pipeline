@@ -120,12 +120,38 @@ The table `stimulus.Trial` contains the information about the presentation of a 
 Any number of conditions of any type can be presented during a scan and each condition may be displayed multiple times.
 
 ## Example queries
+If the language is unspecified, the queries run in both MATLAB and Python.
 
-All scans during which the `Monet` stimulus has been played:
+### All scans with any visual stimuli
+```
+visualScans = experiment.Scan() & stimulus.Trial()
+```
+
+### All scans with the `Monet` stimulus:
 ```
 monetScans = experiment.Scan() & (stimulus.Trial() * stimulus.Monet())
 ```
 or
 ```
 monetScans = experiment.Scan() & (stimulus.Trial() * stimulus.Condition() & 'special_name="stimulus.Monet"')
+```
+
+### All unique conditions shown during a given scan
+
+```python
+scan_key = dict(animal_id=7302, session=1, scan_idx=3)
+scan_conditions = stimulus.Condition() & (stimulus.Trial() & scan_key)
+```
+
+```matlab
+scanKey = struct('animal_id', 7302, 'session', 1, 'scan_idx', 3);
+scanConditions = stimulus.Condition & (stimulus.Trial & scanKey);
+```
+
+
+### All stimuli types shown during a given scan
+```python
+# python
+scanKey = dict(animal_id=7302, session=1, scan_idx=3)
+scan_stimuli = dj.U('special_name') & (dj.Condition() * dj.Trial() & scanKey)
 ```
