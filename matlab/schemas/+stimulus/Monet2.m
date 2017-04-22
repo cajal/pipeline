@@ -22,7 +22,7 @@ movie                       : longblob                     # (computed) uint8 mo
 classdef Monet2 < dj.Manual & stimulus.core.Visual
     
     properties(Constant)
-        variation = 'dimitri-1'
+        version = '2'
     end
     
     methods(Static)
