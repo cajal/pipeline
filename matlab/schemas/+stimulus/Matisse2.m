@@ -26,7 +26,7 @@ movie                  :longblob      # computed uint8 movie
 classdef Matisse2 < dj.Manual & stimulus.core.Visual
     
     properties(Constant)
-        variation = '1'
+        version = '1'
     end
     
     methods(Static)

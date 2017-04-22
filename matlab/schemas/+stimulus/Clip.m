@@ -9,7 +9,7 @@ cut_after              : float           # (s) cuts off after this duration
 classdef Clip < dj.Manual & stimulus.core.Visual
     
     properties(Constant)
-        variation = '1'
+        version = '1'
         movie_dir = '/Users/dimitri/stimuli'
     end
     

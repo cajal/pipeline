@@ -24,7 +24,7 @@ image                  :longblob      #  actual image to present
 classdef Matisse < dj.Manual & stimulus.core.Visual
     
     properties(Constant)
-        variation = '2'
+        version = '2'
     end
     
     methods(Static)

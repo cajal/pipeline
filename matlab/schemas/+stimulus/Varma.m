@@ -28,7 +28,7 @@ movie                   :longblob      # actual movie to be used
 classdef Varma < dj.Manual & stimulus.core.Visual
     
     properties(Constant)
-        variation = '1'    % update upon modifying the algorithm
+        version = '1'    % update upon modifying the algorithm
     end
     
     

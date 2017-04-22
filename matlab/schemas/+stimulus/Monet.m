@@ -30,7 +30,7 @@ classdef Monet < dj.Manual & stimulus.core.Visual
     % psy.MonetLookup
     
     properties(Constant)
-        variation = 'legacy from vis.Monet * vis.MonetLookup'
+        version = 'legacy from vis.Monet * vis.MonetLookup'
     end
     
     methods(Static)
