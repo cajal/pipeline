@@ -253,7 +253,7 @@ class RF(dj.Computed):
         print('Populating', key)
         nbins = 5
         bin_size = 0.1  # s
-        [x, y, distance, diagonal] = (preprocess.Sync() * vis.Session() & key).fetch1[
+        x, y, distance, diagonal = (preprocess.Sync() * vis.Session() & key).fetch1[
             'resolution_x', 'resolution_y', 'monitor_distance', 'monitor_size']
         cm_per_inch = 2.54
         degrees_per_pixel = 180 / np.pi * diagonal * cm_per_inch / np.sqrt(
