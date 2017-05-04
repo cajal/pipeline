@@ -3,40 +3,59 @@ from scipy.interpolate import interp1d, RectBivariateSpline, interp2d
 from scipy import signal
 import numpy as np
 
-def compute_motion_offsets(field, template):
+def compute_motion_offsets(field, template, align_subpixels=True):
     """ Compute offsets in x and y for rigid subpixel motion correction.
+    
+    A patch is taken from the center of each frame (the margin size that is not included
+    represents the maximum possible pixel shifts that can be applied) and convolved 
+    against the template to get the amount of shifting needed to align the center of the 
+    frame with the template: 0 if center of frame = center of template. This is an 
+    approximation of the full 2-d convolution but should be ok if center patch is big and 
+    maximum shifts don't go over the assumed max_shift.
+    
+    A positive x_shift means that the image needs to be moved x_shift pixels left, a 
+    positive y_shift means the image needs to be moved y_shift pixels up.
     
     :param np.array template: 2-d template image. Each frame in field is aligned to this.
     :param np.array field: 3-d field (image_height, image_width, num_frames). First two
-        dimensions 
+        dimensions
+    :param bool align_subpixels: Whether to apply subpixel alignment after aligning pixels
     
     :returns: Array with x, y motion offsets for each image in field ([2 x num_frames]).
-        Positive offsets for right and down offsets, e.g., x_offset = 1 means image is 1 
-        pixel to the right of template
     :rtype: np.array 
     """
     # Get some params
-    num_frames = field.shape[2]
-    max_y_offset = int(round(field.shape[0] * 0.10)) # max num_pixels images can be moved in y
-    max_x_offset = int(round(field.shape[1] * 0.10))
+    image_height, image_width, num_frames = field.shape
+    max_y_shift = int(round(image_height * 0.10))  # max num_pixels images can be moved in y
+    max_x_shift = int(round(image_width * 0.10))
 
-    # If template and images are int, signal.correlate fails
-    template = template.astype(np.float32)
+    # Assert template is float. If template and images are int, signal.correlate fails
+    if not np.issubdtype(template.dtype, np.float):
+        template = template.astype(np.float32)
 
-    y_offsets = np.empty(num_frames)
-    x_offsets = np.empty(num_frames)
+    # Cut center patch of frames
+    frame_centers = field[max_y_shift: -max_y_shift, max_x_shift: -max_x_shift, :]
+
+    y_shifts = np.empty(num_frames)
+    x_shifts = np.empty(num_frames)
     for i in range(num_frames):
 
         # Align pixels (convolving on template and finding highest value)
-        center_patch = field[max_y_offset: -max_y_offset, max_x_offset: -max_x_offset, i]
-        conv_template = signal.correlate(template, center_patch, mode='valid')
-        y_offset, x_offset = np.unravel_index(np.argmax(conv_template), conv_template.shape)
-        y_offsets[i] = y_offset - max_y_offset
-        x_offsets[i] = x_offset - max_x_offset
+        conv_image = signal.correlate(template, frame_centers[:, :, i], mode='valid')
+        y_shift, x_shift = np.unravel_index(np.argmax(conv_image), conv_image.shape)
+        y_shifts[i] = max_y_shift - y_shift
+        x_shifts[i] = max_x_shift - x_shift
 
-        # TODO: Subpixel, check for black images, check too much motion
+        if align_subpixels:
+            #TODO:
+            pass
 
-    return y_offsets, x_offsets
+    # Smooth them
+    #hanning = signal.hann(5)
+    #y_shifts_smoothed = signal.convolve(y_shifts, hanning, mode='same')
+    #x_shifts_smoothed = signal.convolve(x_shifts, hanning, mode='same')
+
+    return y_shifts, x_shifts
 
 
 def compute_raster_phase(image):
@@ -45,14 +64,14 @@ def compute_raster_phase(image):
     #TODO: Compute raster correction
     return 0
 
-def correct_motion(scan, xy_motion, in_place=True):
+def correct_motion(scan, xy_shifts, in_place=True):
     """ Motion correction for two-photon scans.
 
-    Moves each image in the scan x number of pixels to the left, y number of pixels up and
-    resamples. Works for 2-d arrays and up.
+    Shifts each image in the scan x_shift pixels to the left and y_shift pixels up. Works 
+    for 2-d arrays and up.
 
     :param np.array scan: Volume with images to be corrected in the first two dimensions.
-    :param list/np.array xy_motion: Volume with x, y motion offsets for each image in the
+    :param list/np.array xy_shifts: Volume with x, y motion shifts for each image in the
     first dimension: usually [2 x num_frames].
     :param bool in_place: If True (default), the original array is modified in memory.
 
@@ -82,26 +101,26 @@ def correct_motion(scan, xy_motion, in_place=True):
     # Reshape input (to deal with more than 2-D volumes)
     reshaped_scan = np.reshape(scan, (image_height, image_width, -1))
     num_images = reshaped_scan.shape[-1]
-    reshaped_xy = np.reshape(xy_motion, (2, -1))
+    reshaped_xy = np.reshape(xy_shifts, (2, -1))
 
     if reshaped_xy.shape[-1] != reshaped_scan.shape[-1]:
         raise PipelineException('Scan and motion arrays have different dimensions')
 
-    # Over every image (as long as the x and y offset is defined)
+    # Over every image (as long as the x and y shift is defined)
     for i in range(num_images):
-        [x_offset, y_offset] = reshaped_xy[:, i]
-        if not np.isnan(x_offset) and not np.isnan(y_offset):
+        [x_shift, y_shift] = reshaped_xy[:, i]
+        if not np.isnan(x_shift) and not np.isnan(y_shift):
 
             # Get current image
             image = reshaped_scan[:, :, i]
 
             # Create interpolation function
             interp_function = interp2d(range(image_width), range(image_height), image,
-                                      kind= 'cubic', copy=False)
+                                      kind='cubic', copy=False)
 
             # Evaluate on the original image plus offsets
-            reshaped_scan[:, :, i] = interp_function(np.arange(image_width) + x_offset,
-                                                     np.arange(image_height) + y_offset)
+            reshaped_scan[:, :, i] = interp_function(np.arange(image_width) + x_shift,
+                                                     np.arange(image_height) + y_shift)
 
     scan = np.reshape(reshaped_scan, original_shape)
     return scan
@@ -114,6 +133,9 @@ def correct_raster(scan, raster_phase, fill_fraction, in_place=True):
     image_width, channels, slices, num_frames]. Works for 2-d arrays and up (assuming
     images are in the first two dimensions). Based on Matlab implementation of
     ne7.ip.correctRaster()
+    
+    Positive raster phase shifts even lines to the left and odd lines to the right. 
+    Negative raster phase shifts even lines to the right and odd lines to the left.  
 
     :param np.array scan: Volume with images to be corrected in the first two dimensions.
     :param float raster_phase: Phase difference between odd and even lines.
