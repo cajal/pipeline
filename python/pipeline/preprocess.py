@@ -74,7 +74,7 @@ class Prepare(dj.Imported):
         definition = """    # basic information about resonant microscope scans, raster correction
         -> Prepare
         ---
-        nframes_requested       : int               # number of valumes (from header)
+        nframes_requested       : int               # number of volumes (from header)
         nframes                 : int               # frames recorded
         px_width                : smallint          # pixels per line
         px_height               : smallint          # lines per frame
@@ -87,7 +87,7 @@ class Prepare(dj.Imported):
         nchannels               : tinyint           # number of recorded channels
         nslices                 : tinyint           # number of slices
         slice_pitch             : float             # (um) distance between slices
-        fill_fraction           : float             # raster scan fill fraction (see scanimage)
+        fill_fraction           : float             # raster scan temporal fill fraction (see scanimage)
         preview_frame           : longblob          # raw average frame from channel 1 from an early fragment of the movie
         raster_phase            : float             # shift of odd vs even raster lines
         """
@@ -152,6 +152,54 @@ class Prepare(dj.Imported):
 
             return (height_radius_in_pixels, width_radius_in_pixels)
 
+        def _make_tuples(self, key, scan, channel):
+            """ Read some scan parameters, compute FOV in microns and raster phase for 
+            raster correction. 
+            
+            :param scan Scan: The scan. An Scan object returned by scanreader.
+            """
+            # Get attributes
+            key = key.copy() # in case key is reused somewhere else
+            key['nframes_requested'] = scan.num_requested_frames
+            key['nframes'] = scan.num_frames
+            if scan.is_multiROI:
+                print('Warning: MultiROI scan. px_height & px_width may not be the same',
+                      'for all fields.')
+                key['px_height'] = scan.field_heights[0]
+                key['px_width'] = scan.field_widths[0]
+            else:
+                key['px_height'] = scan.image_height
+                key['px_width'] = scan.image_width
+            key['bidirectional'] = scan.is_bidirectional
+            key['fps'] = scan.fps
+            key['zoom'] = 1 if scan.is_multiROI else scan.zoom
+            key['dwell_time'] = (scan.seconds_per_line / scan._pixels_per_line) * 1e6
+            key['nchannels'] = scan.num_channels
+            key['nslices'] = scan.num_fields
+            key['slice_pitch'] = scan.zstep_in_microns
+            key['fill_fraction'] = scan.temporal_fill_fraction
+
+            # Calculate true height and width in microns
+            #TODO:
+            key['um_width'] = key['px_width']
+            key['um_height'] = key['px_height']
+
+            # Compute a preview image of the scan: mean of frames 1000-3000
+            preview_field = int(scan.num_fields // 2) # 0 for 0-1, 1 for 2-3, etc
+            if scan.num_frames < 2000:
+                preview_image = np.mean(scan[preview_field, :, :, channel, -2000:], axis=-1)
+            else:
+                preview_image = np.mean(scan[preview_field, :, :, channel, 1000:3000], axis=-1)
+            key['preview_frame'] = preview_image
+
+            # Compute raster correction parameters
+            if scan.is_bidirectional:
+                key['raster_phase'] = galvo_corrections.compute_raster_phase(preview_image)
+            else:
+                key['raster_phase'] = 0
+
+            # Insert result
+            self.insert1(key)
 
     class GalvoMotion(dj.Part):
         definition = """   # motion correction for galvo scans
@@ -181,13 +229,56 @@ class Prepare(dj.Imported):
 
             return my_lambda_function
 
+        def _make_tuples(self, key, scan, channel=0):
+            key = key.copy()
+            key['channel'] = channel + 1 # indices start at 1 in database
+
+            # Get some params
+            um_height, px_height = (Prepare.Galvo() & key).fetch1['um_height', 'px_height']
+            um_width, px_width = (Prepare.Galvo() & key).fetch1['um_width', 'px_width']
+            height_microns_per_pixel = um_height / px_height
+            width_microns_per_pixel = um_width / px_width
+
+            # Get raster correction function
+            correct_raster = (Prepare.Galvo() & key).get_correct_raster()
+
+            for field_id in range(scan.num_fields):
+                field = scan[field_id, :, :, channel, :] # 3-d (height, width, frames)
+                key['slice'] = field_id + 1
+
+                # Correct raster effects (needed for subpixel changes in y)
+                field = correct_raster(field)
+
+                # Create template
+                if scan.num_frames < 3000:
+                    template = np.mean(field[:, :, -2000:], axis=-1)
+                else:
+                    template = np.mean(field[:, :, 1000:3000], axis=-1)
+                key['template'] = template
+
+                # Get motion correction offsets
+                y_offsets, x_offsets = galvo_corrections.compute_motion_offsets(field, template)
+                key['motion_xy'] = np.stack([x_offsets, y_offsets])
+
+                # Calculate root mean squared distance of motion offsets
+                x_offsets_in_microns = x_offsets * width_microns_per_pixel
+                y_offsets_in_microns = y_offsets * height_microns_per_pixel
+                x_distances = x_offsets_in_microns - x_offsets_in_microns.mean()
+                y_distances = y_offsets_in_microns - y_offsets_in_microns.mean()
+                key['motion_rms'] = np.sqrt(np.mean(np.square([x_distances, y_distances])))
+
+                # Insert
+                self.insert1(key)
+
     class GalvoAverageFrame(dj.Part):
         definition = """   # average frame for each slice and channel after corrections
         -> Prepare.GalvoMotion
         -> Channel
         ---
-        frame  : longblob     # average frame ater Anscombe, max-weighting,
+        frame  : longblob     # average frame after Anscombe, max-weighting,
         """
+        def _make_tuples(self, key, scan):
+           pass
 
     class Aod(dj.Part):
         definition = """   # information about AOD scans
@@ -204,12 +295,38 @@ class Prepare(dj.Imported):
         z: float   # (um)
         """
 
-    def save_video(self, filename='galvo_corrections.mp4', slice=1, channel=1,
+    def _make_tuples(self, key):
+        print('Preparing scan', key)
+        self.insert1(key)
+        if (experiment.Scan() & key).fetch1['software'] == 'scanimage':
+            # Read the scan
+            import scanreader
+            scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
+            scan = scanreader.read_scan(scan_filename)
+
+            # Select channel to use for raster and motion correction according to dye used
+            fluorophore = (experiment.Session.Fluorophore() & key).fetch1['fluorophore']
+            channel = 1 if fluorophore in ['RCaMP1a'] else 0
+            # TODO: Make sure this is the only one that uses 2nd channel or add here
+
+            # Prepare raster correction
+            print('Computing raster correction parameters...')
+            Prepare.Galvo()._make_tuples(key, scan, channel)
+
+            # Prepare motion correction
+            print('Computing motion correction parameters...')
+            Prepare.GalvoMotion()._make_tuples(key, scan, channel)
+
+            # Prepare average frame
+            Prepare.GalvoAverageFrame()._make_tuples(key, scan)
+
+
+    def save_video(self, filename='galvo_corrections.mp4', field=1, channel=1,
                    start_index=0, seconds=30, dpi=250):
         """ Creates an animation video showing the original vs corrected scan.
 
         :param string filename: Output filename (path + filename)
-        :param int slice: Slice to use for plotting (key for GalvoMotion). Starts at 1
+        :param int field: Slice to use for plotting (key for GalvoMotion). Starts at 1
         :param int channel: What channel from the scan to use. Starts at 1
         :param int start_index: Where in the scan to start the video.
         :param int seconds: How long in seconds should the animation run.
@@ -218,27 +335,24 @@ class Prepare(dj.Imported):
         :returns Figure. You can call show() on it.
         :rtype: matplotlib.figure.Figure
         """
-        # Get scan filename
-        scan_filename = (experiment.Scan() & self).local_filenames_as_wildcard
-
         # Get fps and total_num_frames
         fps = (Prepare.Galvo() & self).fetch1['fps']
         num_video_frames = int(round(fps * seconds))
         stop_index = start_index + num_video_frames
 
         # Load the scan
-        from tiffreader import TIFFReader
-        reader = TIFFReader(scan_filename)
-        scan = np.double(reader[:, :, channel - 1, slice - 1, start_index: stop_index])
-        scan = scan.squeeze()
+        import scanreader
+        scan_filename = (experiment.Scan() & self).local_filenames_as_wildcard
+        scan = scanreader.read_scan(scan_filename)
+        scan = np.double(scan[field - 1, :, :, channel - 1, start_index: stop_index])
         original_scan = scan.copy()
 
         # Correct the scan
         correct_motion = (Prepare.GalvoMotion() & self &
-                          {'slice': slice, 'channel': channel}).get_correct_motion()
+                          {'slice': field, 'channel': channel}).get_correct_motion()
         correct_raster = (Prepare.Galvo() & self).get_correct_raster()
         raster_corrected = correct_raster(scan)
-        motion_corrected = correct_motion(raster_corrected, range(start_index, stop_index))
+        motion_corrected = correct_motion(raster_corrected, slice(start_index, stop_index))
         corrected_scan = motion_corrected
 
         # Create animation
@@ -266,7 +380,7 @@ class Prepare(dj.Imported):
             im1.set_data(original_scan[:, :, i])
             im2.set_data(corrected_scan[:, :, i])
 
-        video = animation.FuncAnimation(fig, update_img, num_video_frames,
+        video = animation.FuncAnimation(fig, update_img, corrected_scan.shape[2],
                                         interval=1000 / fps)
 
         # Save animation
@@ -593,12 +707,10 @@ class ExtractRaw(dj.Imported):
         # Insert key in ExtractRaw
         self.insert1(key)
 
-        # Get scan filename
-        scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
-
         # Read the scan
-        from tiffreader import TIFFReader
-        reader = TIFFReader(scan_filename)
+        import scanreader
+        scan_filename = (experiment.Scan() & self).local_filenames_as_wildcard
+        scan = scanreader.read_scan(scan_filename)
 
         # Estimate number of components per slice
         num_components = (Prepare.Galvo() & key).estimate_num_components_per_slice()
@@ -647,14 +759,14 @@ class ExtractRaw(dj.Imported):
             for slice in channel_slices:
                 # Load the scan
                 print('Loading scan...')
-                scan = np.double(reader[:, :, channel - 1, slice - 1, :]).squeeze()
+                field = np.double(scan[slice - 1, :, :, channel - 1, :])
 
                 # Correct scan
                 print('Correcting scan...')
                 correct_motion = (Prepare.GalvoMotion() & key &
                                   {'slice': slice, 'channel': channel}).get_correct_motion()
                 correct_raster = (Prepare.Galvo() & key).get_correct_raster()
-                corrected_scan = correct_motion(correct_raster(scan))
+                corrected_scan = correct_motion(correct_raster(field))
 
                 # Compute and insert correlation image
                 print('Computing correlation image...')
@@ -714,12 +826,12 @@ class ExtractRaw(dj.Imported):
         lowercase_kwargs = {key.lower(): value for key, value in kwargs.items()}
         ExtractRaw.CNMFParameters().insert1({**key, **lowercase_kwargs})
 
-    def save_video(self, filename='cnmf_results.mp4', slice=1, channel=1,
+    def save_video(self, filename='cnmf_results.mp4', field=1, channel=1,
                    start_index=0, seconds=30, dpi=250, first_n=None):
         """ Creates an animation video showing the original vs corrected scan.
 
         :param string filename: Output filename (path + filename)
-        :param int slice: Slice to use for plotting. Starts at 1
+        :param int field: Slice to use for plotting. Starts at 1
         :param int channel: What channel from the scan to use. Starts at 1
         :param int start_index: Where in the scan to start the video.
         :param int seconds: How long in seconds should the animation run.
@@ -729,26 +841,23 @@ class ExtractRaw(dj.Imported):
         :returns Figure. You can call show() on it.
         :rtype: matplotlib.figure.Figure
         """
-        # Get scan filename
-        scan_filename = (experiment.Scan() & self).local_filenames_as_wildcard
-
         # Get fps and calculate total number of frames
         fps = (Prepare.Galvo() & self).fetch1['fps']
         num_video_frames = int(round(fps * seconds))
         stop_index = start_index + num_video_frames
 
         # Load the scan
-        from tiffreader import TIFFReader
-        reader = TIFFReader(scan_filename)
-        scan = np.double(reader[:, :, channel - 1, slice - 1, start_index: stop_index])
-        scan = scan.squeeze()
+        import scanreader
+        scan_filename = (experiment.Scan() & self).local_filenames_as_wildcard
+        scan = scanreader.read_scan(scan_filename)
+        scan = np.double(scan[field - 1, :, :, channel - 1, start_index: stop_index])
 
         # Correct the scan
         correct_motion = (Prepare.GalvoMotion() & self &
-                          {'slice': slice, 'channel': channel}).get_correct_motion()
+                          {'slice': field, 'channel': channel}).get_correct_motion()
         correct_raster = (Prepare.Galvo() & self).get_correct_raster()
         raster_corrected = correct_raster(scan)
-        motion_corrected = correct_motion(raster_corrected, range(start_index, stop_index))
+        motion_corrected = correct_motion(raster_corrected, slice(start_index, stop_index))
         scan = motion_corrected
 
         # Get scan dimensions
@@ -756,9 +865,9 @@ class ExtractRaw(dj.Imported):
         num_pixels = image_height * image_width
 
         # Get location and activity matrices
-        location_matrix = self.get_all_masks(slice, channel)
-        activity_matrix = self.get_all_traces(slice, channel)
-        background_rel = ExtractRaw.BackgroundComponents() & self & {'slice': slice,
+        location_matrix = self.get_all_masks(field, channel)
+        activity_matrix = self.get_all_traces(field, channel)
+        background_rel = ExtractRaw.BackgroundComponents() & self & {'slice': field,
                                                                      'channel': channel}
         background_location_matrix, background_activity_matrix = \
             background_rel.fetch1['masks', 'activity']
@@ -818,7 +927,7 @@ class ExtractRaw(dj.Imported):
             im3.set_data(background[:, :, i])
             im4.set_data(residual[:, :, i])
 
-        video = animation.FuncAnimation(fig, update_img, num_video_frames,
+        video = animation.FuncAnimation(fig, update_img, scan.shape[2],
                                         interval=1000 / fps)
 
         # Save animation
