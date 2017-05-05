@@ -4,10 +4,6 @@ import datajoint as dj
 import numpy as np
 import sh
 from commons import lab
-try:
-    import pyfnnd
-except ImportError:
-    warn('Could not load pyfnnd.  Oopsi spike inference will fail. Install from https://github.com/cajal/PyFNND.git')
 
 from . import experiment, config, PipelineException
 from .utils.dsp import mirrconv
@@ -1169,6 +1165,11 @@ class Spikes(dj.Computed):
             plt.close(fig)
 
     def _make_tuples(self, key):
+        try:
+            import pyfnnd
+        except ImportError:
+            warn('Could not load pyfnnd. Oopsi spike inference will fail. Install from https://github.com/cajal/PyFNND.git')
+
         print('Populating Spikes for ', key, end='...', flush=True)
         method = (SpikeMethod() & key).fetch1['spike_method_name']
         if method == 'stm':

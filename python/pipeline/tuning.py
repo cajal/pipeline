@@ -7,7 +7,9 @@ from scipy.signal import convolve
 import io
 import imageio
 import datajoint as dj
-from . import preprocess, vis   # needed for foreign keys
+from . import preprocess
+from . import stimulus
+from . import vis
 
 from distutils.version import StrictVersion
 assert StrictVersion(dj.__version__) >= StrictVersion('0.3.8')
@@ -375,5 +377,8 @@ class RF(dj.Computed):
         print('done.', flush=True)
 
 
+
+
 schema.spawn_missing_classes()
+
 
