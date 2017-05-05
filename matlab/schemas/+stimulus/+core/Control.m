@@ -141,7 +141,7 @@ classdef Control < handle
                 trialRecord.trial_idx = trialId;
                 trialRecord.condition_hash = condition.condition_hash;
                 trialRecord.flip_times = self.screen.clearFlipTimes();
-                trialRecord.last_flip = trialRecord.flip_times(1);
+                trialRecord.last_flip = self.screen.flipCount;
                 self.trialTable.insertParallel(trialRecord)
                 trialId = trialId + 1;
             end
