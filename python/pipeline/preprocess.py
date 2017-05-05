@@ -180,6 +180,12 @@ class Prepare(dj.Imported):
             key['fill_fraction'] = scan.temporal_fill_fraction
 
             # Calculate true height and width in microns
+            if scan.is_multiROI:
+                # Look in header
+                pass
+            else:
+                # Use FOV
+                pass
             #TODO:
             key['um_width'] = key['px_width']
             key['um_height'] = key['px_height']
@@ -194,6 +200,15 @@ class Prepare(dj.Imported):
 
             # Compute raster correction parameters
             if scan.is_bidirectional:
+
+
+                # Testing
+                #import re
+                #match = re.search(r'hScan2D\.linePhase = (?P<line_phase>.*)', scan.header)
+                #key['raster_phase'] = float(match.group('line_phase')) if match else 0
+                #key['raster_phase'] = 0.002
+
+
                 key['raster_phase'] = galvo_corrections.compute_raster_phase(preview_image)
             else:
                 key['raster_phase'] = 0
@@ -236,8 +251,6 @@ class Prepare(dj.Imported):
             # Get some params
             um_height, px_height = (Prepare.Galvo() & key).fetch1['um_height', 'px_height']
             um_width, px_width = (Prepare.Galvo() & key).fetch1['um_width', 'px_width']
-            height_microns_per_pixel = um_height / px_height
-            width_microns_per_pixel = um_width / px_width
 
             # Get raster correction function
             correct_raster = (Prepare.Galvo() & key).get_correct_raster()
@@ -256,16 +269,19 @@ class Prepare(dj.Imported):
                     template = np.mean(field[:, :, 1000:3000], axis=-1)
                 key['template'] = template
 
-                # Get motion correction offsets
-                y_offsets, x_offsets = galvo_corrections.compute_motion_offsets(field, template)
-                key['motion_xy'] = np.stack([x_offsets, y_offsets])
+                # Get motion correction shifts
+                y_shifts, x_shifts = galvo_corrections.compute_motion_shifts(field, template)
+                key['motion_xy'] = np.stack([x_shifts, y_shifts])
 
-                # Calculate root mean squared distance of motion offsets
-                x_offsets_in_microns = x_offsets * width_microns_per_pixel
-                y_offsets_in_microns = y_offsets * height_microns_per_pixel
-                x_distances = x_offsets_in_microns - x_offsets_in_microns.mean()
-                y_distances = y_offsets_in_microns - y_offsets_in_microns.mean()
-                key['motion_rms'] = np.sqrt(np.mean(np.square([x_distances, y_distances])))
+                # Calculate root mean squared distance of motion shifts
+                y_shifts_in_microns = y_shifts * (um_height / px_height)
+                x_shifts_in_microns = x_shifts * (um_width / px_width)
+                # x_distances = x_shifts_in_microns - x_shifts_in_microns.mean()
+                # y_distances = y_shifts_in_microns - y_shifts_in_microns.mean()
+                # key['motion_rms'] = np.sqrt(np.mean(np.square([x_distances, y_distances])))
+
+                # Calculate mean euclidean distance
+                key['motion_rms'] = np.mean(np.sqrt(x_shifts_in_microns**2 + y_shifts_in_microns**2))
 
                 # Insert
                 self.insert1(key)
