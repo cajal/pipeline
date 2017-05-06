@@ -158,13 +158,16 @@ class Prepare(dj.Imported):
             
             :param scan Scan: The scan. An Scan object returned by scanreader.
             """
+            # Warning for multiroi scans
+            if scan.is_multiROI:
+                print('Warning: MultiROI scan. px_height & px_width may not be the same',
+                      'for all fields. Taking those of first field.')
+
             # Get attributes
             key = key.copy() # in case key is reused somewhere else
             key['nframes_requested'] = scan.num_requested_frames
             key['nframes'] = scan.num_frames
             if scan.is_multiROI:
-                print('Warning: MultiROI scan. px_height & px_width may not be the same',
-                      'for all fields.')
                 key['px_height'] = scan.field_heights[0]
                 key['px_width'] = scan.field_widths[0]
             else:
@@ -173,25 +176,29 @@ class Prepare(dj.Imported):
             key['bidirectional'] = scan.is_bidirectional
             key['fps'] = scan.fps
             key['zoom'] = 1 if scan.is_multiROI else scan.zoom
-            key['dwell_time'] = (scan.seconds_per_line / scan._pixels_per_line) * 1e6
+            key['dwell_time'] = (scan.seconds_per_line / scan._page_width) * 1e6
             key['nchannels'] = scan.num_channels
             key['nslices'] = scan.num_fields
             key['slice_pitch'] = scan.zstep_in_microns
             key['fill_fraction'] = scan.temporal_fill_fraction
 
-            # Calculate true height and width in microns
+            # Calculate height and width in microns
             if scan.is_multiROI:
-                # Look in header
-                pass
+                # Get it from the scan
+                key['um_height'] = scan.field_heights_in_microns[0]
+                key['um_width'] = scan.field_widths_in_microns[0]
             else:
-                # Use FOV
-                pass
-            #TODO:
-            key['um_width'] = key['px_width']
-            key['um_height'] = key['px_height']
+                # Estimate using measured FOVs for similar setups
+                fov_rel = (experiment.FOV() * experiment.Session() * experiment.Scan()
+                           & key & 'session_date>=fov_ts')
+                zooms = fov_rel.fetch['mag'].astype(np.float32) # measured zooms in setup
+                closest_zoom = zooms[np.argmin(np.abs(np.log(zooms / scan.zoom)))]
+                um_height, um_width = (fov_rel & {'mag': closest_zoom}).fetch1['height', 'width']
+                key['um_height'] = float(um_height) * (closest_zoom / scan.zoom) * scan._y_angle_scale_factor
+                key['um_width'] = float(um_width) * (closest_zoom / scan.zoom) * scan._x_angle_scale_factor
 
             # Compute a preview image of the scan: mean of frames 1000-3000
-            preview_field = int(scan.num_fields // 2) # 0 for 0-1, 1 for 2-3, etc
+            preview_field = int(np.floor(scan.num_fields / 2))
             if scan.num_frames < 2000:
                 preview_image = np.mean(scan[preview_field, :, :, channel, -2000:], axis=-1)
             else:
@@ -200,15 +207,6 @@ class Prepare(dj.Imported):
 
             # Compute raster correction parameters
             if scan.is_bidirectional:
-
-
-                # Testing
-                #import re
-                #match = re.search(r'hScan2D\.linePhase = (?P<line_phase>.*)', scan.header)
-                #key['raster_phase'] = float(match.group('line_phase')) if match else 0
-                #key['raster_phase'] = 0.002
-
-
                 key['raster_phase'] = galvo_corrections.compute_raster_phase(preview_image)
             else:
                 key['raster_phase'] = 0
@@ -223,8 +221,8 @@ class Prepare(dj.Imported):
         ---
         -> Channel
         template                    : longblob       # stack that was used as alignment template
-        motion_xy                   : longblob       # (pixels) y,x motion correction offsets
-        motion_rms                  : float          # (um) stdev of motion
+        motion_xy                   : longblob       # (pixels) x,y motion correction offsets
+        motion_rms                  : float          # (um) stddev of motion
         align_times=CURRENT_TIMESTAMP: timestamp     # automatic
         """
 
@@ -245,6 +243,7 @@ class Prepare(dj.Imported):
             return my_lambda_function
 
         def _make_tuples(self, key, scan, channel=0):
+            """Computes the motion shifts per frame needed to correct the scan."""
             key = key.copy()
             key['channel'] = channel + 1 # indices start at 1 in database
 
