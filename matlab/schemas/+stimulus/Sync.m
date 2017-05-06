@@ -111,7 +111,7 @@ b = robustfit(photodiode_flip_times, trial_flip_times-trial_flip_times(1));
 sync_info.signal_start_time = b(1) + trial_flip_times(1);
 sync_info.signal_duration = length(photodiode_signal)/photodiode_fs*b(2);
 time_discrepancy =  (b(1) + photodiode_flip_times*b(2)) -  (trial_flip_times(:)-trial_flip_times(1));
-assert((quantile(abs(time_discrepancy),0.9)) < 0.034, ...
+assert((quantile(abs(time_discrepancy),0.999)) < 0.034, ...
     'Incorrectly detected flips. Time discrepancy = %f s', max(abs(time_discrepancy)))
 end
 
