@@ -12,7 +12,7 @@ classdef Sync < dj.Imported
     
     
     properties
-        keySource = experiment.Scan & preprocess.Prepare
+        keySource = experiment.Scan & preprocess.Prepare & stimulus.Trial
     end
     
     methods(Static)
@@ -42,17 +42,27 @@ classdef Sync < dj.Imported
             fps = 60;   % does not need to be exact
             
             % synchronize to stimulus
-            tuple =  sync(key, photodiode_signal,...
-                photodiode_fs, fps, stimulus.Trial & key);
+            tuple =  sync(photodiode_signal, photodiode_fs, fps, stimulus.Trial & key);
             
-            self.insert(key)
+            % find scanimage frame pulses
+            n = ceil(0.0002*photodiode_fs);
+            k = hamming(2*n);
+            k = -k/sum(k);
+            k(1:n) = -k(1:n);
+            pulses = conv(dat.scanImage,k,'same');
+            peaks = ne7.dsp.spaced_max(pulses, 0.005*photodiode_fs);
+            peaks = peaks(pulses(peaks) > 0.1*quantile(pulses(peaks),0.9));
+            peaks = longestContiguousBlock(peaks);
+            tuple.frame_times = tuple.signal_start_time + tuple.signal_duration*(peaks-1)/length(dat.scanImage);
+            
+            self.insert(dj.struct.join(key, tuple))
         end
     end
     
 end
 
 
-function sync_info = sync(key, photodiode_signal, photodiode_fs, fps, trials)
+function sync_info = sync(photodiode_signal, photodiode_fs, fps, trials)
 % given the photodiode signal, returns a structure describing visual
 % stimulus trials that were displayed and exact timing synchronization.
 % The photodiode signal is assumed to be uniformly sampled in time.
@@ -69,6 +79,7 @@ photodiode_flip_numbers = photodiode_flip_numbers(ix);
 % if flips are ouf of order, reset to the start of the most recent count
 ix = find(photodiode_flip_numbers(2:end) <= photodiode_flip_numbers(1:end-1), 1, 'last');
 if ~isempty(ix)
+    warning('flips are out of order, indicating an error in the stimulus')
     photodiode_flip_indices = photodiode_flip_indices(ix+1:end);
     photodiode_flip_numbers = photodiode_flip_numbers(ix+1:end);
 end
@@ -84,15 +95,14 @@ trial_flip_numbers = [trial_flip_numbers{:}];
 trial_flip_times = [trial_flip_times{:}];
 assert(length(trial_flip_times)==length(trial_flip_numbers));
 
-assert(all(ismember(photodiode_flip_numbers, trial_flip_numbers)), ...
-    'some photodiode numbers come from a different scan')
+if ~all(ismember(photodiode_flip_numbers, trial_flip_numbers))
+    error 'some photodiode flips come from a different scan'
+end
 
 % Select only the matched flips
-ix = ismember(photodiode_flip_numbers, trial_flip_numbers);
+ix = ismember(trial_flip_numbers, photodiode_flip_numbers);
 assert(sum(ix)>100, 'Insufficient matched flips (%d)', sum(ix))
-photodiode_flip_indices = photodiode_flip_indices(ix);
-photodiode_flip_numbers = photodiode_flip_numbers(ix);
-trial_flip_times = trial_flip_times(ismember(trial_flip_numbers, photodiode_flip_numbers));
+trial_flip_times = trial_flip_times(ix);
 
 % regress the photodiode_signal indices against the stimulus times to get the
 % photodiode_signal signal time on stimulus clock. Assumes uninterrupted uniform sampling of photodiode_signal!!!
@@ -101,22 +111,8 @@ b = robustfit(photodiode_flip_times, trial_flip_times-trial_flip_times(1));
 sync_info.signal_start_time = b(1) + trial_flip_times(1);
 sync_info.signal_duration = length(photodiode_signal)/photodiode_fs*b(2);
 time_discrepancy =  (b(1) + photodiode_flip_times*b(2)) -  (trial_flip_times(:)-trial_flip_times(1));
-assert((quantile(abs(time_discrepancy),0.999)) < 0.034, ...
+assert((quantile(abs(time_discrepancy),0.9)) < 0.034, ...
     'Incorrectly detected flips. Time discrepancy = %f s', max(abs(time_discrepancy)))
-
-% find first and last trials overlapping signal
-trials = fetch(trialTable & key, 'trial_idx', 'flip_times', 'ORDER BY trial_idx');
-i=1;
-while trials(i).flip_times(end) < sync_info.signal_start_time
-    i=i+1;
-end
-sync_info.first_trial = trials(i).trial_idx;
-i=length(trials);
-while trials(i).flip_times(1) > sync_info.signal_start_time + sync_info.signal_duration
-    i=i-1;
-end
-sync_info.last_trial = trials(i).trial_idx;
-
 end
 
 
@@ -143,7 +139,7 @@ function [flipIdx, flipAmps] = getFlips(x, fs, frameRate)
 
 T = fs/frameRate*2;  % period of oscillation measured in samples
 % filter flips
-n = floor(T/4);  % should be T/2 or smaller
+n = floor(T/3);  % should be T/2 or smaller
 k = hamming(n);
 k = [k;0;-k]/sum(k);
 x = fftfilt(k,[double(x);zeros(n,1)]);
@@ -188,4 +184,17 @@ while iFlip < quitFlip
     end
     iFlip = iFlip+1;
 end
+end
+
+
+function idx = longestContiguousBlock(idx)
+d = diff(idx);
+ix = [0 find(d > 10*median(d)) length(idx)];
+f = cell(length(ix)-1,1);
+for i = 1:length(ix)-1
+    f{i} = idx(ix(i)+1:ix(i+1));
+end
+l = cellfun(@length, f);
+[~,j] = max(l);
+idx = f{j};
 end
