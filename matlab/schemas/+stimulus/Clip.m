@@ -10,11 +10,37 @@ classdef Clip < dj.Manual & stimulus.core.Visual
     
     properties(Constant)
         version = '1'
-        movie_dir = '/Users/dimitri/stimuli'
+        movie_dir = '~/stimuli'
     end
     
     
     methods(Static)
+        
+        function migrate
+            % migrate data from the legacy schema +vis
+            control = stimulus.getControl;
+            
+            % migrate monet conditions
+            clip = vis.MovieClipCond & (vis.Trial*preprocess.Sync & 'trial_idx between first_trial and last_trial' & 'animal_id>0');
+            
+            condKeys = clip.fetch';
+            count = 0;
+            for key = condKeys
+                count = count + 1;
+                fprintf('[%d/%d]', count, length(condKeys))
+                cond = fetch(vis.MovieClipCond & key, '*');
+                cond = rmfield(cond, {'animal_id', 'psy_id', 'cond_idx'});
+                hash = control.makeConditions(stimulus.Clip, cond);
+                
+                % copy all trials that used this condition
+                for tuple = fetch(vis.Trial*preprocess.Sync & 'trial_idx between first_trial and last_trial' & key,...
+                        'last_flip_count->last_flip', 'trial_ts', 'flip_times')'
+                    insert(stimulus.Trial, setfield(rmfield(tuple, {'psy_id'}), 'condition_hash', hash{1}))
+                end
+            end
+        end
+        
+        
         
         function cond = prepare(cond)
             if ~exist(stimulus.Clip.movie_dir, 'dir')
@@ -27,14 +53,14 @@ classdef Clip < dj.Manual & stimulus.core.Visual
             if ~exist(cond.filename, 'file')
                 fprintf('Writing %s\n', cond.filename)
                 fid = fopen(cond.filename, 'w');
-                clip = fetch1(stimulus.MovieClip & cond, 'clip');                
+                clip = fetch1(stimulus.MovieClip & cond, 'clip');
                 fwrite(fid, clip, 'int8');
                 fclose(fid);
             end
         end
         
     end
-
+    
     
     methods
         
@@ -42,15 +68,13 @@ classdef Clip < dj.Manual & stimulus.core.Visual
             disp(cond.filename)
             movie = Screen('OpenMovie', self.win, cond.filename);
             Screen('PlayMovie', movie, 1);
-            opts.checkDroppedFrames = false;
             for i=1:ceil(cond.cut_after*self.fps)
                 tex = Screen('GetMovieImage', self.win, movie);
                 if tex<=0
                     break
                 end
                 Screen('DrawTexture', self.win, tex, [], self.rect)
-                self.flip(opts)
-                opts.checkDroppedFrames = true;
+                self.flip(struct('checkDroppedFrames', i>1))
                 Screen('close', tex)
             end
             Screen('CloseMovie', movie)
