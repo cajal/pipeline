@@ -9,7 +9,7 @@ classdef Visual < handle
     % core.Visual is a mixing class for conditions
     
     properties(Constant, Abstract)
-        variation % overwrite this in derived classes to specify variations of stimuli with the same class name
+        version     % overwrite this in derived classes to specify variations of stimuli with the same class name
     end
     
     properties(Constant)
@@ -37,7 +37,7 @@ classdef Visual < handle
             rect = self.screen.rect;
         end
         
-        function flip(varargin)
+        function flip(self, varargin)
             self.screen.flip(varargin{:})
         end
     end
