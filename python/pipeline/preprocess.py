@@ -128,7 +128,7 @@ class Prepare(dj.Imported):
             else:
                 num_components = slice_volume * 0.0001
 
-            return int(round(num_components))
+            return round(num_components)
 
         def estimate_soma_radius_in_pixels(self):
             """ Estimates the radius of a neuron in the scan (in pixels). Assumes soma is
@@ -200,14 +200,16 @@ class Prepare(dj.Imported):
             # Compute a preview image of the scan: mean of frames 1000-3000
             preview_field = int(np.floor(scan.num_fields / 2))
             if scan.num_frames < 2000:
-                preview_image = np.mean(scan[preview_field, :, :, channel, -2000:], axis=-1)
+                mini_field = scan[preview_field, :, :, channel, -2000:]
             else:
-                preview_image = np.mean(scan[preview_field, :, :, channel, 1000:3000], axis=-1)
+                mini_field = scan[preview_field, :, :, channel, 1000:3000]
+            preview_image = np.mean(mini_field, axis=-1)
             key['preview_frame'] = preview_image
 
             # Compute raster correction parameters
-            if scan.is_bidirectional:
-                key['raster_phase'] = galvo_corrections.compute_raster_phase(preview_image)
+            if scan.is_bidirectional and scan.scanner_type == 'Resonant':
+                key['raster_phase'] = galvo_corrections.compute_raster_phase(preview_image,
+                                                                             scan.temporal_fill_fraction)
             else:
                 key['raster_phase'] = 0
 
@@ -263,9 +265,12 @@ class Prepare(dj.Imported):
 
                 # Create template
                 if scan.num_frames < 3000:
-                    template = np.mean(field[:, :, -2000:], axis=-1)
+                    mini_field = field[:, :, -2000:]
                 else:
-                    template = np.mean(field[:, :, 1000:3000], axis=-1)
+                    mini_field = field[:, :, 1000:3000]
+                template = np.mean(mini_field, axis=-1)
+                template -= template.min() # set lowest element to zero
+                template = 2 * np.sqrt(template + 3/8) # anscombe transform: decrease leverage of outliers and increase contrast
                 key['template'] = template
 
                 # Get motion correction shifts
@@ -317,12 +322,14 @@ class Prepare(dj.Imported):
             # Read the scan
             import scanreader
             scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
-            scan = scanreader.read_scan(scan_filename)
+            scan = scanreader.read_scan(scan_filename, join_contiguous=False)
 
             # Select channel to use for raster and motion correction according to dye used
             fluorophore = (experiment.Session.Fluorophore() & key).fetch1['fluorophore']
-            channel = 1 if fluorophore in ['RCaMP1a'] else 0
-            # TODO: Make sure this is the only one that uses 2nd channel or add here
+            channel = 1 if fluorophore in ['RCaMP1a', 'mCherry', 'tdTomato'] else 0
+            if fluorophore == 'Twitch2B':
+                print('Warning: Twitch2B scan. Using first channel to compute correction '
+                      'parameters.')
 
             # Prepare raster correction
             print('Computing raster correction parameters...')
@@ -363,8 +370,7 @@ class Prepare(dj.Imported):
         original_scan = scan.copy()
 
         # Correct the scan
-        correct_motion = (Prepare.GalvoMotion() & self &
-                          {'slice': field, 'channel': channel}).get_correct_motion()
+        correct_motion = (Prepare.GalvoMotion() & self & {'slice': field}).get_correct_motion()
         correct_raster = (Prepare.Galvo() & self).get_correct_raster()
         raster_corrected = correct_raster(scan)
         motion_corrected = correct_motion(raster_corrected, slice(start_index, stop_index))
@@ -707,7 +713,7 @@ class ExtractRaw(dj.Imported):
                 plt.close(fig)
 
     def _make_tuples(self, key):
-        """ Load scan one slice & channel at a time, correct for raster and motion
+        """ Load scan one slice and channel at a time, correct for raster and motion
         artifacts and use CNMF to extract sources and deconvolve spike traces.
 
         See caiman_interface.demix_and_deconvolve_with_cnmf for an explanation of params
@@ -764,30 +770,26 @@ class ExtractRaw(dj.Imported):
             kwargs['percentage_of_patch_overlap'] = .2
 
         # Over each channel
-        scan_channels = (Prepare.GalvoMotion() & key).fetch['channel']
-        scan_channels = np.unique(scan_channels)
-        for channel in scan_channels:
+        for channel in range(scan.num_channels):
             current_trace_id = 1 # to count traces over one channel, ids start at 1
-            channel_slices = (Prepare.GalvoMotion() & key & {'channel': channel}).fetch['slice']
 
             # Over each slice in the channel
-            for slice in channel_slices:
+            for slice in range(scan.num_slices):
                 # Load the scan
                 print('Loading scan...')
-                field = np.double(scan[slice - 1, :, :, channel - 1, :])
+                field = (scan[slice, :, :, channel, :]).astype(np.float32, copy=False)
 
                 # Correct scan
                 print('Correcting scan...')
-                correct_motion = (Prepare.GalvoMotion() & key &
-                                  {'slice': slice, 'channel': channel}).get_correct_motion()
+                correct_motion = (Prepare.GalvoMotion() & key & {'slice': slice + 1}).get_correct_motion()
                 correct_raster = (Prepare.Galvo() & key).get_correct_raster()
                 corrected_scan = correct_motion(correct_raster(field))
 
                 # Compute and insert correlation image
                 print('Computing correlation image...')
                 correlation_image = cmn.compute_correlation_image(corrected_scan)
-                ExtractRaw.GalvoCorrelationImage().insert1({**key, 'slice': slice,
-                                                            'channel': channel,
+                ExtractRaw.GalvoCorrelationImage().insert1({**key, 'slice': slice + 1,
+                                                            'channel': channel + 1,
                                                             'correlation_image': correlation_image})
 
                 # Extract traces
@@ -805,7 +807,7 @@ class ExtractRaw(dj.Imported):
                 dj.conn().is_connected # make sure connection is active
                 for i  in new_order:
                     # Create new trace key
-                    trace_key = {**key, 'trace_id': current_trace_id, 'channel': channel}
+                    trace_key = {**key, 'trace_id': current_trace_id, 'channel': channel + 1}
 
                     # Insert traces and spikes
                     ExtractRaw.Trace().insert1({**trace_key, 'raw_trace': raw_traces[i, :]})
@@ -822,9 +824,9 @@ class ExtractRaw(dj.Imported):
                     defined_mask_indices += 1 # matlab indices start at 1
 
                     # Insert spatial mask
-                    ExtractRaw.GalvoSegmentation().insert1({**key, 'slice': slice},
+                    ExtractRaw.GalvoSegmentation().insert1({**key, 'slice': slice + 1},
                                                            skip_duplicates=True)
-                    ExtractRaw.GalvoROI().insert1({**trace_key, 'slice': slice,
+                    ExtractRaw.GalvoROI().insert1({**trace_key, 'slice': slice + 1,
                                                    'mask_pixels': defined_mask_indices,
                                                    'mask_weights': defined_mask_weights})
 
@@ -832,7 +834,7 @@ class ExtractRaw(dj.Imported):
                     current_trace_id+=1
 
                 # Insert background components
-                background_dict = {**key, 'channel': channel, 'slice': slice,
+                background_dict = {**key, 'channel': channel + 1, 'slice': slice + 1,
                                    'masks': background_location_matrix,
                                    'activity': background_activity_matrix}
                 ExtractRaw.BackgroundComponents().insert1(background_dict)
@@ -858,7 +860,7 @@ class ExtractRaw(dj.Imported):
         """
         # Get fps and calculate total number of frames
         fps = (Prepare.Galvo() & self).fetch1['fps']
-        num_video_frames = int(round(fps * seconds))
+        num_video_frames = round(fps * seconds)
         stop_index = start_index + num_video_frames
 
         # Load the scan
@@ -868,8 +870,7 @@ class ExtractRaw(dj.Imported):
         scan = np.double(scan[field - 1, :, :, channel - 1, start_index: stop_index])
 
         # Correct the scan
-        correct_motion = (Prepare.GalvoMotion() & self &
-                          {'slice': field, 'channel': channel}).get_correct_motion()
+        correct_motion = (Prepare.GalvoMotion() & self & {'slice': field}).get_correct_motion()
         correct_raster = (Prepare.Galvo() & self).get_correct_raster()
         raster_corrected = correct_raster(scan)
         motion_corrected = correct_motion(raster_corrected, slice(start_index, stop_index))
