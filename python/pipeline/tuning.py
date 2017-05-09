@@ -7,7 +7,9 @@ from scipy.signal import convolve
 import io
 import imageio
 import datajoint as dj
-from . import preprocess, vis   # needed for foreign keys
+from . import preprocess
+from . import stimulus
+from . import vis
 
 from distutils.version import StrictVersion
 assert StrictVersion(dj.__version__) >= StrictVersion('0.3.8')
@@ -253,7 +255,7 @@ class RF(dj.Computed):
         print('Populating', key)
         nbins = 5
         bin_size = 0.1  # s
-        [x, y, distance, diagonal] = (preprocess.Sync() * vis.Session() & key).fetch1[
+        x, y, distance, diagonal = (preprocess.Sync() * vis.Session() & key).fetch1[
             'resolution_x', 'resolution_y', 'monitor_distance', 'monitor_size']
         cm_per_inch = 2.54
         degrees_per_pixel = 180 / np.pi * diagonal * cm_per_inch / np.sqrt(
@@ -375,5 +377,8 @@ class RF(dj.Computed):
         print('done.', flush=True)
 
 
+
+
 schema.spawn_missing_classes()
+
 
