@@ -4,7 +4,7 @@ from scipy import signal
 import numpy as np
 
 def compute_motion_shifts(field, template, smooth_shifts=True, smoothing_window_size=5,
-                          max_fraction_yshift=0.1, max_fraction_xshift=0.1):
+                          max_fraction_yshift=0.10, max_fraction_xshift=0.10):
     """ Compute shifts in x and y for rigid motion correction.
     
     A patch is taken from the center of each frame (the margin size that is not included
@@ -26,7 +26,7 @@ def compute_motion_shifts(field, template, smooth_shifts=True, smoothing_window_
     :param max_fraction_yshift: Maximum allowed motion in y as a fraction of pixels in y.
     :param max_fraction_xshift: Maximum allowed motion in x as a fraction of pixels in x.
     
-    :returns: (y_shifts, x_shifts) Each is an array ([num_frames]) with the y, x motion 
+    :return: (y_shifts, x_shifts) Each is an array ([num_frames]) with the y, x motion 
         shifts needed to align each frame with the template.
     :rtype: (np.array, np.array) 
     """
@@ -40,11 +40,15 @@ def compute_motion_shifts(field, template, smooth_shifts=True, smoothing_window_
 
     # Get some params
     image_height, image_width, num_frames = field.shape
-    max_y_shift = int(round(image_height * max_fraction_yshift))  # max num_pixels to move in y
-    max_x_shift = int(round(image_width * max_fraction_xshift))
+    max_y_shift = round(image_height * max_fraction_yshift)  # max num_pixels to move in y
+    max_x_shift = round(image_width * max_fraction_xshift)
+    skip_rows = round(image_height * 0.10)  # rows near the top or bottom have artifacts
+    skip_cols = round(image_width * 0.10)  # so do columns
 
-    # Cut center patch of frames
-    frame_centers = field[max_y_shift: -max_y_shift, max_x_shift: -max_x_shift, :]
+    # Discard some rows/cols and cut center patch of frames
+    template = template[skip_rows: -skip_rows, skip_cols: -skip_cols]
+    frame_centers = field[skip_rows + max_y_shift: -skip_rows - max_y_shift,
+                    skip_cols + max_x_shift: -skip_cols - max_x_shift, :]
 
     y_shifts = np.zeros(num_frames)
     x_shifts = np.zeros(num_frames)
@@ -57,7 +61,7 @@ def compute_motion_shifts(field, template, smooth_shifts=True, smoothing_window_
         x_shifts[i] = max_x_shift - x_shift
 
         # if align_subpixels:
-        #     """Transcribed from commons.ne7.ip.measureShift.m. Doesn't quite work."""
+        #     """Transcribed from commons.ne7.ip.measureShift.m."""
         #     from scipy import fftpack
         #     fxcorr = fftpack.fft2(field[:, :, i]) * np.conj(fftpack.fft2(template))
         #
@@ -78,8 +82,8 @@ def compute_motion_shifts(field, template, smooth_shifts=True, smoothing_window_
         #     phase_times_magnitude = phases * magnitudes
         #
         #     # Select only those with low frequencies (half Nyquist, freqs < 0.25)
-        #     quarter_height = int(round(image_height / 4))
-        #     quarter_width = int(round(image_width / 4))
+        #     quarter_height = round(image_height / 4)
+        #     quarter_width = round(image_width / 4)
         #     y_mag = y_weighted_magnitudes[quarter_height: -quarter_height, quarter_width: -quarter_width].ravel()
         #     x_mag = x_weighted_magnitudes[quarter_height: -quarter_height, quarter_width: -quarter_width].ravel()
         #     phase = phase_times_magnitude[quarter_height: -quarter_height, quarter_width: -quarter_width].ravel()
@@ -105,11 +109,80 @@ def compute_motion_shifts(field, template, smooth_shifts=True, smoothing_window_
     return y_shifts, x_shifts
 
 
-def compute_raster_phase(image):
-    """"""
-    print('Warning: Raster correction not implemented yet.')
-    #TODO: Compute raster correction
-    return 0
+def compute_raster_phase(image, temporal_fill_fraction):
+    """ Compute raster correction for bidirectional resonant scanners.
+    
+    It shifts the odd and even rows to the left and right by an increasing angle to find
+    the best match. Positive raster phase will shift even rows to the right and odd rows 
+    to the left.
+    
+    :param np.array image: The image to be corrected.
+    :param float temporal_fill_fraction: Fraction of time during which the scan is 
+        recording a line against the total time per line. 
+        
+    :return: An angle (in radians). Estimate of the mismatch angle between the expected 
+        initial angle and the one recorded.
+    :rtype: float
+    """
+    # Make sure image has even number of rows (so # even and odd rows is the same)
+    image = image[:-1] if image.shape[0] % 2 == 1 else image
+
+    # Get some params
+    image_height, image_width = image.shape
+    skip_rows = round(image_height * 0.05) # rows near the top or bottom have artifacts
+    skip_cols = round(image_width * 0.10) # so do columns
+
+    # Create images with even and odd rows
+    even_rows = image[::2][skip_rows: -skip_rows]
+    odd_rows = image[1::2][skip_rows: -skip_rows]
+
+    # Scan angle at which each pixel was recorded.
+    max_angle = (np.pi / 2) * temporal_fill_fraction
+    scan_angles = np.linspace(-max_angle, max_angle, image_width + 2)[1:-1]
+    #sin_index = np.sin(scan_angles)
+
+    # Greedy search for the best raster phase: starts at coarse estimates and refines them
+    even_interp = interp.interp1d(scan_angles, even_rows, fill_value='extrapolate')
+    odd_interp = interp.interp1d(scan_angles, odd_rows, fill_value='extrapolate')
+    angle_shift = 0
+    for scale in [1e-2, 1e-3, 1e-4, 1e-5, 1e-6]:
+        angle_shifts = angle_shift + scale * np.linspace(-9, 9, 19)
+        match_values = []
+        for new_angle_shift in angle_shifts:
+            shifted_evens = even_interp(scan_angles + new_angle_shift)
+            shifted_odds = odd_interp(scan_angles - new_angle_shift)
+            match_values.append(np.sum(shifted_evens[:, skip_cols: -skip_cols] *
+                                       shifted_odds[:, skip_cols: -skip_cols]))
+        angle_shift = angle_shifts[np.argmax(match_values)]
+
+    # Old version
+    # Create time index
+    # half_width = image_width / 2
+    # time_range = ((np.arange(image_width) + 0.5) - half_width) / half_width # sin(angle)
+    # time_range = time_range * temporal_fill_fraction # scan is off on the edges,
+    # This houdl have been temporal
+    # scan_angles = np.arcsin(time_range)
+
+    # Iteratively find the best raster phase, by shifting odd and even rows.
+    # raster_phase = 0
+    # step = 0.02
+    # phase_shifts = np.array([-0.5, -0.25, -0.1, 0.1, 0.25, 0.5])
+    # even_interp = interp.interp1d(sin_index, even_rows)
+    # odd_interp = interp.interp1d(sin_index, odd_rows)
+    # while step > 1e-4:
+    #     phases = raster_phase + (step * phase_shifts) * spatial_fill_fraction
+    #     match = []
+    #     for new_phase in phases:
+    #         shifted_evens = even_interp(np.sin(scan_angles + new_phase) / spatial_fill_fraction)
+    #         shifted_odds = odd_interp(np.sin(scan_angles - new_phase) / spatial_fill_fraction)
+    #         match.append(np.sum(shifted_evens[:, 10:-10] * shifted_odds[:, 10:-10]))
+    #
+    #     A = np.stack([phases**2, phases, np.ones_like(phases)])
+    #     b = np.array(match)
+    #     alpha_2, alpha_1, alpha_0 = np.linalg.lstsq(A, b)[0]
+    #     raster_phase = max(alpha_2, min(phases[-1], -(alpha_1/alpha_2) / 2))
+    #     step = step/4
+    return angle_shift
 
 def correct_motion(scan, xy_shifts, in_place=True):
     """ Motion correction for two-photon scans.
@@ -132,18 +205,18 @@ def correct_motion(scan, xy_shifts, in_place=True):
         raise PipelineException('Scan needs to be a numpy array.')
     if scan.ndim < 2:
         raise PipelineException('Scan with less than 2 dimensions.')
+
+    # Assert scan is float (integer precision is not good enough)
     if not np.issubdtype(scan.dtype, np.float):
         print('Changing scan type from', str(scan.dtype), 'to double')
-        scan = np.double(scan)
+        scan = scan.astype(np.float32, copy=(not in_place))
+    elif not in_place:
+        scan = scan.copy() # copy it anyway preserving the original dtype
 
     # Get some dimensions
     original_shape = scan.shape
     image_height = original_shape[0]
     image_width = original_shape[1]
-
-    # If copy is needed
-    if not in_place:
-        scan = scan.copy()
 
     # Reshape input (to deal with more than 2-D volumes)
     reshaped_scan = np.reshape(scan, (image_height, image_width, -1))
@@ -173,7 +246,7 @@ def correct_motion(scan, xy_shifts, in_place=True):
     return scan
 
 
-def correct_raster(scan, raster_phase, fill_fraction, in_place=True):
+def correct_raster(scan, raster_phase, temporal_fill_fraction, in_place=True):
     """ Raster correction for resonant scanners.
 
     Corrects two-photon images in n-dimensional scans, usual shape is [image_height,
@@ -186,8 +259,8 @@ def correct_raster(scan, raster_phase, fill_fraction, in_place=True):
 
     :param np.array scan: Volume with images to be corrected in the first two dimensions.
     :param float raster_phase: Phase difference between odd and even lines.
-    :param float fill_fraction: Ratio between active acquisition and total length of the
-    scan line.
+    :param float temporal_fill_fraction: Ratio between active acquisition and total length
+        of the scan line.
     :param bool in_place: If True (default), the original array is modified in memory.
 
     :return: Raster-corrected scan.
@@ -200,25 +273,22 @@ def correct_raster(scan, raster_phase, fill_fraction, in_place=True):
         raise PipelineException('Scan needs to be a numpy array.')
     if scan.ndim < 2:
         raise PipelineException('Scan with less than 2 dimensions.')
+
+    # Assert scan is float
     if not np.issubdtype(scan.dtype, np.float):
-        print('Changing scan type from', str(scan.dtype), 'to double')
-        scan = np.double(scan)
+        print('Changing scan type from', str(scan.dtype), 'to float')
+        scan = scan.astype(np.float32, copy=(not in_place))
+    elif not in_place:
+        scan = scan.copy() # copy it anyway preserving the original dtype
 
     # Get some dimensions
     original_shape = scan.shape
     image_height = original_shape[0]
     image_width = original_shape[1]
-    half_width = image_width / 2
 
-    # If copy is needed
-    if not in_place:
-        scan = scan.copy()
-
-    # Create interpolation points for sinusoidal raster
-    index  = np.linspace(-half_width + 0.5, half_width - 0.5, image_width) / half_width
-    time_index = np.arcsin(index * fill_fraction)
-    interp_points_even = np.sin(time_index + raster_phase) / fill_fraction
-    interp_points_odd = np.sin(time_index - raster_phase) / fill_fraction
+    # Scan angle at which each pixel was recorded.
+    max_angle = (np.pi / 2) * temporal_fill_fraction
+    scan_angles = np.linspace(-max_angle, max_angle, image_width + 2)[1:-1]
 
     # We iterate over every image in the scan (first 2 dimensions). Same correction
     # regardless of what channel, slice or frame they belong to.
@@ -227,17 +297,16 @@ def correct_raster(scan, raster_phase, fill_fraction, in_place=True):
     for i in range(num_images):
         # Get current image
         image = reshaped_scan[:, :, i]
-        mean_intensity = np.mean(image)  # to fill outside the interpolation range
 
         # Correct even rows of the image (0, 2, ...)
-        interp_function = interp.interp1d(index, image[::2, :], fill_value=mean_intensity,
-                                          bounds_error=False, copy=False)
-        reshaped_scan[::2, :, i] = interp_function(interp_points_even)
+        interp_function = interp.interp1d(scan_angles, image[::2, :], bounds_error=False,
+                                          fill_value='extrapolate', copy=False)
+        reshaped_scan[::2, :, i] = interp_function(scan_angles + raster_phase)
 
         # Correct odd rows of the image (1, 3, ...)
-        interp_function = interp.interp1d(index, image[1::2, :], bounds_error=False,
-                                          fill_value=mean_intensity, copy=False)
-        reshaped_scan[1::2, :, i] = interp_function(interp_points_odd)
+        interp_function = interp.interp1d(scan_angles, image[1::2, :], bounds_error=False,
+                                          fill_value='extrapolate', copy=False)
+        reshaped_scan[1::2, :, i] = interp_function(scan_angles - raster_phase)
 
     scan = np.reshape(reshaped_scan, original_shape)
     return scan
