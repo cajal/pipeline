@@ -48,9 +48,13 @@ classdef OriMap < dj.Imported
                 frame = fixMotion(fixRaster(double(reader(:,:,1,key.slice,frames(iframe)))), frames(iframe));
                 X(iframe,:) = frame(:);
             end
+            
+            % remove periods where the design matrix has nans
             ix = any(isnan(X),2);
             X(ix,:) = [];
             designMatrix(ix,:) = [];
+            
+            % normalize traces
             M = mean(X);
             X = bsxfun(@minus, X, M);
             X = bsxfun(@rdivide, X, M);
