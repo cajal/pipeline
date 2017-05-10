@@ -189,7 +189,7 @@ end
 
 
 function assign(s)
-% assigns fields of a structure to variables in caller's workspace
+% assigns fields from the give structure as variables in caller's workspace
 for f = fieldnames(s)'
     assignin('caller', f{1}, s.(f{1}))
 end

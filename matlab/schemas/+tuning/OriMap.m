@@ -1,5 +1,5 @@
 %{
-tuning.OriMap (imported) # pixelwise responses to full-field directional stimuli
+# pixelwise responses to full-field directional stimuli
 -> tuning.OriDesignMatrix
 -> preprocess.PrepareGalvo
 -> preprocess.Slice
@@ -10,10 +10,10 @@ dof_map                     : longblob                      # degrees of in orig
 %}
 
 
-classdef OriMap < dj.Relvar & dj.AutoPopulate
+classdef OriMap < dj.Imported
 
-	properties
-		popRel = tuning.OriDesignMatrix*preprocess.PrepareGalvo*preprocess.Slice & 'slice>=1 and slice<=nslices'
+	properties(Constant)
+		keySource = tuning.OriDesignMatrix*preprocess.PrepareGalvo*preprocess.Slice & 'slice>=1 and slice<=nslices'
 	end
 
 	methods(Access=protected)
