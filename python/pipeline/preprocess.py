@@ -128,7 +128,7 @@ class Prepare(dj.Imported):
             else:
                 num_components = slice_volume * 0.0001
 
-            return round(num_components)
+            return int(round(num_components))
 
         def estimate_soma_radius_in_pixels(self):
             """ Estimates the radius of a neuron in the scan (in pixels). Assumes soma is
@@ -366,7 +366,7 @@ class Prepare(dj.Imported):
         import scanreader
         scan_filename = (experiment.Scan() & self).local_filenames_as_wildcard
         scan = scanreader.read_scan(scan_filename)
-        scan = np.double(scan[field - 1, :, :, channel - 1, start_index: stop_index])
+        scan = (scan[field - 1, :, :, channel - 1, start_index: stop_index]).astype(np.float32, copy=False)
         original_scan = scan.copy()
 
         # Correct the scan
@@ -730,12 +730,12 @@ class ExtractRaw(dj.Imported):
 
         # Read the scan
         import scanreader
-        scan_filename = (experiment.Scan() & self).local_filenames_as_wildcard
+        scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
         scan = scanreader.read_scan(scan_filename)
 
         # Estimate number of components per slice
         num_components = (Prepare.Galvo() & key).estimate_num_components_per_slice()
-        num_components += int(0.2 * num_components) # add 20% more just to be sure
+        num_components += int(round(0.2 * num_components)) # add 20% more just to be sure
 
         # Estimate the radius of a neuron in the scan (used for somatic scans)
         soma_radius_in_pixels = (Prepare.Galvo() & key).estimate_soma_radius_in_pixels()
@@ -774,7 +774,7 @@ class ExtractRaw(dj.Imported):
             current_trace_id = 1 # to count traces over one channel, ids start at 1
 
             # Over each slice in the channel
-            for slice in range(scan.num_slices):
+            for slice in range(scan.num_fields):
                 # Load the scan
                 print('Loading scan...')
                 field = (scan[slice, :, :, channel, :]).astype(np.float32, copy=False)
@@ -860,7 +860,7 @@ class ExtractRaw(dj.Imported):
         """
         # Get fps and calculate total number of frames
         fps = (Prepare.Galvo() & self).fetch1['fps']
-        num_video_frames = round(fps * seconds)
+        num_video_frames = int(round(fps * seconds))
         stop_index = start_index + num_video_frames
 
         # Load the scan
