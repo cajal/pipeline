@@ -18,7 +18,7 @@ This software is published under the [LGPLv3 license](LICENSE.txt).
 
 **Python specific**
 * [c2s](https://github.com/lucastheis/c2s)
-* [tiffreader](https://github.com/atlab/tiffreader.git)
+* [scanreader](https://github.com/atlab/scanreader.git)
 * check `requirements.txt` for other libraries
 
 # Howto
