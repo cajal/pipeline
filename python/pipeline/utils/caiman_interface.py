@@ -1,6 +1,7 @@
 """Interface to the CaImAn package (https://github.com/simonsfoundation/CaImAn)"""
 import numpy as np
 import caiman
+from caiman.source_extraction.cnmf import cnmf as cnmf
 import glob, os
 import matplotlib.pyplot as plt
 
@@ -107,7 +108,7 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=200, merge_threshold=0.8
         overlap_in_pixels = int(round(overlap_in_pixels))
 
         # Run CNMF on patches (only for initialization, no impulse response modelling p=0)
-        cnmf = caiman.cnmf.CNMF(num_processes, only_init_patch=True, p=0,
+        cnmf = caiman.source_extraction.cnmf.CNMF(num_processes, only_init_patch=True, p=0,
                                 rf=int(round(patch_size / 2)), stride=overlap_in_pixels,
                                 k=num_components_per_patch, merge_thresh=merge_threshold,
                                 method_init=init_method, gSig=soma_radius_in_pixels,
@@ -128,7 +129,7 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=200, merge_threshold=0.8
         initial_f = cnmf.f
 
     # Run CNMF
-    cnmf = caiman.cnmf.CNMF(num_processes, k=num_components, method_init=init_method,
+    cnmf = caiman.source_extraction.cnmf.CNMF(num_processes, k=num_components, method_init=init_method,
                             gSig=soma_radius_in_pixels, alpha_snmf=snmf_alpha, p=AR_order,
                             merge_thresh=merge_threshold, gnb=num_background_components,
                             check_nan=False, n_pixels_per_process=num_pixels_per_process,
