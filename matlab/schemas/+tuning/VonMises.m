@@ -1,5 +1,5 @@
 %{
-tuning.VonMises (computed) # directional tuning
+# directional tuning
 -> tuning.DirectionalResponse
 -> preprocess.SpikesRateTrace
 -----
@@ -12,10 +12,10 @@ von_sharp  : float  #  sharpnesses
 von_pvalue : float  # p-value by shuffling (nShuffles = 1e4)
 %}
 
-classdef VonMises < dj.Relvar & dj.AutoPopulate
+classdef VonMises < dj.Computed
     
     properties
-        popRel  = tuning.DirectionalResponse
+        keySource  = tuning.DirectionalResponse
     end
     
     

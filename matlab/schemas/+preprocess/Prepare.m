@@ -1,14 +1,14 @@
 %{
-preprocess.Prepare (imported) # master table that gathers data about the scans of different types, prepares for trace extraction
+# master table that gathers data about the scans of different types, prepares for trace extraction
 -> experiment.Scan
 ---
 %}
 
 
-classdef Prepare < dj.Relvar & dj.AutoPopulate
+classdef Prepare < dj.Imported
     
     properties
-        popRel = experiment.Scan - experiment.ScanIgnored & 'aim="2pScan"'
+        keySource = experiment.Scan - experiment.ScanIgnored & 'aim="2pScan"'
     end
     
     methods(Access=protected)
