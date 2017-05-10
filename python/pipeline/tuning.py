@@ -128,7 +128,7 @@ class OriMapy(dj.Imported):
         x = x.T.reshape((height, width, -1))
         r2 = 1-r2.reshape((height, width))/v
 
-        self.insert(dict(key, regr_coef_maps=x, r2_map=r2, dof_map=dof))
+        self.insert1(dict(key, regr_coef_maps=x, r2_map=r2, dof_map=dof))
 
 
 
