@@ -101,7 +101,7 @@ class OriMapy(dj.Imported):
         height, width, nslices = (preprocess.Prepare.Galvo() & key).fetch1['px_height', 'px_width', 'nslices']
         design = design[key['slice'] - 1::nslices, :]
         if scan.shape[2] == 2*design.shape[0]:
-            scan = np.hstack((scan[:,:,::2],scan[:,:,1::2]))   # this is a hack for mesoscope scanner -- needs fixing
+            scan = (scan[:,:,::2] + scan[:,:,1::2])/2  # this is a hack for mesoscope scanner -- needs fixing
 
         assert design.shape[0] == scan.shape[2]
         height, width = scan.shape[0:2]    # hack for mesoscope -- needs fixing
