@@ -47,7 +47,7 @@ def compute_motion_shifts(field, template, smooth_shifts=True, smoothing_window_
     for i in range(num_frames):
         image_freq = np.fft.fftn(field[:, :, i])
         yx_shift = feature.register_translation(image_freq, template_freq, 10,
-                                                        space='fourier')[0]
+                                                space='fourier')[0]
         y_shifts[i] = yx_shift[0]
         x_shifts[i] = yx_shift[1]
 
