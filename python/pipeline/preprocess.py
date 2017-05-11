@@ -366,7 +366,7 @@ class Prepare(dj.Imported):
         import scanreader
         scan_filename = (experiment.Scan() & self).local_filenames_as_wildcard
         scan = scanreader.read_scan(scan_filename)
-        scan = (scan[field - 1, :, :, channel - 1, start_index: stop_index]).astype(np.float32, copy=False)
+        scan = scan[field - 1, :, :, channel - 1, start_index: stop_index]
         original_scan = scan.copy()
 
         # Correct the scan
@@ -777,7 +777,7 @@ class ExtractRaw(dj.Imported):
             for slice in range(scan.num_fields):
                 # Load the scan
                 print('Loading scan...')
-                field = (scan[slice, :, :, channel, :]).astype(np.float32, copy=False)
+                field = scan[slice, :, :, channel, :]
 
                 # Correct scan
                 print('Correcting scan...')
@@ -867,7 +867,7 @@ class ExtractRaw(dj.Imported):
         import scanreader
         scan_filename = (experiment.Scan() & self).local_filenames_as_wildcard
         scan = scanreader.read_scan(scan_filename)
-        scan = np.double(scan[field - 1, :, :, channel - 1, start_index: stop_index])
+        scan = scan[field - 1, :, :, channel - 1, start_index: stop_index]
 
         # Correct the scan
         correct_motion = (Prepare.GalvoMotion() & self & {'slice': field}).get_correct_motion()
