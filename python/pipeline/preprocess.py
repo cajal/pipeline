@@ -980,6 +980,31 @@ class ExtractRaw(dj.Imported):
         # Draw contours
         cmn.plot_contours(location_matrix, correlation_image)
 
+    def plot_centroids(self, slice=1, channel=1, first_n=None):
+        """ Draw centroids of masks over the correlation image.
+
+        :param slice: Scan slice to use
+        :param channel: Scan channel to use
+        :param first_n: Number of masks to plot. None for all.
+        :returns: None
+        """
+        from .utils import caiman_interface as cmn
+
+        # Get location matrix
+        location_matrix = self.get_all_masks(slice, channel)
+
+        # Select first n components
+        if first_n is not None:
+            location_matrix = location_matrix[:, :, :first_n]
+
+        # Get correlation image if defined
+        image_rel = ExtractRaw.GalvoCorrelationImage() & self & {'slice': slice,
+                                                                 'channel': channel}
+        correlation_image = image_rel.fetch1['correlation_image'] if image_rel else None
+
+        # Draw centroids
+        cmn.plot_centroids(location_matrix, correlation_image)
+
     def plot_impulse_responses(self, slice=1, channel=1, num_timepoints=100):
         """ Plots the individual impulse response functions for all traces assuming an
         autoregressive process (p > 0).
