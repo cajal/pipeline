@@ -113,33 +113,6 @@ def compute_raster_phase(image, temporal_fill_fraction):
                                        shifted_odds[:, skip_cols: -skip_cols]))
         angle_shift = angle_shifts[np.argmax(match_values)]
 
-    # Old version
-    # Create time index
-    # half_width = image_width / 2
-    # time_range = ((np.arange(image_width) + 0.5) - half_width) / half_width # sin(angle)
-    # time_range = time_range * temporal_fill_fraction # scan is off on the edges,
-    # This houdl have been temporal
-    # scan_angles = np.arcsin(time_range)
-
-    # Iteratively find the best raster phase, by shifting odd and even rows.
-    # raster_phase = 0
-    # step = 0.02
-    # phase_shifts = np.array([-0.5, -0.25, -0.1, 0.1, 0.25, 0.5])
-    # even_interp = interp.interp1d(sin_index, even_rows)
-    # odd_interp = interp.interp1d(sin_index, odd_rows)
-    # while step > 1e-4:
-    #     phases = raster_phase + (step * phase_shifts) * spatial_fill_fraction
-    #     match = []
-    #     for new_phase in phases:
-    #         shifted_evens = even_interp(np.sin(scan_angles + new_phase) / spatial_fill_fraction)
-    #         shifted_odds = odd_interp(np.sin(scan_angles - new_phase) / spatial_fill_fraction)
-    #         match.append(np.sum(shifted_evens[:, 10:-10] * shifted_odds[:, 10:-10]))
-    #
-    #     A = np.stack([phases**2, phases, np.ones_like(phases)])
-    #     b = np.array(match)
-    #     alpha_2, alpha_1, alpha_0 = np.linalg.lstsq(A, b)[0]
-    #     raster_phase = max(alpha_2, min(phases[-1], -(alpha_1/alpha_2) / 2))
-    #     step = step/4
     return angle_shift
 
 def correct_motion(scan, xy_shifts, in_place=True):
@@ -166,7 +139,7 @@ def correct_motion(scan, xy_shifts, in_place=True):
 
     # Assert scan is float (integer precision is not good enough)
     if not np.issubdtype(scan.dtype, np.float):
-        print('Changing scan type from', str(scan.dtype), 'to double')
+        print('Warning: Changing scan type from', str(scan.dtype), 'to np.float32')
         scan = scan.astype(np.float32, copy=(not in_place))
     elif not in_place:
         scan = scan.copy() # copy it anyway preserving the original dtype
@@ -234,10 +207,10 @@ def correct_raster(scan, raster_phase, temporal_fill_fraction, in_place=True):
 
     # Assert scan is float
     if not np.issubdtype(scan.dtype, np.float):
-        print('Changing scan type from', str(scan.dtype), 'to float')
-        scan = scan.astype(np.float32, copy=(not in_place))
+         print('Warning: Changing scan type from', str(scan.dtype), 'to np.float32')
+         scan = scan.astype(np.float32, copy=(not in_place))
     elif not in_place:
-        scan = scan.copy() # copy it anyway preserving the original dtype
+         scan = scan.copy() # copy it anyway preserving the original float dtype
 
     # Get some dimensions
     original_shape = scan.shape

@@ -257,6 +257,7 @@ class Prepare(dj.Imported):
             correct_raster = (Prepare.Galvo() & key).get_correct_raster()
 
             for field_id in range(scan.num_fields):
+                print('Correcting field', field + 1)
                 field = scan[field_id, :, :, channel, :] # 3-d (height, width, frames)
                 key['slice'] = field_id + 1
 
@@ -346,7 +347,7 @@ class Prepare(dj.Imported):
             # Read the scan
             import scanreader
             scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
-            scan = scanreader.read_scan(scan_filename, join_contiguous=False)
+            scan = scanreader.read_scan(scan_filename)
 
             # Select channel to use for raster and motion correction according to dye used
             fluorophore = (experiment.Session.Fluorophore() & key).fetch1['fluorophore']
