@@ -298,7 +298,31 @@ class Prepare(dj.Imported):
         frame  : longblob     # average frame after Anscombe, max-weighting,
         """
         def _make_tuples(self, key, scan):
-           pass
+            q = 6 # used for the weighted average
+
+            # Get raster correcting function
+            correct_raster = (Prepare.Galvo() & key).get_correct_raster()
+
+            for field_id in range(scan.num_fields):
+                for channel_id in range(scan.num_channels):
+                    new_tuple = key.copy()
+                    new_tuple['channel'] = channel_id + 1
+                    new_tuple['slice'] = field_id + 1
+
+                    # Get motion correction function
+                    galvomotion_rel = (Prepare.GalvoMotion() & key & {'slice': field_id + 1})
+                    correct_motion = galvomotion_rel.get_correct_motion()
+
+                    # Correct field
+                    field = scan[field_id, :, :, channel_id, :]
+                    field = correct_motion(correct_raster(field))
+
+                    # Q-norm average over time
+                    field[field < 0] = 0
+                    new_tuple['frame'] = np.mean(field ** q, axis=-1) ** (1/q)
+
+                    # Insert new tuple
+                    self.insert1(new_tuple)
 
     class Aod(dj.Part):
         definition = """   # information about AOD scans
