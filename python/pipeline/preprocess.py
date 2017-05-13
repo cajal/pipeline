@@ -257,7 +257,7 @@ class Prepare(dj.Imported):
             correct_raster = (Prepare.Galvo() & key).get_correct_raster()
 
             for field_id in range(scan.num_fields):
-                print('Correcting field', field + 1)
+                print('Correcting field', field_id + 1)
                 field = scan[field_id, :, :, channel, :] # 3-d (height, width, frames)
                 key['slice'] = field_id + 1
 
