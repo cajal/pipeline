@@ -299,7 +299,7 @@ class Prepare(dj.Imported):
         frame  : longblob     # average frame after Anscombe, max-weighting,
         """
         def _make_tuples(self, key, scan):
-            q = 6 # used for the weighted average
+            p = 6 # used for the weighted average
 
             # Get raster correcting function
             correct_raster = (Prepare.Galvo() & key).get_correct_raster()
@@ -318,9 +318,9 @@ class Prepare(dj.Imported):
                     field = scan[field_id, :, :, channel_id, :]
                     field = correct_motion(correct_raster(field))
 
-                    # Q-norm average over time
+                    # l-p norm of each pixel over time
                     field[field < 0] = 0
-                    new_tuple['frame'] = np.mean(field ** q, axis=-1) ** (1/q)
+                    new_tuple['frame'] = np.mean(field ** p, axis=-1) ** (1 / p)
 
                     # Insert new tuple
                     self.insert1(new_tuple)
