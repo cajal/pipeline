@@ -365,6 +365,7 @@ class Prepare(dj.Imported):
             Prepare.GalvoMotion()._make_tuples(key, scan, channel)
 
             # Prepare average frame
+            print('Computing average corrected frame...')
             Prepare.GalvoAverageFrame()._make_tuples(key, scan)
 
 
