@@ -10,7 +10,6 @@ sync_ts=CURRENT_TIMESTAMP   : timestamp                     # automatic
 
 classdef Sync < dj.Imported
     
-    
     properties
         keySource = experiment.Scan & preprocess.Prepare & stimulus.Trial
     end
@@ -22,7 +21,8 @@ classdef Sync < dj.Imported
             missing = preprocess.Sync - proj(stimulus.Sync);
             ignore_extra = dj.set('ignore_extra_insert_fields', true);
             insert(stimulus.Sync, missing.fetch('*'))
-            dj.set('ignore_extra_insert_fields', ignore_extra);
+            dj.set('ignore_extra_insert_fields', ignore_extra)
+            disp done
         end
     end
     
@@ -71,12 +71,13 @@ function sync_info = sync(photodiode_signal, photodiode_fs, fps, trials)
 [photodiode_flip_indices, photodiode_flip_numbers] = ...
     whichFlips(photodiode_signal, photodiode_fs, fps);
 
-% remove duplicated numbers due to terminated programs
+% remove undecoded flips
 ix = ~isnan(photodiode_flip_numbers);
 photodiode_flip_indices = photodiode_flip_indices(ix);
 photodiode_flip_numbers = photodiode_flip_numbers(ix);
 
 % if flips are ouf of order, reset to the start of the most recent count
+% This may happen if a trial got interrupted and not recorded.
 ix = find(photodiode_flip_numbers(2:end) <= photodiode_flip_numbers(1:end-1), 1, 'last');
 if ~isempty(ix)
     warning('flips are out of order, indicating an error in the stimulus')
