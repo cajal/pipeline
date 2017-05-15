@@ -1,6 +1,7 @@
 """Interface to the CaImAn package (https://github.com/simonsfoundation/CaImAn)"""
 import numpy as np
 import caiman
+from caiman.source_extraction.cnmf import cnmf as cnmf
 import glob, os
 import matplotlib.pyplot as plt
 
@@ -107,7 +108,7 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=200, merge_threshold=0.8
         overlap_in_pixels = int(round(overlap_in_pixels))
 
         # Run CNMF on patches (only for initialization, no impulse response modelling p=0)
-        cnmf = caiman.cnmf.CNMF(num_processes, only_init_patch=True, p=0,
+        cnmf = caiman.source_extraction.cnmf.CNMF(num_processes, only_init_patch=True, p=0,
                                 rf=int(round(patch_size / 2)), stride=overlap_in_pixels,
                                 k=num_components_per_patch, merge_thresh=merge_threshold,
                                 method_init=init_method, gSig=soma_radius_in_pixels,
@@ -128,7 +129,7 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=200, merge_threshold=0.8
         initial_f = cnmf.f
 
     # Run CNMF
-    cnmf = caiman.cnmf.CNMF(num_processes, k=num_components, method_init=init_method,
+    cnmf = caiman.source_extraction.cnmf.CNMF(num_processes, k=num_components, method_init=init_method,
                             gSig=soma_radius_in_pixels, alpha_snmf=snmf_alpha, p=AR_order,
                             merge_thresh=merge_threshold, gnb=num_background_components,
                             check_nan=False, n_pixels_per_process=num_pixels_per_process,
@@ -225,6 +226,30 @@ def plot_contours(location_matrix, background_image=None):
                                              vmax=background_image.max(),
                                              thr_method='nrg', nrgthr=0.995)
 
+def plot_centroids(location_matrix, background_image=None):
+    """ Plot the centroid of each component in location matrix over a background image.
+
+    :param np.array location_matrix: (image_height x image_width x num_components)
+    :param np.array background_image: (image_height x image_width). Image for the
+        background. Mean or correlation image look fine.
+    """
+    # Reshape location_matrix
+    image_height, image_width, num_components = location_matrix.shape
+    location_matrix = location_matrix.reshape(-1, num_components, order='F')
+
+    # Set black background if not provided
+    if background_image is None:
+        background_image = np.zeros([image_height, image_width])
+
+    # Get centroids
+    coordinates = caiman.utils.visualization.plot_contours(location_matrix, background_image)
+    centroids = np.array([coordinate['CoM'] for coordinate in coordinates]) # [num_components x 2)
+
+    # Plot centroids
+    plt.figure()
+    plt.imshow(background_image)
+    plt.plot(centroids[:, 1], centroids[:, 0], 'ow', markersize=3)
+    #plt.scatter(centroids[:, 1], centroids[:, 0])
 
 def save_as_memmap(scan, base_name='caiman', order='F'):
     """Save the scan as a memory mapped file as expected by caiman
