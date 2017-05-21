@@ -1,222 +1,11 @@
 from .. import PipelineException
 from scipy import interpolate  as interp
 from scipy import signal
-from skimage import feature
 import numpy as np
-
-
-
-
-def compute_motion_shifts_skimage(field, template):
-    """ Compute shifts in x and y for subixel rigid motion correction.
-
-    A positive x_shift means that the image needs to be moved x_shift pixels left, a 
-    positive y_shift means the image needs to be moved y_shift pixels up.
-
-    :param np.array template: 2-d template image. Each frame in field is aligned to this.
-    :param np.array field: 2-d or 3-d array with images in the first two dimension,
-        usually [image_height, image_width, num_frames]
-    :param bool smooth_shifts: If True, smooth the timeseries of shifts.
-    :param int smoothing_window_size: Size of the Hann window used for smoothing.
-    :param max_fraction_yshift: Maximum allowed motion in y as a fraction of pixels in y.
-    :param max_fraction_xshift: Maximum allowed motion in x as a fraction of pixels in x.
-
-    :return: (y_shifts, x_shifts) Each is an array ([num_frames]) with the y, x motion 
-        shifts needed to align each frame with the template.
-    :rtype: (np.array, np.array) 
-    """
-    # Add third dimension if field is a single image
-    if field.ndim == 2:
-        field = np.expand_dims(field, -1)
-
-    # Get some params
-    image_height, image_width, num_frames = field.shape
-
-    # Get fourier transform of template
-    target_freq = np.fft.fftn(template)
-
-    # Compute subpixel shifts per image
-    y_shifts = np.empty(num_frames)
-    x_shifts = np.empty(num_frames)
-    for i in range(num_frames):
-        src_freq = np.fft.fftn(field[:, :, i])
-
-        #################################################################################
-        # Whole-pixel shift - Compute cross-correlation by an IFFT
-        shape = src_freq.shape
-        image_product = src_freq * target_freq.conj()
-        cross_correlation = np.fft.ifftn(image_product)
-
-        # Locate maximum
-        maxima = np.unravel_index(np.argmax(np.abs(cross_correlation)), cross_correlation.shape)
-        midpoints = np.array([np.fix(axis_size / 2) for axis_size in shape])
-
-        shifts = np.array(maxima, dtype=np.float64)
-        shifts[shifts > midpoints] -= np.array(shape)[shifts > midpoints]
-
-        # SUBPIXEL SHIFT
-        from skimage.feature.register_translation import _upsampled_dft
-        upsample_factor = 10 # tenth of a pixel
-
-        # Initial shift estimate in upsampled grid
-        shifts = np.round(shifts * upsample_factor) / upsample_factor
-        upsampled_region_size = np.ceil(upsample_factor * 1.5)
-        # Center of output array at dftshift + 1
-        dftshift = np.fix(upsampled_region_size / 2.0)
-        upsample_factor = np.array(upsample_factor, dtype=np.float64)
-        normalization = (src_freq.size * upsample_factor ** 2)
-        # Matrix multiply DFT around the current shift estimate
-        sample_region_offset = dftshift - shifts * upsample_factor
-        cross_correlation = _upsampled_dft(image_product.conj(),
-                                           upsampled_region_size,
-                                           upsample_factor,
-                                           sample_region_offset).conj()
-        cross_correlation /= normalization
-        # Locate maximum and map back to original pixel grid
-        maxima = np.array(np.unravel_index(
-            np.argmax(np.abs(cross_correlation)),
-            cross_correlation.shape),
-            dtype=np.float64)
-        maxima -= dftshift
-        shifts = shifts + maxima / upsample_factor
-
-
-
-
-        yx_shift = shifts
-        ##################################################################################
-        y_shifts[i] = yx_shift[0]
-        x_shifts[i] = yx_shift[1]
-
-    return y_shifts, x_shifts
-
-
-
-
-def compute_motion_shifts_dimitri(field, template):
-    """ Compute shifts in x and y for subixel rigid motion correction.
-
-    A positive x_shift means that the image needs to be moved x_shift pixels left, a 
-    positive y_shift means the image needs to be moved y_shift pixels up.
-
-    :param np.array template: 2-d template image. Each frame in field is aligned to this.
-    :param np.array field: 2-d or 3-d array with images in the first two dimension,
-        usually [image_height, image_width, num_frames]
-    :param bool smooth_shifts: If True, smooth the timeseries of shifts.
-    :param int smoothing_window_size: Size of the Hann window used for smoothing.
-    :param max_fraction_yshift: Maximum allowed motion in y as a fraction of pixels in y.
-    :param max_fraction_xshift: Maximum allowed motion in x as a fraction of pixels in x.
-
-    :return: (y_shifts, x_shifts) Each is an array ([num_frames]) with the y, x motion 
-        shifts needed to align each frame with the template.
-    :rtype: (np.array, np.array) 
-    """
-    # Add third dimension if field is a single image
-    if field.ndim == 2:
-        field = np.expand_dims(field, -1)
-
-    # Get some params
-    image_height, image_width, num_frames = field.shape
-
-    # Get fourier transform of template
-    target_freq = np.fft.fftn(template)
-
-    # Compute subpixel shifts per image
-    y_shifts = np.empty(num_frames)
-    x_shifts = np.empty(num_frames)
-    for i in range(num_frames):
-        src_freq = np.fft.fftn(field[:, :, i])
-
-        #################################################################################
-        # Whole-pixel shift - Compute cross-correlation by an IFFT
-        shape = src_freq.shape
-        image_product = src_freq * target_freq.conj()
-        cross_correlation = np.fft.ifftn(image_product)
-
-        # Locate maximum
-        maxima = np.unravel_index(np.argmax(np.abs(cross_correlation)), cross_correlation.shape)
-        midpoints = np.array([np.fix(axis_size / 2) for axis_size in shape])
-
-        shifts = np.array(maxima, dtype=np.float64)
-        shifts[shifts > midpoints] -= np.array(shape)[shifts > midpoints]
-
-        # SUBPIXEL SHIFT
-        """ Transcribed from commons.ne7.ip.measureShift.m. """
-
-        # Shift by the whole number of pixels
-        half_height = np.floor(template.shape[0] / 2)
-        half_width = np.floor(template.shape[1] / 2)
-        y_freqs = np.arange(-half_height, half_height + image_height % 2) / image_height
-        x_freqs = np.arange(-half_width, half_width + image_width % 2) / image_width
-        shifts_in_freq = np.outer(np.exp(2j * np.pi * shifts[0] * y_freqs),
-                                  np.exp(2j * np.pi * shifts[1] * x_freqs))
-        shifted_fxcorr = image_product * np.fft.fftshift(shifts_in_freq)
-
-        # Get phases and magnitudes from fxcorr
-        phases = np.fft.fftshift(np.angle(shifted_fxcorr))
-        magnitudes = np.fft.fftshift(np.abs(shifted_fxcorr))
-        y_weighted_magnitudes = (magnitudes.T * y_freqs).T
-        x_weighted_magnitudes = magnitudes * x_freqs
-        phase_times_magnitude = phases * magnitudes
-
-        # Select only those with low frequencies (half Nyquist, freqs < 0.25)
-        quarter_height = round(image_height / 4)
-        quarter_width = round(image_width / 4)
-        y_mag = y_weighted_magnitudes[quarter_height: -quarter_height, quarter_width: -quarter_width].ravel()
-        x_mag = x_weighted_magnitudes[quarter_height: -quarter_height, quarter_width: -quarter_width].ravel()
-        phase = phase_times_magnitude[quarter_height: -quarter_height, quarter_width: -quarter_width].ravel()
-
-        # To find the slope in y and x fit:
-        # phase_times_magnitude = y_shift * y_weighted_magnitudes
-        #                         + x_shift * x_weighted_magnitudes
-        A = np.stack([y_mag, x_mag], axis=1)
-        b = phase
-        y_slope, x_slope = np.linalg.lstsq(A, b)[0]
-
-        # Apply subpixel shifts
-        shifts[0] -= (y_slope / (2 * np.pi))
-        shifts[1] -= (x_slope / (2 * np.pi))
-
-
-        yx_shift = shifts
-        ##################################################################################
-        y_shifts[i] = yx_shift[0]
-        x_shifts[i] = yx_shift[1]
-
-    return y_shifts, x_shifts
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 def compute_motion_shifts(field, template, smooth_shifts=True, smoothing_window_size=5,
                           max_fraction_yshift=0.10, max_fraction_xshift=0.10):
-    """ Compute shifts in x and y for subixel rigid motion correction.
+    """ Compute shifts in x and y for subpixel rigid motion correction.
     
     A positive x_shift means that the image needs to be moved x_shift pixels left, a 
     positive y_shift means the image needs to be moved y_shift pixels up.
@@ -251,13 +40,59 @@ def compute_motion_shifts(field, template, smooth_shifts=True, smoothing_window_
     # Get fourier transform of template
     template_freq = np.fft.fftn(template)
 
-    # Compute subpixel shifts per image
+    # Compute subpixel shifts per image (verbatim from skimage.feature.register_translation)
     y_shifts = np.empty(num_frames)
     x_shifts = np.empty(num_frames)
     for i in range(num_frames):
         image_freq = np.fft.fftn(field[:, :, i])
-        yx_shift = feature.register_translation(image_freq, template_freq, 10,
-                                               space='fourier')[0]
+        # yx_shift = feature.register_translation(image_freq, template_freq, 10,
+        #                                        space='fourier')[0]
+
+        # To avoid the overhead of register_translation (which computes a set of other
+        # things other than the motion correction shifts), we copy only the relevant code
+        # from skimage.feature.register_translation
+        src_freq = image_freq
+        target_freq = template_freq
+        upsample_factor = 10 # motion correction to a tenth of a pixel
+
+        #########################################################################
+        from skimage.feature.register_translation import _upsampled_dft
+
+        # Whole-pixel shift - Compute cross-correlation by an IFFT
+        shape = src_freq.shape
+        image_product = src_freq * target_freq.conj()
+        cross_correlation = np.fft.ifftn(image_product)
+
+        # Locate maximum
+        maxima = np.unravel_index(np.argmax(np.abs(cross_correlation)),
+                                  cross_correlation.shape)
+        midpoints = np.array([np.fix(axis_size / 2) for axis_size in shape])
+
+        shifts = np.array(maxima, dtype=np.float64)
+        shifts[shifts > midpoints] -= np.array(shape)[shifts > midpoints]
+
+        # Initial shift estimate in upsampled grid
+        shifts = np.round(shifts * upsample_factor) / upsample_factor
+        upsampled_region_size = np.ceil(upsample_factor * 1.5)
+        # Center of output array at dftshift + 1
+        dftshift = np.fix(upsampled_region_size / 2.0)
+        upsample_factor = np.array(upsample_factor, dtype=np.float64)
+        normalization = (src_freq.size * upsample_factor ** 2)
+        # Matrix multiply DFT around the current shift estimate
+        sample_region_offset = dftshift - shifts * upsample_factor
+        cross_correlation = _upsampled_dft(image_product.conj(), upsampled_region_size,
+                                           upsample_factor, sample_region_offset).conj()
+        cross_correlation /= normalization
+        # Locate maximum and map back to original pixel grid
+        maxima = np.array(np.unravel_index(
+            np.argmax(np.abs(cross_correlation)),
+            cross_correlation.shape),
+            dtype=np.float64)
+        maxima -= dftshift
+        shifts = shifts + maxima / upsample_factor
+        ################################################################################
+        yx_shift = shifts
+
         y_shifts[i] = yx_shift[0]
         x_shifts[i] = yx_shift[1]
 
