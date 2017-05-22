@@ -28,9 +28,6 @@ proj_z                      : longblob                      # x projection
 %}
 
 classdef Bead < dj.Computed
-    properties
-        popRel = quality.BeadStack
-    end
     
     methods(Access=protected)
         

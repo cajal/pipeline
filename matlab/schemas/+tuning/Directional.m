@@ -1,15 +1,15 @@
 %{
-tuning.Directional (computed) # all directional drift trials for the scan
+# all directional drift trials for the scan
 -> preprocess.Sync
 ---
 ndirections                 : tinyint                       # number of directions
 %}
 
 
-classdef Directional < dj.Relvar & dj.AutoPopulate
+classdef Directional < dj.Computed
 
     properties
-        popRel = preprocess.Sync  & (vis.Monet & 'speed>0');
+        keySource = preprocess.Sync  & (vis.Trial*vis.Monet & 'speed>0' & 'trial_idx between first_trial and last_trial');
     end
     
     methods(Access=protected)
@@ -17,7 +17,7 @@ classdef Directional < dj.Relvar & dj.AutoPopulate
         function makeTuples(self, key)
             iTrial = 0;
             trialTuples = [];
-            for trialKey = fetch(vis.Trial * preprocess.Sync & vis.Monet & key)'
+            for trialKey = fetch(vis.Trial * preprocess.Sync & vis.Monet & key & 'trial_idx between first_trial and last_trial')'
                 frameTimes = fetch1(preprocess.Sync & trialKey, 'frame_times');
                 [params, flips] = fetch1(...
                     vis.Monet*vis.MonetLookup*vis.Trial & trialKey, ...

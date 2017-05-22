@@ -13,7 +13,7 @@ classdef Control < handle
         conditionTable = stimulus.Condition
         trialTable = stimulus.Trial
         condCache = containers.Map
-        trialQueue = stimulus.core.FIFO
+        trialQueue = stimulus.core.FIFO(1e5)
     end
     
     
@@ -30,11 +30,13 @@ classdef Control < handle
             dbConn.cancelTransaction   % reset
             for i = 1:numel(params)
                 param = params(i);
-                condition.special_name = class(specialTable);
-                condition.special_variation = specialTable.variation;
-                hash = dj.DataHash(dj.struct.join(condition, param), ...
+                condition = struct;
+                condition.stimulus_type = class(specialTable);
+                condition.stimulus_version = specialTable.version;
+                hash = stimulus.utils.DataHash(dj.struct.join(condition, param), ...
                     struct('Format','base64', 'Method', 'md5'));
                 hash = hash(1:self.hashLength);
+                
                 if ~self.condCache.isKey(hash)
                     condition.condition_hash = hash;
                     if exists(self.conditionTable & condition)
@@ -43,10 +45,10 @@ classdef Control < handle
                     else
                         fprintf .
                         param = specialTable.make(param);
+                        specialTable.create    % to avoid implicit commits during transaction
                         dbConn.startTransaction
                         try
                             self.conditionTable.insert(condition)
-                            param = specialTable.make(param);
                             param.condition_hash = hash;
                             specialTable.insert(param)
                             dbConn.commitTransaction
@@ -55,6 +57,7 @@ classdef Control < handle
                             rethrow(err)
                         end
                     end
+                    param = specialTable.prepare(param);
                     self.condCache(hash) = setfield(param, 'obj___', specialTable); %#ok<SFLD>
                 end
                 hashes{i} = hash;
@@ -126,12 +129,11 @@ classdef Control < handle
             end
             
             while ~self.trialQueue.isempty
-                % emit sync audio signal
-                PsychPortAudio('Start', audioHandle, 1, 0)
+                % emit sync audio signal used for synchronization
+                PsychPortAudio('Start', audioHandle, 1, 0);
                 
                 %%%% SHOW TRIAL %%%%
                 condition = self.condCache(self.trialQueue.pop);
-                
                 condition.obj___.showTrial(condition)
                 
                 % save trial
@@ -139,7 +141,7 @@ classdef Control < handle
                 trialRecord.trial_idx = trialId;
                 trialRecord.condition_hash = condition.condition_hash;
                 trialRecord.flip_times = self.screen.clearFlipTimes();
-                trialRecord.last_flip = trialRecord.flip_times(1);
+                trialRecord.last_flip = self.screen.flipCount;
                 self.trialTable.insertParallel(trialRecord)
                 trialId = trialId + 1;
             end
@@ -153,7 +155,7 @@ classdef Control < handle
         function cleanupRun(self)
             % used only for cleanup in run
             self.screen.flip(struct('logFlips', false, 'checkDroppedFrames', false))
-            PsychPortAudio('Close')
+            PsychPortAudio('Close');
             Priority(0);
             ShowCursor;
             disp 'cleaned up'
