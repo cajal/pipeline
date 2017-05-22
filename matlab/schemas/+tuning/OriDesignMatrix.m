@@ -1,5 +1,5 @@
 %{
-tuning.OriDesignMatrix (computed) # design matrix for directional response
+# design matrix for directional response
 -> tuning.Directional
 -> tuning.CaKernel
 ---
@@ -8,10 +8,10 @@ regressor_cov               : longblob                      # regressor covarian
 %}
 
 
-classdef OriDesignMatrix < dj.Relvar & dj.AutoPopulate
+classdef OriDesignMatrix < dj.Computed
 
-	properties
-		popRel = tuning.Directional*tuning.CaKernel & 'kernel=0'
+	properties(Constant)
+		keySource = tuning.Directional*tuning.CaKernel & 'kernel=0'
 	end
 
 	methods(Access=protected)
