@@ -11,8 +11,8 @@ from .utils.eye_tracking import ROIGrabber, ts2sec, read_video_hdf5, CVROIGrabbe
 from .utils import galvo_corrections
 import matplotlib.pyplot as plt
 
-
 from distutils.version import StrictVersion
+
 assert StrictVersion(dj.__version__) >= StrictVersion('0.2.9')
 
 schema = dj.schema('pipeline_preprocess', locals())
@@ -118,7 +118,7 @@ class Prepare(dj.Imported):
 
             # Get slice dimensions (in micrometers)
             slice_height, slice_width = (Prepare.Galvo() & self).fetch1['um_height',
-                                                                       'um_width']
+                                                                        'um_width']
             slice_thickness = 10  # assumption
             slice_volume = slice_width * slice_height * slice_thickness
 
@@ -138,7 +138,7 @@ class Prepare(dj.Imported):
                 x-axis (width) of the scan.
              :rtype: tuple of floats
             """
-            soma_radius_in_microns = 7 # assumption
+            soma_radius_in_microns = 7  # assumption
 
             # Calculate size in pixels (height radius)
             um_height, px_height = (Prepare.Galvo() & self).fetch1['um_height', 'px_height']
@@ -164,7 +164,7 @@ class Prepare(dj.Imported):
                       'for all fields. Taking those of first field.')
 
             # Get attributes
-            key = key.copy() # in case key is reused somewhere else
+            key = key.copy()  # in case key is reused somewhere else
             key['nframes_requested'] = scan.num_requested_frames
             key['nframes'] = scan.num_frames
             if scan.is_multiROI:
@@ -191,7 +191,7 @@ class Prepare(dj.Imported):
                 # Estimate using measured FOVs for similar setups
                 fov_rel = (experiment.FOV() * experiment.Session() * experiment.Scan()
                            & key & 'session_date>=fov_ts')
-                zooms = fov_rel.fetch['mag'].astype(np.float32) # measured zooms in setup
+                zooms = fov_rel.fetch['mag'].astype(np.float32)  # measured zooms in setup
                 closest_zoom = zooms[np.argmin(np.abs(np.log(zooms / scan.zoom)))]
                 um_height, um_width = (fov_rel & {'mag': closest_zoom}).fetch1['height', 'width']
                 key['um_height'] = float(um_height) * (closest_zoom / scan.zoom) * scan._y_angle_scale_factor
@@ -241,13 +241,12 @@ class Prepare(dj.Imported):
                 else:
                     return galvo_corrections.correct_motion(scan, xy_motion[:, indices])
 
-
             return my_lambda_function
 
         def _make_tuples(self, key, scan, channel=0):
             """Computes the motion shifts per frame needed to correct the scan."""
             key = key.copy()
-            key['channel'] = channel + 1 # indices start at 1 in database
+            key['channel'] = channel + 1  # indices start at 1 in database
 
             # Get some params
             um_height, px_height = (Prepare.Galvo() & key).fetch1['um_height', 'px_height']
@@ -258,7 +257,7 @@ class Prepare(dj.Imported):
 
             for field_id in range(scan.num_fields):
                 print('Correcting field', field_id + 1)
-                field = scan[field_id, :, :, channel, :] # 3-d (height, width, frames)
+                field = scan[field_id, :, :, channel, :]  # 3-d (height, width, frames)
                 key['slice'] = field_id + 1
 
                 # Correct raster effects (needed for subpixel changes in y)
@@ -270,8 +269,9 @@ class Prepare(dj.Imported):
                 else:
                     mini_field = field[:, :, 1000:3000]
                 template = np.mean(mini_field, axis=-1)
-                template -= template.min() # set lowest element to zero
-                template = 2 * np.sqrt(template + 3/8) # anscombe transform: decrease leverage of outliers and increase contrast
+                template -= template.min()  # set lowest element to zero
+                template = 2 * np.sqrt(
+                    template + 3 / 8)  # anscombe transform: decrease leverage of outliers and increase contrast
                 key['template'] = template
 
                 # Get motion correction shifts
@@ -286,7 +286,7 @@ class Prepare(dj.Imported):
                 # key['motion_rms'] = np.sqrt(np.mean(np.square([x_distances, y_distances])))
 
                 # Calculate mean euclidean distance
-                key['motion_rms'] = np.mean(np.sqrt(x_shifts_in_microns**2 + y_shifts_in_microns**2))
+                key['motion_rms'] = np.mean(np.sqrt(x_shifts_in_microns ** 2 + y_shifts_in_microns ** 2))
 
                 # Insert
                 self.insert1(key)
@@ -298,8 +298,9 @@ class Prepare(dj.Imported):
         ---
         frame  : longblob     # average frame after Anscombe, max-weighting,
         """
+
         def _make_tuples(self, key, scan):
-            p = 6 # used for the weighted average
+            p = 6  # used for the weighted average
 
             # Get raster correcting function
             correct_raster = (Prepare.Galvo() & key).get_correct_raster()
@@ -367,7 +368,6 @@ class Prepare(dj.Imported):
             # Prepare average frame
             print('Computing average corrected frame...')
             Prepare.GalvoAverageFrame()._make_tuples(key, scan)
-
 
     def save_video(self, filename='galvo_corrections.mp4', field=1, channel=1,
                    start_index=0, seconds=30, dpi=250):
@@ -480,12 +480,13 @@ class ExtractRaw(dj.Imported):
     -> Prepare
     -> Method
     """
+
     @property
     def key_source(self):
         return Prepare() * Method() & dj.OrList(
             [(Prepare.Galvo() * Method.Galvo() - 'segmentation="manual"'),
              Prepare.Galvo() * Method.Galvo() * ManualSegment(),
-             Prepare.Aod() * Method.Aod()] )
+             Prepare.Aod() * Method.Aod()])
 
     class Trace(dj.Part):
         definition = """
@@ -761,7 +762,7 @@ class ExtractRaw(dj.Imported):
 
         # Estimate number of components per slice
         num_components = (Prepare.Galvo() & key).estimate_num_components_per_slice()
-        num_components += int(round(0.2 * num_components)) # add 20% more just to be sure
+        num_components += int(round(0.2 * num_components))  # add 20% more just to be sure
 
         # Estimate the radius of a neuron in the scan (used for somatic scans)
         soma_radius_in_pixels = (Prepare.Galvo() & key).estimate_soma_radius_in_pixels()
@@ -797,7 +798,7 @@ class ExtractRaw(dj.Imported):
 
         # Over each channel
         for channel in range(scan.num_channels):
-            current_trace_id = 1 # to count traces over one channel, ids start at 1
+            current_trace_id = 1  # to count traces over one channel, ids start at 1
 
             # Over each slice in the channel
             for slice in range(scan.num_fields):
@@ -822,7 +823,7 @@ class ExtractRaw(dj.Imported):
                 print('Extracting mask, traces and spikes (cnmf)...')
                 cnmf_result = cmn.demix_and_deconvolve_with_cnmf(corrected_scan, **kwargs)
                 (location_matrix, activity_matrix, background_location_matrix,
-                background_activity_matrix, raw_traces, spikes, AR_params) = cnmf_result
+                 background_activity_matrix, raw_traces, spikes, AR_params) = cnmf_result
 
                 # Obtain new mask order based on their brightness in the correlation image
                 new_order = cmn.order_components(location_matrix, correlation_image)
@@ -830,8 +831,8 @@ class ExtractRaw(dj.Imported):
                 # Insert traces, spikes and spatial masks (preserving new order)
                 print('Inserting masks, traces, spikes, ar parameters and background'
                       ' components...')
-                dj.conn().is_connected # make sure connection is active
-                for i  in new_order:
+                dj.conn().is_connected  # make sure connection is active
+                for i in new_order:
                     # Create new trace key
                     trace_key = {**key, 'trace_id': current_trace_id, 'channel': channel + 1}
 
@@ -847,7 +848,7 @@ class ExtractRaw(dj.Imported):
                     mask_as_F_ordered_vector = location_matrix[:, :, i].ravel(order='F')
                     defined_mask_indices = np.where(mask_as_F_ordered_vector)[0]
                     defined_mask_weights = mask_as_F_ordered_vector[defined_mask_indices]
-                    defined_mask_indices += 1 # matlab indices start at 1
+                    defined_mask_indices += 1  # matlab indices start at 1
 
                     # Insert spatial mask
                     ExtractRaw.GalvoSegmentation().insert1({**key, 'slice': slice + 1},
@@ -857,7 +858,7 @@ class ExtractRaw(dj.Imported):
                                                    'mask_weights': defined_mask_weights})
 
                     # Increase trace_id counter
-                    current_trace_id+=1
+                    current_trace_id += 1
 
                 # Insert background components
                 background_dict = {**key, 'channel': channel + 1, 'slice': slice + 1,
@@ -1048,7 +1049,7 @@ class ExtractRaw(dj.Imported):
 
         if ar_coefficients is not None:
             fig = plt.figure()
-            x_axis = np.arange(num_timepoints) / fps # make it seconds
+            x_axis = np.arange(num_timepoints) / fps  # make it seconds
 
             # Over each trace
             for g in ar_coefficients:
@@ -1058,7 +1059,7 @@ class ExtractRaw(dj.Imported):
                 irf = np.zeros(num_timepoints)
                 irf[0] = 1  # initial spike
                 for i in range(1, num_timepoints):
-                    if i <= AR_order: # start of the array needs special care
+                    if i <= AR_order:  # start of the array needs special care
                         irf[i] = np.sum(g[:i] * irf[i - 1:: -1])
                     else:
                         irf[i] = np.sum(g * irf[i - 1: i - AR_order - 1: -1])
@@ -1107,6 +1108,7 @@ class ExtractRaw(dj.Imported):
         spike_traces = np.array([x.squeeze() for x in spike_traces])
 
         return spike_traces
+
 
 @schema
 class Sync(dj.Imported):
@@ -1348,7 +1350,8 @@ class Spikes(dj.Computed):
         try:
             import pyfnnd
         except ImportError:
-            warn('Could not load pyfnnd. Oopsi spike inference will fail. Install from https://github.com/cajal/PyFNND.git')
+            warn(
+                'Could not load pyfnnd. Oopsi spike inference will fail. Install from https://github.com/cajal/PyFNND.git')
 
         print('Populating Spikes for ', key, end='...', flush=True)
         method = (SpikeMethod() & key).fetch1['spike_method_name']
@@ -1382,27 +1385,6 @@ class Spikes(dj.Computed):
 
 
 @schema
-class EyeQuality(dj.Lookup):
-    definition = """
-    # Different eye quality definitions for Tracking
-
-    eye_quality                : smallint
-    ---
-    description                : varchar(255)
-    """
-
-    contents = [
-        (-1, 'unusable'),
-        (0, 'good quality'),
-        (1, 'poor quality'),
-        (2, 'very poor quality (not well centered, pupil not fully visible)'),
-        (3, 'good (but pupil is not the brightest spot)'),
-        (4, 'very dark'),
-        (5, 'like 4 but more slack in ratio'),
-    ]
-
-
-@schema
 class BehaviorSync(dj.Imported):
     definition = """
     -> experiment.Scan
@@ -1412,108 +1394,123 @@ class BehaviorSync(dj.Imported):
 
 
 @schema
-class Eye(dj.Imported):
+class MaskType(dj.Lookup):
     definition = """
-    # eye velocity and timestamps
+    # classification of segmentation masks
 
-    -> experiment.Scan
+    mask_type   : varchar(32) # cell type
     ---
-    -> EyeQuality
-    eye_roi                     : tinyblob  # manual roi containing eye in full-size movie
-    eye_time                    : longblob  # timestamps of each frame in seconds, with same t=0 as patch and ball data
-    total_frames                : int       # total number of frames in movie.
-    eye_ts=CURRENT_TIMESTAMP    : timestamp # automatic
     """
 
-    def unpopulated(self):
+    @property
+    def contents(self):
+        yield from zip(['soma', 'dendrite', 'axon','unknown', 'artifact'])
+
+
+@schema
+class MaskClassification(dj.Computed):
+    definition = """
+    # grouping table for cell selections
+
+    -> ExtractRaw
+    ---
+    """
+
+    @property
+    def key_source(self):
+        return ExtractRaw() & dict(extract_method=2)
+
+    class MaskType(dj.Part):
+        definition = """
+        -> MaskClassification
+        -> ExtractRaw.GalvoROI
+        ---
+        -> MaskType
         """
-        Returns all keys from Scan()*Session() that are not in Eye but have a video.
 
-
-        :param path_prefix: prefix to the path to find the video (usually '/mnt/', but empty by default)
-        """
-
-        rel = experiment.Session() * experiment.Scan.EyeVideo()
-        path_prefix = config['path.mounts']
-        restr = [k for k in (rel - self).proj('behavior_path', 'filename').fetch.as_dict() if
-                 os.path.exists("{path_prefix}/{behavior_path}/{filename}".format(path_prefix=path_prefix, **k))]
-        return (rel - self) & restr
-
-    def grab_timestamps_and_frames(self, key, n_sample_frames=10):
-
-        import cv2
-
-        rel = experiment.Session() * experiment.Scan.EyeVideo() * experiment.Scan.BehaviorFile().proj(
-            hdf_file='filename')
-
-        info = (rel & key).fetch1()
-
-        avi_path = lab.Paths().get_local_path("{behavior_path}/{filename}".format(**info))
-        # replace number by %d for hdf-file reader
-
-        tmp = info['hdf_file'].split('.')
-        if not '%d' in tmp[0]:
-            info['hdf_file'] = tmp[0][:-1] + '%d.' + tmp[-1]
-
-        hdf_path = lab.Paths().get_local_path("{behavior_path}/{hdf_file}".format(**info))
-
-        data = read_video_hdf5(hdf_path)
-        packet_length = data['analogPacketLen']
-        dat_time, _ = ts2sec(data['ts'], packet_length)
-
-        if float(data['version']) == 2.:
-            cam_key = 'eyecam_ts'
-            eye_time, _ = ts2sec(data[cam_key][0])
-        else:
-            cam_key = 'cam1ts' if info['rig'] == '2P3' else  'cam2ts'
-            eye_time, _ = ts2sec(data[cam_key])
-
-        total_frames = len(eye_time)
-
-        frame_idx = np.floor(np.linspace(0, total_frames - 1, n_sample_frames))
-
-        cap = cv2.VideoCapture(avi_path)
-        no_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-
-        if total_frames != no_frames:
-            warn("{total_frames} timestamps, but {no_frames}  movie frames.".format(total_frames=total_frames,
-                                                                                    no_frames=no_frames))
-            if total_frames > no_frames and total_frames and no_frames:
-                total_frames = no_frames
-                eye_time = eye_time[:total_frames]
-                frame_idx = np.round(np.linspace(0, total_frames - 1, n_sample_frames)).astype(int)
-            else:
-                raise PipelineException('Can not reconcile frame count', key)
-        frames = []
-        for frame_pos in frame_idx:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_pos)
-            ret, frame = cap.read()
-
-            frames.append(np.asarray(frame, dtype=float)[..., 0])
-        frames = np.stack(frames, axis=2)
-        return eye_time, frames, total_frames
+    @staticmethod
+    def _reshape_masks(mask_pixels, mask_weights, px_height, px_width):
+        ret = np.zeros((px_height, px_width, len(mask_pixels)))
+        for i, (mp, mw) in enumerate(zip(mask_pixels, mask_weights)):
+            mask = np.zeros(px_height * px_width)
+            mask[mp.squeeze().astype(int) - 1] = mw.squeeze()
+            ret[..., i] = mask.reshape(px_height, px_width, order='F')
+        return ret
 
     def _make_tuples(self, key):
-        key['eye_time'], frames, key['total_frames'] = self.grab_timestamps_and_frames(key)
+        import matplotlib.pyplot as plt
+        import seaborn as sns
+        rel = ExtractRaw.GalvoROI() & key
 
-        try:
-            import cv2
-            print('Drag window and print q when done')
-            rg = CVROIGrabber(frames.mean(axis=2))
-            rg.grab()
-        except ImportError:
-            rg = ROIGrabber(frames.mean(axis=2))
+        keys, px, w = rel.fetch[dj.key, 'mask_pixels', 'mask_weights']
+        d1, d2, fps = tuple(map(int, (Prepare.Galvo() & key).fetch1['px_height', 'px_width', 'fps']))
 
-        with dj.config(display__width=50):
-            print(EyeQuality())
-        key['eye_quality'] = int(input("Enter the quality of the eye: "))
-        key['eye_roi'] = rg.roi
+        templates = {}
+        for slice in (Prepare.GalvoAverageFrame() & key).fetch['slice']:
+
+            if ExtractRaw.GalvoCorrelationImage() & dict(key, slice=slice):
+                print('Using correlation image')
+                templates[slice] = np.stack([normalize(t)
+                                             for t in
+                                             (ExtractRaw.GalvoCorrelationImage() & dict(key, slice=slice)).fetch[
+                                                 'correlation_image']],
+                                            axis=2).max(axis=2)
+            else:
+                print('Using average frame')
+                templates[slice] = np.stack([normalize(t)
+                                             for t in
+                                             (Prepare.GalvoAverageFrame() & dict(key, slice=slice)).fetch['frame']],
+                                            axis=2).max(axis=2)
+        masks = self._reshape_masks(px, w, d1, d2)
         self.insert1(key)
-        print('[Done]')
-        if input('Do you want to stop? y/N: ') == 'y':
-            self.connection.commit_transaction()
-            raise PipelineException('User interrupted population.')
+        for m, k in zip(masks.transpose([2, 0, 1]), keys):
+            ir = m.sum(axis=1) > 0
+            ic = m.sum(axis=0) > 0
 
+            il, jl = [max(np.min(np.where(i)[0]) - 10, 0) for i in [ir, ic]]
+            ih, jh = [min(np.max(np.where(i)[0]) + 10, len(i)) for i in [ir, ic]]
+            tmp_mask = np.array(m[il:ih, jl:jh])
+
+            with sns.axes_style('white'):
+                fig, ax = plt.subplots(1, 3, sharex=True, sharey=True, figsize=(20, 5))
+
+            ax[0].imshow(templates[k['slice']][il:ih, jl:jh], cmap=plt.cm.get_cmap('gray'))
+            ax[1].imshow(templates[k['slice']][il:ih, jl:jh], cmap=plt.cm.get_cmap('gray'))
+            tmp_mask[tmp_mask == 0] = np.NaN
+            ax[1].matshow(tmp_mask, cmap=plt.cm.get_cmap('viridis'), alpha=0.5, zorder=10)
+            ax[2].matshow(tmp_mask, cmap=plt.cm.get_cmap('viridis'))
+            for a in ax:
+                a.set_aspect(1)
+                a.axis('off')
+            fig.tight_layout()
+            fig.canvas.manager.window.wm_geometry("+250+250")
+            fig.suptitle('S(o)ma, (D)endrite, A(x)on, (A)rtifact, or (U)nknown?')
+
+            def on_button(event):
+                if event.key == 'o':
+                    self.MaskType().insert1(dict(key, mask_type='soma', **k))
+                    print('Soma', k)
+                    plt.close(fig)
+                elif event.key == 'd':
+                    self.MaskType().insert1(dict(key, mask_type='dendrite', **k))
+                    print('Dendrite', k)
+                    plt.close(fig)
+                elif event.key == 'x':
+                    self.MaskType().insert1(dict(key, mask_type='axon', **k))
+                    print('Axon', k)
+                    plt.close(fig)
+                elif event.key == 'a':
+                    self.MaskType().insert1(dict(key, mask_type='artifact', **k))
+                    print('Artifact', k)
+                    plt.close(fig)
+                elif event.key == 'u':
+                    self.MaskType().insert1(dict(key, mask_type='unknown', **k))
+                    print('Unknown', k)
+                    plt.close(fig)
+
+            fig.canvas.mpl_connect('key_press_event', on_button)
+
+            plt.show()
 
 
 schema.spawn_missing_classes()
