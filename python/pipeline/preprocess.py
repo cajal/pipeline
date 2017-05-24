@@ -1393,4 +1393,124 @@ class BehaviorSync(dj.Imported):
     """
 
 
+@schema
+class MaskType(dj.Lookup):
+    definition = """
+    # classification of segmentation masks
+
+    mask_type   : varchar(32) # cell type
+    ---
+    """
+
+    @property
+    def contents(self):
+        yield from zip(['soma', 'dendrite', 'axon','unknown', 'artifact'])
+
+
+@schema
+class MaskClassification(dj.Computed):
+    definition = """
+    # grouping table for cell selections
+
+    -> ExtractRaw
+    ---
+    """
+
+    @property
+    def key_source(self):
+        return ExtractRaw() & dict(extract_method=2)
+
+    class MaskType(dj.Part):
+        definition = """
+        -> MaskClassification
+        -> ExtractRaw.GalvoROI
+        ---
+        -> MaskType
+        """
+
+    @staticmethod
+    def _reshape_masks(mask_pixels, mask_weights, px_height, px_width):
+        ret = np.zeros((px_height, px_width, len(mask_pixels)))
+        for i, (mp, mw) in enumerate(zip(mask_pixels, mask_weights)):
+            mask = np.zeros(px_height * px_width)
+            mask[mp.squeeze().astype(int) - 1] = mw.squeeze()
+            ret[..., i] = mask.reshape(px_height, px_width, order='F')
+        return ret
+
+    def _make_tuples(self, key):
+        import matplotlib.pyplot as plt
+        import seaborn as sns
+        rel = ExtractRaw.GalvoROI() & key
+
+        keys, px, w = rel.fetch[dj.key, 'mask_pixels', 'mask_weights']
+        d1, d2, fps = tuple(map(int, (Prepare.Galvo() & key).fetch1['px_height', 'px_width', 'fps']))
+
+        templates = {}
+        for slice in (Prepare.GalvoAverageFrame() & key).fetch['slice']:
+
+            if ExtractRaw.GalvoCorrelationImage() & dict(key, slice=slice):
+                print('Using correlation image')
+                templates[slice] = np.stack([normalize(t)
+                                             for t in
+                                             (ExtractRaw.GalvoCorrelationImage() & dict(key, slice=slice)).fetch[
+                                                 'correlation_image']],
+                                            axis=2).max(axis=2)
+            else:
+                print('Using average frame')
+                templates[slice] = np.stack([normalize(t)
+                                             for t in
+                                             (Prepare.GalvoAverageFrame() & dict(key, slice=slice)).fetch['frame']],
+                                            axis=2).max(axis=2)
+        masks = self._reshape_masks(px, w, d1, d2)
+        self.insert1(key)
+        for m, k in zip(masks.transpose([2, 0, 1]), keys):
+            ir = m.sum(axis=1) > 0
+            ic = m.sum(axis=0) > 0
+
+            il, jl = [max(np.min(np.where(i)[0]) - 10, 0) for i in [ir, ic]]
+            ih, jh = [min(np.max(np.where(i)[0]) + 10, len(i)) for i in [ir, ic]]
+            tmp_mask = np.array(m[il:ih, jl:jh])
+
+            with sns.axes_style('white'):
+                fig, ax = plt.subplots(1, 3, sharex=True, sharey=True, figsize=(20, 5))
+
+            ax[0].imshow(templates[k['slice']][il:ih, jl:jh], cmap=plt.cm.get_cmap('gray'))
+            ax[1].imshow(templates[k['slice']][il:ih, jl:jh], cmap=plt.cm.get_cmap('gray'))
+            tmp_mask[tmp_mask == 0] = np.NaN
+            ax[1].matshow(tmp_mask, cmap=plt.cm.get_cmap('viridis'), alpha=0.5, zorder=10)
+            ax[2].matshow(tmp_mask, cmap=plt.cm.get_cmap('viridis'))
+            for a in ax:
+                a.set_aspect(1)
+                a.axis('off')
+            fig.tight_layout()
+            fig.canvas.manager.window.wm_geometry("+250+250")
+            fig.suptitle('S(o)ma, (D)endrite, A(x)on, (A)rtifact, or (U)nknown?')
+
+            def on_button(event):
+                if event.key == 'o':
+                    self.MaskType().insert1(dict(key, mask_type='soma', **k))
+                    print('Soma', k)
+                    plt.close(fig)
+                elif event.key == 'd':
+                    self.MaskType().insert1(dict(key, mask_type='dendrite', **k))
+                    print('Dendrite', k)
+                    plt.close(fig)
+                elif event.key == 'x':
+                    self.MaskType().insert1(dict(key, mask_type='axon', **k))
+                    print('Axon', k)
+                    plt.close(fig)
+                elif event.key == 'a':
+                    self.MaskType().insert1(dict(key, mask_type='artifact', **k))
+                    print('Artifact', k)
+                    plt.close(fig)
+                elif event.key == 'u':
+                    self.MaskType().insert1(dict(key, mask_type='unknown', **k))
+                    print('Unknown', k)
+                    plt.close(fig)
+
+            fig.canvas.mpl_connect('key_press_event', on_button)
+
+            plt.show()
+
+
 schema.spawn_missing_classes()
