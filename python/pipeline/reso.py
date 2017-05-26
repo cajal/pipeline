@@ -1,22 +1,20 @@
-import os
-from warnings import warn
-import datajoint as dj
-import numpy as np
-import sh
-from commons import lab
-import scanreader
-
-from . import experiment, config, PipelineException
-from .utils.dsp import mirrconv
-from .utils.eye_tracking import ROIGrabber, ts2sec, read_video_hdf5, CVROIGrabber
-from .utils import galvo_corrections
-import matplotlib.pyplot as plt
-
 from distutils.version import StrictVersion
+from warnings import warn
+
+import datajoint as dj
+import matplotlib.pyplot as plt
+import numpy as np
+import scanreader
+from datajoint.jobs import key_hash
+
+from .utils.signal import notnan, fill_nans
+# from .shared import Slice, Channel, SegmentationMethod, SpikeMethod
+from . import experiment, notify, shared
+from .utils import galvo_corrections
 
 assert StrictVersion(dj.__version__) >= StrictVersion('0.2.9')
 
-schema = dj.schema('pipeline_meso', locals())
+schema = dj.schema('pipeline_reso', locals())
 
 
 # TODO: find a solution to figure out which channel to use for correction
@@ -26,105 +24,9 @@ schema = dj.schema('pipeline_meso', locals())
 # - fill Spikes tables and its part table from Segmentation
 
 
-
-def notnan(x, start=0, increment=1):
-    while np.isnan(x[start]) and 0 <= start < len(x):
-        start += increment
-    return start
-
-
-def fill_nans(x):
-    """
-    :param x:  1D array  -- will
-    :return: the array with nans interpolated
-    The input argument is modified.
-    """
-    nans = np.isnan(x)
-    x[nans] = 0 if nans.all() else np.interp(nans.nonzero()[0], (~nans).nonzero()[0], x[~nans])
-    return x
-
-
-def normalize(img):
-    return (img - img.min()) / (img.max() - img.min())
-
-
 def erd():
     """a shortcut for convenience"""
     dj.ERD(schema).draw(prefix=False)
-
-
-@schema
-class Slice(dj.Lookup):
-    definition = """  # slices in resonant scanner scans
-    slice  : tinyint  # slice in scan
-    """
-    contents = ((i,) for i in range(12))
-
-
-@schema
-class Channel(dj.Lookup):
-    definition = """  # recording channel, directly related to experiment.PMTFilterSet.Channel
-    channel : tinyint
-    """
-    contents = [[1], [2], [3], [4]]
-
-
-@schema
-class SegmentationMethod(dj.Lookup):
-    definition = """  
-    #  methods for extraction from raw data for either AOD or Galvo data
-
-    extract_method :  tinyint
-    ---
-    segmentation  :  varchar(16)   #
-    """
-
-    @property
-    def contents(self):
-        yield from zip([1, 2], ['manual', 'nmf'])
-
-
-@schema
-class SpikeMethod(dj.Lookup):
-    definition = """
-    spike_method   :  smallint   # spike inference method
-    ---
-    spike_method_name     : varchar(16)   #  short name to identify the spike inference method
-    spike_method_details  : varchar(255)  #  more details about
-    language :  enum('matlab','python')   #  implementation language
-    """
-
-    contents = [
-        [2, "oopsi", "nonnegative sparse deconvolution from Vogelstein (2010)", "python"],
-        [3, "stm", "spike triggered mixture model from Theis et al. (2016)", "python"],
-        [5, "nmf", "", "python"]
-    ]
-
-    def spike_traces(self, X, fps):
-        try:
-            import c2s
-        except ImportError:
-            warn("c2s was not found. You won't be able to populate ExtracSpikes")
-        assert self.fetch1['language'] == 'python', "This tuple cannot be computed in python."
-        if self.fetch1['spike_method'] == 3:
-            N = len(X)
-            for i, trace in enumerate(X):
-                print('Predicting trace %i/%i' % (i + 1, N))
-                tr0 = np.array(trace.pop('trace').squeeze())
-                start = notnan(tr0)
-                end = notnan(tr0, len(tr0) - 1, increment=-1)
-                trace['calcium'] = np.atleast_2d(tr0[start:end + 1])
-
-                trace['fps'] = fps
-                data = c2s.preprocess([trace], fps=fps)
-                data = c2s.predict(data, verbosity=0)
-
-                tr0[start:end + 1] = data[0].pop('predictions')
-                data[0]['rate_trace'] = tr0.T
-                data[0].pop('calcium')
-                data[0].pop('fps')
-
-                yield data[0]
 
 
 @schema
@@ -230,18 +132,26 @@ class ScanInfo(dj.Imported):
                    & key & 'session_date>=fov_ts')
         zooms = fov_rel.fetch['mag'].astype(np.float32)  # measured zooms in setup
         closest_zoom = zooms[np.argmin(np.abs(np.log(zooms / scan.zoom)))]
-        um_height, um_width = (fov_rel & {'mag': closest_zoom}).fetch1['height', 'width']
+        interval = 'ABS(mag - {}) < 1e-4'.format(closest_zoom)
+        um_height, um_width = (fov_rel & interval).fetch1['height', 'width']
         key['um_height'] = float(um_height) * (closest_zoom / scan.zoom) * scan._y_angle_scale_factor
         key['um_width'] = float(um_width) * (closest_zoom / scan.zoom) * scan._x_angle_scale_factor
 
         self.insert1(key)
+        self.notify(key)
+
+    def notify(self, key):
+        # --  notification
+        (notify.SlackUser() & (experiment.Session() & key)).notify(
+            "ScanInfo for `animal_id={animal_id}, session={session}, scan_idx={scan_idx}` has been populated".format(
+                **key))
 
 
 @schema
 class RasterCorrection(dj.Computed):
     definition = """
     # computes information for raster correction
-    
+
     ->ScanInfo
     ---
     preview_frame           : longblob          # raw average frame from channel 1 from an early fragment of the movie
@@ -290,22 +200,34 @@ class RasterCorrection(dj.Computed):
 
         # Insert result
         self.insert1(key)
+        self.notify(key)
+
+    def notify(self, key):
+        # --  notification
+        file = notify.temporary_image(key['preview_frame'], key)
+        (notify.SlackUser() & (experiment.Session() & key)).notify(
+            "RasterCorrection for `animal_id={animal_id}, session={session}, scan_idx={scan_idx}` has been populated".format(
+                **key), file=file, file_title='preview frame')
 
 
 @schema
 class MotionCorrection(dj.Computed):
-    definition = """   
+    definition = """
     # motion correction for galvo scans
-    
+
     -> RasterCorrection
-    -> Slice
+    -> shared.Slice
     ---
-    -> Channel
+    -> shared.Channel
     template                    : longblob       # stack that was used as alignment template
     motion_xy                   : longblob       # (pixels) x,y motion correction offsets
     motion_rms                  : float          # (um) stddev of motion
     align_times=CURRENT_TIMESTAMP: timestamp     # automatic
     """
+
+    @property
+    def key_source(self):
+        return RasterCorrection()
 
     def get_correct_motion(self):
         """
@@ -380,6 +302,13 @@ class MotionCorrection(dj.Computed):
 
             # Insert
             self.insert1(key)
+            self.notify(key)
+
+    def notify(self, key):
+        # --  notification
+        d = {k: v for k, v in key.items() if k in ['animal_id', 'session', 'scan_idx']}
+        (notify.SlackUser() & (experiment.Session() & key)).notify(
+            "MotionCorrection for `{}` has been populated".format(str(d)))
 
     def save_video(self, filename='galvo_corrections.mp4', field=1, channel=1,
                    start_index=0, seconds=30, dpi=250):
@@ -455,10 +384,14 @@ class MotionCorrection(dj.Computed):
 class AverageFrame(dj.Computed):
     definition = """   # average frame for each slice and channel after corrections
     -> MotionCorrection
-    -> Channel
+    -> shared.Channel
     ---
     frame  : longblob     # average frame after Anscombe, max-weighting,
     """
+
+    @property
+    def key_source(self):
+        return MotionCorrection()
 
     def _make_tuples(self, key):
         # Read the scan
@@ -470,58 +403,91 @@ class AverageFrame(dj.Computed):
         # Get raster correcting function
         correct_raster = (RasterCorrection() & key).get_correct_raster()
 
-        for field_id in range(scan.num_fields):
-            for channel_id in range(scan.num_channels):
-                new_tuple = key.copy()
-                new_tuple['channel'] = channel_id + 1
-                new_tuple['slice'] = field_id + 1
+        for channel_id in range(scan.num_channels):
+            new_tuple = dict(key, channel=channel_id + 1)
 
-                # Get motion correction function
-                galvomotion_rel = (MotionCorrection() & key & {'slice': field_id + 1})
-                correct_motion = galvomotion_rel.get_correct_motion()
+            # Get motion correction function
+            galvomotion_rel = MotionCorrection() & key
+            correct_motion = galvomotion_rel.get_correct_motion()
 
-                # Correct field
-                field = scan[field_id, :, :, channel_id, :]
-                field = correct_motion(correct_raster(field))
+            # Correct field
+            field = scan[key['slice'] - 1, :, :, channel_id, :]
+            field = correct_motion(correct_raster(field))
 
-                # l-p norm of each pixel over time
-                field[field < 0] = 0
-                new_tuple['frame'] = np.mean(field ** p, axis=-1) ** (1 / p)
+            # l-p norm of each pixel over time
+            field[field < 0] = 0
+            new_tuple['frame'] = np.mean(field ** p, axis=-1) ** (1 / p)
 
-                # Insert new tuple
-                self.insert1(new_tuple)
+            # Insert new tuple
+            self.insert1(new_tuple)
+        self.notify(key, scan)
+
+    def notify(self, key, scan):
+        # --  notification
+        import matplotlib
+        matplotlib.rcParams['backend'] = 'Agg'
+        import matplotlib.pyplot as plt
+        import seaborn as sns
+        with sns.axes_style('white'):
+            fig, ax = plt.subplots(1, scan.num_channels, figsize=(5 * scan.num_channels, 5))
+        for channel_id in range(scan.num_channels):
+            frame = (self & dict(key, channel=channel_id + 1)).fetch1['frame']
+            ax[channel_id].matshow(frame, cmap='gray')
+            ax[channel_id].axis('off')
+            ax[channel_id].set_title('channel {channel}'.format(channel=channel_id + 1))
+        fig.suptitle('slice {slice}'.format(**key))
+        fig.tight_layout()
+        filename = '/tmp/' + key_hash(key) + '.png'
+        fig.savefig(filename)
+        d = {k: v for k, v in key.items() if k in ['animal_id', 'session', 'scan_idx']}
+        (notify.SlackUser() & (experiment.Session() & key)).notify(
+            "AverageFrame for `{}` has been populated".format(str(d)),
+            file=filename, file_title='average frames'
+        )
+
+
+@schema
+class SegmentationTask(dj.Manual):
+    definition = """
+    # defines what needs to be segmented and which channel to use
+
+    -> experiment.Session
+    -> shared.Channel
+    ---
+    -> experiment.Compartment
+    """
 
 
 @schema
 class Segmentation(dj.Imported):
     definition = """
     # Correction, source extraction and trace deconvolution of a two-photon scan
-    
+
     -> MotionCorrection
-    -> SegmentationMethod
-    -> Channel
+    -> SegmentationTask
+    -> shared.SegmentationMethod
+    -> shared.Channel
     """
 
     @property
     def key_source(self):
-        return MotionCorrection() * SegmentationMethod() & dj.OrList(
-            [(MotionCorrection() * SegmentationMethod() - 'segmentation="manual"'),
-             MotionCorrection() * SegmentationMethod() * ManualSegment()])
-
+        return ScanInfo() * shared.SegmentationMethod() & SegmentationTask().proj() & MotionCorrection().proj()  # \
+        #    & dj.OrList(
+        # [(MotionCorrection() * shared.SegmentationMethod() - 'segmentation="manual"'),
+        #  MotionCorrection() * shared.SegmentationMethod() * ManualSegment()])
 
     class Trace(dj.Part):
         definition = """  # final calcium trace but before spike extraction or filtering
         -> Segmentation
         trace_id              : smallint
         ---
-        trace                 : longblob                     # leave null same as ExtractRaw.Trace
+        raw_trace                 : longblob                     # leave null same as ExtractRaw.Trace
         """
-
 
     class Mask(dj.Part):
         definition = """
         # Region of interest produced by segmentation
-        
+
         -> Segmentation.Trace
         ---
         mask_pixels          : longblob      # indices into the image in column major (Fortran) order
@@ -549,8 +515,6 @@ class Segmentation(dj.Imported):
 
             return spatial_mask
 
-
-
     class CorrelationImage(dj.Part):
         definition = """
         # Each pixel shows the (average) temporal correlation between that pixel and its eight neighbors
@@ -562,7 +526,7 @@ class Segmentation(dj.Imported):
     class BackgroundComponents(dj.Part):
         definition = """
         # Inferred background components with the CNMF algorithm
-        
+
         -> Segmentation
         ---
         masks    : longblob # array (im_width x im_height x num_background_components)
@@ -580,11 +544,11 @@ class Segmentation(dj.Imported):
     class CNMFParameters(dj.Part):
         definition = """
         # Arguments used to demix and deconvolve the scan with CNMF
-        
+
         -> Segmentation
-        
+
         ---
-        
+
         num_components  : smallint      # estimated number of components
         ar_order        : tinyint       # order of the autoregressive process for impulse function response
         merge_threshold : float         # overlapping masks are merged if temporal correlation greater than this
@@ -612,9 +576,6 @@ class Segmentation(dj.Imported):
         print('*' * 80)
         print('Processing scan {}'.format(key))
         print('*' * 80)
-
-        # Insert key in ExtractRaw
-        self.insert1(key)
 
         # Read the scan
         scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
@@ -656,83 +617,100 @@ class Segmentation(dj.Imported):
             kwargs['patch_downsampling_factor'] = 4
             kwargs['percentage_of_patch_overlap'] = .2
 
-        # Over each channel
-        for channel in range(scan.num_channels):
-            current_trace_id = 1  # to count traces over one channel, ids start at 1
+        # fetch channel from segmentation task
+        channel = int((SegmentationTask() & key).fetch1['channel'] - 1)
+        current_trace_id = 1  # to count traces over one channel, ids start at 1
 
-            # Over each slice in the channel
-            for slice in range(scan.num_fields):
-                # Load the scan
-                print('Loading scan...')
-                field = scan[slice, :, :, channel, :]
+        # Over each slice in the channel
+        for slice in range(scan.num_fields):
+            self.insert1(dict(key, slice=slice + 1, channel=channel + 1))
 
-                # Correct scan
-                print('Correcting scan...')
-                correct_motion = (MotionCorrection() & key & {'slice': slice + 1}).get_correct_motion()
-                correct_raster = (RasterCorrection() & key).get_correct_raster()
-                corrected_scan = correct_motion(correct_raster(field))
+            # Load the scan
+            print('Loading scan...')
 
-                # Compute and insert correlation image
-                print('Computing correlation image...')
-                correlation_image = cmn.compute_correlation_image(corrected_scan)
-                Segmentation.CorrelationImage().insert1({**key, 'slice': slice + 1,
-                                                         'channel': channel + 1,
-                                                         'correlation_image': correlation_image})
+            field = scan[slice, :, :, channel, :]
 
-                # Extract traces
-                print('Extracting mask, traces and spikes (cnmf)...')
-                cnmf_result = cmn.demix_and_deconvolve_with_cnmf(corrected_scan, **kwargs)
-                (location_matrix, activity_matrix, background_location_matrix,
-                 background_activity_matrix, raw_traces, spikes, AR_params) = cnmf_result
+            # Correct scan
+            print('Correcting scan...')
+            correct_motion = (MotionCorrection() & key & {'slice': slice + 1}).get_correct_motion()
+            correct_raster = (RasterCorrection() & key).get_correct_raster()
+            corrected_scan = correct_motion(correct_raster(field))
 
-                # Obtain new mask order based on their brightness in the correlation image
-                new_order = cmn.order_components(location_matrix, correlation_image)
+            # Compute and insert correlation image
+            print('Computing correlation image...')
+            correlation_image = cmn.compute_correlation_image(corrected_scan)
+            Segmentation.CorrelationImage().insert1({**key, 'slice': slice + 1,
+                                                     'channel': channel + 1,
+                                                     'correlation_image': correlation_image})
 
-                # Insert traces, spikes and spatial masks (preserving new order)
-                print('Inserting masks, traces, spikes, ar parameters and background'
-                      ' components...')
-                dj.conn().is_connected  # make sure connection is active
-                for i in new_order:
-                    # Create new trace key
-                    trace_key = {**key, 'trace_id': current_trace_id, 'channel': channel + 1}
+            # Extract traces
+            print('Extracting mask, traces and spikes (cnmf)...')
+            cnmf_result = cmn.demix_and_deconvolve_with_cnmf(corrected_scan, **kwargs)
+            (location_matrix, activity_matrix, background_location_matrix,
+             background_activity_matrix, raw_traces, spikes, AR_params) = cnmf_result
 
-                    # Insert traces and spikes
-                    Segmentation.Trace().insert1({**trace_key, 'raw_trace': raw_traces[i, :]})
-                    Segmentation.SpikeRate().insert1({**trace_key, 'spike_trace': spikes[i, :]})
+            # Obtain new mask order based on their brightness in the correlation image
+            new_order = cmn.order_components(location_matrix, correlation_image)
 
-                    # Insert fitted AR parameters
-                    if kwargs['AR_order'] > 0:
-                        Segmentation.ARCoefficients().insert1({**trace_key, 'g': AR_params[i, :]})
+            # Insert traces, spikes and spatial masks (preserving new order)
+            print('Inserting masks, traces, spikes, ar parameters and background'
+                  ' components...')
+            dj.conn().is_connected  # make sure connection is active
 
-                    # Get indices and weights of defined pixels in mask (matlab-like)
-                    mask_as_F_ordered_vector = location_matrix[:, :, i].ravel(order='F')
-                    defined_mask_indices = np.where(mask_as_F_ordered_vector)[0]
-                    defined_mask_weights = mask_as_F_ordered_vector[defined_mask_indices]
-                    defined_mask_indices += 1  # matlab indices start at 1
+            # --- insert into spikes
+            spike_method = (shared.SpikeMethod() & 'spike_method_name="nmf"').fetch1['spike_method']
+            skey = dict(key, channel=channel + 1, slice=slice + 1, spike_method=spike_method)
+            Spikes().insert1(skey, skip_duplicates=True)
+            for i in new_order:
+                # Create new trace key
+                trace_key = {**key, 'trace_id': current_trace_id, 'channel': channel + 1, 'slice': slice + 1}
 
-                    # Insert spatial mask
-                    # TODO: Channel?
-                    Segmentation.Mask().insert1({**trace_key, 'slice': slice + 1,
-                                                 'mask_pixels': defined_mask_indices,
-                                                 'mask_weights': defined_mask_weights})
+                # Insert traces and spikes
+                Segmentation.Trace().insert1({**trace_key, 'raw_trace': raw_traces[i, :]})
 
-                    # Increase trace_id counter
-                    current_trace_id += 1
+                Spikes.RateTrace().insert1({**trace_key, 'rate_trace': spikes[i, :], 'spike_method': spike_method})
 
-                # Insert background components
-                background_dict = {**key, 'channel': channel + 1, 'slice': slice + 1,
-                                   'masks': background_location_matrix,
-                                   'activity': background_activity_matrix}
-                Segmentation.BackgroundComponents().insert1(background_dict)
+                # Insert fitted AR parameters
+                if kwargs['AR_order'] > 0:
+                    Segmentation.ARCoefficients().insert1({**trace_key, 'g': AR_params[i, :]})
 
-        # Insert CNMF parameters (one per scan)
-        lowercase_kwargs = {key.lower(): value for key, value in kwargs.items()}
-        Segmentation.CNMFParameters().insert1({**key, **lowercase_kwargs})
+                # Get indices and weights of defined pixels in mask (matlab-like)
+                mask_as_F_ordered_vector = location_matrix[:, :, i].ravel(order='F')
+                defined_mask_indices = np.where(mask_as_F_ordered_vector)[0]
+                defined_mask_weights = mask_as_F_ordered_vector[defined_mask_indices]
+                defined_mask_indices += 1  # matlab indices start at 1
+
+                # Insert spatial mask
+                Segmentation.Mask().insert1({**trace_key, 'slice': slice + 1,
+                                             'mask_pixels': defined_mask_indices,
+                                             'mask_weights': defined_mask_weights})
+
+                # Increase trace_id counter
+                current_trace_id += 1
+
+            # Insert background components
+            background_dict = {**key, 'channel': channel + 1, 'slice': slice + 1,
+                               'masks': background_location_matrix,
+                               'activity': background_activity_matrix}
+            Segmentation.BackgroundComponents().insert1(background_dict)
+
+            # ----------------------------------
+            # Insert CNMF parameters (one per scan slice and scan)
+            lowercase_kwargs = {key.lower(): value for key, value in kwargs.items()}
+            Segmentation.CNMFParameters().insert1({**key, **lowercase_kwargs, 'slice': slice + 1, 'channel': channel + 1})
+        self.notify(key)
+
+
+    def notify(self, key):
+        d = {k: v for k, v in key.items() if k in ['animal_id', 'session', 'scan_idx', 'channel']}
+        (notify.SlackUser() & (experiment.Session() & key)).notify(
+            "Segmentation for `{}` has been populated".format(str(d)))
+
 
     def save_video(self, filename='cnmf_results.mp4', field=1, channel=1,
                    start_index=0, seconds=30, dpi=250, first_n=None):
         """ Creates an animation video showing the original vs corrected scan.
-
+    
         :param string filename: Output filename (path + filename)
         :param int field: Slice to use for plotting. Starts at 1
         :param int channel: What channel from the scan to use. Starts at 1
@@ -740,7 +718,7 @@ class Segmentation(dj.Imported):
         :param int seconds: How long in seconds should the animation run.
         :param int dpi: Dots per inch, controls the quality of the video.
         :param int first_n: Consider only the first n components.
-
+    
         :returns Figure. You can call show() on it.
         :rtype: matplotlib.figure.Figure
         """
@@ -840,9 +818,10 @@ class Segmentation(dj.Imported):
 
         return fig
 
+
     def plot_contours(self, slice=1, channel=1, first_n=None):
         """ Draw contours of masks over the correlation image.
-
+    
         :param slice: Scan slice to use
         :param channel: Scan channel to use
         :param first_n: Number of masks to plot. None for all.
@@ -865,9 +844,10 @@ class Segmentation(dj.Imported):
         # Draw contours
         cmn.plot_contours(location_matrix, correlation_image)
 
+
     def plot_centroids(self, slice=1, channel=1, first_n=None):
         """ Draw centroids of masks over the correlation image.
-
+    
         :param slice: Scan slice to use
         :param channel: Scan channel to use
         :param first_n: Number of masks to plot. None for all.
@@ -890,12 +870,13 @@ class Segmentation(dj.Imported):
         # Draw centroids
         cmn.plot_centroids(location_matrix, correlation_image)
 
+
     def plot_impulse_responses(self, slice=1, channel=1, num_timepoints=100):
         """ Plots the individual impulse response functions for all traces assuming an
         autoregressive process (p > 0).
-
+    
         :param int num_timepoints: The number of points after impulse to use for plotting.
-
+    
         :returns Figure. You can call show() on it.
         :rtype: matplotlib.figure.Figure
         """
@@ -927,6 +908,7 @@ class Segmentation(dj.Imported):
 
             return fig
 
+
     def get_all_masks(self, slice, channel):
         """Returns an image_height x image_width x num_masks matrix with all masks."""
         mask_rel = Segmentation.Mask() & self & {'slice': slice, 'channel': channel}
@@ -943,6 +925,7 @@ class Segmentation(dj.Imported):
 
         return location_matrix
 
+
     def get_all_traces(self, slice, channel):
         """ Returns a num_traces x num_timesteps matrix with all traces."""
         trace_rel = Segmentation.Trace() * Segmentation.Mask() & self & {'slice': slice,
@@ -955,59 +938,47 @@ class Segmentation(dj.Imported):
 
         return raw_traces
 
-    def get_all_spikes(self, slice, channel):
-        """ Returns a num_spike_traces x num_timesteps matrix with all spike rates."""
-        spike_rel = Segmentation.SpikeRate() * Segmentation.Mask() & self & {'slice': slice,
-                                                                             'channel': channel}
-        # Get spike traces
-        spike_traces = spike_rel.fetch.order_by('trace_id')['spike_trace']
-
-        # Reshape them
-        spike_traces = np.array([x.squeeze() for x in spike_traces])
-
-        return spike_traces
-
-
-@schema
-class Sync(dj.Imported):
-    definition = """
-    -> ScanInfo
-    ---
-    -> vis.Session
-    first_trial                 : int                           # first trial index from vis.Trial overlapping recording
-    last_trial                  : int                           # last trial index from vis.Trial overlapping recording
-    signal_start_time           : double                        # (s) signal start time on stimulus clock
-    signal_duration             : double                        # (s) signal duration on stimulus time
-    frame_times = null          : longblob                      # times of frames and slices
-    sync_ts=CURRENT_TIMESTAMP   : timestamp                     # automatic
-    """
 
 
 
+
+# @schema
+# class Sync(dj.Imported):
+#     definition = """
+#     -> ScanInfo
+#     ---
+#     -> vis.Session
+#     first_trial                 : int                           # first trial index from vis.Trial overlapping recording
+#     last_trial                  : int                           # last trial index from vis.Trial overlapping recording
+#     signal_start_time           : double                        # (s) signal start time on stimulus clock
+#     signal_duration             : double                        # (s) signal duration on stimulus time
+#     frame_times = null          : longblob                      # times of frames and slices
+#     sync_ts=CURRENT_TIMESTAMP   : timestamp                     # automatic
+#     """
+#
 
 @schema
 class Spikes(dj.Computed):
-    definition = """  
+    definition = """
     # infer spikes from calcium traces
-    
+
     -> Segmentation
-    -> SpikeMethod
+    -> shared.SpikeMethod
     """
 
     @property
     def key_source(self):
-        return ((Segmentation() * SpikeMethod() & "language='python'") - 'segmentation="nmf"').proj()
+        return ((Segmentation() * shared.SpikeMethod() & "language='python'") - 'segmentation="nmf"').proj()
 
     class RateTrace(dj.Part):
-        definition = """  
+        definition = """
         # Deconvolved calcium acitivity
-        
+
         -> Spikes
         -> Segmentation.Trace
         ---
         rate_trace: longblob     # leave null same as ExtractRaw.Trace
         """
-
 
     def _make_tuples(self, key):
         try:
@@ -1017,7 +988,7 @@ class Spikes(dj.Computed):
                 'Could not load pyfnnd. Oopsi spike inference will fail. Install from https://github.com/cajal/PyFNND.git')
 
         print('Populating Spikes for ', key, end='...', flush=True)
-        method = (SpikeMethod() & key).fetch1['spike_method_name']
+        method = (shared.SpikeMethod() & key).fetch1['spike_method_name']
         if method == 'stm':
             prep = ScanInfo() & key
             fps = prep.fetch1['fps']
@@ -1025,7 +996,7 @@ class Spikes(dj.Computed):
                  (Segmentation.Trace() & key).proj('trace').fetch.as_dict]
 
             self.insert1(key)
-            for x in (SpikeMethod() & key).spike_traces(X, fps):
+            for x in (shared.SpikeMethod() & key).spike_traces(X, fps):
                 self.RateTrace().insert1(dict(key, **x))
 
         elif method == 'oopsi':
@@ -1040,14 +1011,14 @@ class Spikes(dj.Computed):
             raise NotImplementedError('Method {spike_method} not implemented.'.format(**key))
         print('Done', flush=True)
 
-
-@schema
-class BehaviorSync(dj.Imported):
-    definition = """
-    -> experiment.Scan
-    ---
-    frame_times                  : longblob # time stamp of imaging frame on behavior clock
-    """
-
-
+#
+# @schema
+# class BehaviorSync(dj.Imported):
+#     definition = """
+#     -> experiment.Scan
+#     ---
+#     frame_times                  : longblob # time stamp of imaging frame on behavior clock
+#     """
+#
+#
 schema.spawn_missing_classes()
