@@ -335,7 +335,7 @@ class PupilTracker:
             df2 = pd.DataFrame(cond)
 
             print('-', end="", flush=True)
-            if np.any(df['conditions'] >= show_matching):
+            if 'conditions' in df.columns and np.any(df['conditions'] >= show_matching):
 
                 idx = df['conditions'] >= show_matching
                 df = df[idx]

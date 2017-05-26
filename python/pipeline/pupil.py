@@ -57,6 +57,10 @@ class Eye(dj.Imported):
         ---
         """
 
+    @property
+    def key_source(self):
+        return (experiment.Scan() & experiment.Scan.EyeVideo()) - experiment.ScanIgnored()
+
     @staticmethod
     def _get_modified_parameters():
         new_param = dict(DEFAULT_PARAMETERS)
@@ -73,7 +77,7 @@ class Eye(dj.Imported):
         :param path_prefix: prefix to the path to find the video (usually '/mnt/', but empty by default)
         """
 
-        rel = experiment.Session() * experiment.Scan.EyeVideo()
+        rel = experiment.Session() * experiment.Scan.EyeVideo() - experiment.ScanIgnored()
         path_prefix = config['path.mounts']
         restr = [k for k in (rel - self).proj('behavior_path', 'filename').fetch.as_dict() if
                  os.path.exists("{path_prefix}/{behavior_path}/{filename}".format(path_prefix=path_prefix, **k))]
