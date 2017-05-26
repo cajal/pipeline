@@ -86,11 +86,10 @@ RUN apt-get update -y -q && \
 RUN grep -vwE "install_requires=" CaImAn/setup.py > tmp && mv tmp CaImAn/setup.py &&\
     pip3 install -e CaImAn/
 
-# --- install tiffreader
+# --- install scanreader
 RUN \
-  pip3 install oct2py && \
-  git clone https://github.com/atlab/tiffreader.git && \
-  pip3 install -e tiffreader
+  git clone https://github.com/atlab/scanreader.git && \
+  pip3 install -e scanreader
 
 ## --- install pipeline
 COPY . /data/pipeline
