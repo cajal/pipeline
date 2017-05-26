@@ -31,9 +31,9 @@ classdef Control < handle
             for i = 1:numel(params)
                 param = params(i);
                 condition = struct;
-                condition.special_name = class(specialTable);
-                condition.special_variation = specialTable.variation;
-                hash = dj.DataHash(dj.struct.join(condition, param), ...
+                condition.stimulus_type = class(specialTable);
+                condition.stimulus_version = specialTable.version;
+                hash = stimulus.utils.DataHash(dj.struct.join(condition, param), ...
                     struct('Format','base64', 'Method', 'md5'));
                 hash = hash(1:self.hashLength);
                 
@@ -141,7 +141,7 @@ classdef Control < handle
                 trialRecord.trial_idx = trialId;
                 trialRecord.condition_hash = condition.condition_hash;
                 trialRecord.flip_times = self.screen.clearFlipTimes();
-                trialRecord.last_flip = trialRecord.flip_times(1);
+                trialRecord.last_flip = self.screen.flipCount;
                 self.trialTable.insertParallel(trialRecord)
                 trialId = trialId + 1;
             end
