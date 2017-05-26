@@ -1,5 +1,5 @@
 import datajoint as dj
-from . import experiment, PipelineException
+from . import experiment, PipelineException, notify
 
 from warnings import warn
 import numpy as np
@@ -59,7 +59,7 @@ class Eye(dj.Imported):
 
     @property
     def key_source(self):
-        return (experiment.Scan() & experiment.Scan.EyeVideo()) - experiment.ScanIgnored()
+        return (experiment.Scan() & experiment.Scan.EyeVideo().proj()) - experiment.ScanIgnored()
 
     @staticmethod
     def _get_modified_parameters():
@@ -161,11 +161,9 @@ class Eye(dj.Imported):
                 self.ManualParameters().insert1(dict(key, tracking_parameters=self._get_modified_parameters()),
                                                 ignore_extra_fields=True)
 
-
     def get_video_path(self):
         video_info = (experiment.Session() * experiment.Scan.EyeVideo() & self).fetch1()
         return lab.Paths().get_local_path("{behavior_path}/{filename}".format(**video_info))
-
 
 
 @schema
@@ -205,12 +203,16 @@ class TrackedVideo(dj.Computed):
 
         tr = PupilTracker(param)
         traces = tr.track(avi_path, roi - 1, display=config['display.tracking'])  # -1 because of matlab indices
+
         key['tracking_parameters'] = json.dumps(param)
         self.insert1(key)
         fr = self.Frame()
         for trace in traces:
             trace.update(key)
             fr.insert1(trace, ignore_extra_fields=True)
+
+        (notify.SlackUser() & (experiment.Session() & key)).notify(
+            'Pupil tracking for {} has been populated'.format(str(key)))
 
     def plot_traces(self, outdir='./', show=False):
         """

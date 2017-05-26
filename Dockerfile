@@ -101,4 +101,6 @@ RUN git clone https://github.com/atlab/commons.git && \
     pip3 install scikit-learn --upgrade && \
     pip3 install imreg_dft
 
+RUN pip3 install slacker
+
 ENTRYPOINT ["worker"]

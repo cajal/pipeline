@@ -4,12 +4,15 @@ import datajoint as dj
 import numpy as np
 import sh
 from commons import lab
+from datajoint.jobs import key_hash
+from pipeline.notify import temporary_image
 
 from . import experiment, config, PipelineException
 from .utils.dsp import mirrconv
 from .utils.eye_tracking import ROIGrabber, ts2sec, read_video_hdf5, CVROIGrabber
 from .utils import galvo_corrections
 import matplotlib.pyplot as plt
+from .import notify
 
 from distutils.version import StrictVersion
 
@@ -159,6 +162,7 @@ class Prepare(dj.Imported):
             :param scan Scan: The scan. An Scan object returned by scanreader.
             """
             # Warning for multiroi scans
+
             if scan.is_multiROI:
                 print('Warning: MultiROI scan. px_height & px_width may not be the same',
                       'for all fields. Taking those of first field.')
@@ -368,6 +372,22 @@ class Prepare(dj.Imported):
             # Prepare average frame
             print('Computing average corrected frame...')
             Prepare.GalvoAverageFrame()._make_tuples(key, scan)
+
+            # --- notify
+            filename = temporary_image((Prepare.GalvoAverageFrame() & key & dict(channel=channel)).fetch1['frame'], key)
+            (notify.SlackUser() & dict(username='fabee')).notify(
+                """Prepare tracking for 
+                    animal_id={animal_id}, 
+                    session={session}, 
+                    scan_idx={scan_idx} has been populated""".format(**key),
+                file=filename, file_title='average frame'
+            )
+            # (notify.SlackUser() & (experiment.Session() & key)).notify(
+            #     """Pupil tracking for
+            #         animal_id={animal_id},
+            #         session={session},
+            #         scan_idx={scan_idx} has been populated""".format(**key))
+
 
     def save_video(self, filename='galvo_corrections.mp4', field=1, channel=1,
                    start_index=0, seconds=30, dpi=250):
