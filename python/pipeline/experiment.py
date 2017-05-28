@@ -391,7 +391,7 @@ class Scan(dj.Manual):
         local_path = lab.Paths().get_local_path(scan_path)
 
         scan_name = (Scan() & self).fetch1['filename']
-        local_filename = os.path.join(local_path, scan_name) + '_*.tif'  # all parts
+        local_filename = os.path.join(local_path, scan_name) + '*.tif'  # all parts
 
         return local_filename
 
