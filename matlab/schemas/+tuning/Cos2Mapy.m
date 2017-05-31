@@ -15,11 +15,11 @@ classdef Cos2Mapy < dj.Computed
 
 		function makeTuples(self, key)
             % check that angles are uniformly sampled
-            [ndirs, C] = fetch1(tuning.Directional*tuning.OriDesignMatrix & key, ...
+            [ndirs, C] = fetch1(tuning.Directional*tun Screen('PlayMovie', movie,1);ing.OriDesignMatrix & key, ...
                 'ndirections', 'regressor_cov');
             phi = (0:ndirs-1)'/ndirs*360;            
             [B, R2, dof] = fetch1(tuning.OriMapy & key, ...
-                'regr_coef_maps', 'r2_map', 'dof_map');
+                'regr_coef_maps', 'r2_map', 'dof_map'); Screen('PlayMovie', movie,1);
             assert(size(B,3) == length(phi), 'OriMapy regression coeff dimension mismatch')
             sz = size(R2);
             B = reshape(B,[],length(phi));
