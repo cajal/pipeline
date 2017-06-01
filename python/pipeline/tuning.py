@@ -4,11 +4,12 @@ Analysis of visual tuning: receptive fields, tuning curves, pixelwise maps
 import numpy as np
 from scipy.interpolate import interp1d
 from scipy.signal import convolve
+from scipy import linalg, stats
 import io
 import imageio
 import datajoint as dj
 from . import preprocess
-from . import stimulus
+from . import experiment
 from . import vis
 
 from distutils.version import StrictVersion
@@ -75,7 +76,7 @@ class OriDesignMatrix(dj.Computed):
 
 
 @schema
-class OriMap(dj.Imported):
+class OriMapy(dj.Imported):
     definition = """ # pixelwise responses to full-field directional stimuli
     -> OriDesignMatrix
     -> preprocess.Prepare.GalvoMotion
@@ -84,6 +85,55 @@ class OriMap(dj.Imported):
     r2_map: longblob  # pixelwise r-squared after gaussinization
     dof_map: longblob  # degrees of in original signal, width x height
     """
+
+    def _make_tuples(self, key):
+        # Load the scan
+        import scanreader
+        scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
+        scan = scanreader.read_scan(scan_filename)
+        scan = (scan[key['slice']-1, :, :, 0, :]).astype(np.float32, copy=False)
+
+        # Correct the scan
+        correct_motion = (preprocess.Prepare.GalvoMotion() & key).get_correct_motion()
+        correct_raster = (preprocess.Prepare.Galvo() & key).get_correct_raster()
+        scan = correct_motion(correct_raster(scan))
+        design, cov = (OriDesignMatrix() & key).fetch1['design_matrix', 'regressor_cov']
+        height, width, nslices = (preprocess.Prepare.Galvo() & key).fetch1['px_height', 'px_width', 'nslices']
+        design = design[key['slice'] - 1::nslices, :]
+        if scan.shape[2] == 2*design.shape[0]:
+            scan = (scan[:,:,::2] + scan[:,:,1::2])/2  # this is a hack for mesoscope scanner -- needs fixing
+
+        assert design.shape[0] == scan.shape[2]
+        height, width = scan.shape[0:2]    # hack for mesoscope -- needs fixing
+        assert (height, width) == scan.shape[0:2]
+
+        # remove periods where the design matrix has any nans
+        ix = np.logical_not(np.isnan(design).any(axis=1))
+        design = design[ix, :]
+        design = design - design.mean()
+        nregressors = design.shape[1]
+
+        # normalize scan
+        m = scan.mean(axis=-1, keepdims=True)
+        scan -= m
+        scan /= m
+        v = (scan**2).sum(axis=-1)
+
+        # estimate degrees of freedom per pixel
+        spectrum = np.abs(np.fft.fft(scan, axis=-1))
+        dof = (spectrum.sum(axis=-1)**2/(spectrum**2).sum(axis=-1)).astype(np.int32)
+
+        # solve
+        scan = scan[:, :, ix].reshape((-1, design.shape[0])).T
+        x, r2, rank, sv = linalg.lstsq(design, scan, overwrite_a=True, overwrite_b=True, check_finite=False)
+        del scan, design
+
+        assert rank == nregressors
+        x = x.T.reshape((height, width, -1))
+        r2 = 1-r2.reshape((height, width))/v
+
+        self.insert1(dict(key, regr_coef_maps=x, r2_map=r2, dof_map=dof))
+
 
 
 @schema
