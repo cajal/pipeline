@@ -10,6 +10,10 @@ classdef Screen < handle
         flipSize  = [0.05 0.06];   %  the relative size of the photodiode texture
     end
     
+    properties
+        frameStep = 1;
+    end
+    
     properties(SetAccess=private)
         rect              % (pixels) window rectangle
         win               % window pointer
@@ -150,7 +154,7 @@ classdef Screen < handle
                     [0 0 self.flipRect(1) self.flipRect(2)]);
             end
             % update screen
-            when = self.prevFlipTime+self.frameInterval;
+            when = self.prevFlipTime+self.frameStep * self.frameInterval;
             flipTime = Screen('Flip', self.win, when - 0.5*self.frameInterval, double(~clearScreen));
             if ~isempty(when)
                 droppedFrames = round((flipTime - when)/self.frameInterval);
@@ -189,7 +193,7 @@ end
 
 
 function assign(s)
-% assigns fields of a structure to variables in caller's workspace
+% assigns fields from the give structure as variables in caller's workspace
 for f = fieldnames(s)'
     assignin('caller', f{1}, s.(f{1}))
 end
