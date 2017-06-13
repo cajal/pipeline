@@ -8,7 +8,7 @@ schema = dj.schema('pipeline_notification', locals())
 class SlackConnection(dj.Manual):
     definition = """
     # slack domain and api key for notification
-    
+
     domain         : varchar(128) # slack domain
     ---
     api_key     : varchar(128) # api key for bot connection
@@ -19,10 +19,10 @@ class SlackUser(dj.Manual):
 
     definition = """
     # information for user notification
-    
+
     -> Person
     ---
-    slack_user          : varchar(128) # user on slack 
+    slack_user          : varchar(128) # user on slack
     -> SlackConnection
     """
 

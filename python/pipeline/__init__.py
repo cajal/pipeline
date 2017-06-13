@@ -1,9 +1,8 @@
-import os
-
 _report_on = {
     'aod pipeline': ['aod_monet', 'aodpre'],
     'reso pipeline': ['pre', 'rf', 'trk', 'trippy', 'monet']
 }
+
 
 #--- switch matplotlib backend if there is no way to display things.
 import matplotlib
@@ -16,18 +15,10 @@ except TclError:
     matplotlib.use('Agg', warn=False, force=True)
 
 
-class PipelineException(Exception):
-    """Base pipeline exception. Prints the message plus any passed info."""
-    def __init__(self, message, info=None):
-        info_message = '\nError info: ' + repr(info) if info else ''
-        super().__init__(message + info_message)
-        self.info = info
-
-
 # ----------- loads local configuration from file ----------------
+import os
 from .settings import Config, LOCALCONFIG, GLOBALCONFIG
 config = Config()
-
 
 if os.path.exists(LOCALCONFIG):  # pragma: no cover
     local_config_file = os.path.expanduser(LOCALCONFIG)
