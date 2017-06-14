@@ -233,6 +233,7 @@ class MadAlexFrameSet(dj.Lookup):
         np.random.seed(1706)
         all_images = np.arange(1, 12001, dtype=np.int32)
         ri = np.random.randint
+        rp = np.random.permutation
         repeats_shared = all_images[ri(0, len(all_images), size=25)]
 
         all_images = np.setdiff1d(all_images, repeats_shared)
@@ -247,6 +248,8 @@ class MadAlexFrameSet(dj.Lookup):
                        uniques=uniques,
                        repeats_shared=repeats_shared,
                        repeats_nonshared=repeats_nonshared)
+
+
 
 @schema
 class MatisseCenterLoc(dj.Lookup):
