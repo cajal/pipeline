@@ -1,7 +1,4 @@
 """ Schemas for resonant scanners."""
-from warnings import warn
-from .exceptions import PipelineException
-
 import datajoint as dj
 from datajoint.jobs import key_hash
 import matplotlib.pyplot as plt
@@ -13,6 +10,7 @@ from . import experiment, notify, shared
 from .utils import galvo_corrections
 from .utils import signal
 from .utils import quality
+from .exceptions import PipelineException
 
 
 schema = dj.schema('pipeline_reso', locals())
@@ -601,8 +599,9 @@ class ManualSegmentation(dj.Manual):
 
 
 @schema
-class NMFSegmentation(dj.Computed):
+class NMF(dj.Computed):
     definition = """ # source extraction using constrained non-negative matrix factorization (Pnevmatikakis et al., 2016)
+
     -> MotionCorrection
     -> SegmentationTask
     ---
@@ -612,7 +611,7 @@ class NMFSegmentation(dj.Computed):
     class Parameters(dj.Part):
         definition = """ # parameters used to demix and deconvolve the scan with CNMF
 
-        -> NMFSegmentation
+        -> NMF
         ---
         num_components                  : smallint      # estimated number of components
         ar_order                        : tinyint       # order of the autoregressive process for impulse response function
@@ -632,7 +631,7 @@ class NMFSegmentation(dj.Computed):
     class BackgroundComponents(dj.Part):
         definition = """ # inferred background components
 
-        -> NMFSegmentation
+        -> NMF
         ---
         masks               : longblob      # array (im_width x im_height x num_background_components)
         activity            : longblob      # array (num_background_components x timesteps)
@@ -642,6 +641,7 @@ class NMFSegmentation(dj.Computed):
     class ARCoefficients(dj.Part):
         definition = """ # fitted parameters for the autoregressive process
 
+        -> NMF
         -> Segmentation.Mask
         ---
         g                   : blob          # g1, g2, ... coefficients for the AR process
@@ -724,18 +724,19 @@ class NMFSegmentation(dj.Computed):
         # Insert CNMF results
         print('Inserting masks, background components, ar coefficients and traces...')
 
-        ## Insert in NMFSegmentation and Segmentation
+        ## Insert in NMF, Segmentation and Calcium
         self.insert1(key)
         Segmentation().insert1({**key, 'extract_method': 2})
+        Calcium().insert1({**key, 'extract_method': 2}) # nmf also inserts traces
 
         ## Insert CNMF parameters
         lowercase_kwargs = {k.lower(): v for k, v in kwargs.items()}
-        NMFSegmentation.Parameters().insert1({**key, **lowercase_kwargs})
+        NMF.Parameters().insert1({**key, **lowercase_kwargs})
 
         ## Insert background components
         background_dict = {**key, 'masks': background_location_matrix,
                            'activity': background_activity_matrix}
-        NMFSegmentation.BackgroundComponents().insert1(background_dict)
+        NMF.BackgroundComponents().insert1(background_dict)
 
         ## Insert masks and traces (masks in Matlab format)
         masks_as_F_ordered_vectors = location_matrix.reshape(-1, num_masks, order='F')
@@ -754,10 +755,10 @@ class NMFSegmentation(dj.Computed):
                                              'px_y': px_y, 'um_x': um_x, 'um_y': um_y,
                                              'um_z': um_z})
 
-            Trace().insert1({**mask_key, 'raw_trace': trace})
+            Calcium.Trace().insert1({**mask_key, 'trace': trace})
 
             if kwargs['AR_order'] > 0:
-               NMFSegmentation.ARCoefficients().insert1({**mask_key, 'g': ar_coeffs})
+               NMF.ARCoefficients().insert1({**mask_key, 'g': ar_coeffs})
 
         self.notify(key)
 
@@ -767,7 +768,7 @@ class NMFSegmentation(dj.Computed):
         fig.savefig(img_filename)
         plt.close(fig)
 
-        msg = 'NMFSegmentation for `{}` has been populated.'.format(key)
+        msg = 'NMF for `{}` has been populated.'.format(key)
         (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
                                                                    file_title='mask contours')
 
@@ -807,9 +808,9 @@ class NMFSegmentation(dj.Computed):
 
         # Get location and activity matrices
         location_matrix = (Segmentation() & self).get_all_masks()
-        activity_matrix = (Trace() & self).get_all_traces() # always there for CNMF
+        activity_matrix = (Calcium() & self).get_all_traces() # always there for CNMF
         background_location_matrix, background_activity_matrix = \
-            (NMFSegmentation.BackgroundComponents() & self).fetch1['masks', 'activity']
+            (NMF.BackgroundComponents() & self).fetch1['masks', 'activity']
 
         # Select first n components
         if first_n is not None:
@@ -882,7 +883,7 @@ class NMFSegmentation(dj.Computed):
         :returns Figure. You can call show() on it.
         :rtype: matplotlib.figure.Figure
         """
-        ar_rel = NMFSegmentation.ARCoefficients() & self
+        ar_rel = NMF.ARCoefficients() & self
         if ar_rel: # if an AR model was used
             # Get some params
             fps = (ScanInfo() & self).fetch1['fps']
@@ -951,6 +952,7 @@ class Segmentation(dj.Manual):
     class MaskInfo(dj.Part):
         definition = """ # mask type and coordinates in x, y, z
 
+        -> Segmentation
         -> Segmentation.Mask
         ---
         -> shared.MaskType                  # type of the mask assigned during segmentation
@@ -1065,10 +1067,69 @@ class Segmentation(dj.Manual):
         """ Delete entries in appropiate subtables."""
         if ManualSegmentation() & self:
             dj.BaseRelation.delete(ManualSegmentation() & self)
-        if NMFSegmentation() & self:
-            dj.BaseRelation.delete(NMFSegmentation() & self)
+        if NMF() & self:
+            dj.BaseRelation.delete(NMF() & self)
         if self:
             super().delete()
+
+
+@schema
+class Calcium(dj.Computed):
+    definition = """  # calcium traces before spike extraction or filtering
+
+    -> Segmentation
+    """
+
+    class Trace(dj.Part):
+        definition = """
+
+        -> Calcium
+        -> Segmentation.Mask
+        ---
+        trace                   : longblob
+        """
+
+    def _make_tuples(self, key):
+        print('Creating calcium traces for', key)
+
+        # Load scan
+        slice_id = key['slice'] - 1
+        channel = key['channel'] - 1
+        scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
+        scan = scanreader.read_scan(scan_filename, dtype=np.float32)
+        scan_ = scan[slice_id, :, :, channel, :]
+
+        # Get masks as images
+        mask_ids, mask_pixels, mask_weights = \
+            (Segmentation.Mask() & key).fetch['mask_id', 'pixels', 'weights']
+        location_matrix = Segmentation.reshape_masks(mask_pixels, mask_weights,
+                                                     scan.image_height, scan.image_width)
+        masks = location_matrix.transpose([2, 0, 1])
+
+        self.insert1(key)
+        for mask_id, mask in zip(mask_ids, masks):
+            trace = np.average(scan_.reshape(-1, scan.num_frames), weights=mask.ravel(),
+                               axis=0)
+
+            Calcium.Trace().insert1({**key, 'mask_id': mask_id, 'trace': trace})
+
+        self.notify(key)
+
+    def notify(self, key):
+        fig = plt.figure()
+        plt.plot((Calcium() & key).get_all_traces().T)
+        img_filename = '/tmp/' + key_hash(key) + '.png'
+        fig.savefig(img_filename)
+        plt.close(fig)
+
+        msg = 'Calcium.Trace for `{}` has been populated.'.format(key)
+        (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
+                                                                   file_title='calcium traces')
+
+    def get_all_traces(self):
+        """ Returns a num_traces x num_timesteps matrix with all traces."""
+        traces = (Calcium.Trace() & self).fetch.order_by('mask_id')['trace']
+        return np.array([x.squeeze() for x in traces])
 
 
 @schema
@@ -1083,6 +1144,8 @@ class MaskClassification(dj.Computed):
 
     class Type(dj.Part):
         definition = """
+
+        -> MaskClassification
         -> Segmentation.Mask
         ---
         -> shared.MaskType
@@ -1126,20 +1189,24 @@ class MaskClassification(dj.Computed):
                 a.axis('off')
             fig.tight_layout()
             fig.canvas.manager.window.wm_geometry("+250+250")
-            fig.suptitle('S(o)ma, (D)endrite, A(x)on, (A)rtifact, or (U)nknown?')
+            fig.suptitle('S(o)ma, A(x)on, (D)endrite, (N)europil, (A)rtifact or (U)nknown?')
 
             def on_button(event):
                 if event.key == 'o':
                     self.Type().insert1({**key, 'mask_id': mask_id, 'type': 'soma'})
                     print('Soma', {**key, 'mask_id': mask_id})
                     plt.close(fig)
+                elif event.key == 'x':
+                    self.Type().insert1({**key, 'mask_id': mask_id, 'type': 'axon'})
+                    print('Axon', {**key, 'mask_id': mask_id})
+                    plt.close(fig)
                 elif event.key == 'd':
                     self.Type().insert1({**key, 'mask_id': mask_id, 'type': 'dendrite'})
                     print('Dendrite', {**key, 'mask_id': mask_id})
                     plt.close(fig)
-                elif event.key == 'x':
-                    self.Type().insert1({**key, 'mask_id': mask_id, 'type': 'axon'})
-                    print('Axon', {**key, 'mask_id': mask_id})
+                elif event.key == 'n':
+                    self.Type().insert1({**key, 'mask_id': mask_id, 'type': 'neuropil'})
+                    print('Neuropil', {**key, 'mask_id': mask_id})
                     plt.close(fig)
                 elif event.key == 'a':
                     self.Type().insert1({**key, 'mask_id': mask_id, 'type': 'artifact'})
@@ -1156,56 +1223,17 @@ class MaskClassification(dj.Computed):
 
 
 @schema
-class Trace(dj.Computed):
-    definition = """  # calcium trace before spike extraction or filtering
-
-    -> Segmentation.Mask
-    ---
-    raw_trace               : longblob
-    """
-    @property
-    def key_source(self):
-        return Segmentation() # run only once per slice (to avoid reloading the scan)
-
-    def _make_tuples(self, key):
-        # Load scan
-        slice_id = key['slice'] - 1
-        channel = key['channel'] - 1
-        scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
-        scan = scanreader.read_scan(scan_filename, dtype=np.float32)
-        scan_ = scan[slice_id, :, :, channel, :]
-
-        # Get masks as images
-        mask_ids, mask_pixels, mask_weights = \
-            (Segmentation.Mask() & key).fetch['mask_id', 'pixels', 'weights']
-        location_matrix = Segmentation.reshape_masks(mask_pixels, mask_weights,
-                                                     scan.image_height, scan.image_width)
-        masks = location_matrix.transpose([2, 0, 1])
-
-        for mask_id, mask in zip(mask_ids, masks):
-            trace = np.apply_along_axis(lambda frame: np.average(frame, weights=mask),
-                                        scan_, axis=-1)
-
-            self.insert1({**key, 'mask_id': mask_id, 'raw_trace': trace})
-
-    def get_all_traces(self):
-        """ Returns a num_traces x num_timesteps matrix with all traces."""
-        # Get traces
-        traces = (Trace() & self).fetch.order_by('mask_id')['raw_trace']
-
-        return np.array([x.squeeze() for x in traces])
-
-@schema
 class ScanSet(dj.Computed):
     definition = """ # union of all masks in the same scan
 
-    -> Segmentation
+    -> Segmentation         # processing done per slice
     """
 
     class Unit(dj.Part):
         definition = """ # single unit in the scan
         -> ScanInfo
-        unit_id                 :int                # unique per scan
+        -> shared.SegmentationMethod
+        unit_id                 :int                # unique per scan & segmentation method
         ---
         -> Segmentation.Mask
         """
@@ -1220,8 +1248,9 @@ class ScanSet(dj.Computed):
         # Insert in ScanSet
         self.insert1(key)
 
-        # Get next unit_id for Scan
-        scan_key = {k:v for k, v in key.items() if k in ['animal_id', 'session', 'scan_idx']}
+        # Get next unit_id for Scan (& SegmentationMethod)
+        scan_key = {k:v for k, v in key.items() if k in ['animal_id', 'session',
+                                                         'scan_idx', 'extract_method']}
         unit_rel = ScanSet.Unit() & scan_key
         unit_id = np.max(unit_rel.fetch['unit_id']) + 1 if unit_rel else 1
 
@@ -1231,63 +1260,107 @@ class ScanSet(dj.Computed):
             ScanSet.Unit().insert1({**key, 'mask_id': mask_id, 'unit_id': unit_id})
             unit_id += 1
 
+    def delete(self):
+        """ Propagate deletion to units in the slice."""
+        if ScanSet.Unit() & self:
+            (ScanSet.Unit() & self).delete()
+        if self:
+            super().delete()
+
+
 @schema
 class Activity(dj.Computed):
     definition = """ # deconvolved calcium activity inferred from calcium traces
 
-    -> ScanSet
+    -> ScanSet              # processing done per slice
     -> shared.SpikeMethod
     """
 
     @property
     def key_source(self):
-        return ((ScanSet() * shared.SpikeMethod() & "language='python'") - {'segmentation': 'nmf'})
+        return ScanSet() * (shared.SpikeMethod() & {'language': 'python'})
 
     class Trace(dj.Part):
         definition = """ # deconvolved calcium acitivity
 
-        -> Activity
         -> ScanSet.Unit
+        -> shared.SpikeMethod
         ---
-        trace                       : longblob
+        trace                   : longblob
         """
 
     def _make_tuples(self, key):
-        try:
-            import pyfnnd
-        except ImportError:
-            warn('Could not load pyfnnd. Oopsi spike inference will fail. Install from '
-                 'https://github.com/cajal/PyFNND.git')
+        print('Creating activity traces for', key)
 
-        print('Populating Spikes for {}...'.format(key), flush=True)
-        method = (shared.SpikeMethod() & key).fetch1['spike_method_name']
-        if method == 'stm':
-            fps = (ScanInfo() & key).fetch1['fps']
-            X = [dict(trace=signal.fill_nans(x['trace'].astype('float64'))) for x in
-                 (Segmentation.Trace() & key).proj('trace').fetch.as_dict]
+        # Get params
+        fps = (ScanInfo() & key).fetch1['fps']
+        unit_ids, traces = ((ScanSet.Unit() & key) * Calcium.Trace()).fetch['unit_id', 'trace']
+        full_traces = [signal.fill_nans(np.squeeze(trace).copy()) for trace in traces]
 
-            self.insert1(key)
-            for x in (shared.SpikeMethod() & key).spike_traces(X, fps):
-                self.RateTrace().insert1(dict(key, **x))
+        # Insert in Activity
+        self.insert1(key)
 
-        elif method == 'oopsi':
-            fps = (ScanInfo() & key).fetch1['fps']
-            part = self.RateTrace()
+        # Get scan key (used to insert in Activity.Trace)
+        scan_key = {k:v for k, v in key.items() if k in ['animal_id', 'session',
+                                                         'scan_idx', 'extract_method',
+                                                         'spike_method']}
 
-            self.insert1(key)
-            for trace, trace_key in zip(*(Segmentation.Trace() & key).fetch['trace', dj.key]):
-                trace = pyfnnd.deconvolve(signal.fill_nans(np.float64(trace.flatten())), dt=1 / fps)[0]
-                part.insert1(dict(trace_key, rate_trace=trace.astype(np.float32)[:, np.newaxis], **key))
+        method_name = (shared.SpikeMethod() & key).fetch1['spike_method_name']
+        if method_name == 'oopsi': # Non-negative sparse deconvolution
+            import pyfnnd # Install from https://github.com/cajal/PyFNND.git
+
+            for unit_id, trace in zip(unit_ids, full_traces):
+                spike_trace = pyfnnd.deconvolve(trace, dt=1/fps)[0]
+                Activity.Trace().insert1({**scan_key, 'unit_id': unit_id, 'trace': spike_trace})
+
+        elif method_name == 'stm': # Spike-triggered mixture model
+            import c2s # Install from https://github.com/lucastheis/c2s
+
+            for unit_id, trace in zip(unit_ids, full_traces):
+                start = signal.notnan(trace)
+                end = signal.notnan(trace, len(trace) - 1, increment=-1)
+                trace_dict = {'calcium': np.atleast_2d(trace[start:end + 1]), 'fps': fps}
+
+                data = c2s.predict(c2s.preprocess([trace_dict], fps=fps), verbosity=0)
+                spike_trace = np.squeeze(data[0].pop('predictions'))
+
+                Activity.Trace().insert1({**scan_key, 'unit_id': unit_id, 'trace': spike_trace})
+
+        elif method_name == 'nmf': # Noise-constrained deconvolution
+            from pipeline.utils import caiman_interface as cmn
+
+            #for unit_id, trace in zip(unit_ids, full_traces):
+            #    spike_trace = cmn.deconvolve(trace, fps)
+            #    Activity.Trace().insert1({**scan_key, 'unit_id': unit_id, 'trace': spike_trace})
+            raise NotImplementedError('NMF not yet implemented')
+
         else:
-            raise NotImplementedError('Method {spike_method} not implemented.'.format(**key))
-        print('Done', flush=True)
+            raise NotImplementedError('{} method not implemented.'.format(method_name))
+
+        self.notify(key)
+
+    def notify(self, key):
+        fig = plt.figure()
+        plt.plot((Activity() & key).get_all_spikes().T)
+        img_filename = '/tmp/' + key_hash(key) + '.png'
+        fig.savefig(img_filename)
+        plt.close(fig)
+
+        msg = 'Activity.Trace for `{}` has been populated.'.format(key)
+        (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
+                                                                   file_title='spike traces')
 
     def get_all_spikes(self):
-        """ Returns a num_traces x num_timesteps matrix with all traces."""
-        # Get traces
-        traces = (Activity.Trace() & self).fetch.order_by('unit_id')['trace']
+        """ Returns a num_traces x num_timesteps matrix with all spikes."""
+        spikes = (Activity.Trace() & self).fetch.order_by('unit_id')['trace']
+        return np.array([x.squeeze() for x in spikes])
 
-        return np.array([x.squeeze() for x in traces])
+    def delete(self):
+        """ Propagate deletion to traces in the slice. """
+        if Activity.Trace() & self:
+            (Activity.Trace() & self).delete()
+        if self:
+            super().delete()
 
 
 schema.spawn_missing_classes()
