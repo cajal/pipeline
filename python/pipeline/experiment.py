@@ -132,6 +132,7 @@ class Person(dj.Lookup):
         ['jake', 'Jacob Reimer'],
         ['jiakun', 'Jiakun Fu'],
         ['manolis', 'Emmanouil Froudarakis'],
+        ['minggui', 'Minggui Chen']
         ['Paul', 'hey paul'],
         ['shan', 'Shan Shen'],
         ['shuang', 'Shuang Li'],
