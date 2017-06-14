@@ -44,7 +44,6 @@ class MaskType(dj.Lookup):
         ['unknown']
     ]
 
-
 @schema
 class SpikeMethod(dj.Lookup):
     definition = """

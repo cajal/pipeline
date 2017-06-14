@@ -160,7 +160,7 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=200, AR_order=2,
             background_activity_matrix, raw_traces, spikes, AR_coefficients)
 
 
-def _save_as_memmap(scan, base_name='caiman', order='F'):
+def _save_as_memmap(scan, base_name='caiman', order='C'):
     """Save the scan as a memory mapped file as expected by caiman
 
     :param np.array scan: Scan to save shaped (image_height, image_width, num_frames)
@@ -210,7 +210,7 @@ def order_components(location_matrix, correlation_image):
     return new_order
 
 
-def plot_contours(location_matrix, background_image=None):
+def plot_contours(location_matrix, background_image):
     """ Plot each component in location matrix over a background image.
 
     :param np.array location_matrix: (image_height x image_width x num_components)
