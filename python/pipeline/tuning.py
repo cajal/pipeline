@@ -100,7 +100,11 @@ class OriMapy(dj.Imported):
         design, cov = (OriDesignMatrix() & key).fetch1['design_matrix', 'regressor_cov']
         height, width, nslices = (preprocess.Prepare.Galvo() & key).fetch1['px_height', 'px_width', 'nslices']
         design = design[key['slice'] - 1::nslices, :]
+        if scan.shape[2] == 2*design.shape[0]:
+            scan = (scan[:,:,::2] + scan[:,:,1::2])/2  # this is a hack for mesoscope scanner -- needs fixing
+
         assert design.shape[0] == scan.shape[2]
+        height, width = scan.shape[0:2]    # hack for mesoscope -- needs fixing
         assert (height, width) == scan.shape[0:2]
 
         # remove periods where the design matrix has any nans

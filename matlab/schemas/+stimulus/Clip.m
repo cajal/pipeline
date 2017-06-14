@@ -10,7 +10,7 @@ classdef Clip < dj.Manual & stimulus.core.Visual
     
     properties(Constant)
         version = '1'
-        movie_dir = '~/stimuli'
+        movie_dir = '/home/dimitri/stimuli'
     end
     
     
@@ -18,6 +18,7 @@ classdef Clip < dj.Manual & stimulus.core.Visual
         
         function migrate
             % migrate data from the legacy schema +vis
+            
             control = stimulus.getControl;
             
             % migrate monet conditions
@@ -66,9 +67,15 @@ classdef Clip < dj.Manual & stimulus.core.Visual
         
         function showTrial(self, cond)
             disp(cond.filename)
-            movie = Screen('OpenMovie', self.win, cond.filename);
+            [movie, ~, fps] = Screen('OpenMovie', self.win, cond.filename);
+            
+            screenFPS = round(self.screen.fps);
+            frameStep = floor(screenFPS / fps);
+            assert(frameStep*fps == screenFPS, 'Screen FPS %d must be an integer multiple of the movie FPS %d', screenFPS, fps);
+            
+            self.screen.frameStep = frameStep;
             Screen('PlayMovie', movie, 1);
-            for i=1:ceil(cond.cut_after*self.fps)
+            for i=1:ceil(cond.cut_after*fps)
                 tex = Screen('GetMovieImage', self.win, movie);
                 if tex<=0
                     break
