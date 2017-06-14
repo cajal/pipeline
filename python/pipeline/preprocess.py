@@ -7,7 +7,7 @@ from pipeline.notify import temporary_image
 import gc
 
 from . import experiment
-from .utils.dsp import mirrconv
+from .utils.signal import mirrconv
 from .utils import galvo_corrections
 import matplotlib.pyplot as plt
 from .import notify

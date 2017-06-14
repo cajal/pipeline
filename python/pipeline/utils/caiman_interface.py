@@ -70,7 +70,7 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=200, AR_order=2,
     ..warning:: Computation- and memory-intensive for big scans.
     """
     # Save as memory mapped file in F order (that's how caiman wants it)
-    mmap_filename = save_as_memmap(scan, base_name='/tmp/caiman', order='F')
+    mmap_filename = _save_as_memmap(scan, base_name='/tmp/caiman', order='F')
 
     # 'Load' scan
     mmap_scan, (image_height, image_width), num_frames = caiman.load_memmap(mmap_filename)
@@ -160,7 +160,7 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=200, AR_order=2,
             background_activity_matrix, raw_traces, spikes, AR_coefficients)
 
 
-def save_as_memmap(scan, base_name='caiman', order='F'):
+def _save_as_memmap(scan, base_name='caiman', order='F'):
     """Save the scan as a memory mapped file as expected by caiman
 
     :param np.array scan: Scan to save shaped (image_height, image_width, num_frames)
