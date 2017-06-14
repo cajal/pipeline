@@ -1,4 +1,4 @@
-# TODO: Write these
+# TODO: Write and test these
 
 def map_frames(f, scan, field_id, y=slice(None), x=slice(None), channel=0,
                chunk_size_in_GB=10):
