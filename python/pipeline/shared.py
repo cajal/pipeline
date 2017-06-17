@@ -20,15 +20,33 @@ class Channel(dj.Lookup):
 
 @schema
 class SegmentationMethod(dj.Lookup):
-    definition = """
-    #  methods for trace extraction from raw data for either AOD or Galvo data
-
-    extract_method      : tinyint
+    definition = """ # methods for mask extraction for multi-photon scans
+    segmentation_method         : tinyint
     ---
-    segmentation        : varchar(16)
+    name                        : varchar(16)
+    details                     : varchar(255)
+    language                    : enum('matlab', 'python')  # implementation language
     """
 
-    contents = zip([1, 2], ['manual', 'nmf'])
+    contents = [
+    [1, 'manual', '', 'matlab'],
+    [2, 'nmf', 'constrained non-negative matrix factorization from Pnevmatikakis et al. (2016)', 'python']
+    ]
+
+@schema
+class ClassificationMethod(dj.Lookup):
+    definition = """ # methods to classify extracted masks
+    classification_method         : tinyint
+    ---
+    name                        : varchar(16)
+    details                     : varchar(255)
+    language                    : enum('matlab', 'python')  # implementation language
+    """
+
+    contents = [
+    [1, 'manual', 'masks classified by visual inspection', 'python'],
+    #[2, 'cnn', 'classification made by a trained convolutional network', 'python']
+    ]
 
 @schema
 class MaskType(dj.Lookup):
@@ -47,15 +65,15 @@ class MaskType(dj.Lookup):
 @schema
 class SpikeMethod(dj.Lookup):
     definition = """
-    spike_method            : smallint              # spike inference method
+    spike_method        : tinyint                   # spike inference method
     ---
-    spike_method_name       : varchar(16)           # short name to identify the spike inference method
-    spike_method_details    : varchar(255)          # more details
-    language                : enum('matlab', 'python')   # implementation language
+    name                : varchar(16)               # short name to identify the spike inference method
+    details             : varchar(255)              # more details
+    language            : enum('matlab', 'python')  # implementation language
     """
 
     contents = [
-        [2, "oopsi", "nonnegative sparse deconvolution from Vogelstein (2010)", "python"],
-        [3, "stm", "spike triggered mixture model from Theis et al. (2016)", "python"],
-        [5, "nmf", "noise constrained deconvolution from Pnevmatikakis et al., 2016", "python"]
+        [2, 'oopsi', 'nonnegative sparse deconvolution from Vogelstein (2010)', 'python'],
+        [3, 'stm', 'spike triggered mixture model from Theis et al. (2016)', 'python'],
+        [5, 'nmf', 'noise constrained deconvolution from Pnevmatikakis et al. (2016)', 'python']
     ]
