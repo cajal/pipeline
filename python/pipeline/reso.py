@@ -10,15 +10,26 @@ from . import experiment, notify, shared
 from .utils import galvo_corrections
 from .utils import signal
 from .utils import quality
+from .utils import mask_classification
 from .exceptions import PipelineException
 
-
 schema = dj.schema('pipeline_reso', locals())
+CURRENT_VERSION = 0
 
 
-def erd():
-    """a shortcut for convenience"""
-    dj.ERD(schema).draw(prefix=False)
+@schema
+class Version(dj.Lookup):
+    definition = """ # versions for the reso pipeline
+
+    version                         : smallint
+    ---
+    description = ''                : varchar(256)      # any notes on this version
+    date = CURRENT_TIMESTAMP        : timestamp         # automatic
+    """
+    contents = [
+        {'version': 0, 'description': 'test'},
+        {'version': 1, 'description': 'first release'}
+    ]
 
 
 @schema
@@ -26,6 +37,7 @@ class ScanInfo(dj.Imported):
     definition = """ # master table with general data about the scans
 
     -> experiment.Scan
+    -> Version                                  # reso version
     ---
     nslices                 : tinyint           # number of slices
     nchannels               : tinyint           # number of recorded channels
@@ -47,7 +59,8 @@ class ScanInfo(dj.Imported):
     @property
     def key_source(self):
         rigs = [{'rig': '2P2'}, {'rig': '2P3'}, {'rig': '2P5'}]
-        return (experiment.Scan() - experiment.ScanIgnored()) & (experiment.Session() & rigs)
+        reso_scans = (experiment.Scan() - experiment.ScanIgnored()) & (experiment.Session() & rigs)
+        return reso_scans * (Version() & {'version': CURRENT_VERSION})
 
     class Slice(dj.Part):
         definition = """ # slice-specific scan information
@@ -160,9 +173,7 @@ class ScanInfo(dj.Imported):
         self.notify(key)
 
     def notify(self, key):
-        # --  notification
-        d = {k: v for k, v in key.items() if k in ['animal_id', 'session', 'scan_idx']}
-        msg = 'ScanInfo for `{}` has been populated.'.format(d)
+        msg = 'ScanInfo for `{}` has been populated.'.format(key)
         (notify.SlackUser() & (experiment.Session() & key)).notify(msg)
 
     @ property
@@ -198,8 +209,8 @@ class ScanInfo(dj.Imported):
         original_scan = scan_.copy()
 
         # Correct the scan
-        correct_raster = RasterCorrection.get_correct_raster(self.fetch1())
-        correct_motion = MotionCorrection.get_correct_motion({**self.fetch1(), 'slice': slice_id})
+        correct_raster = (RasterCorrection() & self & {'slice': slice_id}).get_correct_raster()
+        correct_motion = (MotionCorrection() & self & {'slice': slice_id}).get_correct_motion()
         corrected_scan = correct_motion(correct_raster(scan_), slice(start_index, stop_index))
 
         # Create animation
@@ -253,66 +264,62 @@ class CorrectionChannel(dj.Manual):
 class RasterCorrection(dj.Computed):
     definition = """ # raster correction for bidirectional resonant scans
 
-    -> ScanInfo
+    -> ScanInfo                         # animal_id, session, scan_idx, version
+    -> CorrectionChannel                # animal_id, session, scan_idx, slice
     ---
-    -> shared.Slice                     # slice used for raster correction
-    -> shared.Channel                   # channel used for raster correction
     template            : longblob      # average frame from the middle of the movie
     raster_phase        : float         # difference between expected and recorded scan angle
     """
 
     @property
     def key_source(self):
-        # Run make_tuples iff correction channel has been set for all slices
-        return (ScanInfo() & CorrectionChannel()) - (ScanInfo.Slice() - CorrectionChannel())
+        # Run make_tuples once per scan iff correction channel has been set for all slices
+        return (((ScanInfo() & CorrectionChannel()) - (ScanInfo.Slice() - CorrectionChannel())) &
+                {'version': CURRENT_VERSION})
 
     def _make_tuples(self, key):
+        print('Computing raster correction...')
+
         # Read the scan
         scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
         scan = scanreader.read_scan(scan_filename, dtype=np.float32)
 
-        # Select (middle) slice and channel
-        slice_id = int(np.floor(scan.num_fields / 2))
-        channel = (CorrectionChannel() & key & {'slice': slice_id + 1}).fetch1['channel'] - 1
+        for slice_id in range(scan.num_fields):
+             # Select channel
+            channel = (CorrectionChannel() & key & {'slice': slice_id + 1}).fetch1['channel'] - 1
 
-        # Create results tuple
-        tuple_ = key.copy()
-        tuple_['slice'] = slice_id + 1
-        tuple_['channel'] = channel + 1
+            # Create results tuple
+            tuple_ = key.copy()
+            tuple_['slice'] = slice_id + 1
 
-        # Create the template (an average frame from the middle of the scan)
-        middle_frame =  int(np.floor(scan.num_frames / 2))
-        frames = slice(max(middle_frame - 1000, 0), middle_frame + 1000)
-        mini_scan = scan[slice_id, :, :, channel, frames]
-        template = np.mean(mini_scan, axis=-1)
-        tuple_['template'] = template
+            # Create the template (an average frame from the middle of the scan)
+            middle_frame =  int(np.floor(scan.num_frames / 2))
+            frames = slice(max(middle_frame - 1000, 0), middle_frame + 1000)
+            mini_scan = scan[slice_id, :, :, channel, frames]
+            template = np.mean(mini_scan, axis=-1)
+            tuple_['template'] = template
 
-        # Compute raster correction parameters
-        if scan.is_bidirectional:
-            tuple_['raster_phase'] = galvo_corrections.compute_raster_phase(template,
-                                                            scan.temporal_fill_fraction)
-        else:
-            tuple_['raster_phase'] = 0
+            # Compute raster correction parameters
+            if scan.is_bidirectional:
+                tuple_['raster_phase'] = galvo_corrections.compute_raster_phase(template,
+                                                                scan.temporal_fill_fraction)
+            else:
+                tuple_['raster_phase'] = 0
 
-        # Insert
-        self.insert1(tuple_)
+            # Insert
+            self.insert1(tuple_)
+
         self.notify(key)
 
     def notify(self, key):
         msg = 'RasterCorrection for `{}` has been populated.'.format(key)
-        msg += '\n Raster phase: {}'.format((self & key).fetch1['raster_phase'])
+        msg += '\nRaster phases: {}'.format((self & key).fetch['raster_phase'])
         (notify.SlackUser() & (experiment.Session() & key)).notify(msg)
 
-    @staticmethod
-    def get_correct_raster(key):
-        """
-         :returns: A function to perform raster correction on the scan
-                [image_height, image_width, channels, slices, num_frames].
-        """
-        key = {k: v for k, v in key.items() if k in RasterCorrection().primary_key}
-
-        raster_phase = (RasterCorrection() & key).fetch1['raster_phase']
-        fill_fraction = (ScanInfo() & key).fetch1['fill_fraction']
+    def get_correct_raster(self):
+        """ Returns a function to perform raster correction on the scan. """
+        raster_phase = self.fetch1['raster_phase']
+        fill_fraction = (ScanInfo() & self).fetch1['fill_fraction']
         if raster_phase == 0:
             return lambda scan: scan.astype(np.float32, copy=False)
         else:
@@ -325,9 +332,7 @@ class MotionCorrection(dj.Computed):
     definition = """ # motion correction for galvo scans
 
     -> RasterCorrection
-    -> shared.Slice
     ---
-    -> shared.Channel                               # channel used for motion correction
     template                        : longblob      # image used as alignment template
     y_shifts                        : longblob      # (pixels) y motion correction shifts
     x_shifts                        : longblob      # (pixels) x motion correction shifts
@@ -340,7 +345,8 @@ class MotionCorrection(dj.Computed):
 
     @property
     def key_source(self):
-        return RasterCorrection() # run make_tuples once per scan
+        # Run make_tuples once per scan iff RasterCorrection is done
+        return ScanInfo() & RasterCorrection() & {'version': CURRENT_VERSION}
 
     def _make_tuples(self, key):
         """Computes the motion shifts per frame needed to correct the scan."""
@@ -363,7 +369,6 @@ class MotionCorrection(dj.Computed):
             # Create results tuple
             tuple_ = key.copy()
             tuple_['slice'] = slice_id + 1
-            tuple_['channel'] = channel + 1
 
             # Load scan (we discard some rows/cols to avoid edge artifacts)
             skip_rows = int(round(px_height * 0.10))
@@ -371,7 +376,7 @@ class MotionCorrection(dj.Computed):
             scan_ = scan[slice_id, skip_rows: -skip_rows, skip_cols: -skip_cols, channel, :]  # 3-d (height, width, frames)
 
             # Correct raster effects (needed for subpixel changes in y)
-            correct_raster = RasterCorrection.get_correct_raster(key)
+            correct_raster = (RasterCorrection() & {**key, 'slice':slice_id + 1}).get_correct_raster()
             scan_ = correct_raster(scan_)
             scan_ -= scan_.min() # make nonnegative for fft
 
@@ -436,20 +441,13 @@ class MotionCorrection(dj.Computed):
         fig.savefig(img_filename)
         plt.close(fig)
 
-        d = {k: v for k, v in key.items() if k in ['animal_id', 'session', 'scan_idx']}
-        msg = 'MotionCorrection for `{}` has been populated.'.format(d)
+        msg = 'MotionCorrection for `{}` has been populated.'.format(key)
         (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
                                                                    file_title='motion shifts')
 
-    @staticmethod
-    def get_correct_motion(key):
-        """
-        :returns: A function to performs motion correction on scans
-                  [image_height, image_width, channels, slices, num_frames].
-        """
-        key = {k: v for k, v in key.items() if k in MotionCorrection().primary_key}
-
-        y_shifts, x_shifts = (MotionCorrection() & key).fetch1['y_shifts', 'x_shifts']
+    def get_correct_motion(self):
+        """ Returns a function to perform motion correction on scans. """
+        y_shifts, x_shifts = self.fetch1['y_shifts', 'x_shifts']
         xy_motion = np.stack([x_shifts, y_shifts])
         def my_lambda_function(scan, indices=None):
             if indices is None:
@@ -474,26 +472,26 @@ class SummaryImages(dj.Computed):
 
     @property
     def key_source(self):
-        return MotionCorrection()
+        return MotionCorrection() & {'version': CURRENT_VERSION} # once per slice
 
     def _make_tuples(self, key):
         from .utils import correlation_image as ci
 
-        print('Computing summary images for', key)
+        print('Computing summary images...')
 
         # Read the scan
         scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
         scan = scanreader.read_scan(scan_filename, dtype=np.float32)
 
-        # Get raster correction function
-        correct_raster = RasterCorrection.get_correct_raster(key)
+        # Get raster and motion correction functions
+        correct_raster = (RasterCorrection() & key).get_correct_raster()
+        correct_motion = (MotionCorrection() & key).get_correct_motion()
 
         for channel in range(scan.num_channels):
             tuple_ = key.copy()
             tuple_['channel'] = channel + 1
 
             # Correct scan
-            correct_motion = MotionCorrection.get_correct_motion(key)
             scan_ = scan[key['slice'] - 1, :, :, channel, :]
             scan_ = correct_motion(correct_raster(scan_))
             scan_ -= scan_.min() # make nonnegative for lp-norm
@@ -532,8 +530,7 @@ class SummaryImages(dj.Computed):
         fig.savefig(img_filename)
         plt.close(fig)
 
-        d = {k: v for k, v in key.items() if k in ['animal_id', 'session', 'scan_idx', 'slice']}
-        msg = 'SummaryImages for `{}` has been populated.'.format(d)
+        msg = 'SummaryImages for `{}` has been populated.'.format(key)
         (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
                                                                    file_title='summary images')
 
@@ -545,6 +542,7 @@ class SegmentationTask(dj.Manual):
     -> experiment.Scan
     -> shared.Slice
     -> shared.Channel
+    -> shared.SegmentationMethod
     ---
     -> experiment.Compartment
     """
@@ -577,357 +575,17 @@ class SegmentationTask(dj.Manual):
 
         return int(round(num_components))
 
-
-@schema
-class ManualSegmentation(dj.Manual):
-    definition = """ # masks created manually
-
-    -> experiment.Scan
-    -> shared.Slice
-    -> shared.Channel
-    ---
-    extract_method = 1              : tinyint       # manual method in shared.SegmentationMethod
-    timestamp=CURRENT_TIMESTAMP     : timestamp     # automatic
-    """
-
-    def delete(self):
-        """ Override delete to also delete tuple from Segmentation. """
-        if Segmentation() & self:
-            dj.BaseRelation.delete(Segmentation() & self) # simple delete to avoid infinite recursion
-        if self:
-            super().delete()
-
-
-@schema
-class NMF(dj.Computed):
-    definition = """ # source extraction using constrained non-negative matrix factorization (Pnevmatikakis et al., 2016)
-
-    -> MotionCorrection
-    -> SegmentationTask
-    ---
-    extract_method = 2              : tinyint       # nmf method in shared.SegmentationMethod
-    """
-
-    class Parameters(dj.Part):
-        definition = """ # parameters used to demix and deconvolve the scan with CNMF
-
-        -> NMF
-        ---
-        num_components                  : smallint      # estimated number of components
-        ar_order                        : tinyint       # order of the autoregressive process for impulse response function
-        merge_threshold                 : float         # overlapping masks are merged if temporal correlation greater than this
-        num_processes = null            : smallint      # number of processes to run in parallel, null=all available
-        num_pixels_per_process          : int           # number of pixels processed at a time
-        block_size                      : int           # number of pixels per each dot product
-        num_background_components       : smallint      # number of background components
-        init_method                     : enum("greedy_roi", "sparse_nmf", "local_nmf") # type of initialization used
-        soma_radius = null              : blob          # (y, x in pixels) estimated radius for a soma in the scan
-        snmf_alpha = null               : float         # regularization parameter for SNMF
-        init_on_patches                 : boolean       # whether to run initialization on small patches
-        patch_downsampling_factor = null : tinyint      # used to calculate size of patches
-        percentage_of_patch_overlap = null : float      # overlap between adjacent patches
-        """
-
-    class BackgroundComponents(dj.Part):
-        definition = """ # inferred background components
-
-        -> NMF
-        ---
-        masks               : longblob      # array (im_width x im_height x num_background_components)
-        activity            : longblob      # array (num_background_components x timesteps)
-        """
-
-    #TODO: Defer this to Activity table, this should be created down there.
-    class ARCoefficients(dj.Part):
-        definition = """ # fitted parameters for the autoregressive process
-
-        -> NMF
-        -> Segmentation.Mask
-        ---
-        g                   : blob          # g1, g2, ... coefficients for the AR process
-    """
-
-    def _make_tuples(self, key):
-        """ Use CNMF to extract masks and traces.
-
-        See caiman_interface.demix_and_deconvolve_with_cnmf for explanation of params
-        """
-        from .utils import caiman_interface as cmn
-
-        print('')
-        print('*' * 85)
-        print('Processing {}'.format(key))
-
-        # Load scan
-        channel = key['channel'] - 1
-        slice_id = key['slice'] - 1
-        scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
-        scan = scanreader.read_scan(scan_filename, dtype=np.float32)
-        scan_ = scan[slice_id, :, :, channel, :]
-
-        # Correct scan
-        print('Correcting scan...')
-        correct_raster = RasterCorrection.get_correct_raster(key)
-        correct_motion = MotionCorrection.get_correct_motion(key)
-        scan_ = correct_motion(correct_raster(scan_))
-        scan_ -= scan_.min() # make nonnegative for caiman
-
-        # Set CNMF parameters
-        ## Estimate number of components per slice
-        num_components = (SegmentationTask() & key).estimate_num_components()
-
-        ## Set general parameters
-        kwargs = {}
-        kwargs['num_components'] = num_components
-        kwargs['AR_order'] = 2  # impulse response modelling with AR(2) process
-        kwargs['merge_threshold'] = 0.8
-
-        ## Set performance/execution parameters (heuristically), decrease if memory overflows
-        kwargs['num_processes'] = 20  # Set to None for all cores available
-        kwargs['num_pixels_per_process'] = 10000
-        kwargs['block_size'] = 10000
-
-        ## Set params specific to somatic or axonal/dendritic scans
-        target = (SegmentationTask() & key).fetch1['compartment']
-        if target == 'soma':
-            kwargs['init_method'] = 'greedy_roi'
-            kwargs['soma_radius'] = 7 / (ScanInfo() & key).microns_per_pixel # 7 microns
-            kwargs['num_background_components'] = 4
-            kwargs['init_on_patches'] = False
-        else: # axons/dendrites
-            kwargs['init_method'] = 'sparse_nmf'
-            kwargs['snmf_alpha'] = 500  # 10^2 to 10^3.5 is a good range
-            kwargs['num_background_components'] = 1
-            kwargs['init_on_patches'] = True
-
-        ## Set params specific to initialization on patches
-        if kwargs['init_on_patches']:
-            kwargs['patch_downsampling_factor'] = 4
-            kwargs['percentage_of_patch_overlap'] = .2
-
-        # Extract traces
-        print('Extracting mask, traces and spikes (cnmf)...')
-        cnmf_result = cmn.demix_and_deconvolve_with_cnmf(scan_, **kwargs)
-        (location_matrix, activity_matrix, background_location_matrix,
-         background_activity_matrix, raw_traces, spikes, AR_coeffs) = cnmf_result
-
-        # Compute masks' coordinates
-        print('Computing mask coordinates...')
-        image_height, image_width, num_masks = location_matrix.shape
-        px_center = [image_height / 2, image_width / 2]
-        um_center = (ScanInfo() & key).fetch1['y', 'x']
-
-        px_centroids = cmn.get_centroids(location_matrix)
-        um_centroids = um_center + (px_centroids - px_center) * (ScanInfo() & key).microns_per_pixel
-        um_z = (ScanInfo.Slice() & key).fetch1['z']
-
-        # Insert CNMF results
-        print('Inserting masks, background components, ar coefficients and traces...')
-
-        ## Insert in NMF, Segmentation and Calcium
-        self.insert1(key)
-        Segmentation().insert1({**key, 'extract_method': 2})
-        Calcium().insert1({**key, 'extract_method': 2}) # nmf also inserts traces
-
-        ## Insert CNMF parameters
-        lowercase_kwargs = {k.lower(): v for k, v in kwargs.items()}
-        NMF.Parameters().insert1({**key, **lowercase_kwargs})
-
-        ## Insert background components
-        background_dict = {**key, 'masks': background_location_matrix,
-                           'activity': background_activity_matrix}
-        NMF.BackgroundComponents().insert1(background_dict)
-
-        ## Insert masks and traces (masks in Matlab format)
-        masks_as_F_ordered_vectors = location_matrix.reshape(-1, num_masks, order='F')
-        masks = masks_as_F_ordered_vectors.T # [num_masks x num_pixels]
-        for i, (mask, (px_y, px_x), (um_y, um_x), trace, ar_coeffs) in enumerate(
-            zip(masks, px_centroids, um_centroids, raw_traces, AR_coeffs)):
-            mask_key = {**key, 'extract_method': 2, 'mask_id': i + 1} # ids start at 1
-
-            mask_pixels = np.where(mask)[0]
-            mask_weights = mask[mask_pixels]
-            mask_pixels += 1  # matlab indices start at 1
-            Segmentation.Mask().insert1({**mask_key, 'pixels': mask_pixels,
-                                         'weights': mask_weights})
-
-            Segmentation.MaskInfo().insert1({**mask_key, 'type': target, 'px_x': px_x,
-                                             'px_y': px_y, 'um_x': um_x, 'um_y': um_y,
-                                             'um_z': um_z})
-
-            Calcium.Trace().insert1({**mask_key, 'trace': trace})
-
-            if kwargs['AR_order'] > 0:
-               NMF.ARCoefficients().insert1({**mask_key, 'g': ar_coeffs})
-
-        self.notify(key)
-
-    def notify(self, key):
-        fig = (Segmentation() & key).plot_contours()
-        img_filename = '/tmp/' + key_hash(key) + '.png'
-        fig.savefig(img_filename)
-        plt.close(fig)
-
-        msg = 'NMF for `{}` has been populated.'.format(key)
-        (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
-                                                                   file_title='mask contours')
-
-    def save_video(self, filename='cnmf_results.mp4', start_index=0, seconds=30,
-                   dpi=250, first_n=None):
-        """ Creates an animation video showing the results of CNMF.
-
-        :param string filename: Output filename (path + filename)
-        :param int start_index: Where in the scan to start the video.
-        :param int seconds: How long in seconds should the animation run.
-        :param int dpi: Dots per inch, controls the quality of the video.
-        :param int first_n: Draw only the first n components.
-
-        :returns Figure. You can call show() on it.
-        :rtype: matplotlib.figure.Figure
-        """
-        # Get fps and calculate total number of frames
-        fps = (ScanInfo() & self).fetch1['fps']
-        num_video_frames = int(round(fps * seconds))
-        stop_index = start_index + num_video_frames
-
-        # Load the scan
-        channel = self.fetch1['channel'] - 1
-        slice_id = self.fetch1['slice'] - 1
-        scan_filename = (experiment.Scan() & self).local_filenames_as_wildcard
-        scan = scanreader.read_scan(scan_filename, dtype=np.float32)
-        scan_ = scan[slice_id, :, :, channel, start_index: stop_index]
-
-        # Correct the scan
-        correct_raster = RasterCorrection.get_correct_raster(self.fetch1())
-        correct_motion = MotionCorrection.get_correct_motion(self.fetch1())
-        scan_ = correct_motion(correct_raster(scan_), slice(start_index, stop_index))
-
-        # Get scan dimensions
-        image_height, image_width, _ = scan_.shape
-        num_pixels = image_height * image_width
-
-        # Get location and activity matrices
-        location_matrix = (Segmentation() & self).get_all_masks()
-        activity_matrix = (Calcium() & self).get_all_traces() # always there for CNMF
-        background_location_matrix, background_activity_matrix = \
-            (NMF.BackgroundComponents() & self).fetch1['masks', 'activity']
-
-        # Select first n components
-        if first_n is not None:
-            location_matrix = location_matrix[:, :, :first_n]
-            activity_matrix = activity_matrix[:first_n, :]
-
-        # Drop frames that won't be displayed
-        activity_matrix = activity_matrix[:, start_index: stop_index]
-        background_activity_matrix = background_activity_matrix[:, start_index: stop_index]
-
-        # Create movies
-        extracted = np.dot(location_matrix.reshape(num_pixels, -1), activity_matrix)
-        extracted = extracted.reshape(image_height, image_width, -1)
-        background = np.dot(background_location_matrix.reshape(num_pixels, -1),
-                            background_activity_matrix)
-        background = background.reshape(image_height, image_width, -1)
-        residual = scan_ - extracted - background
-
-        # Create animation
-        import matplotlib.animation as animation
-
-        ## Set the figure
-        fig, axes = plt.subplots(2, 2, sharex=True, sharey=True)
-
-        axes[0, 0].set_title('Original (Y)')
-        im1 = axes[0, 0].imshow(scan_[:, :, 0], vmin=scan_.min(), vmax=scan_.max())  # just a placeholder
-        fig.colorbar(im1, ax=axes[0, 0])
-
-        axes[0, 1].set_title('Extracted (A*C)')
-        im2 = axes[0, 1].imshow(extracted[:, :, 0], vmin=extracted.min(), vmax=extracted.max())
-        fig.colorbar(im2, ax=axes[0, 1])
-
-        axes[1, 0].set_title('Background (B*F)')
-        im3 = axes[1, 0].imshow(background[:, :, 0], vmin=background.min(),
-                                vmax=background.max())
-        fig.colorbar(im3, ax=axes[1, 0])
-
-        axes[1, 1].set_title('Residual (Y - A*C - B*F)')
-        im4 = axes[1, 1].imshow(residual[:, :, 0], vmin=residual.min(), vmax=residual.max())
-        fig.colorbar(im4, ax=axes[1, 1])
-
-        for ax in axes.ravel():
-            ax.axis('off')
-
-        ## Make the animation
-        def update_img(i):
-            im1.set_data(scan_[:, :, i])
-            im2.set_data(extracted[:, :, i])
-            im3.set_data(background[:, :, i])
-            im4.set_data(residual[:, :, i])
-
-        video = animation.FuncAnimation(fig, update_img, scan_.shape[2],
-                                        interval=1000 / fps)
-
-        # Save animation
-        if not filename.endswith('.mp4'):
-            filename += '.mp4'
-        print('Saving video at:', filename)
-        print('If this takes too long, stop it and call again with dpi <', dpi, '(default)')
-        video.save(filename, dpi=dpi)
-
-        return fig
-
-    #TODO: Move this with ARCoefficients to Activity
-    def plot_impulse_responses(self, num_timepoints=100):
-        """ Plots the impulse response functions for all traces.
-
-        :param int num_timepoints: The number of points after impulse to use for plotting.
-
-        :returns Figure. You can call show() on it.
-        :rtype: matplotlib.figure.Figure
-        """
-        ar_rel = NMF.ARCoefficients() & self
-        if ar_rel: # if an AR model was used
-            # Get some params
-            fps = (ScanInfo() & self).fetch1['fps']
-            ar_coeffs = ar_rel.fetch['g']
-
-            # Define the figure
-            fig = plt.figure()
-            x_axis = np.arange(num_timepoints) / fps  # make it seconds
-
-            # Over each trace
-            for g in ar_coeffs:
-                AR_order = len(g)
-
-                # Calculate impulse response function
-                irf = np.zeros(num_timepoints)
-                irf[0] = 1  # initial spike
-                for i in range(1, num_timepoints):
-                    if i <= AR_order:  # start of the array needs special care
-                        irf[i] = np.sum(g[:i] * irf[i - 1:: -1])
-                    else:
-                        irf[i] = np.sum(g * irf[i - 1: i - AR_order - 1: -1])
-
-                # Plot
-                plt.plot(x_axis, irf)
-
-            return fig
-
-    def delete(self):
-        """ Override delete to also delete tuple from Segmentation. """
-        if Segmentation() & self:
-            dj.BaseRelation.delete(Segmentation() & self)
-        if self:
-            super().delete()
-
-
 @schema
 class Segmentation(dj.Manual):
-    definition = """ # Group of different segmentations.
+    definition = """ # Different mask segmentations.
 
-    -> experiment.Scan
-    -> shared.Slice
-    -> shared.Channel
-    -> shared.SegmentationMethod
+    -> MotionCorrection         # animal_id, session, scan_idx, version, slice
+    -> SegmentationTask         # animal_id, session, scan_idx, slice, channel, segmentation_method
     """
+
+    @property
+    def key_source(self):
+        return MotionCorrection() * SegmentationTask() & {'version': CURRENT_VERSION}
 
     class Mask(dj.Part):
         definition = """ # mask produced by segmentation.
@@ -949,19 +607,259 @@ class Segmentation(dj.Manual):
 
             return np.squeeze(mask)
 
-    class MaskInfo(dj.Part):
-        definition = """ # mask type and coordinates in x, y, z
+    class Manual(dj.Part):
+        definition = """ # masks created manually
 
         -> Segmentation
-        -> Segmentation.Mask
         ---
-        -> shared.MaskType                  # type of the mask assigned during segmentation
-        px_x                :smallint       # x-coordinate of centroid in the frame
-        px_y                :smallint       # y-coordinate of centroid in the frame
-        um_x                :smallint       # x-coordinate of centroid in motor coordinate system
-        um_y                :smallint       # y-coordinate of centroid in motor coordinate system
-        um_z                :smallint       # z-coordinate of mask relative to surface of the cortex
+        timestamp=CURRENT_TIMESTAMP     : timestamp     # automatic
         """
+
+        def _make_tuples(self, key):
+            print('Warning: Manual segmentation is not implemented in Python.')
+            # Copy any masks (and MaskClassification) that were there before
+            # Delete key from Segmentation (this is needed for trace and ScanSet and Activity computation to restart when things are added)
+            # Show GUI with the current masks
+            # User modifies it somehow to produce the new set of masks
+            # Insert info in Segmentation -> Segmentation.Manual -> Segmentation.Mask -> MaskClassification -> MaskClassification.Type
+
+    class CNMF(dj.Part):
+        definition = """ # source extraction using constrained non-negative matrix factorization
+
+        -> Segmentation
+        ---
+        num_components                  : smallint      # estimated number of components
+        merge_threshold                 : float         # overlapping masks are merged if temporal correlation greater than this
+        num_processes = null            : smallint      # number of processes to run in parallel, null=all available
+        num_pixels_per_process          : int           # number of pixels processed at a time
+        num_background_components       : smallint      # number of background components
+        init_method                     : enum("greedy_roi", "sparse_nmf", "local_nmf") # type of initialization used
+        soma_radius = null              : blob          # (y, x in pixels) estimated radius for a soma in the scan
+        snmf_alpha = null               : float         # regularization parameter for SNMF
+        init_on_patches                 : boolean       # whether to run initialization on small patches
+        patch_downsampling_factor = null   : tinyint    # used to calculate size of patches
+        percentage_of_patch_overlap = null : float      # overlap between adjacent patches
+        """
+
+        def _make_tuples(self, key):
+            """ Use CNMF to extract masks and traces.
+
+            See caiman_interface.demix_with_cnmf for explanation of params
+            """
+            from .utils import caiman_interface as cmn
+
+            print('')
+            print('*' * 85)
+            print('Processing {}'.format(key))
+
+            # Load scan
+            channel = key['channel'] - 1
+            slice_id = key['slice'] - 1
+            scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
+            scan = scanreader.read_scan(scan_filename, dtype=np.float32)
+            scan_ = scan[slice_id, :, :, channel, :]
+
+            # Correct scan
+            print('Correcting scan...')
+            correct_raster = (RasterCorrection() & key).get_correct_raster()
+            correct_motion = (MotionCorrection() & key).get_correct_motion()
+            scan_ = correct_motion(correct_raster(scan_))
+            scan_ -= scan_.min() # make nonnegative for caiman
+
+            # Set CNMF parameters
+            ## Estimate number of components per slice
+            num_components = (SegmentationTask() & key).estimate_num_components()
+
+            ## Set general parameters
+            kwargs = {}
+            kwargs['num_components'] = num_components
+            kwargs['merge_threshold'] = 0.8
+
+            ## Set performance/execution parameters (heuristically), decrease if memory overflows
+            kwargs['num_processes'] = 12  # Set to None for all cores available
+            kwargs['num_pixels_per_process'] = 10000
+
+            ## Set params specific to somatic or axonal/dendritic scans
+            target = (SegmentationTask() & key).fetch1['compartment']
+            if target == 'soma':
+                kwargs['init_method'] = 'greedy_roi'
+                kwargs['soma_radius'] = 7 / (ScanInfo() & key).microns_per_pixel # 7 microns
+                kwargs['num_background_components'] = 4
+                kwargs['init_on_patches'] = False
+            else: # axons/dendrites
+                kwargs['init_method'] = 'sparse_nmf'
+                kwargs['snmf_alpha'] = 500  # 10^2 to 10^3.5 is a good range
+                kwargs['num_background_components'] = 1
+                kwargs['init_on_patches'] = True
+
+            ## Set params specific to initialization on patches
+            if kwargs['init_on_patches']:
+                kwargs['patch_downsampling_factor'] = 4
+                kwargs['percentage_of_patch_overlap'] = .2
+
+            # Extract traces
+            print('Extracting mask, traces and spikes (cnmf)...')
+            cnmf_result = cmn.demix_and_deconvolve_with_cnmf(scan_, AR_order=0, **kwargs)
+            (location_matrix, activity_matrix, background_location_matrix,
+             background_activity_matrix, raw_traces, spikes, AR_coeffs) = cnmf_result
+
+            # Insert CNMF results
+            print('Inserting masks, background components and traces...')
+
+            ## Insert in CNMF, Segmentation and Fluorescence
+            Segmentation().insert1(key)
+            Segmentation.CNMF().insert1({**key, **kwargs})
+            Fluorescence().insert1(key) # nmf also inserts traces
+
+            ## Insert background components
+            background_dict = {**key, 'masks': background_location_matrix,
+                               'activity': background_activity_matrix}
+            Segmentation.CNMFBackground().insert1(background_dict)
+
+            ## Insert masks and traces (masks in Matlab format)
+            num_masks = location_matrix.shape[2]
+            masks = location_matrix.reshape(-1, num_masks, order='F').T # [num_masks x num_pixels] in F order
+            for mask_id, mask, trace in zip(range(1, num_masks + 1), masks, raw_traces):
+                mask_pixels = np.where(mask)[0]
+                mask_weights = mask[mask_pixels]
+                mask_pixels += 1  # matlab indices start at 1
+                Segmentation.Mask().insert1({**key, 'mask_id': mask_id, 'pixels': mask_pixels,
+                                             'weights': mask_weights})
+
+                Fluorescence.Trace().insert1({**key, 'mask_id': mask_id, 'trace': trace})
+
+            self.notify(key)
+
+        def save_video(self, filename='cnmf_results.mp4', start_index=0, seconds=30,
+                       dpi=250, first_n=None):
+            """ Creates an animation video showing the results of CNMF.
+
+            :param string filename: Output filename (path + filename)
+            :param int start_index: Where in the scan to start the video.
+            :param int seconds: How long in seconds should the animation run.
+            :param int dpi: Dots per inch, controls the quality of the video.
+            :param int first_n: Draw only the first n components.
+
+            :returns Figure. You can call show() on it.
+            :rtype: matplotlib.figure.Figure
+            """
+            # Get fps and calculate total number of frames
+            fps = (ScanInfo() & self).fetch1['fps']
+            num_video_frames = int(round(fps * seconds))
+            stop_index = start_index + num_video_frames
+
+            # Load the scan
+            channel = self.fetch1['channel'] - 1
+            slice_id = self.fetch1['slice'] - 1
+            scan_filename = (experiment.Scan() & self).local_filenames_as_wildcard
+            scan = scanreader.read_scan(scan_filename, dtype=np.float32)
+            scan_ = scan[slice_id, :, :, channel, start_index: stop_index]
+
+            # Correct the scan
+            correct_raster = (RasterCorrection() & self).get_correct_raster()
+            correct_motion = (MotionCorrection() & self).get_correct_motion()
+            scan_ = correct_motion(correct_raster(scan_), slice(start_index, stop_index))
+
+            # Get scan dimensions
+            image_height, image_width, _ = scan_.shape
+            num_pixels = image_height * image_width
+
+            # Get location and activity matrices
+            location_matrix = (Segmentation() & self).get_all_masks()
+            activity_matrix = (Fluorescence() & self).get_all_traces() # always there for CNMF
+            background_location_matrix, background_activity_matrix = \
+                (Segmentation.CNMFBackground() & self).fetch1['masks', 'activity']
+
+            # Select first n components
+            if first_n is not None:
+                location_matrix = location_matrix[:, :, :first_n]
+                activity_matrix = activity_matrix[:first_n, :]
+
+            # Drop frames that won't be displayed
+            activity_matrix = activity_matrix[:, start_index: stop_index]
+            background_activity_matrix = background_activity_matrix[:, start_index: stop_index]
+
+            # Create movies
+            extracted = np.dot(location_matrix.reshape(num_pixels, -1), activity_matrix)
+            extracted = extracted.reshape(image_height, image_width, -1)
+            background = np.dot(background_location_matrix.reshape(num_pixels, -1),
+                                background_activity_matrix)
+            background = background.reshape(image_height, image_width, -1)
+            residual = scan_ - extracted - background
+
+            # Create animation
+            import matplotlib.animation as animation
+
+            ## Set the figure
+            fig, axes = plt.subplots(2, 2, sharex=True, sharey=True)
+
+            axes[0, 0].set_title('Original (Y)')
+            im1 = axes[0, 0].imshow(scan_[:, :, 0], vmin=scan_.min(), vmax=scan_.max())  # just a placeholder
+            fig.colorbar(im1, ax=axes[0, 0])
+
+            axes[0, 1].set_title('Extracted (A*C)')
+            im2 = axes[0, 1].imshow(extracted[:, :, 0], vmin=extracted.min(), vmax=extracted.max())
+            fig.colorbar(im2, ax=axes[0, 1])
+
+            axes[1, 0].set_title('Background (B*F)')
+            im3 = axes[1, 0].imshow(background[:, :, 0], vmin=background.min(),
+                                    vmax=background.max())
+            fig.colorbar(im3, ax=axes[1, 0])
+
+            axes[1, 1].set_title('Residual (Y - A*C - B*F)')
+            im4 = axes[1, 1].imshow(residual[:, :, 0], vmin=residual.min(), vmax=residual.max())
+            fig.colorbar(im4, ax=axes[1, 1])
+
+            for ax in axes.ravel():
+                ax.axis('off')
+
+            ## Make the animation
+            def update_img(i):
+                im1.set_data(scan_[:, :, i])
+                im2.set_data(extracted[:, :, i])
+                im3.set_data(background[:, :, i])
+                im4.set_data(residual[:, :, i])
+
+            video = animation.FuncAnimation(fig, update_img, scan_.shape[2],
+                                            interval=1000 / fps)
+
+            # Save animation
+            if not filename.endswith('.mp4'):
+                filename += '.mp4'
+            print('Saving video at:', filename)
+            print('If this takes too long, stop it and call again with dpi <', dpi, '(default)')
+            video.save(filename, dpi=dpi)
+
+            return fig
+
+    class CNMFBackground(dj.Part):
+        definition = """ # inferred background components
+
+        -> Segmentation.CNMF
+        ---
+        masks               : longblob      # array (im_height x im_width x num_background_components)
+        activity            : longblob      # array (num_background_components x timesteps)
+        """
+
+    def make_tuples(self, key):
+        # Create masks
+        if key['segmentation_method'] == 1: # manual
+            Segmentation.Manual()._make_tuples(key)
+        elif key['segmentation_method'] == 2: # nmf
+            Segmentation.CNMF()._make_tuples(key)
+        else:
+            msg = 'Unrecognized segmentation method {}'.format(key['segmentation_method'])
+            raise PipelineException(msg)
+
+    def notify(self, key):
+        fig = (Segmentation() & key).plot_contours()
+        img_filename = '/tmp/' + key_hash(key) + '.png'
+        fig.savefig(img_filename)
+        plt.close(fig)
+
+        msg = 'Segmentation for `{}` has been populated.'.format(key)
+        (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
+                                                                   file_title='mask contours')
 
     @staticmethod
     def reshape_masks(mask_pixels, mask_weights, image_height, image_width):
@@ -1019,6 +917,199 @@ class Segmentation(dj.Manual):
 
         return fig
 
+
+@schema
+class Fluorescence(dj.Computed):
+    definition = """  # fluorescence traces before spike extraction or filtering
+
+    -> Segmentation
+    """
+
+    @property
+    def key_source(self):
+        return Segmentation() & {'version': CURRENT_VERSION}
+
+    class Trace(dj.Part):
+        definition = """
+
+        -> Fluorescence
+        -> Segmentation.Mask
+        ---
+        trace                   : longblob
+        """
+
+    def _make_tuples(self, key):
+        print('Creating fluorescence traces...')
+
+        # Load scan
+        slice_id = key['slice'] - 1
+        channel = key['channel'] - 1
+        scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
+        scan = scanreader.read_scan(scan_filename, dtype=np.float32)
+        scan_ = scan[slice_id, :, :, channel, :]
+
+        # Get masks as images
+        mask_ids, mask_pixels, mask_weights = \
+            (Segmentation.Mask() & key).fetch['mask_id', 'pixels', 'weights']
+        location_matrix = Segmentation.reshape_masks(mask_pixels, mask_weights,
+                                                     scan.image_height, scan.image_width)
+        masks = location_matrix.transpose([2, 0, 1])
+
+        self.insert1(key)
+        for mask_id, mask in zip(mask_ids, masks):
+            trace = np.average(scan_.reshape(-1, scan.num_frames), weights=mask.ravel(),
+                               axis=0)
+
+            Fluorescence.Trace().insert1({**key, 'mask_id': mask_id, 'trace': trace})
+
+        self.notify(key)
+
+    def notify(self, key):
+        fig = plt.figure()
+        plt.plot((Fluorescence() & key).get_all_traces().T)
+        img_filename = '/tmp/' + key_hash(key) + '.png'
+        fig.savefig(img_filename)
+        plt.close(fig)
+
+        msg = 'Fluorescence.Trace for `{}` has been populated.'.format(key)
+        (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
+                                                                   file_title='calcium traces')
+
+    def get_all_traces(self):
+        """ Returns a num_traces x num_timesteps matrix with all traces."""
+        traces = (Fluorescence.Trace() & self).fetch.order_by('mask_id')['trace']
+        return np.array([x.squeeze() for x in traces])
+
+
+@schema
+class MaskClassification(dj.Computed):
+    definition = """ # classification of segmented masks.
+
+    -> Segmentation
+    -> shared.ClassificationMethod
+    """
+
+    @property
+    def key_source(self):
+        return Segmentation() & {'version': CURRENT_VERSION}
+
+    class Type(dj.Part):
+        definition = """
+
+        -> MaskClassification
+        -> Segmentation.Mask
+        ---
+        -> shared.MaskType
+        """
+
+    def _make_tuples(self, key):
+        # Get masks as images
+        image_height, image_width = (ScanInfo() & key).fetch1['px_height', 'px_width']
+        mask_ids, pixels, weights = (Segmentation.Mask() & key).fetch['mask_id', 'pixels', 'weights']
+        location_matrix = Segmentation.reshape_masks(pixels, weights, image_height, image_width)
+        masks = location_matrix.transpose([2, 0, 1]) # num_masks, image_height, image_width
+
+        # Make sure SummaryImages has been computed
+        if not (SummaryImages() & key):
+            raise PipelineException('Mask classification requires SummaryImages.')
+
+        # Classify masks
+        if key['classification_method'] ==  1: # manual
+            template = (SummaryImages() & key).fetch1['correlation']
+            mask_types = mask_classification.classify_manual(masks, template)
+        elif key['classification_method'] == 2: #cnn
+            print('Warning: Convnet not yet implemented.')
+        else:
+            msg = 'Unrecognized classification method {}'.format(key['classification_method'])
+            raise PipelineException(msg)
+
+        # Insert results
+        self.insert1(key)
+        for mask_id, mask_type in zip(mask_ids, mask_types):
+            MaskClassification.Type().insert1({**key, 'mask_id': mask_id, 'type': mask_type})
+
+
+@schema
+class ScanSet(dj.Computed):
+    definition = """ # union of all masks in the same scan
+
+    -> Segmentation         # processing done per slice
+    """
+
+    @property
+    def key_source(self):
+        return Segmentation() & {'version': CURRENT_VERSION}
+
+    class Unit(dj.Part):
+        definition = """ # single unit in the scan
+        -> ScanInfo
+        -> shared.SegmentationMethod
+        unit_id                 :int                # unique per scan & segmentation method
+        ---
+        -> Segmentation.Mask
+        """
+
+    #class Match(dj.Part) # MaskSet?
+    #    definition = """ # unit-mask pairs per scan
+    #    -> ScanSet.Unit
+    #    -> Segmentation.Mask
+    #    """
+
+    class UnitInfo(dj.Part):
+        definition = """ # unit type and coordinates in x, y, z
+
+        -> ScanSet.Unit
+        ---
+        -> shared.MaskType                  # type of the unit
+        um_x                :smallint       # x-coordinate of centroid in motor coordinate system
+        um_y                :smallint       # y-coordinate of centroid in motor coordinate system
+        um_z                :smallint       # z-coordinate of mask relative to surface of the cortex
+        px_x                :smallint       # x-coordinate of centroid in the frame
+        px_y                :smallint       # y-coordinate of centroid in the frame
+        """
+
+    def _make_tuples(self, key):
+        from pipeline.utils import caiman_interface as cmn
+
+        # Get masks as images
+        image_height, image_width = (ScanInfo() & key).fetch1['px_height', 'px_width']
+        mask_ids, pixels, weights = (Segmentation.Mask() & key).fetch['mask_id', 'pixels', 'weights']
+        location_matrix = Segmentation.reshape_masks(pixels, weights, image_height, image_width)
+
+        # Compute units' coordinates
+        image_height, image_width, num_units = location_matrix.shape
+        px_center = [image_height / 2, image_width / 2]
+        um_center = (ScanInfo() & key).fetch1['y', 'x']
+
+        px_centroids = cmn.get_centroids(location_matrix)
+        um_centroids = um_center + (px_centroids - px_center) * (ScanInfo() & key).microns_per_pixel
+        um_z = (ScanInfo.Slice() & key).fetch1['z']
+
+        # Get type from MaskClassification if available, else SegmentationTask
+        if MaskClassification() & key:
+            ids, types = (MaskClassification.Type() & key).fetch['mask_id', 'type']
+            get_type = lambda mask_id: types[ids == mask_id].item()
+        else:
+            mask_type = (SegmentationTask() & key).fetch1['compartment']
+            get_type = lambda mask_id: mask_type
+
+        # Get next unit_id for scan
+        unit_rel = (ScanSet.Unit().proj() & key)
+        unit_id = np.max(unit_rel.fetch['unit_id']) + 1 if unit_rel else 1
+
+        # Insert in ScanSet
+        self.insert1(key)
+
+        # Insert units
+        unit_ids = range(unit_id, unit_id + num_units + 1)
+        for unit_id, mask_id, (px_x, px_y), (um_x, um_y) in zip(unit_ids, mask_ids,
+                                                                px_centroids, um_centroids):
+            ScanSet.Unit().insert1({**key, 'unit_id': unit_id, 'mask_id': mask_id})
+
+            ScanSet.UnitInfo().insert1({**key, 'unit_id': unit_id, 'type': get_type(mask_id),
+                                        'um_x': um_x, 'um_y': um_y, 'um_z': um_z,
+                                        'px_x': px_x, 'px_y': px_y})
+
     def plot_centroids(self, first_n=None):
         """ Draw centroids of masks over the correlation image.
 
@@ -1026,7 +1117,7 @@ class Segmentation(dj.Manual):
         :returns: None
         """
         # Get centroids
-        centroids = (Segmentation.MaskInfo() & self).fetch.order_by('mask_id')['px_x', 'px_y']
+        centroids = (ScanSet.UnitInfo() & self).fetch.order_by('unit_id')['px_x', 'px_y']
 
         # Select first n components
         if first_n is not None:
@@ -1052,7 +1143,7 @@ class Segmentation(dj.Manual):
     def plot_centroids_3d(self):
         #TODO: Add different colors for different types, correlation image as 2-d planes
         from mpl_toolkits.mplot3d import Axes3D
-        centroids = (Segmentation.MaskInfo() & self).fetch.order_by('mask_id')['um_x', 'um_y', 'um_z']
+        centroids = (ScanSet.UnitInfo() & self).fetch.order_by('unit_id')['um_x', 'um_y', 'um_z']
 
         fig = plt.figure()
         ax = fig.add_subplot(111, projection='3d')
@@ -1062,207 +1153,9 @@ class Segmentation(dj.Manual):
         ax.set_zlabel('z (um)')
 
         return fig
-
-    def delete(self):
-        """ Delete entries in appropiate subtables."""
-        if ManualSegmentation() & self:
-            dj.BaseRelation.delete(ManualSegmentation() & self)
-        if NMF() & self:
-            dj.BaseRelation.delete(NMF() & self)
-        if self:
-            super().delete()
-
-
-@schema
-class Calcium(dj.Computed):
-    definition = """  # calcium traces before spike extraction or filtering
-
-    -> Segmentation
-    """
-
-    class Trace(dj.Part):
-        definition = """
-
-        -> Calcium
-        -> Segmentation.Mask
-        ---
-        trace                   : longblob
-        """
-
-    def _make_tuples(self, key):
-        print('Creating calcium traces for', key)
-
-        # Load scan
-        slice_id = key['slice'] - 1
-        channel = key['channel'] - 1
-        scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
-        scan = scanreader.read_scan(scan_filename, dtype=np.float32)
-        scan_ = scan[slice_id, :, :, channel, :]
-
-        # Get masks as images
-        mask_ids, mask_pixels, mask_weights = \
-            (Segmentation.Mask() & key).fetch['mask_id', 'pixels', 'weights']
-        location_matrix = Segmentation.reshape_masks(mask_pixels, mask_weights,
-                                                     scan.image_height, scan.image_width)
-        masks = location_matrix.transpose([2, 0, 1])
-
-        self.insert1(key)
-        for mask_id, mask in zip(mask_ids, masks):
-            trace = np.average(scan_.reshape(-1, scan.num_frames), weights=mask.ravel(),
-                               axis=0)
-
-            Calcium.Trace().insert1({**key, 'mask_id': mask_id, 'trace': trace})
-
-        self.notify(key)
-
-    def notify(self, key):
-        fig = plt.figure()
-        plt.plot((Calcium() & key).get_all_traces().T)
-        img_filename = '/tmp/' + key_hash(key) + '.png'
-        fig.savefig(img_filename)
-        plt.close(fig)
-
-        msg = 'Calcium.Trace for `{}` has been populated.'.format(key)
-        (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
-                                                                   file_title='calcium traces')
-
-    def get_all_traces(self):
-        """ Returns a num_traces x num_timesteps matrix with all traces."""
-        traces = (Calcium.Trace() & self).fetch.order_by('mask_id')['trace']
-        return np.array([x.squeeze() for x in traces])
-
-
-@schema
-class MaskClassification(dj.Computed):
-    definition = """ # automatic classification of segmented masks.
-
-    -> Segmentation
-    """
-    @property
-    def key_source(self):
-        return Segmentation() & {'extract_method': '2'} # only for cnmf extraction
-
-    class Type(dj.Part):
-        definition = """
-
-        -> MaskClassification
-        -> Segmentation.Mask
-        ---
-        -> shared.MaskType
-        """
-
-    def _make_tuples(self, key):
-        import matplotlib.pyplot as plt
-        import seaborn as sns
-
-        # Get masks as images
-        mask_ids, pixels, weights = (Segmentation.Mask() & key).fetch['mask_id', 'pixels', 'weights']
-        image_height, image_width = (ScanInfo() & key).fetch1['px_height', 'px_width']
-        location_matrix = Segmentation.reshape_masks(pixels, weights, image_height, image_width)
-        masks = location_matrix.transpose([2, 0, 1])
-
-        # Get template
-        if SummaryImages() & key:
-            template = (SummaryImages() & key).fetch1['correlation']
-        else:
-            raise PipelineException('Manual classification of masks requires SummaryImages.')
-
-        self.insert1(key)
-        for mask_id, mask in zip(mask_ids, masks):
-            ir = mask.sum(axis=1) > 0
-            ic = mask.sum(axis=0) > 0
-
-            il, jl = [max(np.min(np.where(i)[0]) - 10, 0) for i in [ir, ic]]
-            ih, jh = [min(np.max(np.where(i)[0]) + 10, len(i)) for i in [ir, ic]]
-            tmp_mask = np.array(mask[il:ih, jl:jh])
-
-            with sns.axes_style('white'):
-                fig, ax = plt.subplots(1, 3, sharex=True, sharey=True, figsize=(20, 5))
-
-            ax[0].imshow(template[il:ih, jl:jh], cmap=plt.cm.get_cmap('gray'))
-            ax[1].imshow(template[il:ih, jl:jh], cmap=plt.cm.get_cmap('gray'))
-            tmp_mask[tmp_mask == 0] = np.NaN
-            ax[1].matshow(tmp_mask, cmap=plt.cm.get_cmap('viridis'), alpha=0.5, zorder=10)
-            ax[2].matshow(tmp_mask, cmap=plt.cm.get_cmap('viridis'))
-            for a in ax:
-                a.set_aspect(1)
-                a.axis('off')
-            fig.tight_layout()
-            fig.canvas.manager.window.wm_geometry("+250+250")
-            fig.suptitle('S(o)ma, A(x)on, (D)endrite, (N)europil, (A)rtifact or (U)nknown?')
-
-            def on_button(event):
-                if event.key == 'o':
-                    self.Type().insert1({**key, 'mask_id': mask_id, 'type': 'soma'})
-                    print('Soma', {**key, 'mask_id': mask_id})
-                    plt.close(fig)
-                elif event.key == 'x':
-                    self.Type().insert1({**key, 'mask_id': mask_id, 'type': 'axon'})
-                    print('Axon', {**key, 'mask_id': mask_id})
-                    plt.close(fig)
-                elif event.key == 'd':
-                    self.Type().insert1({**key, 'mask_id': mask_id, 'type': 'dendrite'})
-                    print('Dendrite', {**key, 'mask_id': mask_id})
-                    plt.close(fig)
-                elif event.key == 'n':
-                    self.Type().insert1({**key, 'mask_id': mask_id, 'type': 'neuropil'})
-                    print('Neuropil', {**key, 'mask_id': mask_id})
-                    plt.close(fig)
-                elif event.key == 'a':
-                    self.Type().insert1({**key, 'mask_id': mask_id, 'type': 'artifact'})
-                    print('Artifact', {**key, 'mask_id': mask_id})
-                    plt.close(fig)
-                elif event.key == 'u':
-                    self.Type().insert1({**key, 'mask_id': mask_id, 'type': 'unknown'})
-                    print('Unknown', {**key, 'mask_id': mask_id})
-                    plt.close(fig)
-
-            fig.canvas.mpl_connect('key_press_event', on_button)
-
-            plt.show()
-
-
-@schema
-class ScanSet(dj.Computed):
-    definition = """ # union of all masks in the same scan
-
-    -> Segmentation         # processing done per slice
-    """
-
-    class Unit(dj.Part):
-        definition = """ # single unit in the scan
-        -> ScanInfo
-        -> shared.SegmentationMethod
-        unit_id                 :int                # unique per scan & segmentation method
-        ---
-        -> Segmentation.Mask
-        """
-
-    #class Match(dj.Part) # MaskSet?
-    #    definition = """ # unit-mask pairs per scan
-    #    -> ScanSet.Unit
-    #    -> Segmentation.Mask
-    #    """
-
-    def _make_tuples(self, key):
-        # Insert in ScanSet
-        self.insert1(key)
-
-        # Get next unit_id for Scan (& SegmentationMethod)
-        scan_key = {k:v for k, v in key.items() if k in ['animal_id', 'session',
-                                                         'scan_idx', 'extract_method']}
-        unit_rel = ScanSet.Unit() & scan_key
-        unit_id = np.max(unit_rel.fetch['unit_id']) + 1 if unit_rel else 1
-
-        # Insert pairs in ScanSet.Unit
-        mask_ids = (Segmentation.Mask() & key).fetch['mask_id']
-        for mask_id in mask_ids:
-            ScanSet.Unit().insert1({**key, 'mask_id': mask_id, 'unit_id': unit_id})
-            unit_id += 1
-
     def delete(self):
         """ Propagate deletion to units in the slice."""
-        if ScanSet.Unit() & self:
+        if ScanSet.Unit() & self: # this joins ScanSet's slice and channel with Segmentation.Mask's slice and channel
             (ScanSet.Unit() & self).delete()
         if self:
             super().delete()
@@ -1272,13 +1165,13 @@ class ScanSet(dj.Computed):
 class Activity(dj.Computed):
     definition = """ # deconvolved calcium activity inferred from calcium traces
 
-    -> ScanSet              # processing done per slice
+    -> ScanSet                  # processing done per slice
     -> shared.SpikeMethod
     """
 
     @property
     def key_source(self):
-        return ScanSet() * (shared.SpikeMethod() & {'language': 'python'})
+        return ScanSet() * shared.SpikeMethod() & {'version': CURRENT_VERSION}
 
     class Trace(dj.Part):
         definition = """ # deconvolved calcium acitivity
@@ -1289,21 +1182,27 @@ class Activity(dj.Computed):
         trace                   : longblob
         """
 
-    def _make_tuples(self, key):
-        print('Creating activity traces for', key)
+    class ARCoefficients(dj.Part):
+        definition = """ # fitted parameters for the autoregressive process (nmf deconvolution)
 
-        # Get params
+        -> ScanSet.Unit
+        ---
+        g                   : blob          # g1, g2, ... coefficients for the AR process
+    """
+
+    def _make_tuples(self, key):
+        print('Creating activity traces...')
+
+        # Get fluorescence
         fps = (ScanInfo() & key).fetch1['fps']
-        unit_ids, traces = ((ScanSet.Unit() & key) * Calcium.Trace()).fetch['unit_id', 'trace']
+        unit_ids, traces = ((ScanSet.Unit() & key) * Fluorescence.Trace()).fetch['unit_id', 'trace']
         full_traces = [signal.fill_nans(np.squeeze(trace).copy()) for trace in traces]
 
         # Insert in Activity
         self.insert1(key)
 
-        # Get scan key (used to insert in Activity.Trace)
-        scan_key = {k:v for k, v in key.items() if k in ['animal_id', 'session',
-                                                         'scan_idx', 'extract_method',
-                                                         'spike_method']}
+        # Get scan key ignoring slice and channel. Used to insert in Activity.Trace
+        scan_key = {k:v for k, v in key.items() if k not in ['slice', 'channel']}
 
         method_name = (shared.SpikeMethod() & key).fetch1['spike_method_name']
         if method_name == 'oopsi': # Non-negative sparse deconvolution
@@ -1350,6 +1249,42 @@ class Activity(dj.Computed):
         (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
                                                                    file_title='spike traces')
 
+    def plot_impulse_responses(self, num_timepoints=100):
+        """ Plots the impulse response functions for all traces.
+
+        :param int num_timepoints: The number of points after impulse to use for plotting.
+
+        :returns Figure. You can call show() on it.
+        :rtype: matplotlib.figure.Figure
+        """
+        ar_rel = Activity.ARCoefficients() & self
+        if ar_rel: # if an AR model was used
+            # Get some params
+            fps = (ScanInfo() & self).fetch1['fps']
+            ar_coeffs = ar_rel.fetch['g']
+
+            # Define the figure
+            fig = plt.figure()
+            x_axis = np.arange(num_timepoints) / fps  # make it seconds
+
+            # Over each trace
+            for g in ar_coeffs:
+                AR_order = len(g)
+
+                # Calculate impulse response function
+                irf = np.zeros(num_timepoints)
+                irf[0] = 1  # initial spike
+                for i in range(1, num_timepoints):
+                    if i <= AR_order:  # start of the array needs special care
+                        irf[i] = np.sum(g[:i] * irf[i - 1:: -1])
+                    else:
+                        irf[i] = np.sum(g * irf[i - 1: i - AR_order - 1: -1])
+
+                # Plot
+                plt.plot(x_axis, irf)
+
+            return fig
+
     def get_all_spikes(self):
         """ Returns a num_traces x num_timesteps matrix with all spikes."""
         spikes = (Activity.Trace() & self).fetch.order_by('unit_id')['trace']
@@ -1357,8 +1292,11 @@ class Activity(dj.Computed):
 
     def delete(self):
         """ Propagate deletion to traces in the slice. """
-        if Activity.Trace() & self:
-            (Activity.Trace() & self).delete()
+        units_to_delete = (ScanSet.Unit() & self)
+        if Activity.Trace() & self & units_to_delete:
+            (Activity.Trace() & self & units_to_delete).delete()
+        if Activity.ARCoefficients() & (self & {'spike_method': 5}) & units_to_delete:
+            (Activity.ARCoefficients() & (self & {'spike_method': 5}) & units_to_delete).delete()
         if self:
             super().delete()
 
