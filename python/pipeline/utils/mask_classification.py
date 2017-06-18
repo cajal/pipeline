@@ -10,6 +10,7 @@ def classify_manual(masks, template):
     import matplotlib.pyplot as plt
     import seaborn as sns
 
+    mask_types= []
     for mask in masks:
         ir = mask.sum(axis=1) > 0
         ic = mask.sum(axis=0) > 0
@@ -35,24 +36,26 @@ def classify_manual(masks, template):
 
         def on_button(event):
             if event.key == 'o':
+                mask_types.append('soma')
                 plt.close(fig)
-                yield 'soma'
             elif event.key == 'x':
+                mask_types.append('axon')
                 plt.close(fig)
-                yield 'axon'
             elif event.key == 'd':
+                mask_types.append('dendrite')
                 plt.close(fig)
-                yield 'dendrite'
             elif event.key == 'n':
+                mask_types.append('neuropil')
                 plt.close(fig)
-                yield 'neuropil'
             elif event.key == 'a':
+                mask_types.append('artifact')
                 plt.close(fig)
-                yield 'artifact'
             elif event.key == 'u':
+                mask_types.append('unknown')
                 plt.close(fig)
-                yield 'unknown'
 
         fig.canvas.mpl_connect('key_press_event', on_button)
 
         plt.show()
+
+    return mask_types

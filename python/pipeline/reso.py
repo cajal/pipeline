@@ -13,6 +13,7 @@ from .utils import quality
 from .utils import mask_classification
 from .exceptions import PipelineException
 
+
 schema = dj.schema('pipeline_reso', locals())
 CURRENT_VERSION = 0
 
@@ -21,14 +22,14 @@ CURRENT_VERSION = 0
 class Version(dj.Lookup):
     definition = """ # versions for the reso pipeline
 
-    version                         : smallint
+    reso_version                    : smallint
     ---
     description = ''                : varchar(256)      # any notes on this version
     date = CURRENT_TIMESTAMP        : timestamp         # automatic
     """
     contents = [
-        {'version': 0, 'description': 'test'},
-        {'version': 1, 'description': 'first release'}
+        {'reso_version': 0, 'description': 'test'},
+        #{'reso_version': 1, 'description': 'first release'}
     ]
 
 
@@ -60,7 +61,7 @@ class ScanInfo(dj.Imported):
     def key_source(self):
         rigs = [{'rig': '2P2'}, {'rig': '2P3'}, {'rig': '2P5'}]
         reso_scans = (experiment.Scan() - experiment.ScanIgnored()) & (experiment.Session() & rigs)
-        return reso_scans * (Version() & {'version': CURRENT_VERSION})
+        return reso_scans * (Version() & {'reso_version': CURRENT_VERSION})
 
     class Slice(dj.Part):
         definition = """ # slice-specific scan information
@@ -183,71 +184,6 @@ class ScanInfo(dj.Imported):
                                                                'um_width', 'px_width']
         return np.array([um_height/px_height, um_width/px_width])
 
-    def save_video(self, filename='galvo_corrections.mp4', slice_id=1, channel=1,
-                   start_index=0, seconds=30, dpi=250):
-        """ Creates an animation video showing the original vs corrected scan.
-
-        :param string filename: Output filename (path + filename)
-        :param int slice_id: Slice to use for plotting. Starts at 1
-        :param int channel: What channel from the scan to use. Starts at 1
-        :param int start_index: Where in the scan to start the video.
-        :param int seconds: How long in seconds should the animation run.
-        :param int dpi: Dots per inch, controls the quality of the video.
-
-        :returns Figure. You can call show() on it.
-        :rtype: matplotlib.figure.Figure
-        """
-        # Get fps and total_num_frames
-        fps = (ScanInfo() & self).fetch1['fps']
-        num_video_frames = int(round(fps * seconds))
-        stop_index = start_index + num_video_frames
-
-        # Load the scan
-        scan_filename = (experiment.Scan() & self).local_filenames_as_wildcard
-        scan = scanreader.read_scan(scan_filename, dtype=np.float32)
-        scan_ = scan[slice_id - 1, :, :, channel - 1, start_index: stop_index]
-        original_scan = scan_.copy()
-
-        # Correct the scan
-        correct_raster = (RasterCorrection() & self & {'slice': slice_id}).get_correct_raster()
-        correct_motion = (MotionCorrection() & self & {'slice': slice_id}).get_correct_motion()
-        corrected_scan = correct_motion(correct_raster(scan_), slice(start_index, stop_index))
-
-        # Create animation
-        import matplotlib.animation as animation
-
-        ## Set the figure
-        fig, axes = plt.subplots(1, 2, sharex=True, sharey=True)
-
-        axes[0].set_title('Original')
-        im1 = axes[0].imshow(original_scan[:, :, 0], vmin=original_scan.min(),
-                             vmax=original_scan.max())  # just a placeholder
-        fig.colorbar(im1, ax=axes[0])
-        axes[0].axis('off')
-
-        axes[1].set_title('Corrected')
-        im2 = axes[1].imshow(corrected_scan[:, :, 0], vmin=corrected_scan.min(),
-                         vmax=corrected_scan.max())  # just a placeholder
-        fig.colorbar(im2, ax=axes[1])
-        axes[1].axis('off')
-
-        ## Make the animation
-        def update_img(i):
-            im1.set_data(original_scan[:, :, i])
-            im2.set_data(corrected_scan[:, :, i])
-
-        video = animation.FuncAnimation(fig, update_img, corrected_scan.shape[2],
-                                        interval=1000 / fps)
-
-        # Save animation
-        if not filename.endswith('.mp4'):
-            filename += '.mp4'
-        print('Saving video at:', filename)
-        print('If this takes too long, stop it and call again with dpi <', dpi, '(default)')
-        video.save(filename, dpi=dpi)
-
-        return fig
-
 
 @schema
 class CorrectionChannel(dj.Manual):
@@ -274,8 +210,8 @@ class RasterCorrection(dj.Computed):
     @property
     def key_source(self):
         # Run make_tuples once per scan iff correction channel has been set for all slices
-        return (((ScanInfo() & CorrectionChannel()) - (ScanInfo.Slice() - CorrectionChannel())) &
-                {'version': CURRENT_VERSION})
+        scans = (ScanInfo() & CorrectionChannel()) - (ScanInfo.Slice() - CorrectionChannel())
+        return scans & {'reso_version': CURRENT_VERSION}
 
     def _make_tuples(self, key):
         print('Computing raster correction...')
@@ -346,7 +282,7 @@ class MotionCorrection(dj.Computed):
     @property
     def key_source(self):
         # Run make_tuples once per scan iff RasterCorrection is done
-        return ScanInfo() & RasterCorrection() & {'version': CURRENT_VERSION}
+        return ScanInfo() & RasterCorrection() & {'reso_version': CURRENT_VERSION}
 
     def _make_tuples(self, key):
         """Computes the motion shifts per frame needed to correct the scan."""
@@ -440,10 +376,75 @@ class MotionCorrection(dj.Computed):
         img_filename = '/tmp/' + key_hash(key) + '.png'
         fig.savefig(img_filename)
         plt.close(fig)
+        sns.reset_orig()
 
         msg = 'MotionCorrection for `{}` has been populated.'.format(key)
         (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
                                                                    file_title='motion shifts')
+
+    def save_video(self, filename='galvo_corrections.mp4', channel=1, start_index=0,
+                   seconds=30, dpi=250):
+        """ Creates an animation video showing the original vs corrected scan.
+
+        :param string filename: Output filename (path + filename)
+        :param int channel: What channel from the scan to use. Starts at 1
+        :param int start_index: Where in the scan to start the video.
+        :param int seconds: How long in seconds should the animation run.
+        :param int dpi: Dots per inch, controls the quality of the video.
+
+        :returns Figure. You can call show() on it.
+        :rtype: matplotlib.figure.Figure
+        """
+        # Get fps and total_num_frames
+        fps = (ScanInfo() & self).fetch1['fps']
+        num_video_frames = int(round(fps * seconds))
+        stop_index = start_index + num_video_frames
+
+        # Load the scan
+        scan_filename = (experiment.Scan() & self).local_filenames_as_wildcard
+        scan = scanreader.read_scan(scan_filename, dtype=np.float32)
+        scan_ = scan[self.fetch1['slice'] - 1, :, :, channel - 1, start_index: stop_index]
+        original_scan = scan_.copy()
+
+        # Correct the scan
+        correct_raster = (RasterCorrection() & self.proj()).get_correct_raster()
+        correct_motion = self.get_correct_motion()
+        corrected_scan = correct_motion(correct_raster(scan_), slice(start_index, stop_index))
+
+        # Create animation
+        import matplotlib.animation as animation
+
+        ## Set the figure
+        fig, axes = plt.subplots(1, 2, sharex=True, sharey=True)
+
+        axes[0].set_title('Original')
+        im1 = axes[0].imshow(original_scan[:, :, 0], vmin=original_scan.min(),
+                             vmax=original_scan.max())  # just a placeholder
+        fig.colorbar(im1, ax=axes[0])
+        axes[0].axis('off')
+
+        axes[1].set_title('Corrected')
+        im2 = axes[1].imshow(corrected_scan[:, :, 0], vmin=corrected_scan.min(),
+                         vmax=corrected_scan.max())  # just a placeholder
+        fig.colorbar(im2, ax=axes[1])
+        axes[1].axis('off')
+
+        ## Make the animation
+        def update_img(i):
+            im1.set_data(original_scan[:, :, i])
+            im2.set_data(corrected_scan[:, :, i])
+
+        video = animation.FuncAnimation(fig, update_img, corrected_scan.shape[2],
+                                        interval=1000 / fps)
+
+        # Save animation
+        if not filename.endswith('.mp4'):
+            filename += '.mp4'
+        print('Saving video at:', filename)
+        print('If this takes too long, stop it and call again with dpi <', dpi, '(default)')
+        video.save(filename, dpi=dpi)
+
+        return fig
 
     def get_correct_motion(self):
         """ Returns a function to perform motion correction on scans. """
@@ -472,7 +473,7 @@ class SummaryImages(dj.Computed):
 
     @property
     def key_source(self):
-        return MotionCorrection() & {'version': CURRENT_VERSION} # once per slice
+        return MotionCorrection() & {'reso_version': CURRENT_VERSION} # once per slice
 
     def _make_tuples(self, key):
         from .utils import correlation_image as ci
@@ -529,6 +530,7 @@ class SummaryImages(dj.Computed):
         img_filename = '/tmp/' + key_hash(key) + '.png'
         fig.savefig(img_filename)
         plt.close(fig)
+        sns.reset_orig()
 
         msg = 'SummaryImages for `{}` has been populated.'.format(key)
         (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
@@ -576,7 +578,7 @@ class SegmentationTask(dj.Manual):
         return int(round(num_components))
 
 @schema
-class Segmentation(dj.Manual):
+class Segmentation(dj.Computed):
     definition = """ # Different mask segmentations.
 
     -> MotionCorrection         # animal_id, session, scan_idx, version, slice
@@ -585,7 +587,7 @@ class Segmentation(dj.Manual):
 
     @property
     def key_source(self):
-        return MotionCorrection() * SegmentationTask() & {'version': CURRENT_VERSION}
+        return MotionCorrection() * SegmentationTask() & {'reso_version': CURRENT_VERSION}
 
     class Mask(dj.Part):
         definition = """ # mask produced by segmentation.
@@ -728,7 +730,7 @@ class Segmentation(dj.Manual):
 
                 Fluorescence.Trace().insert1({**key, 'mask_id': mask_id, 'trace': trace})
 
-            self.notify(key)
+            Segmentation().notify(key)
 
         def save_video(self, filename='cnmf_results.mp4', start_index=0, seconds=30,
                        dpi=250, first_n=None):
@@ -841,7 +843,7 @@ class Segmentation(dj.Manual):
         activity            : longblob      # array (num_background_components x timesteps)
         """
 
-    def make_tuples(self, key):
+    def _make_tuples(self, key):
         # Create masks
         if key['segmentation_method'] == 1: # manual
             Segmentation.Manual()._make_tuples(key)
@@ -927,7 +929,7 @@ class Fluorescence(dj.Computed):
 
     @property
     def key_source(self):
-        return Segmentation() & {'version': CURRENT_VERSION}
+        return Segmentation() & {'reso_version': CURRENT_VERSION}
 
     class Trace(dj.Part):
         definition = """
@@ -991,7 +993,7 @@ class MaskClassification(dj.Computed):
 
     @property
     def key_source(self):
-        return Segmentation() & {'version': CURRENT_VERSION}
+        return Segmentation() * shared.ClassificationMethod() & {'reso_version': CURRENT_VERSION}
 
     class Type(dj.Part):
         definition = """
@@ -1019,9 +1021,13 @@ class MaskClassification(dj.Computed):
             mask_types = mask_classification.classify_manual(masks, template)
         elif key['classification_method'] == 2: #cnn
             print('Warning: Convnet not yet implemented.')
+            #template = (SummaryImages() & key).fetch1['correlation']
+            #mask_types = mask_classification.classify_cnn(masks, template)
         else:
             msg = 'Unrecognized classification method {}'.format(key['classification_method'])
             raise PipelineException(msg)
+
+        print('Generated types: ', mask_types)
 
         # Insert results
         self.insert1(key)
@@ -1038,7 +1044,7 @@ class ScanSet(dj.Computed):
 
     @property
     def key_source(self):
-        return Segmentation() & {'version': CURRENT_VERSION}
+        return Segmentation() & {'reso_version': CURRENT_VERSION}
 
     class Unit(dj.Part):
         definition = """ # single unit in the scan
@@ -1102,13 +1108,25 @@ class ScanSet(dj.Computed):
 
         # Insert units
         unit_ids = range(unit_id, unit_id + num_units + 1)
-        for unit_id, mask_id, (px_x, px_y), (um_x, um_y) in zip(unit_ids, mask_ids,
-                                                                px_centroids, um_centroids):
+        for unit_id, mask_id, (um_y, um_x), (px_y, px_x) in zip(unit_ids, mask_ids,
+                                                                um_centroids, px_centroids):
             ScanSet.Unit().insert1({**key, 'unit_id': unit_id, 'mask_id': mask_id})
 
-            ScanSet.UnitInfo().insert1({**key, 'unit_id': unit_id, 'type': get_type(mask_id),
-                                        'um_x': um_x, 'um_y': um_y, 'um_z': um_z,
-                                        'px_x': px_x, 'px_y': px_y})
+            unit_info = {**key, 'unit_id': unit_id, 'type': get_type(mask_id), 'um_x': um_x,
+                         'um_y': um_y, 'um_z': um_z, 'px_x': px_x, 'px_y': px_y}
+            ScanSet.UnitInfo().insert1(unit_info, ignore_extra_fields=True) # ignore slice and channel
+
+        self.notify(key)
+
+    def notify(self, key):
+        fig = (ScanSet() & key).plot_centroids()
+        img_filename = '/tmp/' + key_hash(key) + '.png'
+        fig.savefig(img_filename)
+        plt.close(fig)
+
+        msg = 'ScanSet for `{}` has been populated.'.format(key)
+        (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
+                                                                   file_title='unit centroids')
 
     def plot_centroids(self, first_n=None):
         """ Draw centroids of masks over the correlation image.
@@ -1117,12 +1135,9 @@ class ScanSet(dj.Computed):
         :returns: None
         """
         # Get centroids
-        centroids = (ScanSet.UnitInfo() & self).fetch.order_by('unit_id')['px_x', 'px_y']
-
-        # Select first n components
+        centroids = self.get_all_centroids(centroid_type='px')
         if first_n is not None:
-            centroids[0] = centroids[0][:first_n]
-            centroids[1] = centroids[1][:first_n]
+            centroids = centroids[:, :first_n] # select first n components
 
         # Get correlation image if defined, black background otherwise.
         image_rel = SummaryImages() & self
@@ -1136,23 +1151,43 @@ class ScanSet(dj.Computed):
         figsize = 7 * (background_image.shape / np.min(background_image.shape))
         fig = plt.figure(figsize=figsize)
         plt.imshow(background_image)
-        plt.plot(centroids[0], centroids[1], 'ow', markersize=3)
+        plt.plot(centroids[:, 0], centroids[:, 1], 'ow', markersize=3)
 
         return fig
 
-    def plot_centroids_3d(self):
-        #TODO: Add different colors for different types, correlation image as 2-d planes
+    def plot_centroids3d(self):
         from mpl_toolkits.mplot3d import Axes3D
-        centroids = (ScanSet.UnitInfo() & self).fetch.order_by('unit_id')['um_x', 'um_y', 'um_z']
 
+        # Get centroids
+        centroids = self.get_all_centroids()
+
+        # Plot
+        #TODO: Add different colors for different types, correlation image as 2-d planes
         fig = plt.figure()
         ax = fig.add_subplot(111, projection='3d')
-        ax.scatter(centroids[0], centroids[1], centroids[2])
+        ax.scatter(centroids[:, 0], centroids[:, 1], centroids[:, 2])
         ax.set_xlabel('x (um)')
         ax.set_ylabel('y (um)')
         ax.set_zlabel('z (um)')
 
         return fig
+
+    def get_all_centroids(self, centroid_type='um'):
+        """ Returns the centroids for all units in ScanSet (could be limited to slice).
+
+        Centroid type is either 'um' or 'px':
+            'um': Array (num_units x 3) with x, y, z in motor coordinate system (microns).
+            'px': Array (num_units x 2) with x, y pixel coordinates.
+        """
+        units_rel = ScanSet.UnitInfo() & (ScanSet.Unit() & self)
+        if centroid_type == 'um':
+            xs, ys, zs = units_rel.fetch.order_by('unit_id')['um_x', 'um_y', 'um_z']
+            centroids = np.stack([xs, ys, zs], axis=1)
+        else:
+            xs, ys = units_rel.fetch.order_by('unit_id')['px_x', 'px_y']
+            centroids = np.stack([xs, ys], axis=1)
+        return centroids
+
     def delete(self):
         """ Propagate deletion to units in the slice."""
         if ScanSet.Unit() & self: # this joins ScanSet's slice and channel with Segmentation.Mask's slice and channel
@@ -1171,7 +1206,7 @@ class Activity(dj.Computed):
 
     @property
     def key_source(self):
-        return ScanSet() * shared.SpikeMethod() & {'version': CURRENT_VERSION}
+        return ScanSet() * shared.SpikeMethod() & {'reso_version': CURRENT_VERSION}
 
     class Trace(dj.Part):
         definition = """ # deconvolved calcium acitivity
@@ -1200,19 +1235,15 @@ class Activity(dj.Computed):
 
         # Insert in Activity
         self.insert1(key)
-
-        # Get scan key ignoring slice and channel. Used to insert in Activity.Trace
-        scan_key = {k:v for k, v in key.items() if k not in ['slice', 'channel']}
-
-        method_name = (shared.SpikeMethod() & key).fetch1['spike_method_name']
-        if method_name == 'oopsi': # Non-negative sparse deconvolution
+        if key['spike_method'] == 2: # oopsie
             import pyfnnd # Install from https://github.com/cajal/PyFNND.git
 
             for unit_id, trace in zip(unit_ids, full_traces):
                 spike_trace = pyfnnd.deconvolve(trace, dt=1/fps)[0]
-                Activity.Trace().insert1({**scan_key, 'unit_id': unit_id, 'trace': spike_trace})
+                Activity.Trace().insert1({**key, 'unit_id': unit_id, 'trace': spike_trace},
+                                         ignore_extra_fields=True)
 
-        elif method_name == 'stm': # Spike-triggered mixture model
+        elif key['spike_method'] == 3: # stm
             import c2s # Install from https://github.com/lucastheis/c2s
 
             for unit_id, trace in zip(unit_ids, full_traces):
@@ -1223,18 +1254,20 @@ class Activity(dj.Computed):
                 data = c2s.predict(c2s.preprocess([trace_dict], fps=fps), verbosity=0)
                 spike_trace = np.squeeze(data[0].pop('predictions'))
 
-                Activity.Trace().insert1({**scan_key, 'unit_id': unit_id, 'trace': spike_trace})
+                Activity.Trace().insert1({**key, 'unit_id': unit_id, 'trace': spike_trace},
+                                         ignore_extra_fields=True)
 
-        elif method_name == 'nmf': # Noise-constrained deconvolution
-            from pipeline.utils import caiman_interface as cmn
+        elif key['spike_method'] == 5: # nmf
+            #from pipeline.utils import caiman_interface as cmn
 
             #for unit_id, trace in zip(unit_ids, full_traces):
-            #    spike_trace = cmn.deconvolve(trace, fps)
-            #    Activity.Trace().insert1({**scan_key, 'unit_id': unit_id, 'trace': spike_trace})
+            #    spike_trace, ar_coeffs = cmn.deconvolve_nmf(trace, fps)
+            #    Activity.Trace().insert1({**key, 'unit_id': unit_id, 'trace': spike_trace})
+            #    Activity.ARCoefficients.insert1({**key, 'unit_id': unit_id, 'g': ar_coeffs})
             raise NotImplementedError('NMF not yet implemented')
-
         else:
-            raise NotImplementedError('{} method not implemented.'.format(method_name))
+            msg = 'Unrecognized spike method {}'.format(key['spike_method'])
+            raise PipelineException(msg)
 
         self.notify(key)
 
@@ -1287,16 +1320,17 @@ class Activity(dj.Computed):
 
     def get_all_spikes(self):
         """ Returns a num_traces x num_timesteps matrix with all spikes."""
-        spikes = (Activity.Trace() & self).fetch.order_by('unit_id')['trace']
+        units = (ScanSet.Unit() & self)
+        spikes = (Activity.Trace() & self & units).fetch.order_by('unit_id')['trace']
         return np.array([x.squeeze() for x in spikes])
 
     def delete(self):
         """ Propagate deletion to traces in the slice. """
-        units_to_delete = (ScanSet.Unit() & self)
-        if Activity.Trace() & self & units_to_delete:
-            (Activity.Trace() & self & units_to_delete).delete()
-        if Activity.ARCoefficients() & (self & {'spike_method': 5}) & units_to_delete:
-            (Activity.ARCoefficients() & (self & {'spike_method': 5}) & units_to_delete).delete()
+        units = (ScanSet.Unit() & self)
+        if Activity.Trace() & self & units:
+            (Activity.Trace() & self & units).delete()
+        if Activity.ARCoefficients() & (self & {'spike_method': 5}) & units:
+            (Activity.ARCoefficients() & (self & {'spike_method': 5}) & units).delete()
         if self:
             super().delete()
 
