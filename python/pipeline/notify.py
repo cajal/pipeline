@@ -48,4 +48,5 @@ def temporary_image(array, key):
     filename = '/tmp/' + key_hash(key) + '.png'
 
     plt.savefig(filename)
+    sns.reset_orig()
     return filename
