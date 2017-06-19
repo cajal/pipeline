@@ -1,10 +1,8 @@
-import warnings
 from collections import defaultdict
 
 import h5py
-import numpy as np
 from scipy.interpolate import InterpolatedUnivariateSpline as iu_spline
-from pipeline import PipelineException
+from ..exceptions import PipelineException
 import matplotlib
 import pandas as pd
 
@@ -335,7 +333,7 @@ class PupilTracker:
             df2 = pd.DataFrame(cond)
 
             print('-', end="", flush=True)
-            if np.any(df['conditions'] >= show_matching):
+            if 'conditions' in df.columns and np.any(df['conditions'] >= show_matching):
 
                 idx = df['conditions'] >= show_matching
                 df = df[idx]
