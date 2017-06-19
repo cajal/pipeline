@@ -11,6 +11,7 @@ def classify_manual(masks, template):
     import seaborn as sns
 
     mask_types= []
+    plt.ioff()
     for mask in masks:
         ir = mask.sum(axis=1) > 0
         ic = mask.sum(axis=0) > 0
@@ -57,5 +58,6 @@ def classify_manual(masks, template):
         fig.canvas.mpl_connect('key_press_event', on_button)
 
         plt.show()
+    sns.reset_orig()
 
     return mask_types

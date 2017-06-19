@@ -15,7 +15,7 @@ from .exceptions import PipelineException
 
 
 schema = dj.schema('pipeline_reso', locals())
-CURRENT_VERSION = 0
+CURRENT_VERSION = 1
 
 
 @schema
@@ -29,7 +29,7 @@ class Version(dj.Lookup):
     """
     contents = [
         {'reso_version': 0, 'description': 'test'},
-        #{'reso_version': 1, 'description': 'first release'}
+        {'reso_version': 1, 'description': 'first release'}
     ]
 
 
@@ -166,8 +166,8 @@ class ScanInfo(dj.Imported):
             ScanInfo.Slice().insert1({**key, 'slice': slice_id + 1, 'z': depth_zero + slice_depth})
 
         # Compute quantal size for all slice/channel combinations
-        print('Computing quantal size...')
         for slice_id in range(scan.num_fields):
+            print('Computing quantal size for slice', slice_id + 1)
             for channel in range(scan.num_channels):
                 ScanInfo.QuantalSize()._make_tuples(key, scan, slice_id, channel)
 
@@ -214,14 +214,14 @@ class RasterCorrection(dj.Computed):
         return scans & {'reso_version': CURRENT_VERSION}
 
     def _make_tuples(self, key):
-        print('Computing raster correction...')
-
         # Read the scan
         scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
         scan = scanreader.read_scan(scan_filename, dtype=np.float32)
 
         for slice_id in range(scan.num_fields):
-             # Select channel
+            print('Computing raster correction for slice', slice_id + 1)
+
+            # Select channel
             channel = (CorrectionChannel() & key & {'slice': slice_id + 1}).fetch1['channel'] - 1
 
             # Create results tuple
@@ -473,42 +473,45 @@ class SummaryImages(dj.Computed):
 
     @property
     def key_source(self):
-        return MotionCorrection() & {'reso_version': CURRENT_VERSION} # once per slice
+        # Run make_tuples once per scan iff MotionCorrection is done
+        return ScanInfo() & MotionCorrection() & {'reso_version': CURRENT_VERSION}
 
     def _make_tuples(self, key):
         from .utils import correlation_image as ci
-
-        print('Computing summary images...')
 
         # Read the scan
         scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
         scan = scanreader.read_scan(scan_filename, dtype=np.float32)
 
-        # Get raster and motion correction functions
-        correct_raster = (RasterCorrection() & key).get_correct_raster()
-        correct_motion = (MotionCorrection() & key).get_correct_motion()
+        for slice_id in range(scan.num_fields):
+            print('Computing summary images for slice ', slice_id + 1)
 
-        for channel in range(scan.num_channels):
-            tuple_ = key.copy()
-            tuple_['channel'] = channel + 1
+            # Get raster and motion correction functions
+            correct_raster = (RasterCorrection() & {**key, 'slice': slice_id + 1}).get_correct_raster()
+            correct_motion = (MotionCorrection() & {**key, 'slice': slice_id + 1}).get_correct_motion()
 
-            # Correct scan
-            scan_ = scan[key['slice'] - 1, :, :, channel, :]
-            scan_ = correct_motion(correct_raster(scan_))
-            scan_ -= scan_.min() # make nonnegative for lp-norm
+            for channel in range(scan.num_channels):
+                tuple_ = key.copy()
+                tuple_['slice'] = slice_id + 1
+                tuple_['channel'] = channel + 1
 
-            # Compute and insert correlation image
-            tuple_['correlation'] = ci.compute_correlation_image(scan_)
+                # Correct scan
+                scan_ = scan[slice_id, :, :, channel, :]
+                scan_ = correct_motion(correct_raster(scan_))
+                scan_ -= scan_.min() # make nonnegative for lp-norm
 
-            # Compute and insert lp-norm of each pixel over time
-            p = 6
-            scan_ = np.power(scan_, p, out=scan_) # in place
-            tuple_['average'] = np.sum(scan_, axis=-1, dtype=np.float64) ** (1 / p)
+                # Compute and insert correlation image
+                tuple_['correlation'] = ci.compute_correlation_image(scan_)
 
-            # Insert
-            self.insert1(tuple_)
+                # Compute and insert lp-norm of each pixel over time
+                p = 6
+                scan_ = np.power(scan_, p, out=scan_) # in place
+                tuple_['average'] = np.sum(scan_, axis=-1, dtype=np.float64) ** (1 / p)
 
-        self.notify(key, scan)
+                # Insert
+                self.insert1(tuple_)
+
+            self.notify({**key, 'slice': slice_id + 1}, scan) # once per slice
 
     def notify(self, key, scan):
         # --  notification
@@ -518,7 +521,7 @@ class SummaryImages(dj.Computed):
         import seaborn as sns
 
         with sns.axes_style('white'):
-            fig, ax = plt.subplots(2, scan.num_channels, figsize=(5 * scan.num_channels, 5.5 * 2))
+            fig, ax = plt.subplots(2, scan.num_channels, figsize=(5 * scan.num_channels, 6 * 2))
         for i, img_name in enumerate(['average', 'correlation']):
             for channel in range(scan.num_channels):
                 image = (self & key & {'channel': channel + 1}).fetch1[img_name]
@@ -987,13 +990,15 @@ class Fluorescence(dj.Computed):
 class MaskClassification(dj.Computed):
     definition = """ # classification of segmented masks.
 
-    -> Segmentation
+    -> Segmentation                     # animal_id, session, scan_idx, reso_version, slice, channel, segmentation_method
+    -> SummaryImages                    # animal_id, session, scan_idx, reso_version, slice, channel
     -> shared.ClassificationMethod
     """
 
     @property
     def key_source(self):
-        return Segmentation() * shared.ClassificationMethod() & {'reso_version': CURRENT_VERSION}
+        return (Segmentation() * SummaryImages() * shared.ClassificationMethod() &
+                {'reso_version': CURRENT_VERSION})
 
     class Type(dj.Part):
         definition = """
@@ -1011,16 +1016,12 @@ class MaskClassification(dj.Computed):
         location_matrix = Segmentation.reshape_masks(pixels, weights, image_height, image_width)
         masks = location_matrix.transpose([2, 0, 1]) # num_masks, image_height, image_width
 
-        # Make sure SummaryImages has been computed
-        if not (SummaryImages() & key):
-            raise PipelineException('Mask classification requires SummaryImages.')
-
         # Classify masks
         if key['classification_method'] ==  1: # manual
             template = (SummaryImages() & key).fetch1['correlation']
-            mask_types = mask_classification.classify_manual(masks, template)
+            mask_types = mask_classification.classify_manual(masks[:3], template)
         elif key['classification_method'] == 2: #cnn
-            print('Warning: Convnet not yet implemented.')
+            raise PipelineException('Convnet not yet implemented.')
             #template = (SummaryImages() & key).fetch1['correlation']
             #mask_types = mask_classification.classify_cnn(masks, template)
         else:
@@ -1052,6 +1053,7 @@ class ScanSet(dj.Computed):
         -> shared.SegmentationMethod
         unit_id                 :int                # unique per scan & segmentation method
         ---
+        -> ScanSet                                  # for Unit to act as a part table of ScanSet
         -> Segmentation.Mask
         """
 
@@ -1188,17 +1190,10 @@ class ScanSet(dj.Computed):
             centroids = np.stack([xs, ys], axis=1)
         return centroids
 
-    def delete(self):
-        """ Propagate deletion to units in the slice."""
-        if ScanSet.Unit() & self: # this joins ScanSet's slice and channel with Segmentation.Mask's slice and channel
-            (ScanSet.Unit() & self).delete()
-        if self:
-            super().delete()
-
 
 @schema
 class Activity(dj.Computed):
-    definition = """ # deconvolved calcium activity inferred from calcium traces
+    definition = """ # deconvolved activity inferred from fluorescence traces
 
     -> ScanSet                  # processing done per slice
     -> shared.SpikeMethod
@@ -1214,7 +1209,8 @@ class Activity(dj.Computed):
         -> ScanSet.Unit
         -> shared.SpikeMethod
         ---
-        trace                   : longblob
+        -> Activity                         # for it to act as part table of Activity
+        trace               : longblob
         """
 
     class ARCoefficients(dj.Part):
@@ -1222,6 +1218,7 @@ class Activity(dj.Computed):
 
         -> ScanSet.Unit
         ---
+        -> Activity                         # for it to act as part table of Activity
         g                   : blob          # g1, g2, ... coefficients for the AR process
     """
 
@@ -1240,8 +1237,7 @@ class Activity(dj.Computed):
 
             for unit_id, trace in zip(unit_ids, full_traces):
                 spike_trace = pyfnnd.deconvolve(trace, dt=1/fps)[0]
-                Activity.Trace().insert1({**key, 'unit_id': unit_id, 'trace': spike_trace},
-                                         ignore_extra_fields=True)
+                Activity.Trace().insert1({**key, 'unit_id': unit_id, 'trace': spike_trace})
 
         elif key['spike_method'] == 3: # stm
             import c2s # Install from https://github.com/lucastheis/c2s
@@ -1254,8 +1250,7 @@ class Activity(dj.Computed):
                 data = c2s.predict(c2s.preprocess([trace_dict], fps=fps), verbosity=0)
                 spike_trace = np.squeeze(data[0].pop('predictions'))
 
-                Activity.Trace().insert1({**key, 'unit_id': unit_id, 'trace': spike_trace},
-                                         ignore_extra_fields=True)
+                Activity.Trace().insert1({**key, 'unit_id': unit_id, 'trace': spike_trace})
 
         elif key['spike_method'] == 5: # nmf
             #from pipeline.utils import caiman_interface as cmn
@@ -1323,16 +1318,6 @@ class Activity(dj.Computed):
         units = (ScanSet.Unit() & self)
         spikes = (Activity.Trace() & self & units).fetch.order_by('unit_id')['trace']
         return np.array([x.squeeze() for x in spikes])
-
-    def delete(self):
-        """ Propagate deletion to traces in the slice. """
-        units = (ScanSet.Unit() & self)
-        if Activity.Trace() & self & units:
-            (Activity.Trace() & self & units).delete()
-        if Activity.ARCoefficients() & (self & {'spike_method': 5}) & units:
-            (Activity.ARCoefficients() & (self & {'spike_method': 5}) & units).delete()
-        if self:
-            super().delete()
 
 
 schema.spawn_missing_classes()
