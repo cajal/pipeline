@@ -3,7 +3,7 @@ Settings for DataJoint.
 """
 import json
 from collections import OrderedDict
-from . import PipelineException
+from .exceptions import PipelineException
 import collections
 from pprint import pprint, pformat
 

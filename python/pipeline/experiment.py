@@ -3,8 +3,6 @@ import pandas as pd
 from . import mice  # needed for referencing
 import numpy as np
 from distutils.version import StrictVersion
-import numpy as np
-import inspect
 import os
 from commons import lab
 
@@ -22,7 +20,7 @@ def erd():
 class Fluorophore(dj.Lookup):
     definition = """
     # calcium-sensitive indicators
-    fluorophore          : char(10)   # fluorophore short name
+    fluorophore     : char(10)   # fluorophore short name
     -----
     dye_description = ''  : varchar(2048)
     """
@@ -41,10 +39,10 @@ class Fluorophore(dj.Lookup):
         definition = """
         # spectra of fluorophores in Ca++ loaded and Ca++ free state
         ->Fluorophore
-        loaded          : bool # whether the spectrum is for Ca++ loaded or free state
+        loaded          : bool      # whether the spectrum is for Ca++ loaded or free state
         ---
-        wavelength      : longblob # wavelength in nm
-        fluorescence    : longblob # fluorescence in arbitrary units
+        wavelength      : longblob  # wavelength in nm
+        fluorescence    : longblob  # fluorescence in arbitrary units
         """
 
         @property
@@ -65,20 +63,27 @@ class Fluorophore(dj.Lookup):
 class Lens(dj.Lookup):
     definition = """
     # objective lens list
-    lens            : char(4)                # objective lens
+    lens    : char(4) # objective lens
     ---
     """
-
-    contents = [['16x'], ['25x']]
+    contents = [['10x'], ['16x'], ['25x']]
 
 
 @schema
 class Rig(dj.Lookup):
     definition = """
-    rig : char(4)    # multiphoton imaging setup
+    rig     : char(8)    # multiphoton imaging setup
     ---
     """
-    contents = [['2P2'], ['2P3']]
+    contents = [
+        ['2P1'],  # aod scans
+        ['2P2'],  # resonant scans (Shan)
+        ['2P3'],  # resonant scans
+        ['2P4'],  # mesoscope scans
+        ['2P5'],  # resonant
+        ['3P1'],  # 3-photon galvo scans
+        ['2P3P1']  # 2-photon resonant, 3-photon galvo
+    ]
 
 
 @schema
@@ -86,11 +91,11 @@ class FOV(dj.Lookup):
     definition = """  # field-of-view sizes for all lenses and magnifications
     -> Rig
     -> Lens
-    mag                         : decimal(5,2)                  # ScanImage zoom factor
-    fov_ts                      : datetime                      # fov measurement date and time
+    mag         : decimal(5,2)  # ScanImage zoom factor
+    fov_ts      : datetime      # fov measurement date and time
     ---
-    height                      : decimal(5,1)                  # measured width of field of view along axis of pipette (medial/lateral on mouse)
-    width                       : decimal(5,1)                  # measured width of field of view perpendicular to pipette (rostral/caudal on mouse)
+    height      : decimal(5,1)  # measured height of field of view along axis of pipette (medial/lateral on mouse)
+    width       : decimal(5,1)  # measured width of field of view perpendicular to pipette (rostral/caudal on mouse)
     """
 
 
@@ -99,13 +104,12 @@ class Anesthesia(dj.Lookup):
     definition = """   #  anesthesia states
     anesthesia                     : char(20) # anesthesia short name
     ---
-    anesthesia_description=''      : varchar(255) # longer description
+    anesthesia_description=''       : varchar(255) # longer description
     """
-
     contents = [
-        ('isoflurane', ''),
-        ('fentanyl', ''),
-        ('awake', '')
+        ['awake', ''],
+        ['fentanyl', ''],
+        ['isoflurane', '']
     ]
 
 
@@ -118,53 +122,62 @@ class Person(dj.Lookup):
     full_name     : varchar(255)
     """
     contents = [
-        ('unknown', 'placeholder'),
-        ('jiakun', 'Jiakun Fu'),
-        ('manolis', 'Emmanouil Froudarakis'),
-        ('dimitri', 'Dimitri Yatsenko'),
-        ('shan', 'Shan Shen'),
-        ('jake', 'Jacob Reimer'),
-        ('fabee', 'Fabian Sinz'),
-        ('edgar', 'Edgar Y. Walker'),
-        ('cathryn', 'Cathryn Rene Cadwell'),
-        ('shuang', 'Shuang Li'),
-        ('xiaolong', 'Xiaolong Jiang')
+        ['unknown', 'placeholder'],
+        ['atlab', 'general atlab account'],
+        ['cathryn', 'Cathryn Rene Cadwell'],
+        ['dimitri', 'Dimitri Yatsenko'],
+        ['ecobost', 'Erick Cobos T'],
+        ['edgar', 'Edgar Y. Walker'],
+        ['fabee', 'Fabian Sinz'],
+        ['jake', 'Jacob Reimer'],
+        ['jiakun', 'Jiakun Fu'],
+        ['manolis', 'Emmanouil Froudarakis'],
+        ['minggui', 'Minggui Chen'],
+        ['Paul', 'hey paul'],
+        ['shan', 'Shan Shen'],
+        ['shuang', 'Shuang Li'],
+        ['xiaolong', 'Xiaolong Jiang']
     ]
 
 
 @schema
 class BrainArea(dj.Lookup):
     definition = """
-    brain_area       : char(12)     # short name for cortical area
+    brain_area          : char(12)     # short name for cortical area
     ---
     area_description    : varchar(255)
     """
     contents = [
-        ('other', ''),
-        ('unset', ''),
-        ('unknown', ''),
-        ('V1', ''),
-        ('LM', ''),
-        ('LI', ''),
-        ('AL', ''),
-        ('PM', ''),
-        ('POR', ''),
-        ('RL', '')
+        ['unset', ''],
+        ['unknown', ''],
+        ['V1', ''],
+        ['LM', ''],
+        ['LI', ''],
+        ['A', ''],
+        ['AL', ''],
+        ['AM', ''],
+        ['P', ''],
+        ['PM', ''],
+        ['POR', ''],
+        ['RL', ''],
+        ['other', ''],
     ]
 
 
 @schema
 class Layer(dj.Lookup):
     definition = """
-    layer                : char(12)     # short name for cortical area
+    layer                : char(12)     # short name for cortical layer
     ---
     layer_description    : varchar(255)
     z_start=null         : float        # starting depth
     z_end=null           : float        # deepest point
     """
     contents = [
-        ('L2/3', '', 100, 370),
-        ('L4', '', 370, 500),
+        ['L1', '', 0, 100],
+        ['L2/3', '', 100, 370],
+        ['L4', '', 370, 500],
+        {'layer': 'unset', 'layer_description': ''}
     ]
 
     def get_layers(self, z):
@@ -183,15 +196,59 @@ class Software(dj.Lookup):
     ---
     """
     contents = [
-        ('unset', '0.0'),
-        ('scanimage', '3.8'),
-        ('scanimage', '4.0'),
-        ('scanimage', '4.2'),
-        ('scanimage', '4.2pr1'),
-        ('scanimage', '5.1'),
-        ('scanimage', '5.2'),
-        ('aod', '2.0'),
-        ('imager', '1.0')]
+        ['unset', '0.0'],
+        ['aod', '2.0'],
+        ['imager', '1.0'],
+        ['scanimage', '4.0'],
+        ['scanimage', '4.2'],
+        ['scanimage', '4.2pr1'],
+        ['scanimage', '5.1'],
+        ['scanimage', '5.2'],
+        ['scanimage', '2016b'],
+        ['scanimage', '2016b3P']
+    ]
+
+
+@schema
+class Compartment(dj.Lookup):
+    definition = """
+    # cell compartments that can be imaged
+    compartment         : char(16)
+    ---
+    """
+    contents = [['axon'], ['soma']]
+
+
+@schema
+class PMTFilterSet(dj.Lookup):
+    definition = """  #  microscope filter sets: dichroic and PMT Filters
+    pmt_filter_set          : varchar(16)       # short name of microscope filter set
+    ----
+    primary_dichroic        :  varchar(255)     #  passes the laser  (excitation/emission separation)
+    secondary_dichroic      :  varchar(255)     #  splits emission spectrum
+    filter_set_description  :  varchar(4096)    #  A detailed description of the filter set
+    """
+    contents = [
+        ['2P3 red-green A', '680 nm long-pass?', '562 nm long-pass', 'purchased with Thorlabs microscope'],
+        ['2P3 blue-green A', '680 nm long-pass?', '506 nm long-pass', 'purchased with Thorlabs microscope']]
+
+    class Channel(dj.Part):
+        definition = """  #  PMT description including dichroic and filter
+        -> PMTFilterSet
+        pmt_channel : tinyint   #  pmt_channel
+        ---
+        color      : enum('green', 'red', 'blue')
+        pmt_serial_number   :  varchar(40)   #
+        spectrum_center     :  smallint  unsigned  #  (nm) overall pass spectrum of all upstream filters
+        spectrum_bandwidth  :  smallint  unsigned  #  (nm) overall pass spectrum of all upstream filters
+        pmt_filter_details  :  varchar(255)  #  more details, spectrum, pre-amp gain, pre-amp ADC filter
+        """
+        contents = [
+            ['2P3 red-green A', 1, 'green', 'AC7438 Thor', 525, 50, ''],
+            ['2P3 red-green A', 2, 'red', 'AC7753 Thor', 625, 90, ''],
+            ['2P3 blue-green A', 1, 'blue', 'AC7438 Thor', 475, 50, ''],
+            ['2P3 blue-green A', 2, 'green', 'AC7753 Thor', 540, 50, '']
+        ]
 
 
 @schema
@@ -199,7 +256,7 @@ class LaserCalibration(dj.Manual):
     definition = """
     # stores measured values from the laser power calibration
     -> Rig
-    calibration_ts : timestamp                # calibration timestamp -- automatic
+    calibration_ts      : timestamp         # calibration timestamp -- automatic
     ---
     -> Lens
     -> Person
@@ -214,7 +271,7 @@ class LaserCalibration(dj.Manual):
         bidirectional   : bool                # 0 if off 1 if on
         gdd             : int                 # GDD setting on the laser
         ---
-        power                       : float                         # power in mW
+        power           : float               # power in mW
         """
 
     def plot_calibration_curve(self, calibration_date, rig):
@@ -243,66 +300,20 @@ class LaserCalibration(dj.Manual):
 
 
 @schema
-class Compartment(dj.Lookup):
-    definition = """
-    # cell compartments that can be imaged
-    compartment         : char(16)
-    ---
-    """
-
-    contents = [
-        ('axon',),
-        ('soma',),
-    ]
-
-
-@schema
-class PMTFilterSet(dj.Lookup):
-    definition = """  #  microscope filter sets: dichroic and PMT Filters
-    pmt_filter_set : varchar(16)    # short name of microscope filter set
-    ----
-    primary_dichroic      :  varchar(255)    #  passes the laser  (excitation/emission separation)
-    secondary_dichroic    :  varchar(255)    #  splits emission spectrum
-    filter_set_description :  varchar(4096)     #   A detailed description of the filter set
-    """
-    contents = [
-        ['2P3 red-green A', '680 nm long-pass?', '562 nm long-pass', 'purchased with Thorlabs microscope'],
-        ['2P3 blue-green A', '680 nm long-pass?', '506 nm long-pass', 'purchased with Thorlabs microscope']]
-
-    class Channel(dj.Part):
-        definition = """  #  PMT description including dichroic and filter
-        -> PMTFilterSet
-        pmt_channel : tinyint   #  pmt_channel
-        ---
-        color      : enum('green', 'red', 'blue')
-        pmt_serial_number :  varchar(40)   #
-        spectrum_center     :  smallint  unsigned  #  (nm) overall pass spectrum of all upstream filters
-        spectrum_bandwidth  :  smallint  unsigned  #  (nm) overall pass spectrum of all upstream filters
-        pmt_filter_details :varchar(255)  #  more details, spectrum, pre-amp gain, pre-amp ADC filter
-        """
-        contents = [
-            ['2P3 red-green A', 1, 'green', 'AC7438 Thor', 525, 50, ''],
-            ['2P3 red-green A', 2, 'red', 'AC7753 Thor', 625, 90, ''],
-            ['2P3 blue-green A', 1, 'blue', 'AC7438 Thor', 475, 50, ''],
-            ['2P3 blue-green A', 2, 'green', 'AC7753 Thor', 540, 50, '']
-        ]
-
-
-@schema
 class Session(dj.Manual):
     definition = """ # imaging session
     -> mice.Mice
-    session                       : smallint                      # session index for the mouse
+    session                       : smallint            # session index for the mouse
     ---
     -> Rig
-    session_date                  : date                          # date
+    session_date                  : date                # date
     -> Person
     -> Anesthesia
-    scan_path                     : varchar(255)                  # file path for TIFF stacks
-    behavior_path =""             : varchar(255)   # pupil movies, whisking, locomotion, etc.
-    craniotomy_notes=""           : varchar(4095)                 # free-text notes
-    session_notes=""              : varchar(4095)                 # free-text notes
-    session_ts=CURRENT_TIMESTAMP  : timestamp                     # automatic
+    scan_path                     : varchar(255)        # file path for TIFF stacks
+    behavior_path =""             : varchar(255)        # pupil movies, whisking, locomotion, etc.
+    craniotomy_notes=""           : varchar(4095)       # free-text notes
+    session_notes=""              : varchar(4095)       # free-text notes
+    session_ts=CURRENT_TIMESTAMP  : timestamp           # automatic
     """
 
     class Fluorophore(dj.Part):
@@ -311,7 +322,7 @@ class Session(dj.Manual):
         -> Session
         -> Fluorophore
         ---
-        notes=""          : varchar(255) # additional information about fluorophore in this scan
+        notes=""        : varchar(255)  # additional information about fluorophore in this scan
         """
 
     class TargetStructure(dj.Part):
@@ -350,7 +361,7 @@ class Scan(dj.Manual):
     -> BrainArea
     -> Aim
     filename             : varchar(255)                 # file base name
-    depth=0              : int                          # manual depth measurement
+    depth=0              : int                          # (um) manual depth measurement with respect to the surface of the cortex where fastZ = 0
     scan_notes           : varchar(4095)                # free-notes
     site_number=0        : tinyint                      # site number
     -> Software
@@ -391,7 +402,7 @@ class Scan(dj.Manual):
         local_path = lab.Paths().get_local_path(scan_path)
 
         scan_name = (Scan() & self).fetch1['filename']
-        local_filename = os.path.join(local_path, scan_name) + '_*.tif'  # all parts
+        local_filename = os.path.join(local_path, scan_name) + '*.tif'  # all parts
 
         return local_filename
 
