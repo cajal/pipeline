@@ -72,7 +72,7 @@ hold off
 set(h,'LineWidth',0.25, 'LineColor',[1 1 1]*0.5)
 xlabel 'azimith (degrees)'
 ylabel 'elevation (degrees)'
-title(sprintf('Score = %0.4f\n', radius*contrast^1.5));
+title(sprintf('ScoreMixin = %0.4f\n', radius*contrast^1.5));
 drawnow;
 
 end
