@@ -276,7 +276,7 @@ class MotionCorrection(dj.Computed):
     x_std                           : float         # (um) standard deviation of x shifts
     y_outlier_frames                : longblob      # mask with true for frames with high y shifts (already corrected)
     x_outlier_frames                : longblob      # mask with true for frames with high x shifts (already corrected)
-    align_times=CURRENT_TIMESTAMP   : timestamp     # automatic
+    align_time=CURRENT_TIMESTAMP    : timestamp     # automatic
     """
 
     @property
@@ -586,6 +586,8 @@ class Segmentation(dj.Computed):
 
     -> MotionCorrection         # animal_id, session, scan_idx, version, slice
     -> SegmentationTask         # animal_id, session, scan_idx, slice, channel, segmentation_method
+    ---
+    segmentation_time=CURRENT_TIMESTAMP     : timestamp     # automatic
     """
 
     @property
@@ -616,8 +618,6 @@ class Segmentation(dj.Computed):
         definition = """ # masks created manually
 
         -> Segmentation
-        ---
-        timestamp=CURRENT_TIMESTAMP     : timestamp     # automatic
         """
 
         def _make_tuples(self, key):
@@ -633,17 +633,7 @@ class Segmentation(dj.Computed):
 
         -> Segmentation
         ---
-        num_components                  : smallint      # estimated number of components
-        merge_threshold                 : float         # overlapping masks are merged if temporal correlation greater than this
-        num_processes = null            : smallint      # number of processes to run in parallel, null=all available
-        num_pixels_per_process          : int           # number of pixels processed at a time
-        num_background_components       : smallint      # number of background components
-        init_method                     : enum("greedy_roi", "sparse_nmf", "local_nmf") # type of initialization used
-        soma_radius = null              : blob          # (y, x in pixels) estimated radius for a soma in the scan
-        snmf_alpha = null               : float         # regularization parameter for SNMF
-        init_on_patches                 : boolean       # whether to run initialization on small patches
-        patch_downsampling_factor = null   : tinyint    # used to calculate size of patches
-        percentage_of_patch_overlap = null : float      # overlap between adjacent patches
+        params                  : varchar(1024)             # parameters send to CNMF as JSON array
         """
 
         def _make_tuples(self, key):
@@ -652,6 +642,7 @@ class Segmentation(dj.Computed):
             See caiman_interface.demix_with_cnmf for explanation of params
             """
             from .utils import caiman_interface as cmn
+            import json
 
             print('')
             print('*' * 85)
@@ -672,8 +663,9 @@ class Segmentation(dj.Computed):
             scan_ -= scan_.min() # make nonnegative for caiman
 
             # Set CNMF parameters
-            ## Estimate number of components per slice
+            ## Estimate number of components per slice and soma radius in pixels
             num_components = (SegmentationTask() & key).estimate_num_components()
+            soma_radius_in_pixels = tuple(7 / (ScanInfo() & key).microns_per_pixel) # assumption: radius is 7 microns
 
             ## Set general parameters
             kwargs = {}
@@ -688,7 +680,7 @@ class Segmentation(dj.Computed):
             target = (SegmentationTask() & key).fetch1['compartment']
             if target == 'soma':
                 kwargs['init_method'] = 'greedy_roi'
-                kwargs['soma_radius'] = 7 / (ScanInfo() & key).microns_per_pixel # 7 microns
+                kwargs['soma_radius'] = soma_radius_in_pixels
                 kwargs['num_background_components'] = 4
                 kwargs['init_on_patches'] = False
             else: # axons/dendrites
@@ -713,7 +705,7 @@ class Segmentation(dj.Computed):
 
             ## Insert in CNMF, Segmentation and Fluorescence
             Segmentation().insert1(key)
-            Segmentation.CNMF().insert1({**key, **kwargs})
+            Segmentation.CNMF().insert1({**key, 'params': json.dumps(kwargs)})
             Fluorescence().insert1(key) # nmf also inserts traces
 
             ## Insert background components
@@ -993,6 +985,8 @@ class MaskClassification(dj.Computed):
     -> Segmentation                     # animal_id, session, scan_idx, reso_version, slice, channel, segmentation_method
     -> SummaryImages                    # animal_id, session, scan_idx, reso_version, slice, channel
     -> shared.ClassificationMethod
+    ---
+    classif_time=CURRENT_TIMESTAMP    : timestamp     # automatic
     """
 
     @property
@@ -1195,8 +1189,10 @@ class ScanSet(dj.Computed):
 class Activity(dj.Computed):
     definition = """ # deconvolved activity inferred from fluorescence traces
 
-    -> ScanSet                  # processing done per slice
+    -> ScanSet                                      # processing done per slice
     -> shared.SpikeMethod
+    ---
+    deconv_time=CURRENT_TIMESTAMP   : timestamp     # automatic
     """
 
     @property
