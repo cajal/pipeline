@@ -13,12 +13,12 @@ display_timestamp = CURRENT_TIMESTAMP  : timestamp  # automatic
 
 classdef DisplayGeometry < dj.Relvar
     
-    methods
-        function migrate(self)
+    methods(Static)
+        function migrate
             data = rmfield(fetch(vis.Session*experiment.Session & preprocess.Sync, ...
                 'monitor_distance', 'monitor_size', 'monitor_aspect', ...
                 'resolution_x', 'resolution_y', '60->fps', 'psy_ts->display_timestamp'), 'psy_id');
-            self.inserti(data)
+            inserti(experiment.DisplayGeometry, data)
         end
     end
 end
