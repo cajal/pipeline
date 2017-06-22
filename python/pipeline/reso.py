@@ -7,10 +7,7 @@ import scanreader
 import gc
 
 from . import experiment, notify, shared
-from .utils import galvo_corrections
-from .utils import signal
-from .utils import quality
-from .utils import mask_classification
+from .utils import galvo_corrections, signal, quality, mask_classification
 from .exceptions import PipelineException
 
 
@@ -60,7 +57,8 @@ class ScanInfo(dj.Imported):
     @property
     def key_source(self):
         rigs = [{'rig': '2P2'}, {'rig': '2P3'}, {'rig': '2P5'}]
-        reso_scans = (experiment.Scan() - experiment.ScanIgnored()) & (experiment.Session() & rigs)
+        reso_sessions = (experiment.Session() & rigs)
+        reso_scans = (experiment.Scan() - experiment.ScanIgnored()) & reso_sessions
         return reso_scans * (Version() & {'reso_version': CURRENT_VERSION})
 
     class Slice(dj.Part):
@@ -148,13 +146,13 @@ class ScanInfo(dj.Imported):
         # Estimate height and width in microns using measured FOVs for similar setups
         fov_rel = (experiment.FOV() * experiment.Session() * experiment.Scan() & key
                    & 'session_date>=fov_ts')
-        zooms = fov_rel.fetch['mag'].astype(np.float32)  # measured zooms in setup
+        zooms = fov_rel.fetch['mag'].astype(np.float32)  # zooms measured in same setup
         closest_zoom = zooms[np.argmin(np.abs(np.log(zooms / scan.zoom)))]
 
-        interval = 'ABS(mag - {}) < 1e-4'.format(closest_zoom)
-        um_height, um_width = (fov_rel & interval).fetch1['height', 'width']
-        tuple_['um_height'] = float(um_height) * (closest_zoom / scan.zoom) * scan._y_angle_scale_factor
-        tuple_['um_width'] = float(um_width) * (closest_zoom / scan.zoom) * scan._x_angle_scale_factor
+        dims = (fov_rel & 'ABS(mag - {}) < 1e-4'.format(closest_zoom)).fetch1['height', 'width']
+        um_height, um_width  = [float(um) * (closest_zoom / scan.zoom) for um in dims]
+        tuple_['um_height'] = um_height * scan._y_angle_scale_factor
+        tuple_['um_width'] = um_width * scan._x_angle_scale_factor
 
         # Insert in ScanInfo
         self.insert1(tuple_)
@@ -163,7 +161,8 @@ class ScanInfo(dj.Imported):
         slice_depths = [z * scan.zstep_in_microns for z in scan.field_depths]
         depth_zero = (experiment.Scan() & key).fetch1['depth'] # true z at ScanImage's 0
         for slice_id, slice_depth in enumerate(slice_depths):
-            ScanInfo.Slice().insert1({**key, 'slice': slice_id + 1, 'z': depth_zero + slice_depth})
+            ScanInfo.Slice().insert1({**key, 'slice': slice_id + 1, 'z': (depth_zero +
+                                                                          slice_depth)})
 
         # Compute quantal size for all slice/channel combinations
         for slice_id in range(scan.num_fields):
@@ -222,7 +221,8 @@ class RasterCorrection(dj.Computed):
             print('Computing raster correction for slice', slice_id + 1)
 
             # Select channel
-            channel = (CorrectionChannel() & key & {'slice': slice_id + 1}).fetch1['channel'] - 1
+            correction_channel = (CorrectionChannel() & key & {'slice': slice_id + 1})
+            channel = correction_channel.fetch1['channel'] - 1
 
             # Create results tuple
             tuple_ = key.copy()
@@ -238,7 +238,7 @@ class RasterCorrection(dj.Computed):
             # Compute raster correction parameters
             if scan.is_bidirectional:
                 tuple_['raster_phase'] = galvo_corrections.compute_raster_phase(template,
-                                                                scan.temporal_fill_fraction)
+                                                            scan.temporal_fill_fraction)
             else:
                 tuple_['raster_phase'] = 0
 
@@ -300,7 +300,8 @@ class MotionCorrection(dj.Computed):
             print('Correcting motion in slice', slice_id + 1)
 
             # Select channel
-            channel = (CorrectionChannel() & key & {'slice': slice_id + 1}).fetch1['channel'] - 1
+            correction_channel = (CorrectionChannel() & key & {'slice': slice_id + 1})
+            channel = correction_channel.fetch1['channel'] - 1
 
             # Create results tuple
             tuple_ = key.copy()
@@ -312,7 +313,7 @@ class MotionCorrection(dj.Computed):
             scan_ = scan[slice_id, skip_rows: -skip_rows, skip_cols: -skip_cols, channel, :]  # 3-d (height, width, frames)
 
             # Correct raster effects (needed for subpixel changes in y)
-            correct_raster = (RasterCorrection() & {**key, 'slice':slice_id + 1}).get_correct_raster()
+            correct_raster = (RasterCorrection() & key & {'slice': slice_id + 1}).get_correct_raster()
             scan_ = correct_raster(scan_)
             scan_ -= scan_.min() # make nonnegative for fft
 
@@ -323,7 +324,7 @@ class MotionCorrection(dj.Computed):
             template = np.mean(mini_scan, axis=-1)
             template = ndimage.gaussian_filter(template, 0.7) # **
             tuple_['template'] = template
-            # * Anscombe tranform to normalize noise, increase contrast and decrease outlier's leverage
+            # * Anscombe tranform to normalize noise, increase contrast and decrease outliers' leverage
             # ** Small amount of gaussian smoothing to get rid of high frequency noise
 
             # Compute smoothing window size
@@ -333,7 +334,7 @@ class MotionCorrection(dj.Computed):
 
             # Get motion correction shifts
             results = galvo_corrections.compute_motion_shifts(scan_, template,
-                smoothing_window_size=window_size)
+                                                              smoothing_window_size=window_size)
             y_shifts = results[0] - results[0].mean() # center motions around zero
             x_shifts = results[1] - results[1].mean()
             tuple_['y_shifts'] = y_shifts
@@ -353,10 +354,6 @@ class MotionCorrection(dj.Computed):
         self.notify(key, scan)
 
     def notify(self, key, scan):
-        # --  notification
-        import matplotlib
-        matplotlib.rcParams['backend'] = 'Agg'
-        import matplotlib.pyplot as plt
         import seaborn as sns
 
         fps = (ScanInfo() & key).fetch1['fps']
@@ -487,8 +484,8 @@ class SummaryImages(dj.Computed):
             print('Computing summary images for slice ', slice_id + 1)
 
             # Get raster and motion correction functions
-            correct_raster = (RasterCorrection() & {**key, 'slice': slice_id + 1}).get_correct_raster()
-            correct_motion = (MotionCorrection() & {**key, 'slice': slice_id + 1}).get_correct_motion()
+            correct_raster = (RasterCorrection() & key & {'slice': slice_id + 1}).get_correct_raster()
+            correct_motion = (MotionCorrection() & key & {'slice': slice_id + 1}).get_correct_motion()
 
             for channel in range(scan.num_channels):
                 tuple_ = key.copy()
@@ -514,10 +511,6 @@ class SummaryImages(dj.Computed):
             self.notify({**key, 'slice': slice_id + 1}, scan) # once per slice
 
     def notify(self, key, scan):
-        # --  notification
-        import matplotlib
-        matplotlib.rcParams['backend'] = 'Agg'
-        import matplotlib.pyplot as plt
         import seaborn as sns
 
         with sns.axes_style('white'):
@@ -565,7 +558,8 @@ class SegmentationTask(dj.Manual):
         """
 
         # Get slice dimensions (in micrometers)
-        slice_height, slice_width = (ScanInfo() & self).fetch1['um_height', 'um_width']
+        scan = (ScanInfo() & self & {'reso_version': CURRENT_VERSION})
+        slice_height, slice_width = scan.fetch1['um_height', 'um_width']
         slice_thickness = 10  # assumption
         slice_volume = slice_width * slice_height * slice_thickness
 
@@ -606,11 +600,11 @@ class Segmentation(dj.Computed):
         def get_mask_as_image(self):
             """ Return this mask as an image (2-d numpy array)."""
             # Get params
-            pixel_indices, weights = self.fetch['pixels', 'weights']
+            pixels, weights = self.fetch['pixels', 'weights']
             image_height, image_width = (ScanInfo() & self).fetch1['px_height', 'px_width']
 
             # Reshape mask
-            mask = Segmentation.reshape_masks(pixel_indices, weights, image_height, image_width)
+            mask = Segmentation.reshape_masks(pixels, weights, image_height, image_width)
 
             return np.squeeze(mask)
 
@@ -633,7 +627,7 @@ class Segmentation(dj.Computed):
 
         -> Segmentation
         ---
-        params                  : varchar(1024)             # parameters send to CNMF as JSON array
+        params              : varchar(1024)     # parameters send to CNMF as JSON array
         """
 
         def _make_tuples(self, key):
@@ -665,7 +659,7 @@ class Segmentation(dj.Computed):
             # Set CNMF parameters
             ## Estimate number of components per slice and soma radius in pixels
             num_components = (SegmentationTask() & key).estimate_num_components()
-            soma_radius_in_pixels = tuple(7 / (ScanInfo() & key).microns_per_pixel) # assumption: radius is 7 microns
+            soma_radius_in_pixels = 7 / (ScanInfo() & key).microns_per_pixel # assumption: radius is 7 microns
 
             ## Set general parameters
             kwargs = {}
@@ -680,7 +674,7 @@ class Segmentation(dj.Computed):
             target = (SegmentationTask() & key).fetch1['compartment']
             if target == 'soma':
                 kwargs['init_method'] = 'greedy_roi'
-                kwargs['soma_radius'] = soma_radius_in_pixels
+                kwargs['soma_radius'] = tuple(soma_radius_in_pixels)
                 kwargs['num_background_components'] = 4
                 kwargs['init_on_patches'] = False
             else: # axons/dendrites
@@ -692,13 +686,12 @@ class Segmentation(dj.Computed):
             ## Set params specific to initialization on patches
             if kwargs['init_on_patches']:
                 kwargs['patch_downsampling_factor'] = 4
-                kwargs['percentage_of_patch_overlap'] = .2
+                kwargs['proportion_patch_overlap'] = 0.2
 
             # Extract traces
-            print('Extracting mask, traces and spikes (cnmf)...')
-            cnmf_result = cmn.demix_and_deconvolve_with_cnmf(scan_, AR_order=0, **kwargs)
-            (location_matrix, activity_matrix, background_location_matrix,
-             background_activity_matrix, raw_traces, spikes, AR_coeffs) = cnmf_result
+            print('Extracting masks and traces (cnmf)...')
+            cnmf_result = cmn.extract_masks(scan_, **kwargs)
+            (masks, traces, background_masks, background_traces, raw_traces) = cnmf_result
 
             # Insert CNMF results
             print('Inserting masks, background components and traces...')
@@ -706,16 +699,15 @@ class Segmentation(dj.Computed):
             ## Insert in CNMF, Segmentation and Fluorescence
             Segmentation().insert1(key)
             Segmentation.CNMF().insert1({**key, 'params': json.dumps(kwargs)})
-            Fluorescence().insert1(key) # nmf also inserts traces
+            Fluorescence().insert1(key) # we also inserts traces
 
             ## Insert background components
-            background_dict = {**key, 'masks': background_location_matrix,
-                               'activity': background_activity_matrix}
-            Segmentation.CNMFBackground().insert1(background_dict)
+            Segmentation.CNMFBackground().insert1({**key, 'masks': background_masks,
+                                                   'activity': background_traces})
 
             ## Insert masks and traces (masks in Matlab format)
-            num_masks = location_matrix.shape[2]
-            masks = location_matrix.reshape(-1, num_masks, order='F').T # [num_masks x num_pixels] in F order
+            num_masks = masks.shape[-1]
+            masks = masks.reshape(-1, num_masks, order='F').T # [num_masks x num_pixels] in F order
             for mask_id, mask, trace in zip(range(1, num_masks + 1), masks, raw_traces):
                 mask_pixels = np.where(mask)[0]
                 mask_weights = mask[mask_pixels]
@@ -761,26 +753,25 @@ class Segmentation(dj.Computed):
             image_height, image_width, _ = scan_.shape
             num_pixels = image_height * image_width
 
-            # Get location and activity matrices
-            location_matrix = (Segmentation() & self).get_all_masks()
-            activity_matrix = (Fluorescence() & self).get_all_traces() # always there for CNMF
-            background_location_matrix, background_activity_matrix = \
-                (Segmentation.CNMFBackground() & self).fetch1['masks', 'activity']
+            # Get masks and traces
+            masks = (Segmentation() & self).get_all_masks()
+            traces = (Fluorescence() & self).get_all_traces() # always there for CNMF
+            background_masks, background_traces = (Segmentation.CNMFBackground() &
+                                                   self).fetch1['masks', 'activity']
 
             # Select first n components
             if first_n is not None:
-                location_matrix = location_matrix[:, :, :first_n]
-                activity_matrix = activity_matrix[:first_n, :]
+                masks = masks[:, :, :first_n]
+                traces = traces[:first_n, :]
 
             # Drop frames that won't be displayed
-            activity_matrix = activity_matrix[:, start_index: stop_index]
-            background_activity_matrix = background_activity_matrix[:, start_index: stop_index]
+            traces = traces[:, start_index: stop_index]
+            background_traces = background_traces[:, start_index: stop_index]
 
             # Create movies
-            extracted = np.dot(location_matrix.reshape(num_pixels, -1), activity_matrix)
+            extracted = np.dot(masks.reshape(num_pixels, -1), traces)
             extracted = extracted.reshape(image_height, image_width, -1)
-            background = np.dot(background_location_matrix.reshape(num_pixels, -1),
-                                background_activity_matrix)
+            background = np.dot(background_masks.reshape(num_pixels, -1), background_traces)
             background = background.reshape(image_height, image_width, -1)
             residual = scan_ - extracted - background
 
@@ -849,7 +840,7 @@ class Segmentation(dj.Computed):
             raise PipelineException(msg)
 
     def notify(self, key):
-        fig = (Segmentation() & key).plot_contours()
+        fig = (Segmentation() & key).plot_masks()
         img_filename = '/tmp/' + key_hash(key) + '.png'
         fig.savefig(img_filename)
         plt.close(fig)
@@ -880,37 +871,34 @@ class Segmentation(dj.Computed):
         mask_pixels, mask_weights = mask_rel.fetch.order_by('mask_id')['pixels', 'weights']
 
         # Reshape masks
-        location_matrix = Segmentation.reshape_masks(mask_pixels, mask_weights,
-                                                     image_height, image_width)
+        masks = Segmentation.reshape_masks(mask_pixels, mask_weights, image_height, image_width)
 
-        return location_matrix
+        return masks
 
-    def plot_contours(self, first_n=None):
-        """ Draw contours of masks over the correlation image.
+    def plot_masks(self, first_n=None):
+        """ Draw contours of masks over the correlation image (if available).
 
         :param first_n: Number of masks to plot. None for all.
         :returns: None
         """
         from .utils import caiman_interface as cmn
 
-        # Get location matrix
-        location_matrix = self.get_all_masks()
-
-        # Select first n components
+        # Get masks
+        masks = self.get_all_masks()
         if first_n is not None:
-            location_matrix = location_matrix[:, :, :first_n]
+            masks = masks[:, :, :first_n]
 
         # Get correlation image if defined, black background otherwise.
         image_rel = SummaryImages() & self
         if image_rel:
             background_image = image_rel.fetch1['correlation']
         else:
-            background_image = np.zeros(location_matrix.shape[:2])
+            background_image = np.zeros(masks.shape[:-1])
 
         # Draw contours
         figsize = 7 * (background_image.shape / np.min(background_image.shape))
         fig = plt.figure(figsize=figsize)
-        cmn.plot_contours(location_matrix, background_image)
+        cmn.plot_masks(masks, background_image)
 
         return fig
 
@@ -936,21 +924,28 @@ class Fluorescence(dj.Computed):
         """
 
     def _make_tuples(self, key):
-        print('Creating fluorescence traces...')
-
         # Load scan
+        print('Loading scan...')
         slice_id = key['slice'] - 1
         channel = key['channel'] - 1
         scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
         scan = scanreader.read_scan(scan_filename, dtype=np.float32)
         scan_ = scan[slice_id, :, :, channel, :]
 
+        # Correct the scan
+        print('Correcting scan...')
+        correct_raster = (RasterCorrection() & key).get_correct_raster()
+        correct_motion = (MotionCorrection() & key).get_correct_motion()
+        scan_ = correct_motion(correct_raster(scan_))
+
         # Get masks as images
+        print('Creating fluorescence traces...')
         mask_ids, mask_pixels, mask_weights = \
             (Segmentation.Mask() & key).fetch['mask_id', 'pixels', 'weights']
-        location_matrix = Segmentation.reshape_masks(mask_pixels, mask_weights,
-                                                     scan.image_height, scan.image_width)
-        masks = location_matrix.transpose([2, 0, 1])
+        masks = Segmentation.reshape_masks(mask_pixels, mask_weights, scan.image_height,
+                                           scan.image_width)
+        masks = masks / np.sum(masks, axis=(0, 1)) # normalize to sum 1
+        masks = masks.transpose([2, 0, 1])
 
         self.insert1(key)
         for mask_id, mask in zip(mask_ids, masks):
@@ -1007,8 +1002,8 @@ class MaskClassification(dj.Computed):
         # Get masks as images
         image_height, image_width = (ScanInfo() & key).fetch1['px_height', 'px_width']
         mask_ids, pixels, weights = (Segmentation.Mask() & key).fetch['mask_id', 'pixels', 'weights']
-        location_matrix = Segmentation.reshape_masks(pixels, weights, image_height, image_width)
-        masks = location_matrix.transpose([2, 0, 1]) # num_masks, image_height, image_width
+        masks = Segmentation.reshape_masks(pixels, weights, image_height, image_width)
+        masks = masks.transpose([2, 0, 1]) # num_masks, image_height, image_width
 
         # Classify masks
         if key['classification_method'] ==  1: # manual
@@ -1076,16 +1071,14 @@ class ScanSet(dj.Computed):
         # Get masks as images
         image_height, image_width = (ScanInfo() & key).fetch1['px_height', 'px_width']
         mask_ids, pixels, weights = (Segmentation.Mask() & key).fetch['mask_id', 'pixels', 'weights']
-        location_matrix = Segmentation.reshape_masks(pixels, weights, image_height, image_width)
+        masks = Segmentation.reshape_masks(pixels, weights, image_height, image_width)
 
         # Compute units' coordinates
-        image_height, image_width, num_units = location_matrix.shape
         px_center = [image_height / 2, image_width / 2]
         um_center = (ScanInfo() & key).fetch1['y', 'x']
-
-        px_centroids = cmn.get_centroids(location_matrix)
-        um_centroids = um_center + (px_centroids - px_center) * (ScanInfo() & key).microns_per_pixel
         um_z = (ScanInfo.Slice() & key).fetch1['z']
+        px_centroids = cmn.get_centroids(masks)
+        um_centroids = um_center + (px_centroids - px_center) * (ScanInfo() & key).microns_per_pixel
 
         # Get type from MaskClassification if available, else SegmentationTask
         if MaskClassification() & key:
@@ -1103,7 +1096,7 @@ class ScanSet(dj.Computed):
         self.insert1(key)
 
         # Insert units
-        unit_ids = range(unit_id, unit_id + num_units + 1)
+        unit_ids = range(unit_id, unit_id + len(mask_ids) + 1)
         for unit_id, mask_id, (um_y, um_x), (px_y, px_x) in zip(unit_ids, mask_ids,
                                                                 um_centroids, px_centroids):
             ScanSet.Unit().insert1({**key, 'unit_id': unit_id, 'mask_id': mask_id})
@@ -1158,7 +1151,7 @@ class ScanSet(dj.Computed):
         centroids = self.get_all_centroids()
 
         # Plot
-        #TODO: Add different colors for different types, correlation image as 2-d planes
+        # TODO: Add different colors for different types, correlation image as 2-d planes
         fig = plt.figure()
         ax = fig.add_subplot(111, projection='3d')
         ax.scatter(centroids[:, 0], centroids[:, 1], centroids[:, 2])
@@ -1249,13 +1242,12 @@ class Activity(dj.Computed):
                 Activity.Trace().insert1({**key, 'unit_id': unit_id, 'trace': spike_trace})
 
         elif key['spike_method'] == 5: # nmf
-            #from pipeline.utils import caiman_interface as cmn
+            from pipeline.utils import caiman_interface as cmn
 
-            #for unit_id, trace in zip(unit_ids, full_traces):
-            #    spike_trace, ar_coeffs = cmn.deconvolve_nmf(trace, fps)
-            #    Activity.Trace().insert1({**key, 'unit_id': unit_id, 'trace': spike_trace})
-            #    Activity.ARCoefficients.insert1({**key, 'unit_id': unit_id, 'g': ar_coeffs})
-            raise NotImplementedError('NMF not yet implemented')
+            for unit_id, trace in zip(unit_ids, full_traces):
+                spike_trace, ar_coeffs = cmn.deconvolve(trace)
+                Activity.Trace().insert1({**key, 'unit_id': unit_id, 'trace': spike_trace})
+                Activity.ARCoefficients().insert1({**key, 'unit_id': unit_id, 'g': ar_coeffs})
         else:
             msg = 'Unrecognized spike method {}'.format(key['spike_method'])
             raise PipelineException(msg)
