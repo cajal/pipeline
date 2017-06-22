@@ -1,3 +1,5 @@
+import os
+
 _report_on = {
     'aod pipeline': ['aod_monet', 'aodpre'],
     'reso pipeline': ['pre', 'rf', 'trk', 'trippy', 'monet']
@@ -5,21 +7,13 @@ _report_on = {
 
 
 #--- switch matplotlib backend if there is no way to display things.
-import matplotlib
-try:    
-    from tkinter import TclError
-    try:
-        import matplotlib.pyplot as plt
-        del plt  # don't really wanted to import it, just testing
-    except TclError:
-        print('No display found. Switching matplotlib backend to "Agg"')
-        matplotlib.use('Agg', warn=False, force=True)
-except ImportError:
-    matplotlib.use('Agg', warn=False, force=True)
-        
+cmd = 'python -c "import matplotlib.pyplot as plt; plt.figure()" 2> /dev/null'
+if os.system(cmd): # if command fails
+    print('No display found. Switching matplotlib backend to "Agg"')
+    import matplotlib; matplotlib.use('Agg'); del matplotlib
+
 
 # ----------- loads local configuration from file ----------------
-import os
 from .settings import Config, LOCALCONFIG, GLOBALCONFIG
 config = Config()
 
@@ -38,4 +32,3 @@ else:
           """ % (LOCALCONFIG, GLOBALCONFIG))
     local_config_file = os.path.expanduser(LOCALCONFIG)
     config.save(local_config_file)
-
