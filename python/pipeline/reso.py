@@ -924,16 +924,22 @@ class Fluorescence(dj.Computed):
         """
 
     def _make_tuples(self, key):
-        print('Creating fluorescence traces...')
-
         # Load scan
+        print('Loading scan...')
         slice_id = key['slice'] - 1
         channel = key['channel'] - 1
         scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
         scan = scanreader.read_scan(scan_filename, dtype=np.float32)
         scan_ = scan[slice_id, :, :, channel, :]
 
+        # Correct the scan
+        print('Correcting scan...')
+        correct_raster = (RasterCorrection() & key).get_correct_raster()
+        correct_motion = (MotionCorrection() & key).get_correct_motion()
+        scan_ = correct_motion(correct_raster(scan_))
+
         # Get masks as images
+        print('Creating fluorescence traces...')
         mask_ids, mask_pixels, mask_weights = \
             (Segmentation.Mask() & key).fetch['mask_id', 'pixels', 'weights']
         masks = Segmentation.reshape_masks(mask_pixels, mask_weights, scan.image_height,
