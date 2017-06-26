@@ -38,9 +38,9 @@ class ScanInfo(dj.Imported):
     -> Version                                  # reso version
     ---
     nslices                 : tinyint           # number of slices
-    nchannels               : tinyint           # number of recorded channels
+    nchannels               : tinyint           # number of channels
     nframes                 : int               # number of recorded frames
-    nframes_requested       : int               # number of frames (from header)
+    nframes_requested       : int               # number of requested frames (from header)
     px_height               : smallint          # lines per frame
     px_width                : smallint          # pixels per line
     um_height               : float             # height in microns
@@ -361,6 +361,7 @@ class MotionCorrection(dj.Computed):
 
         with sns.axes_style('white'):
             fig, axes = plt.subplots(scan.num_fields, 1, figsize=(10, 5 * scan.num_channels))
+            axes = np.array(axes) # make array if axis is a single element, else unchanged
         for i in range(scan.num_fields):
             y_shifts, x_shifts = (self & key & {'slice': i + 1}).fetch1['y_shifts', 'x_shifts']
             axes[i].set_title('Shifts for slice {}'.format(i + 1))
@@ -514,13 +515,14 @@ class SummaryImages(dj.Computed):
         import seaborn as sns
 
         with sns.axes_style('white'):
-            fig, ax = plt.subplots(2, scan.num_channels, figsize=(5 * scan.num_channels, 6 * 2))
+            fig, axes = plt.subplots(2, scan.num_channels, squeeze=False,
+                                     figsize=(5 * scan.num_channels, 6 * 2))
         for i, img_name in enumerate(['average', 'correlation']):
             for channel in range(scan.num_channels):
                 image = (self & key & {'channel': channel + 1}).fetch1[img_name]
-                ax[i, channel].set_title('Channel {}: {}'.format(channel + 1, img_name))
-                ax[i, channel].matshow(image, cmap='gray')
-                ax[i, channel].axis('off')
+                axes[i, channel].set_title('Channel {}: {}'.format(channel + 1, img_name))
+                axes[i, channel].matshow(image, cmap='gray')
+                axes[i, channel].axis('off')
         fig.suptitle('Slice {}'.format(key['slice']))
         fig.tight_layout()
         img_filename = '/tmp/' + key_hash(key) + '.png'
