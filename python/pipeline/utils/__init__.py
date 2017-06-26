@@ -1,3 +1,3 @@
 __author__ = 'fabee'
-from .eye_tracking import read_video_hdf5, ts2sec, ROIGrabber
-
+from .eye_tracking import ROIGrabber
+from pipeline.utils.h5 import ts2sec, read_video_hdf5
