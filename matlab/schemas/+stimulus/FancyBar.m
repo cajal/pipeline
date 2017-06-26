@@ -44,7 +44,7 @@ classdef FancyBar < dj.Manual & stimulus.core.Visual
                 params = fetch(vis.FancyBar & (vis.Trial * preprocess.Sync & scanKey & 'trial_idx between first_trial and last_trial'), '*');
                 params = dj.struct.join(params, geometry);
                 hashes = control.makeConditions(stimulus.FancyBar, rmfield(params, {'animal_id', 'psy_id', 'cond_idx'}));
-                trials =  fetch(vis.Trial & (preprocess.Sync & scanKey & 'trial_idx between first_trial and last_trial'), '*', 'last_flip_count->last_flip');
+                trials =  fetch(vis.Trial & vis.FancyBar & (preprocess.Sync & scanKey & 'trial_idx between first_trial and last_trial'), '*', 'last_flip_count->last_flip');
                 hashes = hashes(arrayfun(@(trial) find([params.cond_idx]==trial.cond_idx, 1, 'first'), trials));
                 trials = rmfield(trials, {'psy_id', 'cond_idx'});
                 [trials.condition_hash] = deal(hashes{:});
