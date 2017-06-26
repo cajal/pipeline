@@ -14,7 +14,8 @@ try:
 except ImportError:
     warn('Could not load pyfnnd.  Oopsi spike inference will fail. Install from https://github.com/cajal/PyFNND.git')
 
-from .utils.eye_tracking import ROIGrabber, ts2sec, read_video_hdf5, PupilTracker, CVROIGrabber
+from .utils.eye_tracking import ROIGrabber, PupilTracker, CVROIGrabber
+from pipeline.utils import ts2sec, read_video_hdf5
 from . import config
 
 schema = dj.schema('pipeline_pupil', locals())
