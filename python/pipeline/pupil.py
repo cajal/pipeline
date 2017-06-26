@@ -1,5 +1,6 @@
 import datajoint as dj
-from . import experiment, PipelineException, notify
+from . import experiment, notify
+from .exceptions import PipelineException
 
 from warnings import warn
 import numpy as np

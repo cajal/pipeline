@@ -3,13 +3,11 @@ from warnings import warn
 import datajoint as dj
 import numpy as np
 import sh
-from commons import lab
-from datajoint.jobs import key_hash
 from pipeline.notify import temporary_image
+import gc
 
-from . import experiment, config, PipelineException
-from .utils.dsp import mirrconv
-from .utils.eye_tracking import ROIGrabber, ts2sec, read_video_hdf5, CVROIGrabber
+from . import experiment
+from .utils.signal import mirrconv
 from .utils import galvo_corrections
 import matplotlib.pyplot as plt
 from .import notify
@@ -136,7 +134,7 @@ class Prepare(dj.Imported):
         def estimate_soma_radius_in_pixels(self):
             """ Estimates the radius of a neuron in the scan (in pixels). Assumes soma is
              14 x 14 microns.
-             
+
              :returns: a tuple with the estimated pixel radius on the y-axis (height) and
                 x-axis (width) of the scan.
              :rtype: tuple of floats
@@ -156,9 +154,9 @@ class Prepare(dj.Imported):
             return (height_radius_in_pixels, width_radius_in_pixels)
 
         def _make_tuples(self, key, scan, channel):
-            """ Read some scan parameters, compute FOV in microns and raster phase for 
-            raster correction. 
-            
+            """ Read some scan parameters, compute FOV in microns and raster phase for
+            raster correction.
+
             :param scan Scan: The scan. An Scan object returned by scanreader.
             """
             # Warning for multiroi scans
@@ -259,27 +257,40 @@ class Prepare(dj.Imported):
             # Get raster correction function
             correct_raster = (Prepare.Galvo() & key).get_correct_raster()
 
-            for field_id in range(scan.num_fields):
-                print('Correcting field', field_id + 1)
-                field = scan[field_id, :, :, channel, :]  # 3-d (height, width, frames)
-                key['slice'] = field_id + 1
+            for slice_id in range(scan.num_fields):
+                print('Correcting slice', slice_id + 1)
+                key['slice'] = slice_id + 1
+
+                # Load scan (we discard some rows/cols to avoid edge artifacts)
+                skip_rows = int(round(px_height * 0.10))
+                skip_cols = int(round(px_width * 0.10))
+                scan_ = scan[slice_id, skip_rows: -skip_rows, skip_cols: -skip_cols, channel, :]
 
                 # Correct raster effects (needed for subpixel changes in y)
-                field = correct_raster(field)
+                scan_ = correct_raster(scan_)
+                scan_ -= scan_.min() # make nonnegative (for fft used in motion correction)
 
-                # Create template
-                if scan.num_frames < 3000:
-                    mini_field = field[:, :, -2000:]
-                else:
-                    mini_field = field[:, :, 1000:3000]
-                template = np.mean(mini_field, axis=-1)
-                template -= template.min()  # set lowest element to zero
-                template = 2 * np.sqrt(
-                    template + 3 / 8)  # anscombe transform: decrease leverage of outliers and increase contrast
+                 # Create template
+                middle_frame =  int(np.floor(scan.num_frames / 2))
+                mini_scan = scan_[:, :, max(middle_frame - 1000, 0): middle_frame + 1000]
+                mini_scan = 2 * np.sqrt(mini_scan + 3/8) # *
+                template = np.mean(mini_scan, axis=-1)
+                from scipy import ndimage
+                template = ndimage.gaussian_filter(template, 0.7) # **
                 key['template'] = template
+                # * Anscombe tranform to normalize noise, increase contrast and decrease outlier's leverage
+                # ** Small amount of gaussian smoothing to get rid of high frequency noise
+
+                # Compute smoothing window size
+                size_in_ms = 300 # smooth over a 300 milliseconds window
+                window_size = round(scan.fps * (size_in_ms / 1000)) # in frames
+                window_size += 1 if window_size % 2 == 0 else 0 # make odd
 
                 # Get motion correction shifts
-                y_shifts, x_shifts = galvo_corrections.compute_motion_shifts(field, template)
+                y_shifts, x_shifts, _, _ = galvo_corrections.compute_motion_shifts(scan_, template,
+                                                                                   smoothing_window_size=window_size)
+                y_shifts = y_shifts - y_shifts.mean() # center motions around zero
+                x_shifts = x_shifts - x_shifts.mean()
                 key['motion_xy'] = np.stack([x_shifts, y_shifts])
 
                 # Calculate root mean squared distance of motion shifts
@@ -294,6 +305,9 @@ class Prepare(dj.Imported):
 
                 # Insert
                 self.insert1(key)
+
+                del scan_ # free the memory
+                gc.collect()
 
     class GalvoAverageFrame(dj.Part):
         definition = """   # average frame for each slice and channel after corrections
@@ -329,6 +343,10 @@ class Prepare(dj.Imported):
 
                     # Insert new tuple
                     self.insert1(new_tuple)
+
+                    # Free memory
+                    del field
+                    gc.collect()
 
     class Aod(dj.Part):
         definition = """   # information about AOD scans
@@ -374,11 +392,11 @@ class Prepare(dj.Imported):
             Prepare.GalvoAverageFrame()._make_tuples(key, scan)
 
             # --- notify
-            filename = temporary_image((Prepare.GalvoAverageFrame() & key & dict(channel=channel)).fetch1['frame'], key)
+            filename = temporary_image((Prepare.GalvoAverageFrame() & key & dict(channel=channel+1)).fetch1['frame'], key)
             (notify.SlackUser() & dict(username='fabee')).notify(
-                """Prepare tracking for 
-                    animal_id={animal_id}, 
-                    session={session}, 
+                """Prepare tracking for
+                    animal_id={animal_id},
+                    session={session},
                     scan_idx={scan_idx} has been populated""".format(**key),
                 file=filename, file_title='average frame'
             )
@@ -778,7 +796,7 @@ class ExtractRaw(dj.Imported):
         # Read the scan
         import scanreader
         scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
-        scan = scanreader.read_scan(scan_filename)
+        scan = scanreader.read_scan(scan_filename, dtype=np.float32)
 
         # Estimate number of components per slice
         num_components = (Prepare.Galvo() & key).estimate_num_components_per_slice()
@@ -794,7 +812,7 @@ class ExtractRaw(dj.Imported):
         kwargs['merge_threshold'] = 0.8
 
         # Set performance/execution parameters (heuristically), decrease if memory overflows
-        kwargs['num_processes'] = 20  # Set to None for all cores available
+        kwargs['num_processes'] = 10  # Set to None for all cores available
         kwargs['num_pixels_per_process'] = 5000
         kwargs['block_size'] = 5000
 
@@ -817,7 +835,7 @@ class ExtractRaw(dj.Imported):
             kwargs['percentage_of_patch_overlap'] = .2
 
         # Over each channel
-        for channel in range(scan.num_channels):
+        for channel in [0]: # range(scan.num_channels): # fix to only segment first channel
             current_trace_id = 1  # to count traces over one channel, ids start at 1
 
             # Over each slice in the channel
@@ -834,16 +852,21 @@ class ExtractRaw(dj.Imported):
 
                 # Compute and insert correlation image
                 print('Computing correlation image...')
-                correlation_image = cmn.compute_correlation_image(corrected_scan)
+                from pipeline.utils import correlation_image as ci
+                correlation_image = ci.compute_correlation_image(corrected_scan)
                 ExtractRaw.GalvoCorrelationImage().insert1({**key, 'slice': slice + 1,
                                                             'channel': channel + 1,
                                                             'correlation_image': correlation_image})
 
                 # Extract traces
                 print('Extracting mask, traces and spikes (cnmf)...')
+                kwargs['soma_radius'] = kwargs['soma_radius_in_pixels']
+                del kwargs['soma_radius_in_pixels']
                 cnmf_result = cmn.demix_and_deconvolve_with_cnmf(corrected_scan, **kwargs)
                 (location_matrix, activity_matrix, background_location_matrix,
                  background_activity_matrix, raw_traces, spikes, AR_params) = cnmf_result
+                kwargs['soma_radius_in_pixels'] = kwargs['soma_radius']
+                del kwargs['soma_radius']
 
                 # Obtain new mask order based on their brightness in the correlation image
                 new_order = cmn.order_components(location_matrix, correlation_image)
@@ -885,6 +908,10 @@ class ExtractRaw(dj.Imported):
                                    'masks': background_location_matrix,
                                    'activity': background_activity_matrix}
                 ExtractRaw.BackgroundComponents().insert1(background_dict)
+
+                # Free memory
+                del corrected_scan
+                gc.collect()
 
         # Insert CNMF parameters (one per scan)
         lowercase_kwargs = {key.lower(): value for key, value in kwargs.items()}

@@ -5,32 +5,17 @@ _report_on = {
     'reso pipeline': ['pre', 'rf', 'trk', 'trippy', 'monet']
 }
 
-#--- switch matplotlib backend if there is no way to display things.
-import matplotlib
-try:    
-    from tkinter import TclError
-    try:
-        import matplotlib.pyplot as plt
-        del plt  # don't really wanted to import it, just testing
-    except TclError:
-        print('No display found. Switching matplotlib backend to "Agg"')
-        matplotlib.use('Agg', warn=False, force=True)
-except ImportError:
-    matplotlib.use('Agg', warn=False, force=True)
-        
 
-class PipelineException(Exception):
-    """Base pipeline exception. Prints the message plus any passed info."""
-    def __init__(self, message, info=None):
-        info_message = '\nError info: ' + repr(info) if info else ''
-        super().__init__(message + info_message)
-        self.info = info
+#--- switch matplotlib backend if there is no way to display things.
+cmd = 'python -c "import matplotlib.pyplot as plt; plt.figure()" 2> /dev/null'
+if os.system(cmd): # if command fails
+    print('No display found. Switching matplotlib backend to "Agg"')
+    import matplotlib; matplotlib.use('Agg'); del matplotlib
 
 
 # ----------- loads local configuration from file ----------------
 from .settings import Config, LOCALCONFIG, GLOBALCONFIG
 config = Config()
-
 
 if os.path.exists(LOCALCONFIG):  # pragma: no cover
     local_config_file = os.path.expanduser(LOCALCONFIG)
@@ -47,4 +32,3 @@ else:
           """ % (LOCALCONFIG, GLOBALCONFIG))
     local_config_file = os.path.expanduser(LOCALCONFIG)
     config.save(local_config_file)
-
