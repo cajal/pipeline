@@ -361,7 +361,7 @@ class MotionCorrection(dj.Computed):
 
         with sns.axes_style('white'):
             fig, axes = plt.subplots(scan.num_fields, 1, figsize=(10, 5 * scan.num_channels))
-            axes = np.array(axes) # make array if axis is a single element, else unchanged
+            axes = np.array(axes) # make array if axes is a single element, else unchanged
         for i in range(scan.num_fields):
             y_shifts, x_shifts = (self & key & {'slice': i + 1}).fetch1['y_shifts', 'x_shifts']
             axes[i].set_title('Shifts for slice {}'.format(i + 1))
@@ -457,7 +457,6 @@ class MotionCorrection(dj.Computed):
         return my_lambda_function
 
 
-
 @schema
 class SummaryImages(dj.Computed):
     definition = """ # summary images for each slice and channel after corrections
@@ -505,6 +504,10 @@ class SummaryImages(dj.Computed):
                 p = 6
                 scan_ = np.power(scan_, p, out=scan_) # in place
                 tuple_['average'] = np.sum(scan_, axis=-1, dtype=np.float64) ** (1 / p)
+
+                # Free memory
+                del scan_
+                gc.collect()
 
                 # Insert
                 self.insert1(tuple_)
