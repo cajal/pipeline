@@ -4,6 +4,7 @@ This is a legacy schema that is no longer used in the unified pipeline.
 
 import warnings
 import datajoint as dj
+import pipeline.utils.h5
 from pipeline.utils import ROIGrabber
 
 schema = dj.schema('pipeline_rf', locals())
@@ -41,11 +42,11 @@ class Eye(dj.Imported):
         n = (Scan() & key).fetch1['file_num']
         avi_path = r"{p}/{f}{n}eyetracking.avi".format(f=f, p=p, n=n)
         hdf_path = r"{p}/{f}{n}%d.h5".format(f=f, p=p, n=n)
-        data = utils.read_video_hdf5(hdf_path)
+        data = pipeline.utils.h5.read_video_hdf5(hdf_path)
 
         packet_length = data['analogPacketLen']
-        dat_time, _, _ = utils.ts2sec(data['ts'], packet_length)
-        eye_time, _, _ = utils.ts2sec(data['cam2ts'], packet_length)
+        dat_time, _, _ = pipeline.utils.h5.ts2sec(data['ts'], packet_length)
+        eye_time, _, _ = pipeline.utils.h5.ts2sec(data['cam2ts'], packet_length)
         total_frames = len(eye_time)
         n_sample_frames = 10
         frame_idx = np.round(np.linspace(1, total_frames, n_sample_frames))
