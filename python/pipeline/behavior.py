@@ -1,11 +1,12 @@
 import os
 
 import datajoint as dj
+
 from .utils.signal import spaced_max, longest_contiguous_block
 
 from .utils.h5 import read_video_hdf5, ts2sec
 
-from . import experiment
+from . import experiment, notify
 import h5py
 import numpy as np
 from commons import lab
@@ -61,6 +62,11 @@ class Sync(dj.Computed):
         peaks = peaks[pulses[peaks] > 0.1 * np.percentile(pulses[peaks], 90)]
         peaks = longest_contiguous_block(peaks)
 
-        key['frame_times'] = dat_time[peaks]
 
-        self.insert1(key)
+        self.insert1(dict(key, frame_times = dat_time[peaks]))
+        self.notify(key)
+
+    def notify(self, key):
+        msg = 'behavior.Sync for `{}` has been populated.'.format(key)
+        (notify.SlackUser() & (experiment.Session() & key)).notify(msg)
+
