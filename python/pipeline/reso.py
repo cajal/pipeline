@@ -309,8 +309,7 @@ class MotionCorrection(dj.Computed):
             # Load scan (we discard some rows/cols to avoid edge artifacts)
             skip_rows = int(round(px_height * 0.10))
             skip_cols = int(round(px_width * 0.10))
-            scan_ = scan[slice_id, skip_rows: -skip_rows, skip_cols: -skip_cols, channel,
-                    :]  # 3-d (height, width, frames)
+            scan_ = scan[slice_id, skip_rows: -skip_rows, skip_cols: -skip_cols, channel, :]  # height x width x frames
 
             # Correct raster effects (needed for subpixel changes in y)
             correct_raster = (RasterCorrection() & key & {'slice': slice_id + 1}).get_correct_raster()
@@ -360,8 +359,9 @@ class MotionCorrection(dj.Computed):
         seconds = np.arange(scan.num_frames) / fps
 
         with sns.axes_style('white'):
-            fig, axes = plt.subplots(scan.num_fields, 1, figsize=(10, 5 * scan.num_channels))
-            axes = np.array(axes) # make array if axes is a single element, else unchanged
+            fig, axes = plt.subplots(scan.num_fields, 1, figsize=(15, 4 * scan.num_fields),
+                                     sharey=True)
+        axes = [axes] if scan.num_fields == 1 else axes # make list if single axis object
         for i in range(scan.num_fields):
             y_shifts, x_shifts = (self & key & {'slice': i + 1}).fetch1['y_shifts', 'x_shifts']
             axes[i].set_title('Shifts for slice {}'.format(i + 1))
@@ -413,7 +413,7 @@ class MotionCorrection(dj.Computed):
         import matplotlib.animation as animation
 
         ## Set the figure
-        fig, axes = plt.subplots(1, 2, sharex=True, sharey=True)
+        fig, axes = plt.subplots(1, 2)
 
         axes[0].set_title('Original')
         im1 = axes[0].imshow(original_scan[:, :, 0], vmin=original_scan.min(),
@@ -482,7 +482,7 @@ class SummaryImages(dj.Computed):
         scan = scanreader.read_scan(scan_filename, dtype=np.float32)
 
         for slice_id in range(scan.num_fields):
-            print('Computing summary images for slice ', slice_id + 1)
+            print('Computing summary images for slice', slice_id + 1)
 
             # Get raster and motion correction functions
             correct_raster = (RasterCorrection() & key & {'slice': slice_id + 1}).get_correct_raster()
@@ -582,12 +582,11 @@ class SegmentationTask(dj.Manual):
 
 @schema
 class DoNotSegment(dj.Manual):
-    definition = """ # used for the web interface
+    definition = """ # slice/channels that should not be segmented (used for web interface only)
 
     -> experiment.Scan
     -> shared.Slice
     -> shared.Channel
-    ---
     """
 
 
@@ -609,10 +608,10 @@ class Segmentation(dj.Computed):
         definition = """ # mask produced by segmentation.
 
         -> Segmentation
-        mask_id             : smallint
+        mask_id         : smallint
         ---
-        pixels              : longblob      # indices into the image in column major (Fortran) order
-        weights = null      : longblob      # weights of the mask at the indices above
+        pixels          : longblob      # indices into the image in column major (Fortran) order
+        weights         : longblob      # weights of the mask at the indices above
         """
 
         def get_mask_as_image(self):
@@ -651,7 +650,7 @@ class Segmentation(dj.Computed):
         def _make_tuples(self, key):
             """ Use CNMF to extract masks and traces.
 
-            See caiman_interface.demix_with_cnmf for explanation of params
+            See caiman_interface.extract_masks for explanation of parameters
             """
             from .utils import caiman_interface as cmn
             import json
@@ -797,7 +796,7 @@ class Segmentation(dj.Computed):
             import matplotlib.animation as animation
 
             ## Set the figure
-            fig, axes = plt.subplots(2, 2, sharex=True, sharey=True)
+            fig, axes = plt.subplots(2, 2)
 
             axes[0, 0].set_title('Original (Y)')
             im1 = axes[0, 0].imshow(scan_[:, :, 0], vmin=scan_.min(), vmax=scan_.max())  # just a placeholder
@@ -914,8 +913,9 @@ class Segmentation(dj.Computed):
             background_image = np.zeros(masks.shape[:-1])
 
         # Draw contours
-        figsize = 7 * (background_image.shape / np.min(background_image.shape))
-        fig = plt.figure(figsize=figsize)
+        image_height, image_width = background_image.shape
+        figsize = np.array([image_width, image_height]) / min(image_height, image_width)
+        fig = plt.figure(figsize=figsize * 7)
         cmn.plot_masks(masks, background_image)
 
         return fig
@@ -956,12 +956,10 @@ class Fluorescence(dj.Computed):
         correct_motion = (MotionCorrection() & key).get_correct_motion()
         scan_ = correct_motion(correct_raster(scan_))
 
-        # Get masks as images
+        # Get masks
         print('Creating fluorescence traces...')
-        mask_ids, mask_pixels, mask_weights = \
-            (Segmentation.Mask() & key).fetch['mask_id', 'pixels', 'weights']
-        masks = Segmentation.reshape_masks(mask_pixels, mask_weights, scan.image_height,
-                                           scan.image_width)
+        mask_ids, pixels, weights = (Segmentation.Mask() & key).fetch['mask_id', 'pixels', 'weights']
+        masks = Segmentation.reshape_masks(pixels, weights, scan.image_height, scan.image_width)
         masks = masks / np.sum(masks, axis=(0, 1))  # normalize to sum 1
         masks = masks.transpose([2, 0, 1])
 
@@ -1017,7 +1015,7 @@ class MaskClassification(dj.Computed):
         """
 
     def _make_tuples(self, key):
-        # Get masks as images
+        # Get masks
         image_height, image_width = (ScanInfo() & key).fetch1['px_height', 'px_width']
         mask_ids, pixels, weights = (Segmentation.Mask() & key).fetch['mask_id', 'pixels', 'weights']
         masks = Segmentation.reshape_masks(pixels, weights, image_height, image_width)
@@ -1026,7 +1024,7 @@ class MaskClassification(dj.Computed):
         # Classify masks
         if key['classification_method'] == 1:  # manual
             template = (SummaryImages() & key).fetch1['correlation']
-            mask_types = mask_classification.classify_manual(masks[:3], template)
+            mask_types = mask_classification.classify_manual(masks, template)
         elif key['classification_method'] == 2:  # cnn
             raise PipelineException('Convnet not yet implemented.')
             # template = (SummaryImages() & key).fetch1['correlation']
@@ -1035,7 +1033,7 @@ class MaskClassification(dj.Computed):
             msg = 'Unrecognized classification method {}'.format(key['classification_method'])
             raise PipelineException(msg)
 
-        print('Generated types: ', mask_types)
+        print('Generated types:', mask_types)
 
         # Insert results
         self.insert1(key)
@@ -1058,7 +1056,7 @@ class ScanSet(dj.Computed):
         definition = """ # single unit in the scan
         -> ScanInfo
         -> shared.SegmentationMethod
-        unit_id                 :int                # unique per scan & segmentation method
+        unit_id                 : int               # unique per scan & segmentation method
         ---
         -> ScanSet                                  # for Unit to act as a part table of ScanSet
         -> Segmentation.Mask
@@ -1076,11 +1074,11 @@ class ScanSet(dj.Computed):
         -> ScanSet.Unit
         ---
         -> shared.MaskType                  # type of the unit
-        um_x                :smallint       # x-coordinate of centroid in motor coordinate system
-        um_y                :smallint       # y-coordinate of centroid in motor coordinate system
-        um_z                :smallint       # z-coordinate of mask relative to surface of the cortex
-        px_x                :smallint       # x-coordinate of centroid in the frame
-        px_y                :smallint       # y-coordinate of centroid in the frame
+        um_x                : smallint      # x-coordinate of centroid in motor coordinate system
+        um_y                : smallint      # y-coordinate of centroid in motor coordinate system
+        um_z                : smallint      # z-coordinate of mask relative to surface of the cortex
+        px_x                : smallint      # x-coordinate of centroid in the frame
+        px_y                : smallint      # y-coordinate of centroid in the frame
         """
 
     def _make_tuples(self, key):
@@ -1155,8 +1153,9 @@ class ScanSet(dj.Computed):
             background_image = np.zeros([image_height, image_width])
 
         # Plot centroids
-        figsize = 7 * (background_image.shape / np.min(background_image.shape))
-        fig = plt.figure(figsize=figsize)
+        image_height, image_width = background_image.shape
+        figsize = np.array([image_width, image_height]) / min(image_height, image_width)
+        fig = plt.figure(figsize=figsize * 7)
         plt.imshow(background_image)
         plt.plot(centroids[:, 0], centroids[:, 1], 'ow', markersize=3)
 
