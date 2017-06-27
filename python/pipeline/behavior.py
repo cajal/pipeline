@@ -26,14 +26,12 @@ class Sync(dj.Computed):
     def _make_tuples(self, key):
 
 
-        rel = experiment.Session() * experiment.Scan.EyeVideo() * experiment.Scan.BehaviorFile().proj(
+        rel = experiment.Session() * experiment.Scan.BehaviorFile().proj(
             hdf_file='filename')
 
         info = (rel & key).fetch1()
 
-        avi_path = lab.Paths().get_local_path("{behavior_path}/{filename}".format(**info))
         # replace number by %d for hdf-file reader
-
         tmp = info['hdf_file'].split('.')
         if not '%d' in tmp[0]:
             info['hdf_file'] = tmp[0][:-1] + '%d.' + tmp[-1]
