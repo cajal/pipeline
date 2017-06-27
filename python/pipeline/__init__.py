@@ -7,7 +7,7 @@ _report_on = {
 
 
 #--- switch matplotlib backend if there is no way to display things.
-cmd = 'python -c "import matplotlib.pyplot as plt; plt.figure()" 2> /dev/null'
+cmd = 'python3 -c "import matplotlib.pyplot as plt; plt.figure()" 2> /dev/null'
 if os.system(cmd): # if command fails
     print('No display found. Switching matplotlib backend to "Agg"')
     import matplotlib; matplotlib.use('Agg'); del matplotlib
