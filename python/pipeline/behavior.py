@@ -1,11 +1,12 @@
 import os
 
 import datajoint as dj
+
 from .utils.signal import spaced_max, longest_contiguous_block
 
 from .utils.h5 import read_video_hdf5, ts2sec
 
-from . import experiment
+from . import experiment, notify
 import h5py
 import numpy as np
 from commons import lab
@@ -25,14 +26,12 @@ class Sync(dj.Computed):
     def _make_tuples(self, key):
 
 
-        rel = experiment.Session() * experiment.Scan.EyeVideo() * experiment.Scan.BehaviorFile().proj(
+        rel = experiment.Session() * experiment.Scan.BehaviorFile().proj(
             hdf_file='filename')
 
         info = (rel & key).fetch1()
 
-        avi_path = lab.Paths().get_local_path("{behavior_path}/{filename}".format(**info))
         # replace number by %d for hdf-file reader
-
         tmp = info['hdf_file'].split('.')
         if not '%d' in tmp[0]:
             info['hdf_file'] = tmp[0][:-1] + '%d.' + tmp[-1]
@@ -61,6 +60,11 @@ class Sync(dj.Computed):
         peaks = peaks[pulses[peaks] > 0.1 * np.percentile(pulses[peaks], 90)]
         peaks = longest_contiguous_block(peaks)
 
-        key['frame_times'] = dat_time[peaks]
 
-        self.insert1(key)
+        self.insert1(dict(key, frame_times = dat_time[peaks]))
+        self.notify(key)
+
+    def notify(self, key):
+        msg = 'behavior.Sync for `{}` has been populated.'.format(key)
+        (notify.SlackUser() & (experiment.Session() & key)).notify(msg)
+
