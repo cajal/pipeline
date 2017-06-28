@@ -45,18 +45,17 @@ class Spikes(dj.Computed):
 
     def _make_tuples(self, key):
         print('Populating', key)
-        spikes = np.vstack([s.squeeze() for s in (preprocess.Spikes.RateTrace() & key).fetch['rate_trace']])
+        spikes = np.vstack([s.squeeze() for s in (preprocess.Spikes.RateTrace() & key).fetch('rate_trace')])
         s = spikes.sum(axis=0)
         nans = np.isnan(s)
 
         key['leading_nans'] = int(nans[0])
         key['trailing_nans'] = int(nans[1])
 
-        t = (preprocess.Sync() & key).fetch1['frame_times']  # does not need to be unique
+        t = (preprocess.Sync() & key).fetch1('frame_times')  # does not need to be unique
 
-        flip_first = (vis.Trial() * preprocess.Sync().proj('psy_id', trial_idx='first_trial') & key).fetch1[
-            'flip_times']
-        flip_last = (vis.Trial() * preprocess.Sync().proj('psy_id', trial_idx='last_trial') & key).fetch1['flip_times']
+        flip_first = (vis.Trial() * preprocess.Sync().proj('psy_id', trial_idx='first_trial') & key).fetch1('flip_times')
+        flip_last = (vis.Trial() * preprocess.Sync().proj('psy_id', trial_idx='last_trial') & key).fetch1('flip_times')
 
         # (vis.Trial() * preprocess.Sync() & 'trial_idx between first_trial and last_trial')
         fro = np.atleast_1d(flip_first.squeeze())[0]
