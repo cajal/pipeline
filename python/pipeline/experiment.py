@@ -181,7 +181,7 @@ class Layer(dj.Lookup):
     ]
 
     def get_layers(self, z):
-        l, fr, to = self.fetch['layer', 'z_start', 'z_end']
+        l, fr, to = self.fetch('layer', 'z_start', 'z_end')
         m = np.vstack([(z > f) & (z < t) for f,t in zip(fr, to)]).T
         return np.hstack([l[mm] for mm in m]).squeeze()
 
@@ -285,7 +285,7 @@ class LaserCalibration(dj.Manual):
         # sns.set_palette("husl")
 
         for k in (dj.U('pockels', 'bidirectional', 'gdd', 'wavelength') & session).fetch.keys():
-            pe, po, zoom = (session & k).fetch['percentage', 'power', 'zoom']
+            pe, po, zoom = (session & k).fetch('percentage', 'power', 'zoom')
             zoom = np.unique(zoom)
             ax.plot(pe, po, 'o-', label=(u"zoom={0:.2f} ".format(zoom[0])
                                          + " ".join("{0}={1}".format(*v) for v in k.items())))
@@ -398,10 +398,10 @@ class Scan(dj.Manual):
     @property
     def local_filenames_as_wildcard(self):
         """Returns the local filename for all parts of this scan (ends in *.tif)."""
-        scan_path = (Session() & self).fetch1['scan_path']
+        scan_path = (Session() & self).fetch1('scan_path')
         local_path = lab.Paths().get_local_path(scan_path)
 
-        scan_name = (Scan() & self).fetch1['filename']
+        scan_name = (Scan() & self).fetch1('filename')
         local_filename = os.path.join(local_path, scan_name) + '*.tif'  # all parts
 
         return local_filename

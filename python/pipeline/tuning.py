@@ -98,7 +98,7 @@ class OriMapy(dj.Imported):
         correct_raster = (preprocess.Prepare.Galvo() & key).get_correct_raster()
         scan = correct_motion(correct_raster(scan))
         design, cov = (OriDesignMatrix() & key).fetch1['design_matrix', 'regressor_cov']
-        height, width, nslices = (preprocess.Prepare.Galvo() & key).fetch1['px_height', 'px_width', 'nslices']
+        height, width, nslices = (preprocess.Prepare.Galvo() & key).fetch1('px_height', 'px_width', 'nslices')
         design = design[key['slice'] - 1::nslices, :]
         if scan.shape[2] == 2*design.shape[0]:
             scan = (scan[:,:,::2] + scan[:,:,1::2])/2  # this is a hack for mesoscope scanner -- needs fixing
@@ -170,12 +170,12 @@ class DirectionalResponse(dj.Computed):
         print('Directional response for ', key)
         traces, slices, trace_keys = (
             preprocess.Spikes.RateTrace() * preprocess.Slice() & preprocess.ExtractRaw.GalvoROI() &
-            key).fetch['rate_trace', 'slice', dj.key]
+            key).fetch('rate_trace', 'slice', dj.key)
         traces = np.float64(np.stack(t.flatten() for t in traces))
 
         #  fetch and clean up the trace time
-        trace_time = (preprocess.Sync() & key).fetch1['frame_times'].squeeze()  # calcium scan frame times
-        n_slices = (preprocess.Prepare.Galvo() & key).fetch1['nslices']
+        trace_time = (preprocess.Sync() & key).fetch1('frame_times').squeeze()  # calcium scan frame times
+        n_slices = (preprocess.Prepare.Galvo() & key).fetch1('nslices')
         trace_time = trace_time[:n_slices*traces.shape[1]]  # truncate if interrupted scan
         assert n_slices*traces[0].size == trace_time.size, 'trace times must be a multiple of n_slices'
         slice_interval = (trace_time[1:]-trace_time[:-1]).mean()
@@ -190,7 +190,7 @@ class DirectionalResponse(dj.Computed):
         latency = 0.01  # s
         self.insert1(dict(key, latency=1000*latency))
         table = DirectionalResponse.Trial()
-        for onset, offset, trial_key in zip(*(Directional.Trial() & key).fetch['onset', 'offset', dj.key]):
+        for onset, offset, trial_key in zip(*(Directional.Trial() & key).fetch('onset', 'offset', dj.key)):
             for islice in set(slices):
                 ix = np.where(slices == islice)[0]
                 try:
@@ -257,7 +257,7 @@ class RF(dj.Computed):
             cmap = plt.get_cmap('seismic')
             crange = 20.0
             for key in self.fetch.keys():
-                data, scale = (RF.Map() & key).fetch1['map', 'scale']
+                data, scale = (RF.Map() & key).fetch1('map', 'scale')
                 data = np.float64(data) * scale / 127
                 p = os.path.join(
                     os.path.expanduser(path), '{animal_id:05d}_{session}_scan{scan_idx:02d}'.format(**key))
@@ -305,8 +305,8 @@ class RF(dj.Computed):
         print('Populating', key)
         nbins = 5
         bin_size = 0.1  # s
-        x, y, distance, diagonal = (preprocess.Sync() * vis.Session() & key).fetch1[
-            'resolution_x', 'resolution_y', 'monitor_distance', 'monitor_size']
+        x, y, distance, diagonal = (preprocess.Sync() * vis.Session() & key).fetch1(
+            'resolution_x', 'resolution_y', 'monitor_distance', 'monitor_size')
         cm_per_inch = 2.54
         degrees_per_pixel = 180 / np.pi * diagonal * cm_per_inch / np.sqrt(
             np.float64(x) * x + np.float64(y) * y) / distance
@@ -314,7 +314,7 @@ class RF(dj.Computed):
         degrees_y = degrees_per_pixel * y
 
         # enumerate all the stimulus types:
-        stim_selection, algorithm = (RFMethod() & key).fetch1['stim_selection', 'algorithm']
+        stim_selection, algorithm = (RFMethod() & key).fetch1('stim_selection', 'algorithm')
         try:
             condition_table, condition_identifier = dict(
                 monet=lambda: (vis.Monet(), 'rng_seed'),

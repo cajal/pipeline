@@ -1,12 +1,9 @@
-import os
-
 import datajoint as dj
 from .utils.signal import spaced_max, longest_contiguous_block
 
 from .utils.h5 import read_video_hdf5, ts2sec
 
 from . import experiment
-import h5py
 import numpy as np
 from commons import lab
 

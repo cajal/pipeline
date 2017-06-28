@@ -195,10 +195,10 @@ class TrackedVideo(dj.Computed):
         print("Populating", key)
         param = DEFAULT_PARAMETERS
         if Eye.ManualParameters() & key:
-            param = json.loads((Eye.ManualParameters() & key).fetch1['tracking_parameters'])
+            param = json.loads((Eye.ManualParameters() & key).fetch1('tracking_parameters'))
             print('Using manual set parameters', param, flush=True)
 
-        roi = (Eye() & key).fetch1['eye_roi']
+        roi = (Eye() & key).fetch1('eye_roi')
 
         avi_path = (Eye() & key).get_video_path()
         print(avi_path)
@@ -231,8 +231,8 @@ class TrackedVideo(dj.Computed):
             with sns.axes_style('ticks'):
                 fig, ax = plt.subplots(3, 1, figsize=(10, 6), sharex=True)
 
-            r, center, contrast = (TrackedVideo.Frame() & key).fetch.order_by('frame_id')[
-                'major_r', 'center', 'frame_intensity']
+            r, center, contrast = (TrackedVideo.Frame() & key).fetch('major_r', 'center',
+                                                 'frame_intensity', order_by='frame_id')
             ax[0].plot(r)
             ax[0].set_title('Major Radius')
             c = np.vstack([cc if cc is not None else np.NaN * np.ones(2) for cc in center])
@@ -273,11 +273,11 @@ class TrackedVideo(dj.Computed):
         import cv2
         video_info = (experiment.Session() * experiment.Scan.EyeVideo() & self).fetch1()
         videofile = "{path_prefix}/{behavior_path}/{filename}".format(path_prefix=config['path.mounts'], **video_info)
-        eye_roi = (Eye() & self).fetch1['eye_roi'] - 1
+        eye_roi = (Eye() & self).fetch1('eye_roi') - 1
 
         contours, ellipses = ((TrackedVideo.Frame() & self) \
                               & 'frame_id between {0} and {1}'.format(from_frame, to_frame)
-                              ).fetch.order_by('frame_id')['contour', 'rotated_rect']
+                              ).fetch('contour', 'rotated_rect', order_by='frame_id')
         cap = cv2.VideoCapture(videofile)
         no_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         font = cv2.FONT_HERSHEY_SIMPLEX

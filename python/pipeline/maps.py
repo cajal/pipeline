@@ -21,7 +21,7 @@ class LayerMembership(dj.Computed):
 
 
     def _make_tuples(self, key):
-        z = (ExtractRaw.GalvoROI() * MaskCoordinates() & key).fetch['zloc']
+        z = (ExtractRaw.GalvoROI() * MaskCoordinates() & key).fetch('zloc')
         self.insert1(dict(key, layer=str(Layer().get_layers(z))))
 
 
@@ -40,11 +40,11 @@ class AreaMembership(dj.Computed):
         return ExtractRaw.GalvoROI() * AreaBorder().proj(dummy='scan_idx') & dict(extract_method=2)
 
     def _make_tuples(self, key):
-        d1, d2 = tuple(map(int, (Prepare.Galvo() & key).fetch1['px_height', 'px_width']))
+        d1, d2 = tuple(map(int, (Prepare.Galvo() & key).fetch1('px_height', 'px_width'))
 
-        keys, weights, px, slices = (ExtractRaw.GalvoROI() & key).fetch[dj.key, 'mask_weights', 'mask_pixels', 'slice']
+        keys, weights, px, slices = (ExtractRaw.GalvoROI() & key).fetch(dj.key, 'mask_weights', 'mask_pixels', 'slice')
 
-        v1, lm = (AreaBorder().proj('V1_mask', 'LM_mask', dummy='scan_idx') & key).fetch1['V1_mask', 'LM_mask']
+        v1, lm = (AreaBorder().proj('V1_mask', 'LM_mask', dummy='scan_idx') & key).fetch1('V1_mask', 'LM_mask')
         masks = ExtractRaw.GalvoROI.reshape_masks(px, weights, d1, d2)
 
         I, J = map(np.transpose, np.meshgrid(*[np.arange(i) for i in lm.shape]))
