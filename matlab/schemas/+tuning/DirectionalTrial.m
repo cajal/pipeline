@@ -1,5 +1,5 @@
 %{
-tuning.DirectionalTrial (computed) # directional drift trials
+# directional drift trials
 -> tuning.Directional
 drift_trial     : smallint               # trial index
 ---
@@ -10,5 +10,8 @@ offset                      : double                        # (s) offset time in
 %}
 
 
-classdef DirectionalTrial < dj.Relvar
+classdef DirectionalTrial < dj.Part
+    properties(SetAccess=protected)
+        master = tuning.Directional
+    end
 end
