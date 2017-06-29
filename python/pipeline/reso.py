@@ -1039,15 +1039,26 @@ class MaskClassification(dj.Computed):
             MaskClassification.Type().insert1({**key, 'mask_id': mask_id, 'type': mask_type})
 
 
+
+
 @schema
 class ScanSet(dj.Computed):
     definition = """ # union of all masks in the same scan
-
-    -> Segmentation         # processing done per slice
+    -> ScanInfo
+    -> slice
+    -> channel
+    ---
     """
+
+    def _job_key(self, key):
+        """
+        modify job key to reserve the entire scan.
+        """
+        return {k: v for k, v in key.items() if k not in ['slice', 'channel']}
 
     @property
     def key_source(self):
+        return ScanInfo() & Segmention()  & {'reso_version': CURRENT_VERSION}
         return Segmentation() & {'reso_version': CURRENT_VERSION}
 
     class Unit(dj.Part):
@@ -1059,12 +1070,6 @@ class ScanSet(dj.Computed):
         -> ScanSet                                  # for Unit to act as a part table of ScanSet
         -> Segmentation.Mask
         """
-
-    # class Match(dj.Part) # MaskSet?
-    #    definition = """ # unit-mask pairs per scan
-    #    -> ScanSet.Unit
-    #    -> Segmentation.Mask
-    #    """
 
     class UnitInfo(dj.Part):
         definition = """ # unit type and coordinates in x, y, z

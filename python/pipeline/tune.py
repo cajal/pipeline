@@ -5,7 +5,9 @@ It differs from tuning.py in that it uses the new visual stimulus schema `stimul
 import itertools
 import numpy as np
 import datajoint as dj
+from scipy.interpolate import interp1d
 from . import reso, experiment, stimulus
+
 
 schema = dj.schema('pipeline_tune', locals())
 
@@ -36,27 +38,27 @@ class Drift(dj.Computed):
 
 
     def _make_tuples(self, key):
-                frame_times = (stimulus.Sync() & key).fetch1('frame_times').squeeze()
-                direction_set = set()
-                count = itertools.count()
-                tuples = list()
+        frame_times = (stimulus.Sync() & key).fetch1('frame_times').squeeze()
+        direction_set = set()
+        count = itertools.count()
+        tuples = list()
 
-                for trial_key in (stimulus.Trial() & stimulus.Monet().proj() & key).fetch.keys():
-                    onsets, directions, ori_duration, flips = (stimulus.Trial() * stimulus.Monet() & trial_key).fetch1(
-                        'onsets', 'directions', 'ori_on_secs', 'flip_times')
-                    flips = flips.squeeze()
-                    onsets = onsets.squeeze() + flips[0]
-                    directions = directions.squeeze()/np.pi*180
-                    direction_set.update(directions)
-                    tuples.extend(dict(key,
-                                       drift_trial=drift_trial,
-                                       onset=onset,
-                                       offset=onset+ori_duration,
-                                       direction=direction,
-                                       **trial_key)
-                                  for drift_trial, onset, direction in zip(count, onsets, directions))
-                self.insert1(dict(key, ndirections=len(direction_set)))
-                self.Trial().insert(tuples)
+        for trial_key in (stimulus.Trial() & stimulus.Monet().proj() & key).fetch.keys():
+            onsets, directions, ori_duration, flips = (stimulus.Trial() * stimulus.Monet() & trial_key).fetch1(
+                'onsets', 'directions', 'ori_on_secs', 'flip_times')
+            flips = flips.squeeze()
+            onsets = onsets.squeeze() + flips[0]
+            directions = directions.squeeze()/np.pi*180
+            direction_set.update(directions)
+            tuples.extend(dict(key,
+                               drift_trial=drift_trial,
+                               onset=onset,
+                               offset=onset+ori_duration,
+                               direction=direction,
+                               **trial_key)
+                          for drift_trial, onset, direction in zip(count, onsets, directions))
+        self.insert1(dict(key, ndirections=len(direction_set)))
+        self.Trial().insert(tuples)
 
 
 @schema
@@ -78,7 +80,7 @@ class Response(dj.Computed):
 
     def _make_tuples(self, key):
         print('Directional response for ', key)
-        traces, trace_keys = (reso.Activity.Trace() & key).fetch('trace', dj.key)
+        traces, slice, trace_keys = (reso.Activity.Trace() & key).fetch('trace', 'slice', dj.key)
         traces = np.float64(np.stack(t.flatten() for t in traces))
 
         #  fetch and clean up the trace time
@@ -97,8 +99,8 @@ class Response(dj.Computed):
         # insert responses for each trace and trial with time adjustment for slices
         latency = 0.01  # s
         self.insert1(dict(key, latency=1000*latency))
-        table = DirectionalResponse.Trial()
-        for onset, offset, trial_key in zip(*(Directional.Trial() & key).fetch['onset', 'offset', dj.key]):
+        table = Response.Trial()
+        for onset, offset, trial_key in zip(*(Drift.Trial() & key).fetch('onset', 'offset', dj.key)):
             for islice in set(slices):
                 ix = np.where(slices == islice)[0]
                 try:
