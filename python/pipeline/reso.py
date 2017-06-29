@@ -10,6 +10,7 @@ from . import experiment, notify, shared
 from .utils import galvo_corrections, signal, quality, mask_classification
 from .exceptions import PipelineException
 
+
 schema = dj.schema('pipeline_reso', locals())
 CURRENT_VERSION = 1
 
@@ -157,11 +158,9 @@ class ScanInfo(dj.Imported):
         self.insert1(tuple_)
 
         # Insert slice information
-        slice_depths = [z * scan.zstep_in_microns for z in scan.field_depths]
-        depth_zero = (experiment.Scan() & key).fetch1('depth')  # true z at ScanImage's 0
-        for slice_id, slice_depth in enumerate(slice_depths):
-            ScanInfo.Slice().insert1({**key, 'slice': slice_id + 1, 'z': (depth_zero +
-                                                                          slice_depth)})
+        z_zero = (experiment.Scan() & key).fetch1('depth')  # true depth at ScanImage's 0
+        for slice_id, z_slice in enumerate(scan.field_depths):
+            ScanInfo.Slice().insert1({**key, 'slice': slice_id + 1, 'z': z_zero + z_slice})
 
         # Compute quantal size for all slice/channel combinations
         for slice_id in range(scan.num_fields):
