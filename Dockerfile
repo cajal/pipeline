@@ -24,7 +24,6 @@ RUN apt-get install -y build-essential cmake pkg-config libjpeg8-dev libtiff5-de
     libgtk-3-dev libatlas-base-dev ffmpeg locate libhdf5-dev && updatedb
 
 
-
 # because opencv 3.1.0 is currently not cuda8.0 compatible, we use an
 # alternative versiion 
 #RUN git clone https://github.com/Itseez/opencv.git && \
@@ -55,6 +54,7 @@ RUN pip3 install git+https://github.com/datajoint/datajoint-python.git
 # --- install HDF5 reader and nose
 RUN pip3 install h5py nose
 
+
 ## --- install Spike Triggered Mixture Model for deconvolution
 RUN git clone https://github.com/lucastheis/cmt.git && \
   cd ./cmt/code/liblbfgs && \
@@ -65,7 +65,22 @@ RUN git clone https://github.com/lucastheis/cmt.git && \
   python3 setup.py build && \
   python3 setup.py install
 
+
 RUN pip3 install git+https://github.com/cajal/c2s.git
+
+
+# Instal FFTW (C library) and pyfftw (its python wrapper)
+RUN wget http://www.fftw.org/fftw-3.3.6-pl2.tar.gz
+    tar -xvzf fftw-3.3.6-pl2.tar.gz && \
+    cd fftw-3.3.6-pl2 && \
+    ./configure --enable-threads --with-pic --enable-float --enable-sse --enable-sse2 --enable-avx # single precision && \
+    make && make install && \
+    ./configure --enable-threads --with-pic --enable-sse2 -enable-avx # double && \
+    make && make install && \
+    ./configure --enable-threads --with-pic --enable-long-double # long && \
+    make && make install && \
+    cd .. && rm fftw-3.3.6-pl2.tar.gz && \
+    pip3 install pyfftw
 
 
 # --- install CaImAn
@@ -85,6 +100,7 @@ RUN apt-get update -y -q && \
 
 RUN grep -vwE "install_requires=" CaImAn/setup.py > tmp && mv tmp CaImAn/setup.py &&\
     pip3 install -e CaImAn/
+
 
 # --- install scanreader
 RUN \
