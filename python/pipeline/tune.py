@@ -80,7 +80,7 @@ class Response(dj.Computed):
 
     def _make_tuples(self, key):
         print('Directional response for ', key)
-        traces, slice, trace_keys = (reso.Activity.Trace() & key).fetch('trace', 'slice', dj.key)
+        traces, slice, trace_keys = (reso.Activity.Trace()*reso.UnitSet.Unit() & key).fetch('trace', 'slice', dj.key)
         traces = np.float64(np.stack(t.flatten() for t in traces))
 
         #  fetch and clean up the trace time
