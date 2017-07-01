@@ -53,16 +53,19 @@ def compute_raster_phase(image, temporal_fill_fraction):
     return angle_shift
 
 
-def compute_motion_shifts(scan, template, fix_outliers=True, outlier_threshold=0.05,
-                          smooth_shifts=True, smoothing_window_size=5):
+def compute_motion_shifts(scan, template, in_place=True, num_processes=12,
+                          fix_outliers=True, outlier_threshold=0.05, smooth_shifts=True,
+                          smoothing_window_size=5):
     """ Compute shifts in x and y for rigid subpixel motion correction.
 
     Returns the number of pixels that each image in the scan was to the right (x_shift)
     or below (y_shift) the template. Negative shifts mean the image was to the left or
     above the template.
 
-    :param np.array template: 2-d template image. Each frame in scan is aligned to this.
     :param np.array scan: 2 or 3-dimensional scan (image_height, image_width[, num_frames]).
+    :param np.array template: 2-d template image. Each frame in scan is aligned to this.
+    :param bool in_place: Whether the scan can be overwritten.
+    :param int num_proceses: Number of threads used for the ffts.
     :param bool fix_outliers: If True, look for spikes in motion shifts and sets them to
         the mean around them.
     :param float outlier_threshold: Threshold (as a fraction of dimension length) for
@@ -73,75 +76,64 @@ def compute_motion_shifts(scan, template, fix_outliers=True, outlier_threshold=0
     :returns: (y_shifts, x_shifts) Two arrays (num_frames) with the y, x motion shifts
     :returns: (y_outliers, x_outliers) Two boolean arrays (num_frames) with True for y, x
         outliers
+
+    ..note:: We use skimage.feature.register_translation() algorithm but to avoid its
+    overhead (it computes other things besides the motion correction shifts), we copy
+    only the relevant code.
     """
+    import pyfftw
+    from skimage.feature.register_translation import _upsampled_dft
+
     # Add third dimension if scan is a single image
     if scan.ndim == 2:
         scan = np.expand_dims(scan, -1)
 
     # Get some params
     image_height, image_width, num_frames = scan.shape
+    dims = np.array([image_height, image_width])
     max_y_shift = round(image_height * outlier_threshold)
     max_x_shift = round(image_width * outlier_threshold)
 
-    # Get fourier transform of template
-    template_freq = np.fft.fftn(template)
+    # Compute params used in the subpixel registration
+    upsample_factor = 10 # motion correction to a tenth of a pixel
+    upsampled_region_size = upsample_factor * 1.5
+    dftshift = np.fix(upsampled_region_size / 2)
+    midpoints = np.fix(dims / 2)
 
-    # Compute subpixel shifts per image (verbatim from skimage.feature.register_translation)
+    # Prepare fftw
+    frame = pyfftw.empty_aligned(dims, dtype='complex64')
+    fft = pyfftw.builders.fft2(frame, threads=num_processes, overwrite_input=in_place,
+                               avoid_copy=True)
+    ifft = pyfftw.builders.ifft2(frame, threads=num_processes, overwrite_input=in_place,
+                                 avoid_copy=True)
+
+    # Get fourier transform of template
+    template_freq = fft(template).conj() # we only need the conjugate
+
+    # Compute subpixel shifts per image
     y_shifts = np.empty(num_frames)
     x_shifts = np.empty(num_frames)
     for i in range(num_frames):
-        image_freq = np.fft.fftn(scan[:, :, i])
-        # yx_shift = feature.register_translation(image_freq, template_freq, 10,
-        #                                        space='fourier')[0]
-
-        # To avoid the overhead of register_translation (which computes a set of other
-        # things on top of the motion correction shifts), we copy only the relevant code
-        # from skimage.feature.register_translation
-        src_freq = image_freq
-        target_freq = template_freq
-        upsample_factor = 10 # motion correction to a tenth of a pixel
-
-        #########################################################################
-        from skimage.feature.register_translation import _upsampled_dft
-
-        # Whole-pixel shift - Compute cross-correlation by an IFFT
-        shape = src_freq.shape
-        image_product = src_freq * target_freq.conj()
-        cross_correlation = np.fft.ifftn(image_product)
+        # Compute cross-correlation by an IFFT
+        image_freq = fft(scan[:, :, i])
+        image_product = image_freq * template_freq
+        cross_correlation = ifft(image_product)
 
         # Locate maximum
-        maxima = np.unravel_index(np.argmax(np.abs(cross_correlation)),
-                                  cross_correlation.shape)
-        midpoints = np.array([np.fix(axis_size / 2) for axis_size in shape])
+        shifts = np.array(np.unravel_index(np.argmax(np.abs(cross_correlation)), dims))
+        shifts[shifts > midpoints] -= dims[shifts > midpoints]
 
-        shifts = np.array(maxima, dtype=np.float64)
-        shifts[shifts > midpoints] -= np.array(shape)[shifts > midpoints]
-
-        # Initial shift estimate in upsampled grid
-        shifts = np.round(shifts * upsample_factor) / upsample_factor
-        upsampled_region_size = np.ceil(upsample_factor * 1.5)
-        # Center of output array at dftshift + 1
-        dftshift = np.fix(upsampled_region_size / 2.0)
-        upsample_factor = np.array(upsample_factor, dtype=np.float64)
-        normalization = (src_freq.size * upsample_factor ** 2)
         # Matrix multiply DFT around the current shift estimate
         sample_region_offset = dftshift - shifts * upsample_factor
         cross_correlation = _upsampled_dft(image_product.conj(), upsampled_region_size,
                                            upsample_factor, sample_region_offset).conj()
-        cross_correlation /= normalization
+
         # Locate maximum and map back to original pixel grid
-        maxima = np.array(np.unravel_index(
-            np.argmax(np.abs(cross_correlation)),
-            cross_correlation.shape),
-            dtype=np.float64)
-        maxima -= dftshift
-        shifts = shifts + maxima / upsample_factor
-        ################################################################################
-        yx_shift = shifts
+        maxima = np.array(np.unravel_index(np.argmax(np.abs(cross_correlation)),
+                                           cross_correlation.shape))
+        shifts = shifts + (maxima - dftshift) / upsample_factor
 
-        y_shifts[i] = yx_shift[0]
-        x_shifts[i] = yx_shift[1]
-
+        y_shifts[i], x_shifts[i] = shifts
 
     # Detect outliers and set their value to the mean around them.
     y_outliers = None
@@ -165,7 +157,8 @@ def _fix_outliers(shifts, max_shift):
 
     ..note:: Changes done in place.
     """
-    moving_average = np.convolve(shifts, np.ones(100) / 100, 'same')
+    window_size = min(100, len(shifts))
+    moving_average = np.convolve(shifts, np.ones(window_size) / window_size, 'same')
     extreme_shifts = abs(shifts - moving_average) > max_shift
     shifts[extreme_shifts] = moving_average[extreme_shifts]
     return shifts, extreme_shifts
