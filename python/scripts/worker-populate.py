@@ -48,7 +48,7 @@ def main(argv):
         for name, rel in rels_cls.items():
             if args.restrictions is not None:
                 if args.autoprocessing:
-                    rel().populate(AutoProcessing(),args.restrictions, reserve_jobs=True,
+                    rel().populate(AutoProcessing(), args.restrictions, reserve_jobs=True,
                                    suppress_errors=True, limit=1)
                 else:
                     rel().populate(args.restrictions, reserve_jobs=True, suppress_errors=True, limit=1)
