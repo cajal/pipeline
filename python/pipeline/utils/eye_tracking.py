@@ -1,13 +1,9 @@
 from collections import defaultdict
-
-import matplotlib
+import matplotlib.pyplot as plt
 import pandas as pd
+import numpy as np
 
 from ..exceptions import PipelineException
-
-matplotlib.use('agg')
-import matplotlib.pyplot as plt
-import numpy as np
 
 try:
     import cv2

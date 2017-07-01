@@ -11,7 +11,7 @@ class SlackConnection(dj.Manual):
 
     domain         : varchar(128) # slack domain
     ---
-    api_key     : varchar(128) # api key for bot connection
+    api_key        : varchar(128) # api key for bot connection
     """
 
 @schema
@@ -29,7 +29,7 @@ class SlackUser(dj.Manual):
     def notify(self, message, file = None, file_title=None, file_comment=None):
         if self:
             from slacker import Slacker
-            api_key, user = (self * SlackConnection()).fetch1['api_key','slack_user']
+            api_key, user = (self * SlackConnection()).fetch1('api_key','slack_user')
             s = Slacker(api_key)
 
             s.chat.post_message('@' + user, message, as_user=True)

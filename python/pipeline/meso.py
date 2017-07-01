@@ -1,4 +1,4 @@
-""" Schemas for resonant scanners."""
+""" Schemas for mesoscope scans."""
 import datajoint as dj
 from datajoint.jobs import key_hash
 import matplotlib.pyplot as plt
@@ -11,70 +11,101 @@ from .utils import galvo_corrections, signal, quality, mask_classification
 from .exceptions import PipelineException
 
 
-schema = dj.schema('pipeline_reso', locals())
+schema = dj.schema('pipeline_meso', locals())
 CURRENT_VERSION = 1
 
 
 @schema
 class Version(dj.Lookup):
-    definition = """ # versions for the reso pipeline
+    definition = """ # versions for the meso pipeline
 
-    reso_version                    : smallint
+    meso_version                    : smallint
     ---
     description = ''                : varchar(256)      # any notes on this version
     date = CURRENT_TIMESTAMP        : timestamp         # automatic
     """
     contents = [
-        {'reso_version': 0, 'description': 'test'},
-        {'reso_version': 1, 'description': 'first release'}
+        {'meso_version': 0, 'description': 'test'},
+        {'meso_version': 1, 'description': 'first release'}
     ]
 
 
 @schema
 class ScanInfo(dj.Imported):
-    definition = """ # master table with general data about the scans
+    definition = """ # general data about mesoscope scans
 
     -> experiment.Scan
-    -> Version                                  # reso version
+    -> Version                                  # meso version
     ---
-    nslices                 : tinyint           # number of slices
+    nfields                 : tinyint           # number of fields
     nchannels               : tinyint           # number of channels
     nframes                 : int               # number of recorded frames
     nframes_requested       : int               # number of requested frames (from header)
-    px_height               : smallint          # lines per frame
-    px_width                : smallint          # pixels per line
-    um_height               : float             # height in microns
-    um_width                : float             # width in microns
-    x                       : float             # (um) center of scan in the motor coordinate system
-    y                       : float             # (um) center of scan in the motor coordinate system
+    x                       : float             # (um) ScanImage's 0 point in the motor coordinate system
+    y                       : float             # (um) ScanImage's 0 point in the motor coordinate system
     fps                     : float             # (Hz) frames per second
-    zoom                    : decimal(5,2)      # zoom factor
     bidirectional           : boolean           # true = bidirectional scanning
     usecs_per_line          : float             # microseconds per scan line
     fill_fraction           : float             # raster scan temporal fill fraction (see scanimage)
+    nrois                   : tinyint           # number of ROIs (see scanimage)
     """
 
     @property
     def key_source(self):
-        rigs = [{'rig': '2P2'}, {'rig': '2P3'}, {'rig': '2P5'}]
-        reso_sessions = (experiment.Session() & rigs)
-        reso_scans = (experiment.Scan() - experiment.ScanIgnored()) & reso_sessions
-        return reso_scans * (Version() & {'reso_version': CURRENT_VERSION})
+        meso_sessions = (experiment.Session() & {'rig': '2P4'})
+        meso_scans = (experiment.Scan() - experiment.ScanIgnored()) & meso_sessions
+        return meso_scans * (Version() & {'meso_version': CURRENT_VERSION})
 
-    class Slice(dj.Part):
-        definition = """ # slice-specific scan information
+    class Field(dj.Part):
+        definition = """ # field-specific scan information
 
         -> ScanInfo
-        -> shared.Slice
+        -> shared.Field
         ---
-        z           : float             # (um) absolute depth with respect to the surface of the cortex
+        px_height           : smallint      # height in pixels
+        px_width            : smallint      # width in pixels
+        um_height           : float         # height in microns
+        um_width            : float         # width in microns
+        x                   : float         # (um) center of field in the motor coordinate system
+        y                   : float         # (um) center of field in the motor coordinate system
+        z                   : float         # (um) absolute depth with respect to the surface of the cortex
+        delay_image         : longblob      # (ms) delay between the start of the scan and pixels in this field
+        roi                 : tinyint       # ROI to which this field belongs
         """
+
+        def _make_tuples(self, key, scan, field_id):
+            # Create results tuple
+            tuple_ = key.copy()
+            tuple_['field'] = field_id + 1
+
+            # Get attributes
+            x_zero, y_zero, _ = scan.motor_position_at_zero # motor x, y at ScanImage's 0
+            z_zero = (experiment.Scan() & key).fetch1('depth') # true z at ScanImage's 0
+            tuple_['px_height'] = scan.field_heights[field_id]
+            tuple_['px_width'] = scan.field_widths[field_id]
+            tuple_['um_height'] = scan.field_heights_in_microns[field_id]
+            tuple_['um_width'] = scan.field_widths_in_microns[field_id]
+            tuple_['x'] = x_zero + scan._degrees_to_microns(scan.fields[field_id].x)
+            tuple_['y'] = y_zero + scan._degrees_to_microns(scan.fields[field_id].y)
+            tuple_['z'] = z_zero + scan.field_depths[field_id]
+            tuple_['delay_image'] = scan.field_offsets[field_id]
+            tuple_['roi'] = scan.field_rois[field_id][0]
+
+            # Insert
+            self.insert1(tuple_)
+
+        @property
+        def microns_per_pixel(self):
+            """ Returns an array with microns per pixel in height and width. """
+            um_height, px_height, um_width, px_width = self.fetch1('um_height', 'px_height',
+                                                                   'um_width', 'px_width')
+            return np.array([um_height/px_height, um_width/px_width])
 
     class QuantalSize(dj.Part):
         definition = """ # quantal size in images
 
         -> ScanInfo
-        -> shared.Slice
+        -> shared.Field
         -> shared.Channel
         ---
         min_intensity               : int           # min value in movie
@@ -88,16 +119,16 @@ class ScanInfo(dj.Imported):
         percentile95_quantum_rate   : float         # 95th percentile in frame
         """
 
-        def _make_tuples(self, key, scan, slice_id, channel):
+        def _make_tuples(self, key, scan, field_id, channel):
             # Create results tuple
             tuple_ = key.copy()
-            tuple_['slice'] = slice_id + 1
+            tuple_['field'] = field_id + 1
             tuple_['channel'] = channel + 1
 
             # Compute quantal size
-            middle_frame = int(np.floor(scan.num_frames / 2))
+            middle_frame =  int(np.floor(scan.num_frames / 2))
             frames = slice(max(middle_frame - 2000, 0), middle_frame + 2000)
-            mini_scan = scan[slice_id, :, :, channel, frames]
+            mini_scan = scan[field_id, :, :, channel, frames]
             results = quality.compute_quantal_size(mini_scan)
 
             # Add results to tuple
@@ -119,9 +150,7 @@ class ScanInfo(dj.Imported):
             self.insert1(tuple_)
 
     def _make_tuples(self, key):
-        """ Read some scan parameters, compute FOV in microns and quantal size."""
-        from decimal import Decimal
-
+        """ Read some scan parameters and compute quantal size."""
         # Read the scan
         print('Reading header...')
         scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
@@ -129,44 +158,30 @@ class ScanInfo(dj.Imported):
 
         # Get attributes
         tuple_ = key.copy()  # in case key is reused somewhere else
-        tuple_['nslices'] = scan.num_fields
+        tuple_['nfields'] = scan.num_fields
         tuple_['nchannels'] = scan.num_channels
         tuple_['nframes'] = scan.num_frames
         tuple_['nframes_requested'] = scan.num_requested_frames
-        tuple_['px_height'] = scan.image_height
-        tuple_['px_width'] = scan.image_width
         tuple_['x'] = scan.motor_position_at_zero[0]
         tuple_['y'] = scan.motor_position_at_zero[1]
         tuple_['fps'] = scan.fps
-        tuple_['zoom'] = Decimal(str(scan.zoom))
         tuple_['bidirectional'] = scan.is_bidirectional
         tuple_['usecs_per_line'] = scan.seconds_per_line * 1e6
         tuple_['fill_fraction'] = scan.temporal_fill_fraction
-
-        # Estimate height and width in microns using measured FOVs for similar setups
-        fov_rel = (experiment.FOV() * experiment.Session() * experiment.Scan() & key
-                   & 'session_date>=fov_ts')
-        zooms = fov_rel.fetch('mag').astype(np.float32)  # zooms measured in same setup
-        closest_zoom = zooms[np.argmin(np.abs(np.log(zooms / scan.zoom)))]
-
-        dims = (fov_rel & 'ABS(mag - {}) < 1e-4'.format(closest_zoom)).fetch1('height', 'width')
-        um_height, um_width = [float(um) * (closest_zoom / scan.zoom) for um in dims]
-        tuple_['um_height'] = um_height * scan._y_angle_scale_factor
-        tuple_['um_width'] = um_width * scan._x_angle_scale_factor
+        tuple_['nrois'] = scan.num_rois
 
         # Insert in ScanInfo
         self.insert1(tuple_)
 
-        # Insert slice information
-        z_zero = (experiment.Scan() & key).fetch1('depth')  # true depth at ScanImage's 0
-        for slice_id, z_slice in enumerate(scan.field_depths):
-            ScanInfo.Slice().insert1({**key, 'slice': slice_id + 1, 'z': z_zero + z_slice})
+        # Insert field information
+        for field_id in range(scan.num_fields):
+            ScanInfo.Field()._make_tuples(key, scan, field_id)
 
-        # Compute quantal size for all slice/channel combinations
-        for slice_id in range(scan.num_fields):
-            print('Computing quantal size for slice', slice_id + 1)
+        # Compute quantal size for all field/channel combinations
+        for field_id in range(scan.num_fields):
+            print('Computing quantal size for field', field_id + 1)
             for channel in range(scan.num_channels):
-                ScanInfo.QuantalSize()._make_tuples(key, scan, slice_id, channel)
+                ScanInfo.QuantalSize()._make_tuples(key, scan, field_id, channel)
 
         self.notify(key)
 
@@ -174,20 +189,13 @@ class ScanInfo(dj.Imported):
         msg = 'ScanInfo for `{}` has been populated.'.format(key)
         (notify.SlackUser() & (experiment.Session() & key)).notify(msg)
 
-    @property
-    def microns_per_pixel(self):
-        """ Returns an array with microns per pixel in height and width. """
-        um_height, px_height, um_width, px_width = self.fetch1('um_height', 'px_height',
-                                                               'um_width', 'px_width')
-        return np.array([um_height / px_height, um_width / px_width])
-
 
 @schema
 class CorrectionChannel(dj.Manual):
     definition = """ # channel to use for raster and motion correction
 
     -> experiment.Scan
-    -> shared.Slice
+    -> shared.Field
     ---
     -> shared.Channel
     """
@@ -198,7 +206,7 @@ class RasterCorrection(dj.Computed):
     definition = """ # raster correction for bidirectional resonant scans
 
     -> ScanInfo                         # animal_id, session, scan_idx, version
-    -> CorrectionChannel                # animal_id, session, scan_idx, slice
+    -> CorrectionChannel                # animal_id, session, scan_idx, field
     ---
     template            : longblob      # average frame from the middle of the movie
     raster_phase        : float         # difference between expected and recorded scan angle
@@ -206,37 +214,37 @@ class RasterCorrection(dj.Computed):
 
     @property
     def key_source(self):
-        # Run make_tuples once per scan iff correction channel has been set for all slices
-        scans = (ScanInfo() & CorrectionChannel()) - (ScanInfo.Slice() - CorrectionChannel())
-        return scans & {'reso_version': CURRENT_VERSION}
+        # Run make_tuples once per scan iff correction channel has been set for all fields
+        scans = (ScanInfo() & CorrectionChannel()) - (ScanInfo.Field() - CorrectionChannel())
+        return scans & {'meso_version': CURRENT_VERSION}
 
     def _make_tuples(self, key):
         # Read the scan
         scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
         scan = scanreader.read_scan(scan_filename, dtype=np.float32)
 
-        for slice_id in range(scan.num_fields):
-            print('Computing raster correction for slice', slice_id + 1)
+        for field_id in range(scan.num_fields):
+            print('Computing raster correction for field', field_id + 1)
 
             # Select channel
-            correction_channel = (CorrectionChannel() & key & {'slice': slice_id + 1})
+            correction_channel = (CorrectionChannel() & key & {'field': field_id + 1})
             channel = correction_channel.fetch1('channel') - 1
 
             # Create results tuple
             tuple_ = key.copy()
-            tuple_['slice'] = slice_id + 1
+            tuple_['field'] = field_id + 1
 
             # Create the template (an average frame from the middle of the scan)
-            middle_frame = int(np.floor(scan.num_frames / 2))
+            middle_frame =  int(np.floor(scan.num_frames / 2))
             frames = slice(max(middle_frame - 1000, 0), middle_frame + 1000)
-            mini_scan = scan[slice_id, :, :, channel, frames]
+            mini_scan = scan[field_id, :, :, channel, frames]
             template = np.mean(mini_scan, axis=-1)
             tuple_['template'] = template
 
             # Compute raster correction parameters
             if scan.is_bidirectional:
                 tuple_['raster_phase'] = galvo_corrections.compute_raster_phase(template,
-                                                                                scan.temporal_fill_fraction)
+                                                            scan.temporal_fill_fraction)
             else:
                 tuple_['raster_phase'] = 0
 
@@ -280,7 +288,7 @@ class MotionCorrection(dj.Computed):
     @property
     def key_source(self):
         # Run make_tuples once per scan iff RasterCorrection is done
-        return ScanInfo() & RasterCorrection() & {'reso_version': CURRENT_VERSION}
+        return ScanInfo() & RasterCorrection() & {'meso_version': CURRENT_VERSION}
 
     def _make_tuples(self, key):
         """Computes the motion shifts per frame needed to correct the scan."""
@@ -290,50 +298,51 @@ class MotionCorrection(dj.Computed):
         scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
         scan = scanreader.read_scan(scan_filename, dtype=np.float32)
 
-        # Get some params
-        um_height, px_height, um_width, px_width = \
-            (ScanInfo() & key).fetch1('um_height', 'px_height', 'um_width', 'px_width')
+        for field_id in range(scan.num_fields):
+            print('Correcting motion in field', field_id + 1)
 
-        for slice_id in range(scan.num_fields):
-            print('Correcting motion in slice', slice_id + 1)
+            # Get some params
+            field = (ScanInfo.Field() & key & {'field': field_id + 1})
+            um_height, px_height, um_width, px_width = field.fetch1('um_height', 'px_height',
+                                                                    'um_width', 'px_width')
 
             # Select channel
-            correction_channel = (CorrectionChannel() & key & {'slice': slice_id + 1})
+            correction_channel = (CorrectionChannel() & key & {'field': field_id + 1})
             channel = correction_channel.fetch1('channel') - 1
 
             # Create results tuple
             tuple_ = key.copy()
-            tuple_['slice'] = slice_id + 1
+            tuple_['field'] = field_id + 1
 
             # Load scan (we discard some rows/cols to avoid edge artifacts)
             skip_rows = int(round(px_height * 0.10))
             skip_cols = int(round(px_width * 0.10))
-            scan_ = scan[slice_id, skip_rows: -skip_rows, skip_cols: -skip_cols, channel, :]  # height x width x frames
+            scan_ = scan[field_id, skip_rows: -skip_rows, skip_cols: -skip_cols, channel, :]  # height x width x frames
 
             # Correct raster effects (needed for subpixel changes in y)
-            correct_raster = (RasterCorrection() & key & {'slice': slice_id + 1}).get_correct_raster()
+            correct_raster = (RasterCorrection() & key & {'field': field_id + 1}).get_correct_raster()
             scan_ = correct_raster(scan_)
-            scan_ -= scan_.min()  # make nonnegative for fft
+            scan_ -= scan_.min() # make nonnegative for fft
 
             # Create template
-            middle_frame = int(np.floor(scan.num_frames / 2))
+            middle_frame =  int(np.floor(scan.num_frames / 2))
             mini_scan = scan_[:, :, max(middle_frame - 1000, 0): middle_frame + 1000]
-            mini_scan = 2 * np.sqrt(mini_scan + 3 / 8)  # *
+            mini_scan = 2 * np.sqrt(mini_scan + 3/8) # *
             template = np.mean(mini_scan, axis=-1)
-            template = ndimage.gaussian_filter(template, 0.7)  # **
+            template = ndimage.gaussian_filter(template, 0.7) # **
             tuple_['template'] = template
             # * Anscombe tranform to normalize noise, increase contrast and decrease outliers' leverage
             # ** Small amount of gaussian smoothing to get rid of high frequency noise
 
             # Compute smoothing window size
-            size_in_ms = 300  # smooth over a 300 milliseconds window
-            window_size = int(round(scan.fps * (size_in_ms / 1000)))  # in frames
-            window_size += 1 if window_size % 2 == 0 else 0  # make odd
+            size_in_ms = 300 # smooth over a 300 milliseconds window
+            window_size = int(round(scan.fps * (size_in_ms / 1000))) # in frames
+            window_size += 1 if window_size % 2 == 0 else 0 # make odd
 
             # Get motion correction shifts
             results = galvo_corrections.compute_motion_shifts(scan_, template,
                                                               smoothing_window_size=window_size)
-            y_shifts = results[0] - results[0].mean()  # center motions around zero
+            y_shifts = results[0] - results[0].mean() # center motions around zero
             x_shifts = results[1] - results[1].mean()
             tuple_['y_shifts'] = y_shifts
             tuple_['x_shifts'] = x_shifts
@@ -362,8 +371,8 @@ class MotionCorrection(dj.Computed):
                                      sharey=True)
         axes = [axes] if scan.num_fields == 1 else axes # make list if single axis object
         for i in range(scan.num_fields):
-            y_shifts, x_shifts = (self & key & {'slice': i + 1}).fetch1('y_shifts', 'x_shifts')
-            axes[i].set_title('Shifts for slice {}'.format(i + 1))
+            y_shifts, x_shifts = (self & key & {'field': i + 1}).fetch1('y_shifts', 'x_shifts')
+            axes[i].set_title('Shifts for field {}'.format(i + 1))
             axes[i].plot(seconds, y_shifts, label='y shifts')
             axes[i].plot(seconds, x_shifts, label='x shifts')
             axes[i].set_ylabel('Pixels')
@@ -400,7 +409,7 @@ class MotionCorrection(dj.Computed):
         # Load the scan
         scan_filename = (experiment.Scan() & self).local_filenames_as_wildcard
         scan = scanreader.read_scan(scan_filename, dtype=np.float32)
-        scan_ = scan[self.fetch1('slice') - 1, :, :, channel - 1, start_index: stop_index]
+        scan_ = scan[self.fetch1('field') - 1, :, :, channel - 1, start_index: stop_index]
         original_scan = scan_.copy()
 
         # Correct the scan
@@ -422,7 +431,7 @@ class MotionCorrection(dj.Computed):
 
         axes[1].set_title('Corrected')
         im2 = axes[1].imshow(corrected_scan[:, :, 0], vmin=corrected_scan.min(),
-                             vmax=corrected_scan.max())  # just a placeholder
+                         vmax=corrected_scan.max())  # just a placeholder
         fig.colorbar(im2, ax=axes[1])
         axes[1].axis('off')
 
@@ -459,7 +468,7 @@ class MotionCorrection(dj.Computed):
 
 @schema
 class SummaryImages(dj.Computed):
-    definition = """ # summary images for each slice and channel after corrections
+    definition = """ # summary images for each field and channel after corrections
 
     -> MotionCorrection
     -> shared.Channel
@@ -471,7 +480,7 @@ class SummaryImages(dj.Computed):
     @property
     def key_source(self):
         # Run make_tuples once per scan iff MotionCorrection is done
-        return ScanInfo() & MotionCorrection() & {'reso_version': CURRENT_VERSION}
+        return ScanInfo() & MotionCorrection() & {'meso_version': CURRENT_VERSION}
 
     def _make_tuples(self, key):
         from .utils import correlation_image as ci
@@ -480,20 +489,20 @@ class SummaryImages(dj.Computed):
         scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
         scan = scanreader.read_scan(scan_filename, dtype=np.float32)
 
-        for slice_id in range(scan.num_fields):
-            print('Computing summary images for slice', slice_id + 1)
+        for field_id in range(scan.num_fields):
+            print('Computing summary images for field', field_id + 1)
 
             # Get raster and motion correction functions
-            correct_raster = (RasterCorrection() & key & {'slice': slice_id + 1}).get_correct_raster()
-            correct_motion = (MotionCorrection() & key & {'slice': slice_id + 1}).get_correct_motion()
+            correct_raster = (RasterCorrection() & key & {'field': field_id + 1}).get_correct_raster()
+            correct_motion = (MotionCorrection() & key & {'field': field_id + 1}).get_correct_motion()
 
             for channel in range(scan.num_channels):
                 tuple_ = key.copy()
-                tuple_['slice'] = slice_id + 1
+                tuple_['field'] = field_id + 1
                 tuple_['channel'] = channel + 1
 
                 # Correct scan
-                scan_ = scan[slice_id, :, :, channel, :]
+                scan_ = scan[field_id, :, :, channel, :]
                 scan_ = correct_motion(correct_raster(scan_))
                 scan_ -= scan_.min()  # make nonnegative for lp-norm
 
@@ -512,7 +521,7 @@ class SummaryImages(dj.Computed):
                 # Insert
                 self.insert1(tuple_)
 
-            self.notify({**key, 'slice': slice_id + 1}, scan.num_channels)  # once per slice
+            self.notify({**key, 'field': field_id + 1}, scan.num_channels)  # once per field
 
     def notify(self, key, num_channels):
         import seaborn as sns
@@ -528,7 +537,7 @@ class SummaryImages(dj.Computed):
                 axes[channel, i].set_yticklabels([])
                 image = (self & key & {'channel': channel + 1}).fetch1(img_name)
                 axes[channel, i].matshow(image)
-        fig.suptitle('Slice {}'.format(key['slice']))
+        fig.suptitle('Field {}'.format(key['field']))
         fig.tight_layout()
         img_filename = '/tmp/' + key_hash(key) + '.png'
         fig.savefig(img_filename)
@@ -545,7 +554,7 @@ class SegmentationTask(dj.Manual):
     definition = """ # defines the target of segmentation and the channel to use
 
     -> experiment.Scan
-    -> shared.Slice
+    -> shared.Field
     -> shared.Channel
     -> shared.SegmentationMethod
     ---
@@ -553,7 +562,7 @@ class SegmentationTask(dj.Manual):
     """
 
     def estimate_num_components(self):
-        """ Estimates the number of components per slice using simple rules of thumb.
+        """ Estimates the number of components per field using simple rules of thumb.
 
         For somatic scans, estimate number of neurons based on:
         (100x100x100)um^3 = 1e6 um^3 -> 1e2 neurons; (1x1x1)mm^3 = 1e9 um^3 -> 1e5 neurons
@@ -564,46 +573,46 @@ class SegmentationTask(dj.Manual):
         :rtype: int
         """
 
-        # Get slice dimensions (in micrometers)
-        scan = (ScanInfo() & self & {'reso_version': CURRENT_VERSION})
-        slice_height, slice_width = scan.fetch1('um_height', 'um_width')
-        slice_thickness = 10  # assumption
-        slice_volume = slice_width * slice_height * slice_thickness
+        # Get field dimensions (in micrometers)
+        scan = (ScanInfo.Field() & self & {'meso_version': CURRENT_VERSION})
+        field_height, field_width = scan.fetch1('um_height', 'um_width')
+        field_thickness = 10  # assumption
+        field_volume = field_width * field_height * field_thickness
 
         # Estimate number of components
         compartment = self.fetch1('compartment')
         if compartment == 'soma':
-            num_components = slice_volume * 0.0001
+            num_components = field_volume * 0.0001
         elif compartment == 'axon':
-            num_components = slice_volume * 0.001  # ten times as many neurons
+            num_components = field_volume * 0.001  # ten times as many neurons
         else:
             PipelineException("Compartment type '{}' not recognized".format(compartment))
 
         return int(round(num_components))
 
+
 @schema
 class DoNotSegment(dj.Manual):
-    definition = """ # slice/channels that should not be segmented (used for web interface only)
+    definition = """ # field/channels that should not be segmented (used for web interface only)
 
     -> experiment.Scan
-    -> shared.Slice
+    -> shared.Field
     -> shared.Channel
     """
-
 
 @schema
 class Segmentation(dj.Computed):
     definition = """ # Different mask segmentations.
 
-    -> MotionCorrection         # animal_id, session, scan_idx, version, slice
-    -> SegmentationTask         # animal_id, session, scan_idx, slice, channel, segmentation_method
+    -> MotionCorrection         # animal_id, session, scan_idx, version, field
+    -> SegmentationTask         # animal_id, session, scan_idx, field, channel, segmentation_method
     ---
     segmentation_time=CURRENT_TIMESTAMP     : timestamp     # automatic
     """
 
     @property
     def key_source(self):
-        return MotionCorrection() * SegmentationTask() & {'reso_version': CURRENT_VERSION}
+        return MotionCorrection() * SegmentationTask() & {'meso_version': CURRENT_VERSION}
 
     class Mask(dj.Part):
         definition = """ # mask produced by segmentation.
@@ -614,17 +623,6 @@ class Segmentation(dj.Computed):
         pixels          : longblob      # indices into the image in column major (Fortran) order
         weights         : longblob      # weights of the mask at the indices above
         """
-
-        def get_mask_as_image(self):
-            """ Return this mask as an image (2-d numpy array)."""
-            # Get params
-            pixels, weights = self.fetch('pixels', 'weights')
-            image_height, image_width = (ScanInfo() & self).fetch1('px_height', 'px_width')
-
-            # Reshape mask
-            mask = Segmentation.reshape_masks(pixels, weights, image_height, image_width)
-
-            return np.squeeze(mask)
 
     class Manual(dj.Part):
         definition = """ # masks created manually
@@ -662,10 +660,10 @@ class Segmentation(dj.Computed):
 
             # Load scan
             channel = key['channel'] - 1
-            slice_id = key['slice'] - 1
+            field_id = key['field'] - 1
             scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
             scan = scanreader.read_scan(scan_filename, dtype=np.float32)
-            scan_ = scan[slice_id, :, :, channel, :]
+            scan_ = scan[field_id, :, :, channel, :]
 
             # Correct scan
             print('Correcting scan...')
@@ -675,9 +673,9 @@ class Segmentation(dj.Computed):
             scan_ -= scan_.min()  # make nonnegative for caiman
 
             # Set CNMF parameters
-            ## Estimate number of components per slice and soma radius in pixels
+            ## Estimate number of components per field and soma radius in pixels
             num_components = (SegmentationTask() & key).estimate_num_components()
-            soma_radius_in_pixels = 7 / (ScanInfo() & key).microns_per_pixel  # assumption: radius is 7 microns
+            soma_radius_in_pixels = 7 / (ScanInfo.Field() & key).microns_per_pixel  # assumption: radius is 7 microns
 
             ## Set general parameters
             kwargs = {}
@@ -757,10 +755,10 @@ class Segmentation(dj.Computed):
 
             # Load the scan
             channel = self.fetch1('channel') - 1
-            slice_id = self.fetch1('slice') - 1
+            field_id = self.fetch1('field') - 1
             scan_filename = (experiment.Scan() & self).local_filenames_as_wildcard
             scan = scanreader.read_scan(scan_filename, dtype=np.float32)
-            scan_ = scan[slice_id, :, :, channel, start_index: stop_index]
+            scan_ = scan[field_id, :, :, channel, start_index: stop_index]
 
             # Correct the scan
             correct_raster = (RasterCorrection() & self).get_correct_raster()
@@ -773,7 +771,7 @@ class Segmentation(dj.Computed):
 
             # Get masks and traces
             masks = (Segmentation() & self).get_all_masks()
-            traces = (Fluorescence() & self).get_all_traces()  # always there for CNMF
+            traces = (Fluorescence() & self).get_all_traces()
             background_masks, background_traces = (Segmentation.CNMFBackground() &
                                                    self).fetch1('masks', 'activity')
 
@@ -885,7 +883,7 @@ class Segmentation(dj.Computed):
         mask_rel = (Segmentation.Mask() & self)
 
         # Get masks
-        image_height, image_width = (ScanInfo() & self).fetch1('px_height', 'px_width')
+        image_height, image_width = (ScanInfo.Field() & self).fetch1('px_height', 'px_width')
         mask_pixels, mask_weights = mask_rel.fetch('pixels', 'weights', order_by='mask_id')
 
         # Reshape masks
@@ -897,9 +895,7 @@ class Segmentation(dj.Computed):
         """ Draw contours of masks over the correlation image (if available).
 
         :param first_n: Number of masks to plot. None for all.
-
-        :returns Figure. You can call show() on it.
-        :rtype: matplotlib.figure.Figure
+        :returns: None
         """
         from .utils import caiman_interface as cmn
 
@@ -918,22 +914,21 @@ class Segmentation(dj.Computed):
         # Draw contours
         image_height, image_width = background_image.shape
         figsize = np.array([image_width, image_height]) / min(image_height, image_width)
-        fig = plt.figure(figsize=figsize * 7)
+        fig = plt.figure(figsize=7 * figsize)
         cmn.plot_masks(masks, background_image)
 
         return fig
-
 
 @schema
 class Fluorescence(dj.Computed):
     definition = """  # fluorescence traces before spike extraction or filtering
 
-    -> Segmentation   # animal_id, session, scan_idx, reso_version, slice, channel, segmentation_method
+    -> Segmentation
     """
 
     @property
     def key_source(self):
-        return Segmentation() & {'reso_version': CURRENT_VERSION}
+        return Segmentation() & {'meso_version': CURRENT_VERSION}
 
     class Trace(dj.Part):
         definition = """
@@ -947,11 +942,11 @@ class Fluorescence(dj.Computed):
     def _make_tuples(self, key):
         # Load scan
         print('Loading scan...')
-        slice_id = key['slice'] - 1
+        field_id = key['field'] - 1
         channel = key['channel'] - 1
         scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
         scan = scanreader.read_scan(scan_filename, dtype=np.float32)
-        scan_ = scan[slice_id, :, :, channel, :]
+        scan_ = scan[field_id, :, :, channel, :]
 
         # Correct the scan
         print('Correcting scan...')
@@ -961,8 +956,9 @@ class Fluorescence(dj.Computed):
 
         # Get masks
         print('Creating fluorescence traces...')
+        image_height, image_width = (ScanInfo.Field() & key).fetch1('px_height', 'px_width')
         mask_ids, pixels, weights = (Segmentation.Mask() & key).fetch('mask_id', 'pixels', 'weights')
-        masks = Segmentation.reshape_masks(pixels, weights, scan.image_height, scan.image_width)
+        masks = Segmentation.reshape_masks(pixels, weights, image_height, image_width)
         masks = masks.transpose([2, 0, 1])
 
         self.insert1(key)
@@ -995,8 +991,8 @@ class Fluorescence(dj.Computed):
 class MaskClassification(dj.Computed):
     definition = """ # classification of segmented masks.
 
-    -> Segmentation                     # animal_id, session, scan_idx, reso_version, slice, channel, segmentation_method
-    -> SummaryImages                    # animal_id, session, scan_idx, reso_version, slice, channel
+    -> Segmentation                     # animal_id, session, scan_idx, reso_version, field, channel, segmentation_method
+    -> SummaryImages                    # animal_id, session, scan_idx, reso_version, field, channel
     -> shared.ClassificationMethod
     ---
     classif_time=CURRENT_TIMESTAMP    : timestamp     # automatic
@@ -1005,7 +1001,7 @@ class MaskClassification(dj.Computed):
     @property
     def key_source(self):
         return (Segmentation() * SummaryImages() * shared.ClassificationMethod() &
-                {'reso_version': CURRENT_VERSION})
+                {'meso_version': CURRENT_VERSION})
 
     class Type(dj.Part):
         definition = """
@@ -1018,7 +1014,7 @@ class MaskClassification(dj.Computed):
 
     def _make_tuples(self, key):
         # Get masks
-        image_height, image_width = (ScanInfo() & key).fetch1('px_height', 'px_width')
+        image_height, image_width = (ScanInfo.Field() & key).fetch1('px_height', 'px_width')
         mask_ids, pixels, weights = (Segmentation.Mask() & key).fetch('mask_id', 'pixels', 'weights')
         masks = Segmentation.reshape_masks(pixels, weights, image_height, image_width)
         masks = masks.transpose([2, 0, 1])  # num_masks, image_height, image_width
@@ -1042,42 +1038,25 @@ class MaskClassification(dj.Computed):
         for mask_id, mask_type in zip(mask_ids, mask_types):
             MaskClassification.Type().insert1({**key, 'mask_id': mask_id, 'type': mask_type})
 
-
-
-
 @schema
 class ScanSet(dj.Computed):
-    definition = """ # set of all units in the same scan
-    -> ScanInfo
-    -> shared.SegmentationMethod
-    """
+    definition = """ # union of all masks in the same scan
 
-    def _job_key(self, key):
-        """
-        modify job key to reserve the entire scan.
-        """
-        return {k: v for k, v in key.items() if k not in ['slice', 'channel']}
+    -> Segmentation         # processing done per field
+    """
 
     @property
     def key_source(self):
-        return Fluorescence() & {'reso_version': CURRENT_VERSION}
-
-    @property
-    def target(self):
-        return ScanSet.Partial() # so make_tuples is triggered with each new slice
-
-    class Partial(dj.Part):
-        definition = """ # slices that have been processed in the current ScanSet
-        -> ScanSet
-        -> Fluorescence
-        """
+        return Segmentation() & {'meso_version': CURRENT_VERSION}
 
     class Unit(dj.Part):
         definition = """ # single unit in the scan
-        -> ScanSet
-        unit_id             : int               # unique per scan & segmentation method
+        -> ScanInfo
+        -> shared.SegmentationMethod
+        unit_id                 : int               # unique per scan & segmentation method
         ---
-        -> Fluorescence.Trace
+        -> ScanSet                                  # for Unit to act as a part table of ScanSet
+        -> Segmentation.Mask
         """
 
     class UnitInfo(dj.Part):
@@ -1091,26 +1070,23 @@ class ScanSet(dj.Computed):
         um_z                : smallint      # z-coordinate of mask relative to surface of the cortex
         px_x                : smallint      # x-coordinate of centroid in the frame
         px_y                : smallint      # y-coordinate of centroid in the frame
+        ms_delay            : smallint      # (ms) delay from start of frame to recording of this unit
         """
-
-    def job_key(self, key):
-        # Force reservation key to be per scan so diff slices are not run in parallel
-        return {k: v for k, v in key.items() if k not in ['slice', 'channel']}
 
     def _make_tuples(self, key):
         from pipeline.utils import caiman_interface as cmn
 
-        # Get masks
-        image_height, image_width = (ScanInfo() & key).fetch1('px_height', 'px_width')
+        # Get masks as images
+        image_height, image_width = (ScanInfo.Field() & key).fetch1('px_height', 'px_width')
         mask_ids, pixels, weights = (Segmentation.Mask() & key).fetch('mask_id', 'pixels', 'weights')
         masks = Segmentation.reshape_masks(pixels, weights, image_height, image_width)
 
         # Compute units' coordinates
         px_center = [image_height / 2, image_width / 2]
-        um_center = (ScanInfo() & key).fetch1('y', 'x')
-        um_z = (ScanInfo.Slice() & key).fetch1('z')
+        um_center = (ScanInfo.Field() & key).fetch1('y', 'x')
+        um_z = (ScanInfo.Field() & key).fetch1('z')
         px_centroids = cmn.get_centroids(masks)
-        um_centroids = um_center + (px_centroids - px_center) * (ScanInfo() & key).microns_per_pixel
+        um_centroids = um_center + (px_centroids - px_center) * (ScanInfo.Field() & key).microns_per_pixel
 
         # Get type from MaskClassification if available, else SegmentationTask
         if MaskClassification() & key:
@@ -1120,28 +1096,34 @@ class ScanSet(dj.Computed):
             mask_type = (SegmentationTask() & key).fetch1('compartment')
             get_type = lambda mask_id: mask_type
 
+        # Compute units' delays
+        delay_image = (ScanInfo.Field() & key).fetch1('delay_image')
+        delays = (np.sum(masks * np.expand_dims(delay_image, -1), axis=(0, 1)) /
+                  np.sum(masks, axis=(0, 1)))
+        delays = np.round(delays * 1e3).astype(np.int16) # in milliseconds
+
         # Get next unit_id for scan
         unit_rel = (ScanSet.Unit().proj() & key)
         unit_id = np.max(unit_rel.fetch('unit_id')) + 1 if unit_rel else 1
 
         # Insert in ScanSet
-        self.insert1(key, ignore_extra_fields=True, skip_duplicates=True)
-        self.Partial.insert1(key)
+        self.insert1(key)
 
         # Insert units
         unit_ids = range(unit_id, unit_id + len(mask_ids) + 1)
-        for unit_id, mask_id, (um_y, um_x), (px_y, px_x) in zip(unit_ids, mask_ids,
-                                                                um_centroids, px_centroids):
+        for unit_id, mask_id, (um_y, um_x), (px_y, px_x), delay in zip(unit_ids, mask_ids,
+            um_centroids, px_centroids, delays):
             ScanSet.Unit().insert1({**key, 'unit_id': unit_id, 'mask_id': mask_id})
 
-            unit_info = {**key, 'unit_id': unit_id, 'type': get_type(mask_id), 'um_x': um_x,
-                         'um_y': um_y, 'um_z': um_z, 'px_x': px_x, 'px_y': px_y}
-            ScanSet.UnitInfo().insert1(unit_info, ignore_extra_fields=True)
+            unit_info = {**key, 'unit_id': unit_id, 'type': get_type(mask_id),
+                         'um_x': um_x, 'um_y': um_y, 'um_z': um_z, 'px_x': px_x,
+                         'px_y': px_y, 'ms_delay': delay}
+            ScanSet.UnitInfo().insert1(unit_info, ignore_extra_fields=True)  # ignore field and channel
 
         self.notify(key)
 
     def notify(self, key):
-        fig = (ScanSet() & key).plot_centroids(key['slice'], key['channel'])
+        fig = (ScanSet() & key).plot_centroids()
         img_filename = '/tmp/' + key_hash(key) + '.png'
         fig.savefig(img_filename)
         plt.close(fig)
@@ -1150,29 +1132,23 @@ class ScanSet(dj.Computed):
         (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
                                                                    file_title='unit centroids')
 
-    def plot_centroids(self, slice_id=1, channel=1, first_n=None):
-        """ Draw masks centroids over the correlation image. Works on a single slice/channel
+    def plot_centroids(self, first_n=None):
+        """ Draw centroids of masks over the correlation image.
 
-        :param slice_id: Slice to use for plotting.
-        :param channel: Channel to use for plotting.
-        :param first_n: Number of masks to plot. None for all
-
-        :returns Figure. You can call show() on it.
-        :rtype: matplotlib.figure.Figure
+        :param first_n: Number of masks to plot. None for all.
+        :returns: None
         """
         # Get centroids
-        xs, ys = (self & {'slice': slice_id, 'channel': channel}).fetch('px_x', 'px_y',
-                                                                         order_by='unit_id')
-        if first_n is not None: # select first n units
-            xs = xs[:first_n]
-            ys = ys[:first_n]
+        centroids = self.get_all_centroids(centroid_type='px')
+        if first_n is not None:
+            centroids = centroids[:, :first_n]  # select first n components
 
         # Get correlation image if defined, black background otherwise.
-        image_rel = SummaryImages() & self & {'slice': slice_id, 'channel': channel}
+        image_rel = SummaryImages() & self
         if image_rel:
             background_image = image_rel.fetch1('correlation')
         else:
-            image_height, image_width = (ScanInfo() & self).fetch1('px_height', 'px_width')
+            image_height, image_width = (ScanInfo.Field() & self).fetch1('px_height', 'px_width')
             background_image = np.zeros([image_height, image_width])
 
         # Plot centroids
@@ -1180,16 +1156,11 @@ class ScanSet(dj.Computed):
         figsize = np.array([image_width, image_height]) / min(image_height, image_width)
         fig = plt.figure(figsize=figsize * 7)
         plt.imshow(background_image)
-        plt.plot(xs, ys, 'ow', markersize=3)
+        plt.plot(centroids[:, 0], centroids[:, 1], 'ow', markersize=3)
 
         return fig
 
     def plot_centroids3d(self):
-        """ Plots the centroids of all units in the motor coordinate system (in microns)
-
-        :returns Figure. You can call show() on it.
-        :rtype: matplotlib.figure.Figure
-        """
         from mpl_toolkits.mplot3d import Axes3D
 
         # Get centroids
@@ -1197,7 +1168,6 @@ class ScanSet(dj.Computed):
 
         # Plot
         # TODO: Add different colors for different types, correlation image as 2-d planes
-        # masks from diff channels with diff colors.
         fig = plt.figure()
         ax = fig.add_subplot(111, projection='3d')
         ax.scatter(centroids[:, 0], centroids[:, 1], centroids[:, 2])
@@ -1209,7 +1179,7 @@ class ScanSet(dj.Computed):
         return fig
 
     def get_all_centroids(self, centroid_type='um'):
-        """ Returns the centroids for all units in the scan.
+        """ Returns the centroids for all units in ScanSet (could be limited to field).
 
         Centroid type is either 'um' or 'px':
             'um': Array (num_units x 3) with x, y, z in motor coordinate system (microns).
@@ -1224,48 +1194,41 @@ class ScanSet(dj.Computed):
             centroids = np.stack([xs, ys], axis=1)
         return centroids
 
-
 @schema
 class Activity(dj.Computed):
     definition = """ # deconvolved activity inferred from fluorescence traces
 
-    -> ScanSet
+    -> ScanSet                                      # processing done per field
     -> shared.SpikeMethod
     ---
-    activity_time=CURRENT_TIMESTAMP   : timestamp     # automatic
+    deconv_time=CURRENT_TIMESTAMP   : timestamp     # automatic
     """
 
     @property
     def key_source(self):
-        return ScanSet.Partial() * shared.SpikeMethod() & {'reso_version': CURRENT_VERSION}
-
-    @property
-    def target(self):
-        return Activity.Partial() # trigger make_tuples for slices in ScanSet.Partial that are not in Activity.Partial
-
-    class Partial(dj.Part):
-        definition = """ # slices that have been processed in the current Activity
-        -> Activity
-        -> ScanSet.Partial
-        """
+        return ScanSet() * shared.SpikeMethod() & {'meso_version': CURRENT_VERSION}
 
     class Trace(dj.Part):
         definition = """ # deconvolved calcium acitivity
-        -> Activity
+
         -> ScanSet.Unit
+        -> shared.SpikeMethod
         ---
+        -> Activity                         # for it to act as part table of Activity
         trace               : longblob
         """
 
     class ARCoefficients(dj.Part):
         definition = """ # fitted parameters for the autoregressive process (nmf deconvolution)
-        -> Activity.Trace
+
+        -> ScanSet.Unit
         ---
+        -> Activity                         # for it to act as part table of Activity
         g                   : blob          # g1, g2, ... coefficients for the AR process
-        """
+    """
 
     def _make_tuples(self, key):
-        print('Creating activity traces for', key)
+        print('Creating activity traces...')
 
         # Get fluorescence
         fps = (ScanInfo() & key).fetch1('fps')

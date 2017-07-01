@@ -190,12 +190,22 @@ def extract_masks(scan, num_components=200, merge_threshold=0.8,
     # Delete memory mapped scan
     os.remove(mmap_filename)
 
-    # Get final results
+    # Get results
     masks = A.toarray().reshape((image_height, image_width, -1), order='F') # h x w x num_components
     traces = C  # num_components x num_frames
     background_masks = b.reshape((image_height, image_width, -1), order='F') # h x w x num_components
     background_traces = f  # num_background_components x num_frames
     raw_traces = C + YrA  # num_components x num_frames
+
+    # Rescale traces to match scan range (~ np.average(trace*mask, weights=mask))
+    scaling_factor = np.sum(masks**2, axis=(0, 1)) / np.sum(masks, axis=(0, 1))
+    traces = traces * np.expand_dims(scaling_factor, -1)
+    raw_traces = raw_traces * np.expand_dims(scaling_factor, -1)
+    masks = masks / scaling_factor
+    background_scaling_factor = np.sum(background_masks**2, axis=(0, 1)) / np.sum(background_masks,
+                                                                                  axis=(0,1))
+    background_traces = background_traces * np.expand_dims(background_scaling_factor, -1)
+    background_masks = background_masks / background_scaling_factor
 
     return masks, traces, background_masks, background_traces, raw_traces
 
