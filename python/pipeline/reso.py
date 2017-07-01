@@ -10,6 +10,7 @@ from . import experiment, notify, shared
 from .utils import galvo_corrections, signal, quality, mask_classification
 from .exceptions import PipelineException
 
+
 schema = dj.schema('pipeline_reso', locals())
 CURRENT_VERSION = 1
 
@@ -157,11 +158,9 @@ class ScanInfo(dj.Imported):
         self.insert1(tuple_)
 
         # Insert slice information
-        slice_depths = [z * scan.zstep_in_microns for z in scan.field_depths]
-        depth_zero = (experiment.Scan() & key).fetch1('depth')  # true z at ScanImage's 0
-        for slice_id, slice_depth in enumerate(slice_depths):
-            ScanInfo.Slice().insert1({**key, 'slice': slice_id + 1, 'z': (depth_zero +
-                                                                          slice_depth)})
+        z_zero = (experiment.Scan() & key).fetch1('depth')  # true depth at ScanImage's 0
+        for slice_id, z_slice in enumerate(scan.field_depths):
+            ScanInfo.Slice().insert1({**key, 'slice': slice_id + 1, 'z': z_zero + z_slice})
 
         # Compute quantal size for all slice/channel combinations
         for slice_id in range(scan.num_fields):
@@ -898,7 +897,9 @@ class Segmentation(dj.Computed):
         """ Draw contours of masks over the correlation image (if available).
 
         :param first_n: Number of masks to plot. None for all.
-        :returns: None
+
+        :returns Figure. You can call show() on it.
+        :rtype: matplotlib.figure.Figure
         """
         from .utils import caiman_interface as cmn
 
@@ -927,7 +928,7 @@ class Segmentation(dj.Computed):
 class Fluorescence(dj.Computed):
     definition = """  # fluorescence traces before spike extraction or filtering
 
-    -> Segmentation
+    -> Segmentation   # animal_id, session, scan_idx, reso_version, slice, channel, segmentation_method
     """
 
     @property
@@ -1044,29 +1045,38 @@ class MaskClassification(dj.Computed):
 
 @schema
 class ScanSet(dj.Computed):
-    definition = """ # union of all masks in the same scan
+    definition = """ # set of all units in the same scan
 
-    -> Segmentation         # processing done per slice
+    -> ScanInfo
+    -> shared.SegmentationMethod
     """
 
     @property
     def key_source(self):
-        return Segmentation() & {'reso_version': CURRENT_VERSION}
+        return Fluorescence() & {'reso_version': CURRENT_VERSION}
+
+    @property
+    def target(self):
+        return ScanSet.Partial() # so make_tuples is triggered with each new slice
+
+    class Partial(dj.Part):
+        definition = """ # slices that have been processed in the current ScanSet
+        -> ScanSet
+        -> Fluorescence
+        """
 
     class Unit(dj.Part):
         definition = """ # single unit in the scan
-        -> ScanInfo
-        -> shared.SegmentationMethod
-        unit_id                 : int               # unique per scan & segmentation method
+        -> ScanSet
+        unit_id             : int               # unique per scan & segmentation method
         ---
-        -> ScanSet                                  # for Unit to act as a part table of ScanSet
-        -> Segmentation.Mask
+        -> Fluorescence.Trace
         """
 
     # class Match(dj.Part) # MaskSet?
     #    definition = """ # unit-mask pairs per scan
     #    -> ScanSet.Unit
-    #    -> Segmentation.Mask
+    #    -> Fluorescence.Trace
     #    """
 
     class UnitInfo(dj.Part):
@@ -1082,10 +1092,14 @@ class ScanSet(dj.Computed):
         px_y                : smallint      # y-coordinate of centroid in the frame
         """
 
+    def job_key(self, key):
+        # Force reservation key to be per scan so diff slices are not run in parallel
+        return {k: v for k, v in key.items() if k not in ['slice', 'channel']}
+
     def _make_tuples(self, key):
         from pipeline.utils import caiman_interface as cmn
 
-        # Get masks as images
+        # Get masks
         image_height, image_width = (ScanInfo() & key).fetch1('px_height', 'px_width')
         mask_ids, pixels, weights = (Segmentation.Mask() & key).fetch('mask_id', 'pixels', 'weights')
         masks = Segmentation.reshape_masks(pixels, weights, image_height, image_width)
@@ -1110,7 +1124,8 @@ class ScanSet(dj.Computed):
         unit_id = np.max(unit_rel.fetch('unit_id')) + 1 if unit_rel else 1
 
         # Insert in ScanSet
-        self.insert1(key)
+        self.insert1(key, ignore_extra_fields=True, skip_duplicates=True)
+        self.Partial.insert1(key)
 
         # Insert units
         unit_ids = range(unit_id, unit_id + len(mask_ids) + 1)
@@ -1120,12 +1135,12 @@ class ScanSet(dj.Computed):
 
             unit_info = {**key, 'unit_id': unit_id, 'type': get_type(mask_id), 'um_x': um_x,
                          'um_y': um_y, 'um_z': um_z, 'px_x': px_x, 'px_y': px_y}
-            ScanSet.UnitInfo().insert1(unit_info, ignore_extra_fields=True)  # ignore slice and channel
+            ScanSet.UnitInfo().insert1(unit_info, ignore_extra_fields=True)
 
         self.notify(key)
 
     def notify(self, key):
-        fig = (ScanSet() & key).plot_centroids()
+        fig = (ScanSet() & key).plot_centroids(key['slice'], key['channel'])
         img_filename = '/tmp/' + key_hash(key) + '.png'
         fig.savefig(img_filename)
         plt.close(fig)
@@ -1134,19 +1149,25 @@ class ScanSet(dj.Computed):
         (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
                                                                    file_title='unit centroids')
 
-    def plot_centroids(self, first_n=None):
-        """ Draw centroids of masks over the correlation image.
+    def plot_centroids(self, slice_id=1, channel=1, first_n=None):
+        """ Draw masks centroids over the correlation image. Works on a single slice/channel
 
-        :param first_n: Number of masks to plot. None for all.
-        :returns: None
+        :param slice_id: Slice to use for plotting.
+        :param channel: Channel to use for plotting.
+        :param first_n: Number of masks to plot. None for all
+
+        :returns Figure. You can call show() on it.
+        :rtype: matplotlib.figure.Figure
         """
         # Get centroids
-        centroids = self.get_all_centroids(centroid_type='px')
-        if first_n is not None:
-            centroids = centroids[:, :first_n]  # select first n components
+        xs, ys = (self & {'slice': slice_id, 'channel': channel}).fetch('px_x', 'px_y',
+                                                                         order_by='unit_id')
+        if first_n is not None: # select first n units
+            xs = xs[:first_n]
+            ys = ys[:first_n]
 
         # Get correlation image if defined, black background otherwise.
-        image_rel = SummaryImages() & self
+        image_rel = SummaryImages() & self & {'slice': slice_id, 'channel': channel}
         if image_rel:
             background_image = image_rel.fetch1('correlation')
         else:
@@ -1158,11 +1179,16 @@ class ScanSet(dj.Computed):
         figsize = np.array([image_width, image_height]) / min(image_height, image_width)
         fig = plt.figure(figsize=figsize * 7)
         plt.imshow(background_image)
-        plt.plot(centroids[:, 0], centroids[:, 1], 'ow', markersize=3)
+        plt.plot(xs, ys, 'ow', markersize=3)
 
         return fig
 
     def plot_centroids3d(self):
+        """ Plots the centroids of all units in the motor coordinate system (in microns)
+
+        :returns Figure. You can call show() on it.
+        :rtype: matplotlib.figure.Figure
+        """
         from mpl_toolkits.mplot3d import Axes3D
 
         # Get centroids
@@ -1170,6 +1196,7 @@ class ScanSet(dj.Computed):
 
         # Plot
         # TODO: Add different colors for different types, correlation image as 2-d planes
+        # masks from diff channels with diff colors.
         fig = plt.figure()
         ax = fig.add_subplot(111, projection='3d')
         ax.scatter(centroids[:, 0], centroids[:, 1], centroids[:, 2])
@@ -1181,7 +1208,7 @@ class ScanSet(dj.Computed):
         return fig
 
     def get_all_centroids(self, centroid_type='um'):
-        """ Returns the centroids for all units in ScanSet (could be limited to slice).
+        """ Returns the centroids for all units in the scan.
 
         Centroid type is either 'um' or 'px':
             'um': Array (num_units x 3) with x, y, z in motor coordinate system (microns).
@@ -1201,34 +1228,40 @@ class ScanSet(dj.Computed):
 class Activity(dj.Computed):
     definition = """ # deconvolved activity inferred from fluorescence traces
 
-    -> ScanSet                                      # processing done per slice
+    -> ScanSet
     -> shared.SpikeMethod
     ---
-    deconv_time=CURRENT_TIMESTAMP   : timestamp     # automatic
+    activity_time=CURRENT_TIMESTAMP   : timestamp     # automatic
     """
 
     @property
     def key_source(self):
-        return ScanSet() * shared.SpikeMethod() & {'reso_version': CURRENT_VERSION}
+        return ScanSet.Partial() * shared.SpikeMethod() & {'reso_version': CURRENT_VERSION}
+
+    @property
+    def target(self):
+        return Activity.Partial() # trigger make_tuples for slices in ScanSet.Partial that are not in Activity.Partial
+
+    class Partial(dj.Part):
+        definition = """ # slices that have been processed in the current Activity
+        -> Activity
+        -> ScanSet.Partial
+        """
 
     class Trace(dj.Part):
         definition = """ # deconvolved calcium acitivity
-
+        -> Activity
         -> ScanSet.Unit
-        -> shared.SpikeMethod
         ---
-        -> Activity                         # for it to act as part table of Activity
         trace               : longblob
         """
 
     class ARCoefficients(dj.Part):
         definition = """ # fitted parameters for the autoregressive process (nmf deconvolution)
-
-        -> ScanSet.Unit
+        -> Activity.Trace
         ---
-        -> Activity                         # for it to act as part table of Activity
         g                   : blob          # g1, g2, ... coefficients for the AR process
-    """
+        """
 
     def _make_tuples(self, key):
         print('Creating activity traces for', key)

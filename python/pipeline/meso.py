@@ -80,14 +80,14 @@ class ScanInfo(dj.Imported):
 
             # Get attributes
             x_zero, y_zero, _ = scan.motor_position_at_zero # motor x, y at ScanImage's 0
-            z_zero = (experiment.Scan() & key).fetch1['depth'] # true z at ScanImage's 0
+            z_zero = (experiment.Scan() & key).fetch1('depth') # true z at ScanImage's 0
             tuple_['px_height'] = scan.field_heights[field_id]
             tuple_['px_width'] = scan.field_widths[field_id]
             tuple_['um_height'] = scan.field_heights_in_microns[field_id]
             tuple_['um_width'] = scan.field_widths_in_microns[field_id]
             tuple_['x'] = x_zero + scan._degrees_to_microns(scan.fields[field_id].x)
             tuple_['y'] = y_zero + scan._degrees_to_microns(scan.fields[field_id].y)
-            tuple_['z'] = z_zero + scan.field_depths[field_id] * scan.zstep_in_microns
+            tuple_['z'] = z_zero + scan.field_depths[field_id]
             tuple_['delay_image'] = scan.field_offsets[field_id]
             tuple_['roi'] = scan.field_rois[field_id][0]
 
