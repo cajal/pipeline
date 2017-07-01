@@ -1264,7 +1264,7 @@ class Activity(dj.Computed):
         """
 
     def _make_tuples(self, key):
-        print('Creating activity traces...')
+        print('Creating activity traces for', key)
 
         # Get fluorescence
         fps = (ScanInfo() & key).fetch1('fps')

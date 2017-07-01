@@ -70,7 +70,7 @@ RUN pip3 install git+https://github.com/cajal/c2s.git
 
 
 # Instal FFTW (C library) and pyfftw (its python wrapper)
-RUN wget http://www.fftw.org/fftw-3.3.6-pl2.tar.gz
+RUN wget http://www.fftw.org/fftw-3.3.6-pl2.tar.gz && \
     tar -xvzf fftw-3.3.6-pl2.tar.gz && \
     cd fftw-3.3.6-pl2 && \
     ./configure --enable-threads --with-pic --enable-float --enable-sse --enable-sse2 --enable-avx # single precision && \
