@@ -1,4 +1,3 @@
-from warnings import warn
 import datajoint as dj
 
 schema = dj.schema('pipeline_shared', locals())
@@ -10,6 +9,12 @@ class Slice(dj.Lookup):
     """
     contents = [[i] for i in range(1, 13)]
 
+@schema
+class Field(dj.Lookup):
+    definition = """ # fields in mesoscope scans
+    field       : tinyint
+    """
+    contents = [[i] for i in range(1, 25)]
 
 @schema
 class Channel(dj.Lookup):
