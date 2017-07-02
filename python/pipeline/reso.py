@@ -1158,7 +1158,7 @@ class ScanSet(dj.Computed):
         if image_rel:
             background_image = image_rel.fetch1('correlation')
         else:
-            image_height, image_width = (ScanInfo.Field() & self).fetch1('px_height', 'px_width')
+            image_height, image_width = (ScanInfo() & self).fetch1('px_height', 'px_width')
             background_image = np.zeros([image_height, image_width])
 
         # Plot centroids
