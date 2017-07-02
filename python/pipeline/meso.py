@@ -1370,7 +1370,7 @@ class ScanDone(dj.Computed):
         # Reinsert in ScanDone
         self.insert1(scan_key)
 
-        # Insert all processed slices in Partial
+        # Insert all processed fields in Partial
         ScanDone.Partial().insert((Activity() & scan_key).proj())
 
         self.notify(scan_key)
