@@ -715,7 +715,7 @@ class Segmentation(dj.Computed):
             ## Insert in CNMF, Segmentation and Fluorescence
             Segmentation().insert1(key)
             Segmentation.CNMF().insert1({**key, 'params': json.dumps(kwargs)})
-            Fluorescence().insert1(key)  # we also inserts traces
+            Fluorescence().insert1(key)  # we also insert traces
 
             ## Insert background components
             Segmentation.CNMFBackground().insert1({**key, 'masks': background_masks,
@@ -1040,27 +1040,28 @@ class MaskClassification(dj.Computed):
 
 @schema
 class ScanSet(dj.Computed):
-    definition = """ # union of all masks in the same scan
+    definition = """ # set of all units in the same scan
 
-    -> Segmentation         # processing done per field
+    -> Fluorescence         # processing done per field
     """
 
     @property
     def key_source(self):
-        return Segmentation() & {'meso_version': CURRENT_VERSION}
+        return Fluorescence() & {'meso_version': CURRENT_VERSION}
 
     class Unit(dj.Part):
         definition = """ # single unit in the scan
+
         -> ScanInfo
         -> shared.SegmentationMethod
         unit_id                 : int               # unique per scan & segmentation method
         ---
-        -> ScanSet                                  # for Unit to act as a part table of ScanSet
-        -> Segmentation.Mask
+        -> ScanSet                                  # for it to act as a part table of ScanSet
+        -> Fluorescence.Trace
         """
 
     class UnitInfo(dj.Part):
-        definition = """ # unit type and coordinates in x, y, z
+        definition = """ # unit type, coordinates and delay time
 
         -> ScanSet.Unit
         ---
@@ -1073,10 +1074,14 @@ class ScanSet(dj.Computed):
         ms_delay            : smallint      # (ms) delay from start of frame to recording of this unit
         """
 
+    def job_key(self, key):
+        # Force reservation key to be per scan so diff fields are not run in parallel
+        return {k: v for k, v in key.items() if k not in ['field', 'channel']}
+
     def _make_tuples(self, key):
         from pipeline.utils import caiman_interface as cmn
 
-        # Get masks as images
+        # Get masks
         image_height, image_width = (ScanInfo.Field() & key).fetch1('px_height', 'px_width')
         mask_ids, pixels, weights = (Segmentation.Mask() & key).fetch('mask_id', 'pixels', 'weights')
         masks = Segmentation.reshape_masks(pixels, weights, image_height, image_width)
@@ -1133,10 +1138,12 @@ class ScanSet(dj.Computed):
                                                                    file_title='unit centroids')
 
     def plot_centroids(self, first_n=None):
-        """ Draw centroids of masks over the correlation image.
+        """ Draw masks centroids over the correlation image. Works on a single field/channel
 
-        :param first_n: Number of masks to plot. None for all.
-        :returns: None
+        :param first_n: Number of masks to plot. None for all
+
+        :returns Figure. You can call show() on it.
+        :rtype: matplotlib.figure.Figure
         """
         # Get centroids
         centroids = self.get_all_centroids(centroid_type='px')
@@ -1161,6 +1168,11 @@ class ScanSet(dj.Computed):
         return fig
 
     def plot_centroids3d(self):
+        """ Plots the centroids of all units in the motor coordinate system (in microns)
+
+        :returns Figure. You can call show() on it.
+        :rtype: matplotlib.figure.Figure
+        """
         from mpl_toolkits.mplot3d import Axes3D
 
         # Get centroids
@@ -1196,12 +1208,12 @@ class ScanSet(dj.Computed):
 
 @schema
 class Activity(dj.Computed):
-    definition = """ # deconvolved activity inferred from fluorescence traces
+    definition = """ # activity inferred from fluorescence traces
 
     -> ScanSet                                      # processing done per field
     -> shared.SpikeMethod
     ---
-    deconv_time=CURRENT_TIMESTAMP   : timestamp     # automatic
+    activity_time=CURRENT_TIMESTAMP   : timestamp     # automatic
     """
 
     @property
@@ -1221,9 +1233,8 @@ class Activity(dj.Computed):
     class ARCoefficients(dj.Part):
         definition = """ # fitted parameters for the autoregressive process (nmf deconvolution)
 
-        -> ScanSet.Unit
+        -> Activity.Trace
         ---
-        -> Activity                         # for it to act as part table of Activity
         g                   : blob          # g1, g2, ... coefficients for the AR process
     """
 
@@ -1232,7 +1243,7 @@ class Activity(dj.Computed):
 
         # Get fluorescence
         fps = (ScanInfo() & key).fetch1('fps')
-        unit_ids, traces = ((ScanSet.Unit() & key) * Fluorescence.Trace()).fetch('unit_id', 'trace')
+        unit_ids, traces = (Fluorescence.Trace() * (ScanSet.Unit() & key)).fetch('unit_id', 'trace')
         full_traces = [signal.fill_nans(np.squeeze(trace).copy()) for trace in traces]
 
         # Insert in Activity
@@ -1263,7 +1274,8 @@ class Activity(dj.Computed):
             for unit_id, trace in zip(unit_ids, full_traces):
                 spike_trace, ar_coeffs = cmn.deconvolve(trace)
                 Activity.Trace().insert1({**key, 'unit_id': unit_id, 'trace': spike_trace})
-                Activity.ARCoefficients().insert1({**key, 'unit_id': unit_id, 'g': ar_coeffs})
+                Activity.ARCoefficients().insert1({**key, 'unit_id': unit_id, 'g': ar_coeffs},
+                                                  ignore_extra_fields=True)
         else:
             msg = 'Unrecognized spike method {}'.format(key['spike_method'])
             raise PipelineException(msg)
@@ -1289,7 +1301,7 @@ class Activity(dj.Computed):
         :returns Figure. You can call show() on it.
         :rtype: matplotlib.figure.Figure
         """
-        ar_rel = Activity.ARCoefficients() & self
+        ar_rel = Activity.ARCoefficients() & (Activity.Trace() & self)
         if ar_rel:  # if an AR model was used
             # Get some params
             fps = (ScanInfo() & self).fetch1('fps')
@@ -1320,9 +1332,52 @@ class Activity(dj.Computed):
 
     def get_all_spikes(self):
         """ Returns a num_traces x num_timesteps matrix with all spikes."""
-        units = (ScanSet.Unit() & self)
-        spikes = (Activity.Trace() & self & units).fetch('trace', order_by='unit_id')
+        spikes = (Activity.Trace() & self).fetch('trace', order_by='unit_id')
         return np.array([x.squeeze() for x in spikes])
+
+
+@schema
+class ScanDone(dj.Computed):
+    definition = """ # scans that are fully processed (updated every time a field is added)
+
+    -> ScanInfo
+    -> shared.SegmentationMethod
+    -> shared.SpikeMethod
+    """
+
+    @property
+    def key_source(self):
+        return Activity() & {'meso_version': CURRENT_VERSION}
+
+    @property
+    def target(self):
+        return ScanDone.Partial() # trigger make_tuples for fields in Activity that aren't in ScanDone.Partial
+
+    class Partial(dj.Part):
+        definition = """ # fields that have been processed in the current scan
+
+        -> ScanDone
+        -> Activity
+        """
+
+    def _make_tuples(self, key):
+        scan_key = {k: v for k, v in key.items() if k not in ['field', 'channel']}
+
+        # Delete current ScanDone entry
+        with dj.config(safemode=False):
+            (ScanDone() & scan_key).delete()
+
+        # Reinsert in ScanDone
+        self.insert1(scan_key)
+
+        # Insert all processed slices in Partial
+        ScanDone.Partial().insert((Activity() & scan_key).proj())
+
+        self.notify(scan_key)
+
+    def notify(self, key):
+        msg = 'ScanDone for `{}` has been populated.'.format(key)
+        (notify.SlackUser() & (experiment.Session() & key)).notify(msg)
 
 
 schema.spawn_missing_classes()
