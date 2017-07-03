@@ -717,7 +717,7 @@ class Segmentation(dj.Computed):
             ## Insert in CNMF, Segmentation and Fluorescence
             Segmentation().insert1(key)
             Segmentation.CNMF().insert1({**key, 'params': json.dumps(kwargs)})
-            Fluorescence().insert1(key)  # we also inserts traces
+            Fluorescence().insert1(key)  # we also insert traces
 
             ## Insert background components
             Segmentation.CNMFBackground().insert1({**key, 'masks': background_masks,
@@ -1047,29 +1047,21 @@ class MaskClassification(dj.Computed):
 class ScanSet(dj.Computed):
     definition = """ # set of all units in the same scan
 
-    -> ScanInfo
-    -> shared.SegmentationMethod
+    -> Fluorescence                 # processing done per slice
     """
 
     @property
     def key_source(self):
         return Fluorescence() & {'reso_version': CURRENT_VERSION}
 
-    @property
-    def target(self):
-        return ScanSet.Partial() # so make_tuples is triggered with each new slice
-
-    class Partial(dj.Part):
-        definition = """ # slices that have been processed in the current ScanSet
-        -> ScanSet
-        -> Fluorescence
-        """
-
     class Unit(dj.Part):
         definition = """ # single unit in the scan
-        -> ScanSet
-        unit_id             : int               # unique per scan & segmentation method
+
+        -> ScanInfo
+        -> shared.SegmentationMethod
+        unit_id                 : int           # unique per scan & segmentation method
         ---
+        -> ScanSet                              # for it to act as a part table of ScanSet
         -> Fluorescence.Trace
         """
 
@@ -1124,8 +1116,7 @@ class ScanSet(dj.Computed):
         unit_id = np.max(unit_rel.fetch('unit_id')) + 1 if unit_rel else 1
 
         # Insert in ScanSet
-        self.insert1(key, ignore_extra_fields=True, skip_duplicates=True)
-        self.Partial.insert1(key)
+        self.insert1(key)
 
         # Insert units
         unit_ids = range(unit_id, unit_id + len(mask_ids) + 1)
@@ -1140,7 +1131,7 @@ class ScanSet(dj.Computed):
         self.notify(key)
 
     def notify(self, key):
-        fig = (ScanSet() & key).plot_centroids(key['slice'], key['channel'])
+        fig = (ScanSet() & key).plot_centroids()
         img_filename = '/tmp/' + key_hash(key) + '.png'
         fig.savefig(img_filename)
         plt.close(fig)
@@ -1149,25 +1140,21 @@ class ScanSet(dj.Computed):
         (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
                                                                    file_title='unit centroids')
 
-    def plot_centroids(self, slice_id=1, channel=1, first_n=None):
+    def plot_centroids(self, first_n=None):
         """ Draw masks centroids over the correlation image. Works on a single slice/channel
 
-        :param slice_id: Slice to use for plotting.
-        :param channel: Channel to use for plotting.
         :param first_n: Number of masks to plot. None for all
 
         :returns Figure. You can call show() on it.
         :rtype: matplotlib.figure.Figure
         """
         # Get centroids
-        xs, ys = (self & {'slice': slice_id, 'channel': channel}).fetch('px_x', 'px_y',
-                                                                         order_by='unit_id')
-        if first_n is not None: # select first n units
-            xs = xs[:first_n]
-            ys = ys[:first_n]
+        centroids = self.get_all_centroids(centroid_type='px')
+        if first_n is not None:
+            centroids = centroids[:, :first_n]  # select first n components
 
         # Get correlation image if defined, black background otherwise.
-        image_rel = SummaryImages() & self & {'slice': slice_id, 'channel': channel}
+        image_rel = SummaryImages() & self
         if image_rel:
             background_image = image_rel.fetch1('correlation')
         else:
@@ -1179,7 +1166,7 @@ class ScanSet(dj.Computed):
         figsize = np.array([image_width, image_height]) / min(image_height, image_width)
         fig = plt.figure(figsize=figsize * 7)
         plt.imshow(background_image)
-        plt.plot(xs, ys, 'ow', markersize=3)
+        plt.plot(centroids[:, 0], centroids[:, 1], 'ow', markersize=3)
 
         return fig
 
@@ -1208,7 +1195,7 @@ class ScanSet(dj.Computed):
         return fig
 
     def get_all_centroids(self, centroid_type='um'):
-        """ Returns the centroids for all units in the scan.
+        """ Returns the centroids for all units in the scan. Could also be limited by slice.
 
         Centroid type is either 'um' or 'px':
             'um': Array (num_units x 3) with x, y, z in motor coordinate system (microns).
@@ -1226,9 +1213,9 @@ class ScanSet(dj.Computed):
 
 @schema
 class Activity(dj.Computed):
-    definition = """ # deconvolved activity inferred from fluorescence traces
+    definition = """ # activity inferred from fluorescence traces
 
-    -> ScanSet
+    -> ScanSet                                        # processing done per slice
     -> shared.SpikeMethod
     ---
     activity_time=CURRENT_TIMESTAMP   : timestamp     # automatic
@@ -1236,28 +1223,21 @@ class Activity(dj.Computed):
 
     @property
     def key_source(self):
-        return ScanSet.Partial() * shared.SpikeMethod() & {'reso_version': CURRENT_VERSION}
-
-    @property
-    def target(self):
-        return Activity.Partial() # trigger make_tuples for slices in ScanSet.Partial that are not in Activity.Partial
-
-    class Partial(dj.Part):
-        definition = """ # slices that have been processed in the current Activity
-        -> Activity
-        -> ScanSet.Partial
-        """
+        return ScanSet() * shared.SpikeMethod() & {'reso_version': CURRENT_VERSION}
 
     class Trace(dj.Part):
         definition = """ # deconvolved calcium acitivity
-        -> Activity
+
         -> ScanSet.Unit
+        -> shared.SpikeMethod
         ---
+        -> Activity                             # for it to act as part table of Activity
         trace               : longblob
         """
 
     class ARCoefficients(dj.Part):
         definition = """ # fitted parameters for the autoregressive process (nmf deconvolution)
+
         -> Activity.Trace
         ---
         g                   : blob          # g1, g2, ... coefficients for the AR process
@@ -1268,7 +1248,7 @@ class Activity(dj.Computed):
 
         # Get fluorescence
         fps = (ScanInfo() & key).fetch1('fps')
-        unit_ids, traces = ((ScanSet.Unit() & key) * Fluorescence.Trace()).fetch('unit_id', 'trace')
+        unit_ids, traces = (Fluorescence.Trace() * (ScanSet.Unit() & key)).fetch('unit_id', 'trace')
         full_traces = [signal.fill_nans(np.squeeze(trace).copy()) for trace in traces]
 
         # Insert in Activity
@@ -1299,7 +1279,8 @@ class Activity(dj.Computed):
             for unit_id, trace in zip(unit_ids, full_traces):
                 spike_trace, ar_coeffs = cmn.deconvolve(trace)
                 Activity.Trace().insert1({**key, 'unit_id': unit_id, 'trace': spike_trace})
-                Activity.ARCoefficients().insert1({**key, 'unit_id': unit_id, 'g': ar_coeffs})
+                Activity.ARCoefficients().insert1({**key, 'unit_id': unit_id, 'g': ar_coeffs},
+                                                  ignore_extra_fields=True)
         else:
             msg = 'Unrecognized spike method {}'.format(key['spike_method'])
             raise PipelineException(msg)
@@ -1325,7 +1306,7 @@ class Activity(dj.Computed):
         :returns Figure. You can call show() on it.
         :rtype: matplotlib.figure.Figure
         """
-        ar_rel = Activity.ARCoefficients() & self
+        ar_rel = Activity.ARCoefficients() & (Activity.Trace() & self)
         if ar_rel:  # if an AR model was used
             # Get some params
             fps = (ScanInfo() & self).fetch1('fps')
@@ -1356,9 +1337,52 @@ class Activity(dj.Computed):
 
     def get_all_spikes(self):
         """ Returns a num_traces x num_timesteps matrix with all spikes."""
-        units = (ScanSet.Unit() & self)
-        spikes = (Activity.Trace() & self & units).fetch('trace', order_by='unit_id')
+        spikes = (Activity.Trace() & self).fetch('trace', order_by='unit_id')
         return np.array([x.squeeze() for x in spikes])
+
+
+@schema
+class ScanDone(dj.Computed):
+    definition = """ # scans that are fully processed (updated every time a slice is added)
+
+    -> ScanInfo
+    -> shared.SegmentationMethod
+    -> shared.SpikeMethod
+    """
+
+    @property
+    def key_source(self):
+        return Activity() & {'reso_version': CURRENT_VERSION}
+
+    @property
+    def target(self):
+        return ScanDone.Partial() # trigger make_tuples for slices in Activity that aren't in ScanDone.Partial
+
+    class Partial(dj.Part):
+        definition = """ # slices that have been processed in the current scan
+
+        -> ScanDone
+        -> Activity
+        """
+
+    def _make_tuples(self, key):
+        scan_key = {k: v for k, v in key.items() if k not in ['slice', 'channel']}
+
+        # Delete current ScanDone entry
+        with dj.config(safemode=False):
+            (ScanDone() & scan_key).delete()
+
+        # Reinsert in ScanDone
+        self.insert1(scan_key)
+
+        # Insert all processed slices in Partial
+        ScanDone.Partial().insert((Activity() & scan_key).proj())
+
+        self.notify(scan_key)
+
+    def notify(self, key):
+        msg = 'ScanDone for `{}` has been populated.'.format(key)
+        (notify.SlackUser() & (experiment.Session() & key)).notify(msg)
 
 
 schema.spawn_missing_classes()
