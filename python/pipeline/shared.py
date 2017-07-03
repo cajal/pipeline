@@ -1,3 +1,5 @@
+""" Lookup tables shared among multi-photon pipelines. """
+
 import datajoint as dj
 
 schema = dj.schema('pipeline_shared', locals())
