@@ -219,6 +219,8 @@ class RasterCorrection(dj.Computed):
         return scans & {'meso_version': CURRENT_VERSION}
 
     def _make_tuples(self, key):
+        from scipy.signal import tukey
+
         # Read the scan
         scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
         scan = scanreader.read_scan(scan_filename, dtype=np.float32)
@@ -234,17 +236,21 @@ class RasterCorrection(dj.Computed):
             tuple_ = key.copy()
             tuple_['field'] = field_id + 1
 
-            # Create the template (an average frame from the middle of the scan)
+            # Load some frames from the middle of the scan
             middle_frame =  int(np.floor(scan.num_frames / 2))
             frames = slice(max(middle_frame - 1000, 0), middle_frame + 1000)
             mini_scan = scan[field_id, :, :, channel, frames]
-            template = np.mean(mini_scan, axis=-1)
+
+            # Create template (average frame tapered to avoid edge artifacts)
+            taper = np.sqrt(np.outer(tukey(scan.field_heights[field_id], 0.2),
+                                     tukey(scan.field_widths[field_id], 0.2)))
+            template = np.mean(mini_scan, axis=-1) * taper
             tuple_['template'] = template
 
             # Compute raster correction parameters
             if scan.is_bidirectional:
                 tuple_['raster_phase'] = galvo_corrections.compute_raster_phase(template,
-                                                            scan.temporal_fill_fraction)
+                                                             scan.temporal_fill_fraction)
             else:
                 tuple_['raster_phase'] = 0
 
@@ -1243,7 +1249,7 @@ class Activity(dj.Computed):
 
         # Get fluorescence
         fps = (ScanInfo() & key).fetch1('fps')
-        unit_ids, traces = (Fluorescence.Trace() * (ScanSet.Unit() & key)).fetch('unit_id', 'trace')
+        unit_ids, traces = (ScanSet.Unit() * Fluorescence.Trace() & key).fetch('unit_id', 'trace')
         full_traces = [signal.fill_nans(np.squeeze(trace).copy()) for trace in traces]
 
         # Insert in Activity
