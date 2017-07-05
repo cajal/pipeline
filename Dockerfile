@@ -73,11 +73,11 @@ RUN pip3 install git+https://github.com/cajal/c2s.git
 RUN wget http://www.fftw.org/fftw-3.3.6-pl2.tar.gz && \
     tar -xvzf fftw-3.3.6-pl2.tar.gz && \
     cd fftw-3.3.6-pl2 && \
-    ./configure --enable-threads --with-pic --enable-float --enable-sse --enable-sse2 --enable-avx # single precision && \
+    ./configure --enable-threads --with-pic --enable-float --enable-sse --enable-sse2 --enable-avx && \
     make && make install && \
-    ./configure --enable-threads --with-pic --enable-sse2 -enable-avx # double && \
+    ./configure --enable-threads --with-pic --enable-sse2 -enable-avx && \
     make && make install && \
-    ./configure --enable-threads --with-pic --enable-long-double # long && \
+    ./configure --enable-threads --with-pic --enable-long-double && \
     make && make install && \
     cd .. && rm fftw-3.3.6-pl2.tar.gz && \
     pip3 install pyfftw
