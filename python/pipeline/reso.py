@@ -469,15 +469,28 @@ class SummaryImages(dj.Computed):
 
     -> MotionCorrection
     -> shared.Channel
-    ---
-    average             : longblob          # l6-norm (across time) of each pixel
-    correlation         : longblob          # (average) temporal correlation between each pixel and its eight neighbors
     """
 
     @property
     def key_source(self):
         # Run make_tuples once per scan iff MotionCorrection is done
         return ScanInfo() & MotionCorrection() & {'reso_version': CURRENT_VERSION}
+
+    class Average(dj.Part):
+        definition = """ # l6-norm of each pixel across time
+
+        -> SummaryImages
+        ---
+        image           : longblob
+        """
+
+    class Correlation(dj.Part):
+        definition = """ # average temporal correlation between each pixel and its eight neighbors
+
+        -> SummaryImages
+        ---
+        image           : longblob
+        """
 
     def _make_tuples(self, key):
         from .utils import correlation_image as ci
@@ -503,43 +516,47 @@ class SummaryImages(dj.Computed):
                 scan_ = correct_motion(correct_raster(scan_))
                 scan_ -= scan_.min()  # make nonnegative for lp-norm
 
+                # Insert in SummaryImages
+                self.insert1(tuple_)
+
                 # Compute and insert correlation image
-                tuple_['correlation'] = ci.compute_correlation_image(scan_)
+                correlation_image = ci.compute_correlation_image(scan_)
+                SummaryImages.Correlation().insert1({**tuple_, 'image': correlation_image})
 
                 # Compute and insert lp-norm of each pixel over time
                 p = 6
                 scan_ = np.power(scan_, p, out=scan_)  # in place
-                tuple_['average'] = np.sum(scan_, axis=-1, dtype=np.float64) ** (1 / p)
+                average_image = np.sum(scan_, axis=-1, dtype=np.float64) ** (1 / p)
+                SummaryImages.Average().insert1({**tuple_, 'image': average_image})
 
                 # Free memory
                 del scan_
                 gc.collect()
 
-                # Insert
-                self.insert1(tuple_)
-
             self.notify({**key, 'slice': slice_id + 1}, scan.num_channels)  # once per slice
 
     def notify(self, key, num_channels):
-        import seaborn as sns
+        fig, axes = plt.subplots(num_channels, 2, squeeze=False, figsize=(12, 5 * num_channels))
 
-        with sns.axes_style('white'):
-            fig, axes = plt.subplots(num_channels, 2, squeeze=False, figsize=(12, 5 * num_channels))
+        fig.suptitle('Slice {}'.format(key['slice']))
+        axes[0, 0].set_title('Average')
+        axes[0, 1].set_title('Correlation')
+        for ax in axes.ravel():
+            ax.get_xaxis().set_ticks([])
+            ax.get_yaxis().set_ticks([])
+
         for channel in range(num_channels):
             axes[channel, 0].set_ylabel('Channel {}'.format(channel + 1), size='large',
                                         rotation='horizontal', ha='right')
-            for i, img_name in enumerate(['average', 'correlation']):
-                axes[0, i].set_title(img_name.title(), va='top')
-                axes[channel, i].set_xticklabels([])
-                axes[channel, i].set_yticklabels([])
-                image = (self & key & {'channel': channel + 1}).fetch1(img_name)
-                axes[channel, i].matshow(image)
-        fig.suptitle('Slice {}'.format(key['slice']))
+            corr = (SummaryImages.Correlation() & key & {'channel': channel + 1}).fetch1('image')
+            avg = (SummaryImages.Average() & key & {'channel': channel + 1}).fetch1('image')
+            axes[channel, 0].imshow(avg)
+            axes[channel, 1].imshow(corr)
+
         fig.tight_layout()
         img_filename = '/tmp/' + key_hash(key) + '.png'
         fig.savefig(img_filename)
         plt.close(fig)
-        sns.reset_orig()
 
         msg = 'SummaryImages for `{}` has been populated.'.format(key)
         (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
@@ -915,9 +932,9 @@ class Segmentation(dj.Computed):
             masks = masks[:, :, :first_n]
 
         # Get correlation image if defined, black background otherwise.
-        image_rel = SummaryImages() & self
+        image_rel = SummaryImages.Correlation() & self
         if image_rel:
-            background_image = image_rel.fetch1('correlation')
+            background_image = image_rel.fetch1('image')
         else:
             background_image = np.zeros(masks.shape[:-1])
 
@@ -1031,11 +1048,11 @@ class MaskClassification(dj.Computed):
 
         # Classify masks
         if key['classification_method'] == 1:  # manual
-            template = (SummaryImages() & key).fetch1('correlation')
+            template = (SummaryImages.Correlation() & key).fetch1('image')
             mask_types = mask_classification.classify_manual(masks, template)
         elif key['classification_method'] == 2:  # cnn
             raise PipelineException('Convnet not yet implemented.')
-            # template = (SummaryImages() & key).fetch1('correlation')
+            # template = (SummaryImages.Correlation() & key).fetch1('image')
             # mask_types = mask_classification.classify_cnn(masks, template)
         else:
             msg = 'Unrecognized classification method {}'.format(key['classification_method'])
@@ -1160,9 +1177,9 @@ class ScanSet(dj.Computed):
             centroids = centroids[:, :first_n]  # select first n components
 
         # Get correlation image if defined, black background otherwise.
-        image_rel = SummaryImages() & self
+        image_rel = SummaryImages.Correlation() & self
         if image_rel:
-            background_image = image_rel.fetch1('correlation')
+            background_image = image_rel.fetch1('image')
         else:
             image_height, image_width = (ScanInfo() & self).fetch1('px_height', 'px_width')
             background_image = np.zeros([image_height, image_width])
