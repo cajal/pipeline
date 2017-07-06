@@ -21,7 +21,7 @@ class LayerMembership(dj.Computed):
 
 
     def _make_tuples(self, key):
-        z = (ExtractRaw.GalvoROI() * MaskCoordinates() & key).fetch('zloc')
+        z = (ExtractRaw.GalvoROI() * MaskCoordinates() & key).fetch['zloc']
         self.insert1(dict(key, layer=str(Layer().get_layers(z))))
 
 
@@ -40,19 +40,30 @@ class AreaMembership(dj.Computed):
         return ExtractRaw.GalvoROI() * AreaBorder().proj(dummy='scan_idx') & dict(extract_method=2)
 
     def _make_tuples(self, key):
-        d1, d2 = tuple(map(int, (Prepare.Galvo() & key).fetch1('px_height', 'px_width'))
+        print('Populating', key)
+        d1, d2 = tuple(map(int, (Prepare.Galvo() & key).fetch1['px_height', 'px_width']))
 
-        keys, weights, px, slices = (ExtractRaw.GalvoROI() & key).fetch(dj.key, 'mask_weights', 'mask_pixels', 'slice')
+        if Prepare.Meso() & key:
+            v1 = (AreaMask().proj('mask', scan_idx2='scan_idx') & key & dict(area='V1')).fetch1['mask']
+            lm = (AreaMask().proj('mask', scan_idx2='scan_idx') & key & dict(area='LM')).fetch1['mask']
+        else:
+            v1, lm = (AreaBorder().proj('V1_mask', 'LM_mask', dummy='scan_idx') & key).fetch1['V1_mask', 'LM_mask']
 
-        v1, lm = (AreaBorder().proj('V1_mask', 'LM_mask', dummy='scan_idx') & key).fetch1('V1_mask', 'LM_mask')
-        masks = ExtractRaw.GalvoROI.reshape_masks(px, weights, d1, d2)
+        mask_key, weight, px, sli = (ExtractRaw.GalvoROI() & key).fetch1[dj.key, 'mask_weights', 'mask_pixels', 'slice']
+
+        mask = ExtractRaw.GalvoROI.reshape_masks([px], [weight], d1, d2).squeeze()
+        m = mask/mask.sum()
 
         I, J = map(np.transpose, np.meshgrid(*[np.arange(i) for i in lm.shape]))
-        locs = [(int((I * m).sum()), int((J * m).sum())) \
-                for m in map(lambda x: x / x.sum(), masks.transpose([2, 0, 1]))]
+        loc = int((I * m).sum()), int((J * m).sum())
 
         del key['axis']
         del key['dummy']
 
-        self.insert(dict(key, brain_area='LM', **k) for k, loc in zip(keys, locs) if lm[loc])
-        self.insert(dict(key, brain_area='V1', **k) for k, loc in zip(keys, locs) if v1[loc])
+        if lm[loc]:
+            self.insert1(dict(key, brain_area='LM', **mask_key))
+        elif v1[loc]:
+            self.insert1(dict(key, brain_area='V1', **mask_key))
+        else:
+            raise ValueError('mask seems to be neither in V1 or LM')
+

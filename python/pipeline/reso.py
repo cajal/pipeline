@@ -462,7 +462,6 @@ class MotionCorrection(dj.Computed):
 
         return my_lambda_function
 
-
 @schema
 class SummaryImages(dj.Computed):
     definition = """ # summary images for each slice and channel after corrections
@@ -479,17 +478,17 @@ class SummaryImages(dj.Computed):
     class Average(dj.Part):
         definition = """ # l6-norm of each pixel across time
 
-        -> SummaryImages
+        -> master
         ---
-        image           : longblob
+        average_image           : longblob
         """
 
     class Correlation(dj.Part):
         definition = """ # average temporal correlation between each pixel and its eight neighbors
 
-        -> SummaryImages
+        -> master
         ---
-        image           : longblob
+        correlation_image           : longblob
         """
 
     def _make_tuples(self, key):
@@ -521,13 +520,13 @@ class SummaryImages(dj.Computed):
 
                 # Compute and insert correlation image
                 correlation_image = ci.compute_correlation_image(scan_)
-                SummaryImages.Correlation().insert1({**tuple_, 'image': correlation_image})
+                SummaryImages.Correlation().insert1({**tuple_, 'correlation_image': correlation_image})
 
                 # Compute and insert lp-norm of each pixel over time
                 p = 6
                 scan_ = np.power(scan_, p, out=scan_)  # in place
                 average_image = np.sum(scan_, axis=-1, dtype=np.float64) ** (1 / p)
-                SummaryImages.Average().insert1({**tuple_, 'image': average_image})
+                SummaryImages.Average().insert1({**tuple_, 'average_image': average_image})
 
                 # Free memory
                 del scan_
@@ -548,8 +547,8 @@ class SummaryImages(dj.Computed):
         for channel in range(num_channels):
             axes[channel, 0].set_ylabel('Channel {}'.format(channel + 1), size='large',
                                         rotation='horizontal', ha='right')
-            corr = (SummaryImages.Correlation() & key & {'channel': channel + 1}).fetch1('image')
-            avg = (SummaryImages.Average() & key & {'channel': channel + 1}).fetch1('image')
+            corr = (SummaryImages.Correlation() & key & {'channel': channel + 1}).fetch1('correlation_image')
+            avg = (SummaryImages.Average() & key & {'channel': channel + 1}).fetch1('average_image')
             axes[channel, 0].imshow(avg)
             axes[channel, 1].imshow(corr)
 
@@ -934,7 +933,7 @@ class Segmentation(dj.Computed):
         # Get correlation image if defined, black background otherwise.
         image_rel = SummaryImages.Correlation() & self
         if image_rel:
-            background_image = image_rel.fetch1('image')
+            background_image = image_rel.fetch1('correlation_image')
         else:
             background_image = np.zeros(masks.shape[:-1])
 
@@ -1048,7 +1047,7 @@ class MaskClassification(dj.Computed):
 
         # Classify masks
         if key['classification_method'] == 1:  # manual
-            template = (SummaryImages.Correlation() & key).fetch1('image')
+            template = (SummaryImages.Correlation() & key).fetch1('correlation_image')
             mask_types = mask_classification.classify_manual(masks, template)
         elif key['classification_method'] == 2:  # cnn
             raise PipelineException('Convnet not yet implemented.')
@@ -1179,7 +1178,7 @@ class ScanSet(dj.Computed):
         # Get correlation image if defined, black background otherwise.
         image_rel = SummaryImages.Correlation() & self
         if image_rel:
-            background_image = image_rel.fetch1('image')
+            background_image = image_rel.fetch1('correlation_image')
         else:
             image_height, image_width = (ScanInfo() & self).fetch1('px_height', 'px_width')
             background_image = np.zeros([image_height, image_width])
