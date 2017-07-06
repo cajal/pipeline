@@ -463,35 +463,6 @@ class MotionCorrection(dj.Computed):
         return my_lambda_function
 
 @schema
-class SummaryImagesCopy(dj.Computed):
-    definition = """ # summary images for each slice and channel after corrections
-
-    -> MotionCorrection
-    -> shared.Channel
-    """
-
-    @property
-    def key_source(self):
-        # Run make_tuples once per scan iff MotionCorrection is done
-        return ScanInfo() & MotionCorrection() & {'reso_version': CURRENT_VERSION}
-
-    class Average(dj.Part):
-        definition = """ # l6-norm of each pixel across time
-
-        -> master
-        ---
-        image           : longblob
-        """
-
-    class Correlation(dj.Part):
-        definition = """ # average temporal correlation between each pixel and its eight neighbors
-
-        -> master
-        ---
-        image           : longblob
-        """
-
-@schema
 class SummaryImages(dj.Computed):
     definition = """ # summary images for each slice and channel after corrections
 

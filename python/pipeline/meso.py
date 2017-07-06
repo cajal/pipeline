@@ -10,7 +10,6 @@ from . import experiment, notify, shared
 from .utils import galvo_corrections, signal, quality, mask_classification
 from .exceptions import PipelineException
 
-
 schema = dj.schema('pipeline_meso', locals())
 CURRENT_VERSION = 1
 
@@ -79,8 +78,8 @@ class ScanInfo(dj.Imported):
             tuple_['field'] = field_id + 1
 
             # Get attributes
-            x_zero, y_zero, _ = scan.motor_position_at_zero # motor x, y at ScanImage's 0
-            z_zero = (experiment.Scan() & key).fetch1('depth') # true z at ScanImage's 0
+            x_zero, y_zero, _ = scan.motor_position_at_zero  # motor x, y at ScanImage's 0
+            z_zero = (experiment.Scan() & key).fetch1('depth')  # true z at ScanImage's 0
             tuple_['px_height'] = scan.field_heights[field_id]
             tuple_['px_width'] = scan.field_widths[field_id]
             tuple_['um_height'] = scan.field_heights_in_microns[field_id]
@@ -99,7 +98,7 @@ class ScanInfo(dj.Imported):
             """ Returns an array with microns per pixel in height and width. """
             um_height, px_height, um_width, px_width = self.fetch1('um_height', 'px_height',
                                                                    'um_width', 'px_width')
-            return np.array([um_height/px_height, um_width/px_width])
+            return np.array([um_height / px_height, um_width / px_width])
 
     class QuantalSize(dj.Part):
         definition = """ # quantal size in images
@@ -126,7 +125,7 @@ class ScanInfo(dj.Imported):
             tuple_['channel'] = channel + 1
 
             # Compute quantal size
-            middle_frame =  int(np.floor(scan.num_frames / 2))
+            middle_frame = int(np.floor(scan.num_frames / 2))
             frames = slice(max(middle_frame - 2000, 0), middle_frame + 2000)
             mini_scan = scan[field_id, :, :, channel, frames]
             results = quality.compute_quantal_size(mini_scan)
@@ -237,7 +236,7 @@ class RasterCorrection(dj.Computed):
             tuple_['field'] = field_id + 1
 
             # Load some frames from the middle of the scan
-            middle_frame =  int(np.floor(scan.num_frames / 2))
+            middle_frame = int(np.floor(scan.num_frames / 2))
             frames = slice(max(middle_frame - 1000, 0), middle_frame + 1000)
             mini_scan = scan[field_id, :, :, channel, frames]
 
@@ -250,7 +249,7 @@ class RasterCorrection(dj.Computed):
             # Compute raster correction parameters
             if scan.is_bidirectional:
                 tuple_['raster_phase'] = galvo_corrections.compute_raster_phase(template,
-                                                             scan.temporal_fill_fraction)
+                                                                                scan.temporal_fill_fraction)
             else:
                 tuple_['raster_phase'] = 0
 
@@ -328,27 +327,27 @@ class MotionCorrection(dj.Computed):
             # Correct raster effects (needed for subpixel changes in y)
             correct_raster = (RasterCorrection() & key & {'field': field_id + 1}).get_correct_raster()
             scan_ = correct_raster(scan_)
-            scan_ -= scan_.min() # make nonnegative for fft
+            scan_ -= scan_.min()  # make nonnegative for fft
 
             # Create template
-            middle_frame =  int(np.floor(scan.num_frames / 2))
+            middle_frame = int(np.floor(scan.num_frames / 2))
             mini_scan = scan_[:, :, max(middle_frame - 1000, 0): middle_frame + 1000]
-            mini_scan = 2 * np.sqrt(mini_scan + 3/8) # *
+            mini_scan = 2 * np.sqrt(mini_scan + 3 / 8)  # *
             template = np.mean(mini_scan, axis=-1)
-            template = ndimage.gaussian_filter(template, 0.7) # **
+            template = ndimage.gaussian_filter(template, 0.7)  # **
             tuple_['template'] = template
             # * Anscombe tranform to normalize noise, increase contrast and decrease outliers' leverage
             # ** Small amount of gaussian smoothing to get rid of high frequency noise
 
             # Compute smoothing window size
-            size_in_ms = 300 # smooth over a 300 milliseconds window
-            window_size = int(round(scan.fps * (size_in_ms / 1000))) # in frames
-            window_size += 1 if window_size % 2 == 0 else 0 # make odd
+            size_in_ms = 300  # smooth over a 300 milliseconds window
+            window_size = int(round(scan.fps * (size_in_ms / 1000)))  # in frames
+            window_size += 1 if window_size % 2 == 0 else 0  # make odd
 
             # Get motion correction shifts
             results = galvo_corrections.compute_motion_shifts(scan_, template,
                                                               smoothing_window_size=window_size)
-            y_shifts = results[0] - results[0].mean() # center motions around zero
+            y_shifts = results[0] - results[0].mean()  # center motions around zero
             x_shifts = results[1] - results[1].mean()
             tuple_['y_shifts'] = y_shifts
             tuple_['x_shifts'] = x_shifts
@@ -375,7 +374,7 @@ class MotionCorrection(dj.Computed):
         with sns.axes_style('white'):
             fig, axes = plt.subplots(scan.num_fields, 1, figsize=(15, 4 * scan.num_fields),
                                      sharey=True)
-        axes = [axes] if scan.num_fields == 1 else axes # make list if single axis object
+        axes = [axes] if scan.num_fields == 1 else axes  # make list if single axis object
         for i in range(scan.num_fields):
             y_shifts, x_shifts = (self & key & {'field': i + 1}).fetch1('y_shifts', 'x_shifts')
             axes[i].set_title('Shifts for field {}'.format(i + 1))
@@ -437,7 +436,7 @@ class MotionCorrection(dj.Computed):
 
         axes[1].set_title('Corrected')
         im2 = axes[1].imshow(corrected_scan[:, :, 0], vmin=corrected_scan.min(),
-                         vmax=corrected_scan.max())  # just a placeholder
+                             vmax=corrected_scan.max())  # just a placeholder
         fig.colorbar(im2, ax=axes[1])
         axes[1].axis('off')
 
@@ -488,17 +487,17 @@ class SummaryImages(dj.Computed):
     class Average(dj.Part):
         definition = """ # l6-norm of each pixel across time
 
-        -> SummaryImages
+        -> master
         ---
-        image           : longblob
+        average_image           : longblob
         """
 
     class Correlation(dj.Part):
         definition = """ # average temporal correlation between each pixel and its eight neighbors
 
-        -> SummaryImages
+        -> master
         ---
-        image           : longblob
+        correlation_image           : longblob
         """
 
     def _make_tuples(self, key):
@@ -530,13 +529,13 @@ class SummaryImages(dj.Computed):
 
                 # Compute and insert correlation image
                 correlation_image = ci.compute_correlation_image(scan_)
-                SummaryImages.Correlation().insert1({**tuple_, 'image': correlation_image})
+                SummaryImages.Correlation().insert1({**tuple_, 'correlation_image': correlation_image})
 
                 # Compute and insert lp-norm of each pixel over time
                 p = 6
                 scan_ = np.power(scan_, p, out=scan_)  # in place
                 average_image = np.sum(scan_, axis=-1, dtype=np.float64) ** (1 / p)
-                SummaryImages.Average().insert1({**tuple_, 'image': average_image})
+                SummaryImages.Average().insert1({**tuple_, 'average_image': average_image})
 
                 # Free memory
                 del scan_
@@ -557,8 +556,8 @@ class SummaryImages(dj.Computed):
         for channel in range(num_channels):
             axes[channel, 0].set_ylabel('Channel {}'.format(channel + 1), size='large',
                                         rotation='horizontal', ha='right')
-            corr = (SummaryImages.Correlation() & key & {'channel': channel + 1}).fetch1('image')
-            avg = (SummaryImages.Average() & key & {'channel': channel + 1}).fetch1('image')
+            corr = (SummaryImages.Correlation() & key & {'channel': channel + 1}).fetch1('correlation_image')
+            avg = (SummaryImages.Average() & key & {'channel': channel + 1}).fetch1('average_image')
             axes[channel, 0].imshow(avg)
             axes[channel, 1].imshow(corr)
 
@@ -622,6 +621,7 @@ class DoNotSegment(dj.Manual):
     -> shared.Field
     -> shared.Channel
     """
+
 
 @schema
 class Segmentation(dj.Computed):
@@ -930,7 +930,7 @@ class Segmentation(dj.Computed):
         # Get correlation image if defined, black background otherwise.
         image_rel = SummaryImages.Correlation() & self
         if image_rel:
-            background_image = image_rel.fetch1('image')
+            background_image = image_rel.fetch1('correlation_image')
         else:
             background_image = np.zeros(masks.shape[:-1])
 
@@ -941,6 +941,7 @@ class Segmentation(dj.Computed):
         cmn.plot_masks(masks, background_image)
 
         return fig
+
 
 @schema
 class Fluorescence(dj.Computed):
@@ -1044,11 +1045,11 @@ class MaskClassification(dj.Computed):
 
         # Classify masks
         if key['classification_method'] == 1:  # manual
-            template = (SummaryImages.Correlation() & key).fetch1('image')
+            template = (SummaryImages.Correlation() & key).fetch1('correlation_image')
             mask_types = mask_classification.classify_manual(masks, template)
         elif key['classification_method'] == 2:  # cnn
             raise PipelineException('Convnet not yet implemented.')
-            # template = (SummaryImages.Correlation() & key).fetch1('image')
+            # template = (SummaryImages.Correlation() & key).fetch1('correlation_image')
             # mask_types = mask_classification.classify_cnn(masks, template)
         else:
             msg = 'Unrecognized classification method {}'.format(key['classification_method'])
@@ -1060,6 +1061,7 @@ class MaskClassification(dj.Computed):
         self.insert1(key)
         for mask_id, mask_type in zip(mask_ids, mask_types):
             MaskClassification.Type().insert1({**key, 'mask_id': mask_id, 'type': mask_type})
+
 
 @schema
 class ScanSet(dj.Computed):
@@ -1128,7 +1130,7 @@ class ScanSet(dj.Computed):
         delay_image = (ScanInfo.Field() & key).fetch1('delay_image')
         delays = (np.sum(masks * np.expand_dims(delay_image, -1), axis=(0, 1)) /
                   np.sum(masks, axis=(0, 1)))
-        delays = np.round(delays * 1e3).astype(np.int16) # in milliseconds
+        delays = np.round(delays * 1e3).astype(np.int16)  # in milliseconds
 
         # Get next unit_id for scan
         unit_rel = (ScanSet.Unit().proj() & key)
@@ -1140,7 +1142,7 @@ class ScanSet(dj.Computed):
         # Insert units
         unit_ids = range(unit_id, unit_id + len(mask_ids) + 1)
         for unit_id, mask_id, (um_y, um_x), (px_y, px_x), delay in zip(unit_ids, mask_ids,
-            um_centroids, px_centroids, delays):
+                                                                       um_centroids, px_centroids, delays):
             ScanSet.Unit().insert1({**key, 'unit_id': unit_id, 'mask_id': mask_id})
 
             unit_info = {**key, 'unit_id': unit_id, 'type': get_type(mask_id),
@@ -1176,7 +1178,7 @@ class ScanSet(dj.Computed):
         # Get correlation image if defined, black background otherwise.
         image_rel = SummaryImages.Correlation() & self
         if image_rel:
-            background_image = image_rel.fetch1('image')
+            background_image = image_rel.fetch1('correlation_image')
         else:
             image_height, image_width = (ScanInfo.Field() & self).fetch1('px_height', 'px_width')
             background_image = np.zeros([image_height, image_width])
@@ -1228,6 +1230,7 @@ class ScanSet(dj.Computed):
             xs, ys = units_rel.fetch('px_x', 'px_y', order_by='unit_id')
             centroids = np.stack([xs, ys], axis=1)
         return centroids
+
 
 @schema
 class Activity(dj.Computed):
@@ -1374,7 +1377,7 @@ class ScanDone(dj.Computed):
 
     @property
     def target(self):
-        return ScanDone.Partial() # trigger make_tuples for fields in Activity that aren't in ScanDone.Partial
+        return ScanDone.Partial()  # trigger make_tuples for fields in Activity that aren't in ScanDone.Partial
 
     class Partial(dj.Part):
         definition = """ # fields that have been processed in the current scan
