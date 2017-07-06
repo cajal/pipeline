@@ -1,8 +1,9 @@
 #FROM datajoint/datajoint:latest
-FROM eywalker/tensorflow-jupyter:v1.0.1-cuda8.0-cudnn5
+FROM ninai/pipeline:base
 LABEL maintainer="Edgar Y. Walker, Fabian Sinz, Erick Cobos"
 
 WORKDIR /data
+
 # --- install scanreader
 RUN \
   git clone https://github.com/atlab/scanreader.git && \
@@ -15,6 +16,5 @@ RUN \
 
 RUN git clone https://github.com/atlab/commons.git && \
     pip3 install -e commons/python
-
 
 ENTRYPOINT ["worker"]
