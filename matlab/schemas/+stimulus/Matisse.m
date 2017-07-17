@@ -19,6 +19,8 @@ annulus_alpha          :decimal(3,2)  #  aperture annulus alpha
 inner_contrast         :decimal(4,3)  #  pattern contrast in inner region
 outer_contrast         :decimal(4,3)  #  pattern contrast in outer region
 image                  :longblob      #  actual image to present
+second_photodiode=0         : tinyint                       # 1/-1=paint a photodiode white/black patch in the upper right corner
+second_photodiode_time=0.0  : decimal(4,1)                  # time delay of the second photodiode relative to the stimulus onset
 %}
 
 classdef Matisse < dj.Manual & stimulus.core.Visual
@@ -28,6 +30,30 @@ classdef Matisse < dj.Manual & stimulus.core.Visual
     end
     
     methods(Static)
+        
+        function migrate
+            % incremental migrate from old +vis
+            special = vis.Matisse;  % old special condition table
+            trial = vis.Trial;        % old trial table
+            newSpecial = stimulus.Matisse;
+            
+            control = stimulus.getControl;
+            control.clearAll
+            scans = experiment.Scan & (preprocess.Sync*trial*special & 'trial_idx between first_trial and last_trial');
+            remain = scans - stimulus.Trial * newSpecial;
+            
+            for scanKey = remain.fetch'
+                disp(scanKey)
+                params = fetch(special & (trial * preprocess.Sync & scanKey & 'trial_idx between first_trial and last_trial'), '*');
+                hashes = control.makeConditions(newSpecial, rmfield(params, {'animal_id', 'psy_id', 'cond_idx', 'pattern_upscale'}));
+                trials =  fetch(trial & special & (preprocess.Sync & scanKey & 'trial_idx between first_trial and last_trial'), '*', 'last_flip_count->last_flip');
+                hashes = hashes(arrayfun(@(t) find([params.cond_idx]==t.cond_idx, 1, 'first'), trials));
+                trials = rmfield(trials, {'psy_id', 'cond_idx'});
+                [trials.condition_hash] = deal(hashes{:});
+                insert(stimulus.Trial, dj.struct.join(trials, scanKey))
+            end
+        end
+        
         
         function test()
             cond.noise_seed = 100;
