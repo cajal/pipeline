@@ -697,13 +697,14 @@ class Segmentation(dj.Computed):
             scan_ -= scan_.min()  # make nonnegative for caiman
 
             # Set CNMF parameters
-            ## Estimate number of components per slice and soma radius in pixels
+            ## Estimate number of components per slice and soma diameter in pixels
             num_components = (SegmentationTask() & key).estimate_num_components()
-            soma_radius_in_pixels = 7 / (ScanInfo() & key).microns_per_pixel  # assumption: radius is 7 microns
+            soma_diameter = 14 / (ScanInfo() & key).microns_per_pixel  # assumption: somas are 14 microns across
 
             ## Set general parameters
             kwargs = {}
             kwargs['num_components'] = num_components
+            kwargs['num_background_components'] = 1
             kwargs['merge_threshold'] = 0.8
 
             ## Set performance/execution parameters (heuristically), decrease if memory overflows
@@ -714,13 +715,11 @@ class Segmentation(dj.Computed):
             target = (SegmentationTask() & key).fetch1('compartment')
             if target == 'soma':
                 kwargs['init_method'] = 'greedy_roi'
-                kwargs['soma_radius'] = tuple(soma_radius_in_pixels)
-                kwargs['num_background_components'] = 4
+                kwargs['soma_diameter'] = tuple(soma_diameter)
                 kwargs['init_on_patches'] = False
             else:  # axons/dendrites
                 kwargs['init_method'] = 'sparse_nmf'
                 kwargs['snmf_alpha'] = 500  # 10^2 to 10^3.5 is a good range
-                kwargs['num_background_components'] = 1
                 kwargs['init_on_patches'] = True
 
             ## Set params specific to initialization on patches
