@@ -1064,12 +1064,19 @@ class MaskClassification(dj.Computed):
             MaskClassification.Type().insert1({**key, 'mask_id': mask_id, 'type': mask_type})
 
 
+
+
 @schema
 class ScanSet(dj.Computed):
     definition = """ # set of all units in the same scan
-
     -> Fluorescence                 # processing done per slice
     """
+
+    def _job_key(self, key):
+        """
+        modify job key to reserve the entire scan.
+        """
+        return {k: v for k, v in key.items() if k not in ['slice', 'channel']}
 
     @property
     def key_source(self):
@@ -1085,12 +1092,6 @@ class ScanSet(dj.Computed):
         -> ScanSet                              # for it to act as a part table of ScanSet
         -> Fluorescence.Trace
         """
-
-    # class Match(dj.Part) # MaskSet?
-    #    definition = """ # unit-mask pairs per scan
-    #    -> ScanSet.Unit
-    #    -> Fluorescence.Trace
-    #    """
 
     class UnitInfo(dj.Part):
         definition = """ # unit type and coordinates in x, y, z
@@ -1406,4 +1407,4 @@ class ScanDone(dj.Computed):
         (notify.SlackUser() & (experiment.Session() & key)).notify(msg)
 
 
-#schema.spawn_missing_classes()
+# schema.spawn_missing_classes()
