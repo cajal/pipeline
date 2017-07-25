@@ -1075,12 +1075,6 @@ class ScanSet(dj.Computed):
     -> Fluorescence                 # processing done per slice
     """
 
-    def _job_key(self, key):
-        """
-        modify job key to reserve the entire scan.
-        """
-        return {k: v for k, v in key.items() if k not in ['slice', 'channel']}
-
     @property
     def key_source(self):
         return Fluorescence() & {'reso_version': CURRENT_VERSION}
