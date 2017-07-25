@@ -426,7 +426,7 @@ class MotionCorrection(dj.Computed):
         import matplotlib.animation as animation
 
         ## Set the figure
-        fig, axes = plt.subplots(1, 2)
+        fig, axes = plt.subplots(1, 2, sharex=True, sharey=True)
 
         axes[0].set_title('Original')
         im1 = axes[0].imshow(original_scan[:, :, 0], vmin=original_scan.min(),
@@ -522,6 +522,9 @@ class SummaryImages(dj.Computed):
                 # Correct scan
                 scan_ = scan[field_id, :, :, channel, :].astype(np.float32, copy=False)
                 scan_ = correct_motion(correct_raster(scan_))
+
+                # Subtract overall brightness/drift
+                scan_ -= scan_.mean(axis=(0, 1))
                 scan_ -= scan_.min()  # make nonnegative for lp-norm
 
                 # Insert in SummaryImages
@@ -817,7 +820,7 @@ class Segmentation(dj.Computed):
             import matplotlib.animation as animation
 
             ## Set the figure
-            fig, axes = plt.subplots(2, 2)
+            fig, axes = plt.subplots(2, 2, sharex=True, sharey=True)
 
             axes[0, 0].set_title('Original (Y)')
             im1 = axes[0, 0].imshow(scan_[:, :, 0], vmin=scan_.min(), vmax=scan_.max())  # just a placeholder
