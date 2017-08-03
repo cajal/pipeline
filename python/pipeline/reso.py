@@ -600,7 +600,7 @@ class SegmentationTask(dj.Manual):
         if compartment == 'soma':
             num_components = slice_volume * 0.0001
         elif compartment == 'axon':
-            num_components = slice_volume * 0.001  # ten times as many neurons
+            num_components = slice_volume * 0.0005  # five times as many neurons
         else:
             PipelineException("Compartment type '{}' not recognized".format(compartment))
 
@@ -700,35 +700,29 @@ class Segmentation(dj.Computed):
             scan_ -= scan_.min()  # make nonnegative for caiman
 
             # Set CNMF parameters
-            ## Estimate number of components per slice and soma diameter in pixels
-            num_components = (SegmentationTask() & key).estimate_num_components()
-            soma_diameter = 14 / (ScanInfo() & key).microns_per_pixel  # assumption: somas are 14 microns across
-
             ## Set general parameters
             kwargs = {}
-            kwargs['num_components'] = num_components
+            kwargs['num_components'] = (SegmentationTask() & key).estimate_num_components()
             kwargs['num_background_components'] = 1
-            kwargs['merge_threshold'] = 0.8
-
-            ## Set performance/execution parameters (heuristically), decrease if memory overflows
-            kwargs['num_processes'] = 12  # Set to None for all cores available
-            kwargs['num_pixels_per_process'] = 10000
+            kwargs['merge_threshold'] = 0.7
 
             ## Set params specific to somatic or axonal/dendritic scans
             target = (SegmentationTask() & key).fetch1('compartment')
             if target == 'soma':
-                kwargs['init_method'] = 'greedy_roi'
-                kwargs['soma_diameter'] = tuple(soma_diameter)
                 kwargs['init_on_patches'] = False
+                kwargs['init_method'] = 'greedy_roi'
+                kwargs['soma_diameter'] = 14 / (ScanInfo() & key).microns_per_pixel # 14 x 14 microns
             else:  # axons/dendrites
+                kwargs['init_on_patches'] = True
                 kwargs['init_method'] = 'sparse_nmf'
                 kwargs['snmf_alpha'] = 500  # 10^2 to 10^3.5 is a good range
-                kwargs['init_on_patches'] = True
+                kwargs['patch_size'] = 50 / (ScanInfo() & key).microns_per_pixel # 40 x 40 microns
+                kwargs['proportion_patch_overlap'] = 0.2 # 20% overlap
+                kwargs['num_components_per_patch'] = 10
 
-            ## Set params specific to initialization on patches
-            if kwargs['init_on_patches']:
-                kwargs['patch_downsampling_factor'] = 4
-                kwargs['proportion_patch_overlap'] = 0.2
+            ## Set performance/execution parameters (heuristically), decrease if memory overflows
+            kwargs['num_processes'] = 12  # Set to None for all cores available
+            kwargs['num_pixels_per_process'] = 10000
 
             # Extract traces
             print('Extracting masks and traces (cnmf)...')
@@ -918,16 +912,16 @@ class Segmentation(dj.Computed):
 
         return masks
 
-    def plot_masks(self, first_n=None):
+    def plot_masks(self, threshold=0.99, first_n=None):
         """ Draw contours of masks over the correlation image (if available).
 
+        :param threshold: Threshold on the cumulative mass to define mask contours. Lower
+            for tighter contours.
         :param first_n: Number of masks to plot. None for all.
 
         :returns Figure. You can call show() on it.
         :rtype: matplotlib.figure.Figure
         """
-        from .utils import caiman_interface as cmn
-
         # Get masks
         masks = self.get_all_masks()
         if first_n is not None:
@@ -940,11 +934,24 @@ class Segmentation(dj.Computed):
         else:
             background_image = np.zeros(masks.shape[:-1])
 
-        # Draw contours
-        image_height, image_width = background_image.shape
+        # Plot background
+        image_height, image_width, num_masks = masks.shape
         figsize = np.array([image_width, image_height]) / min(image_height, image_width)
         fig = plt.figure(figsize=figsize * 7)
-        cmn.plot_masks(masks, background_image)
+        plt.imshow(background_image)
+
+        # Draw contours
+        cumsum_mask = np.empty([image_height, image_width])
+        for i in range(num_masks):
+            mask = masks[:, :, i]
+
+            ## Compute cumulative mass (similar to caiman)
+            indices = np.unravel_index(np.flip(np.argsort(mask, axis=None), axis=0), mask.shape) # max to min value in mask
+            cumsum_mask[indices] = np.cumsum(mask[indices]**2) / np.sum(mask**2)
+
+            ## Plot contour at desired threshold (with random color)
+            random_color = (np.random.rand(), np.random.rand(), np.random.rand())
+            plt.contour(cumsum_mask, [threshold], linewidths=0.8, colors=[random_color])
 
         return fig
 
@@ -1066,8 +1073,6 @@ class MaskClassification(dj.Computed):
         self.insert1(key)
         for mask_id, mask_type in zip(mask_ids, mask_types):
             MaskClassification.Type().insert1({**key, 'mask_id': mask_id, 'type': mask_type})
-
-
 
 
 @schema
