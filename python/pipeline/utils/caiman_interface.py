@@ -1,6 +1,6 @@
 """Interface to the CaImAn package (https://github.com/simonsfoundation/CaImAn)."""
 import numpy as np
-from caiman import cluster
+from caiman import cluster, components_evaluation
 from caiman.utils import visualization
 from caiman.source_extraction.cnmf import map_reduce, initialization, pre_processing, \
                                           merging, spatial, temporal, deconvolution
@@ -13,11 +13,12 @@ def log(*messages):
     print(formatted_time, *messages, flush=True)
 
 
-def extract_masks(scan, num_components=200, merge_threshold=0.8,
-                  num_background_components=1, num_processes=12,
-                  num_pixels_per_process=5000, init_method='greedy_roi',
-                  soma_diameter=(10, 10), snmf_alpha=None, init_on_patches=False,
-                  patch_downsampling_factor=None, proportion_patch_overlap=None):
+def extract_masks(scan, num_components=200, num_background_components=1,
+                  merge_threshold=0.8, init_on_patches=False, init_method='greedy_roi',
+                  soma_diameter=(10, 10), snmf_alpha=None, patch_size=None,
+                  proportion_patch_overlap=None, num_components_per_patch=None,
+                  num_processes=12, num_pixels_per_process=5000,
+                  remove_bad_components=False, fps=None):
     """ Extract masks from multi-photon scans using CNMF.
 
     Uses constrained non-negative matrix factorization to find spatial components (masks)
@@ -30,28 +31,29 @@ def extract_masks(scan, num_components=200, merge_threshold=0.8,
 
     :param np.array scan: 3-dimensional scan (image_height, image_width, num_frames).
     :param int num_components: An estimate of the number of spatial components in the scan
+    :param int num_background_components: Number of components to model the background.
     :param int merge_threshold: Maximal temporal correlation allowed between the activity
         of overlapping components before merging them.
-    :param int num_background_components:  Number of background components to use.
-    :param int num_processes: Number of processes to run in parallel. None for as many
-        processes as available cores.
-    :param int num_pixels_per_process: Number of pixels that a process handles each
-        iteration.
+    :param bool init_on_patches: If True, run the initialization methods on small patches
+        of the scan rather than on the whole image.
     :param string init_method: Initialization method for the components.
         'greedy_roi': Look for a gaussian-shaped patch, apply rank-1 NMF, store
             components, calculate residual scan and repeat for num_components.
         'sparse_nmf': Regularized non-negative matrix factorization (as impl. in sklearn)
-        'local_nmf': ...
     :param (float, float) soma_diameter: Estimated neuron size in y and x (pixels). Used
         in'greedy_roi' initialization to search for neurons of this size.
-    :param int snmf_alpha: Regularization parameter (alpha) for the sparse NMF (if used).
-    :param bool init_on_patches: If True, run the initialization methods on small patches
-        of the scan rather than on the whole image.
-    :param float patch_downsampling_factor: Image dimensions are divided by this factor
-        to obtain patch dimensions, e.g., if original size is 256x256 and factor is 10,
-        patches will be 26x26.
+    :param int snmf_alpha: Regularization parameter (alpha) for sparse NMF (if used).
+    :param (float, float) patch_size: Size of the patches in y and x (pixels).
     :param float proportion_patch_overlap: Patches are sampled in a sliding window. This
-        controls how much overlap is between adjacent patches (0 for none, 0.9 for 90%)
+        controls how much overlap is between adjacent patches (0 for none, 0.9 for 90%).
+    :param int num_components_per_patch: Number of components per patch (used if
+        init_on_patches=True)
+    :param int num_processes: Number of processes to run in parallel. None for as many
+        processes as available cores.
+    :param int num_pixels_per_process: Number of pixels that a process handles each
+        iteration.
+    :param remove_bad_components: ...
+    :param fps: ...
 
     :returns: Weighted masks (image_height x image_width x num_components). Inferred
         location of each component.
@@ -83,21 +85,15 @@ def extract_masks(scan, num_components=200, merge_threshold=0.8,
     if init_on_patches:
         # TODO: Redo this (per-patch initialization) in a nicer/more efficient way
 
-        # Calculate some parameters
-        patch_size = np.array([image_height, image_width]) / patch_downsampling_factor
-        num_components_per_patch = num_components / patch_downsampling_factor**2
-        num_components_per_patch = max(num_components_per_patch, 1) # at least 1
-        overlap_in_pixels = patch_size * proportion_patch_overlap
-
         # Make sure they are integers
         half_patch_size = np.int32(np.round(patch_size / 2))
         num_components_per_patch = int(round(num_components_per_patch))
-        overlap_in_pixels = np.int32(np.round(overlap_in_pixels))
+        patch_overlap = np.int32(np.round(patch_size * proportion_patch_overlap))
 
         # Create options dictionary (needed for run_CNMF_patches)
         options = {'patch_params': {'only_init': True, 'remove_very_bad_comps': False, # remove_very_bads_comps unnecesary (same as default)
                                     'ssub': 'UNUSED.', 'tsub': 'UNUSED',
-                                    'skip_refinement': 'UNUSED.'}, # remove_very_bads_comps unnecesary (same as default)
+                                    'skip_refinement': 'UNUSED.'},
                    'preprocess_params': {'check_nan': False}, # check_nan is unnecessary (same as default value)
                    'spatial_params': {'nb': num_background_components}, # nb is unnecessary, it is pased to the function and in init_params
                    'temporal_params': {'p': 0, 'method': 'UNUSED.', 'block_size': 'UNUSED.'},
@@ -110,7 +106,7 @@ def extract_masks(scan, num_components=200, merge_threshold=0.8,
 
         # Initialize per patch
         res = map_reduce.run_CNMF_patches(mmap_scan.filename, (image_height, image_width, num_frames),
-                                          options, rf=half_patch_size, stride=overlap_in_pixels,
+                                          options, rf=half_patch_size, stride=patch_overlap,
                                           gnb=num_background_components, dview=direct_view)
         initial_A, initial_C, YrA, initial_b, initial_f, pixels_noise, _ = res
 
@@ -140,6 +136,16 @@ def extract_masks(scan, num_components=200, merge_threshold=0.8,
                                                        alpha_snmf=snmf_alpha)
             initial_A, initial_C, initial_b, initial_f, _ = res
 
+    # Remove bad components
+    if remove_bad_components:
+        log('Removing bad components...')
+        # TODO: Ask Andrea to document this: what each threshold mean and how are defaults chosen.
+        good_indices, _, _, _, _ = components_evaluation.estimate_components_quality(initial_C,
+            scan, initial_A, initial_C, initial_b, initial_f, final_frate=fps, r_values_min=0.5,
+            fitness_min=-15, fitness_delta_min=-15, return_all=True, N=5)
+
+        initial_A = initial_A[:, good_indices]
+        initial_C = initial_C[good_indices]
 
     # Estimate noise per pixel
     log('Calculating noise per pixel...')
@@ -321,6 +327,7 @@ def _greedyROI(scan, num_components=200, neuron_size=(11, 11),
 
     return masks, traces, background_masks, background_traces
 
+
 def _gaussian2d(stddev, truncate=4):
     """ Creates a 2-d gaussian kernel truncated at 4 standard deviations (8 in total).
 
@@ -336,6 +343,7 @@ def _gaussian2d(stddev, truncate=4):
     kernel = mlab.bivariate_normal(x, y, sigmay=stddev[0], sigmax=stddev[1])
     return kernel
 
+
 # Based on caiman.source_extraction.cnmf.initialization.finetune()
 def _rank1_NMF(scan, trace, num_iterations=5):
     num_frames = scan.shape[-1]
@@ -344,6 +352,7 @@ def _rank1_NMF(scan, trace, num_iterations=5):
         mask  = mask * np.sum(mask) / np.sum(mask ** 2)
         trace = np.average(scan.reshape(-1, num_frames), weights=mask.ravel(), axis=0)
     return mask, trace
+
 
 def deconvolve(trace, AR_order=2):
     """ Deconvolve traces using noise constrained deconvolution (Pnevmatikakis et al., 2016)
@@ -360,22 +369,6 @@ def deconvolve(trace, AR_order=2):
         method='cvxpy', bas_nonneg=False, fudge_factor=0.96) # fudge_factor is a regularization term
 
     return spike_trace, AR_coeffs
-
-def plot_masks(masks, background_image):
-    """ Plot masks over a background image.
-
-    :param np.array masks: Masks (image_height x image_width x num_components)
-    :param np.array background_image: Image (image_height x image_width) to plot in the
-        background. Mean or correlation image look fine.
-    """
-    # Reshape masks
-    image_height, image_width, num_components = masks.shape
-    masks = masks.reshape(-1, num_components, order='F')
-
-    # Plot contours
-    visualization.plot_contours(masks, background_image, vmin=background_image.min(),
-                                vmax=background_image.max(), thr_method='nrg',
-                                nrgthr=0.995, display_numbers=False)
 
 
 def get_centroids(masks):
