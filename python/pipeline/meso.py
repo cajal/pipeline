@@ -710,7 +710,7 @@ class Segmentation(dj.Computed):
             if target == 'soma':
                 kwargs['init_on_patches'] = False
                 kwargs['init_method'] = 'greedy_roi'
-                kwargs['soma_diameter'] = 14 / (ScanInfo() & key).microns_per_pixel # 14 x 14 microns
+                kwargs['soma_diameter'] = 14 / (ScanInfo.Field() & key).microns_per_pixel # 14 x 14 microns
             else:  # axons/dendrites
                 kwargs['init_on_patches'] = True
                 kwargs['init_method'] = 'sparse_nmf'
