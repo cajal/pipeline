@@ -715,7 +715,7 @@ class Segmentation(dj.Computed):
                 kwargs['init_on_patches'] = True
                 kwargs['init_method'] = 'sparse_nmf'
                 kwargs['snmf_alpha'] = 500  # 10^2 to 10^3.5 is a good range
-                kwargs['patch_size'] = 50 / (ScanInfo() & key).microns_per_pixel # 40 x 40 microns
+                kwargs['patch_size'] = 50 / (ScanInfo.Field() & key).microns_per_pixel # 40 x 40 microns
                 kwargs['proportion_patch_overlap'] = 0.2 # 20% overlap
                 kwargs['num_components_per_patch'] = 10
 
