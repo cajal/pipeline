@@ -711,12 +711,12 @@ class Segmentation(dj.Computed):
             if target == 'soma':
                 kwargs['init_on_patches'] = False
                 kwargs['init_method'] = 'greedy_roi'
-                kwargs['soma_diameter'] = 14 / (ScanInfo() & key).microns_per_pixel # 14 x 14 microns
+                kwargs['soma_diameter'] = tuple(14 / (ScanInfo() & key).microns_per_pixel) # 14 x 14 microns
             else:  # axons/dendrites
                 kwargs['init_on_patches'] = True
                 kwargs['init_method'] = 'sparse_nmf'
                 kwargs['snmf_alpha'] = 500  # 10^2 to 10^3.5 is a good range
-                kwargs['patch_size'] = 50 / (ScanInfo() & key).microns_per_pixel # 40 x 40 microns
+                kwargs['patch_size'] = tuple(50 / (ScanInfo() & key).microns_per_pixel) # 40 x 40 microns
                 kwargs['proportion_patch_overlap'] = 0.2 # 20% overlap
                 kwargs['num_components_per_patch'] = 10
 
