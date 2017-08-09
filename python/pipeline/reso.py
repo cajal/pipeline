@@ -56,7 +56,7 @@ class ScanInfo(dj.Imported):
 
     @property
     def key_source(self):
-        rigs = [{'rig': '2P2'}, {'rig': '2P3'}, {'rig': '2P5'}]
+        rigs = [{'rig': '2P2'}, {'rig': '2P3'}, {'rig': '2P5'}, {'rig': '3P1'}]
         reso_sessions = (experiment.Session() & rigs)
         reso_scans = (experiment.Scan() - experiment.ScanIgnored()) & reso_sessions
         return reso_scans * (Version() & {'reso_version': CURRENT_VERSION})
