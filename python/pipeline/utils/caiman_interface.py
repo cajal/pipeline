@@ -86,7 +86,8 @@ def extract_masks(scan, num_components=200, num_background_components=1,
         # TODO: Redo this (per-patch initialization) in a nicer/more efficient way
 
         # Make sure they are integers
-        half_patch_size = np.int32(np.round(np.array(patch_size) / 2))
+        patch_size = np.array(patch_size)
+        half_patch_size = np.int32(np.round(patch_size / 2))
         num_components_per_patch = int(round(num_components_per_patch))
         patch_overlap = np.int32(np.round(patch_size * proportion_patch_overlap))
 
