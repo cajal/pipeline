@@ -718,7 +718,7 @@ class Segmentation(dj.Computed):
                 kwargs['snmf_alpha'] = 500  # 10^2 to 10^3.5 is a good range
                 kwargs['patch_size'] = tuple(50 / (ScanInfo() & key).microns_per_pixel) # 40 x 40 microns
                 kwargs['proportion_patch_overlap'] = 0.2 # 20% overlap
-                kwargs['num_components_per_patch'] = 10
+                kwargs['num_components_per_patch'] = 15
 
             ## Set performance/execution parameters (heuristically), decrease if memory overflows
             kwargs['num_processes'] = 12  # Set to None for all cores available
