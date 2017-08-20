@@ -731,6 +731,7 @@ class Segmentation(dj.Computed):
 
             # Insert CNMF results
             print('Inserting masks, background components and traces...')
+            dj.conn()
 
             ## Insert in CNMF, Segmentation and Fluorescence
             Segmentation().insert1(key)
