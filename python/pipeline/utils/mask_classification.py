@@ -58,6 +58,9 @@ def classify_manual(masks, template):
         fig.canvas.mpl_connect('key_press_event', on_button)
 
         plt.show()
+
+        import datajoint as dj
+        dj.conn().is_connected
     sns.reset_orig()
 
     return mask_types
