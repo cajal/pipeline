@@ -70,54 +70,6 @@ class ScanInfo(dj.Imported):
         z           : float             # (um) absolute depth with respect to the surface of the cortex
         """
 
-    class QuantalSize(dj.Part):
-        definition = """ # quantal size in images
-
-        -> ScanInfo
-        -> shared.Slice
-        -> shared.Channel
-        ---
-        min_intensity               : int           # min value in movie
-        max_intensity               : int           # max value in movie
-        intensities                 : longblob      # intensities for fitting variances
-        variances                   : longblob      # variances for each intensity
-        quantal_size                : float         # variance slope, corresponds to quantal size
-        zero_level                  : int           # level corresponding to zero (computed from variance dependence)
-        quantal_frame               : longblob      # average frame expressed in quanta
-        median_quantum_rate         : float         # median value in frame
-        percentile95_quantum_rate   : float         # 95th percentile in frame
-        """
-
-        def _make_tuples(self, key, scan, slice_id, channel):
-            # Create results tuple
-            tuple_ = key.copy()
-            tuple_['slice'] = slice_id + 1
-            tuple_['channel'] = channel + 1
-
-            # Compute quantal size
-            middle_frame = int(np.floor(scan.num_frames / 2))
-            frames = slice(max(middle_frame - 2000, 0), middle_frame + 2000)
-            mini_scan = scan[slice_id, :, :, channel, frames]
-            results = quality.compute_quantal_size(mini_scan)
-
-            # Add results to tuple
-            tuple_['min_intensity'] = results[0]
-            tuple_['max_intensity'] = results[1]
-            tuple_['intensities'] = results[2]
-            tuple_['variances'] = results[3]
-            tuple_['quantal_size'] = results[4]
-            tuple_['zero_level'] = results[5]
-
-            # Compute average frame rescaled with the quantal size
-            mean_frame = np.mean(mini_scan, axis=-1)
-            average_frame = (mean_frame - tuple_['zero_level']) / tuple_['quantal_size']
-            tuple_['quantal_frame'] = average_frame
-            tuple_['median_quantum_rate'] = np.median(average_frame)
-            tuple_['percentile95_quantum_rate'] = np.percentile(average_frame, 95)
-
-            # Insert
-            self.insert1(tuple_)
-
     def _make_tuples(self, key):
         """ Read some scan parameters, compute FOV in microns and quantal size."""
         from decimal import Decimal
@@ -161,12 +113,6 @@ class ScanInfo(dj.Imported):
         z_zero = (experiment.Scan() & key).fetch1('depth')  # true depth at ScanImage's 0
         for slice_id, z_slice in enumerate(scan.field_depths):
             ScanInfo.Slice().insert1({**key, 'slice': slice_id + 1, 'z': z_zero + z_slice})
-
-        # Compute quantal size for all slice/channel combinations
-        for slice_id in range(scan.num_fields):
-            print('Computing quantal size for slice', slice_id + 1)
-            for channel in range(scan.num_channels):
-                ScanInfo.QuantalSize()._make_tuples(key, scan, slice_id, channel)
 
         self.notify(key)
 
@@ -1411,4 +1357,149 @@ class ScanDone(dj.Computed):
         (notify.SlackUser() & (experiment.Session() & key)).notify(msg)
 
 
-# schema.spawn_missing_classes()
+
+# Quality schemas (could eventually be moved elsewhere, depends only on ScanInfo)
+@schema
+class Quality(dj.Computed):
+    definition = """ # different quality metrics for a scan (before corrections)
+
+    -> ScanInfo
+    """
+
+    @property
+    def key_source(self):
+        return ScanInfo() & {'reso_version': CURRENT_VERSION}
+
+    class MeanIntensity(dj.Part):
+        definition = """ # mean intensity values across time
+
+        -> Quality
+        -> shared.Slice
+        -> shared.Channel
+        ---
+        intensities                 : longblob
+        """
+
+    class SummaryFrames(dj.Part):
+        definition = """ # 16-part summary of the scan (mean of 16 blocks)
+
+        -> Quality
+        -> shared.Slice
+        -> shared.Channel
+        ---
+        summary                     : longblob      # h x w x 16
+        """
+
+    class Contrast(dj.Part):
+        definition = """ # difference between 99 and 1 percentile across time
+
+        -> Quality
+        -> shared.Slice
+        -> shared.Channel
+        ---
+        contrasts                   : longblob
+        """
+
+    class QuantalSize(dj.Part):
+        definition = """ # quantal size in images
+
+        -> ScanInfo
+        -> shared.Slice
+        -> shared.Channel
+        ---
+        min_intensity               : int           # min value in movie
+        max_intensity               : int           # max value in movie
+        quantal_size                : float         # variance slope, corresponds to quantal size
+        zero_level                  : int           # level corresponding to zero (computed from variance dependence)
+        quantal_frame               : longblob      # average frame expressed in quanta
+        """
+
+    def _make_tuples(self, key):
+        # Read the scan
+        scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
+        scan = scanreader.read_scan(scan_filename, dtype=np.float32)
+
+        # Insert in Quality
+        self.insert1(key)
+
+        for slice_id in range(scan.num_fields):
+            print('Computing quality metrics for slice', slice_id + 1)
+            for channel in range(scan.num_channels):
+                # Create results tuple
+                slice_key = key.copy()
+                slice_key['slice'] = slice_id + 1
+                slice_key['channel'] = channel + 1
+
+                #Load scan
+                scan_ = scan[slice_id, :, :, channel, :]
+
+                # Compute mean intensity
+                mean_intensities = np.mean(scan_, axis=(0, 1))
+                self.MeanIntensity().insert1({**slice_key, 'intensities': mean_intensities})
+
+                # Compute summary frames
+                frames = []
+                for chunk in np.array_split(scan_, 16, axis=-1):
+                    frames.append(np.mean(chunk, axis=-1))
+                frames = np.stack(frames, axis=-1)
+                self.SummaryFrames().insert1({**slice_key, 'summary': frames})
+
+                # Compute contrast
+                # np.percentile(scan_, [99, 1], axis=(0, 1)) creates two copies of the scan
+                contrasts = np.empty(scan.num_frames)
+                for i in range(scan.num_frames):
+                    percentiles = np.percentile(scan_[:, :, i], q=[1, 99])
+                    contrasts[i] = percentiles[1] - percentiles[0]
+                self.Contrast().insert1({**slice_key, 'contrasts': contrasts})
+
+                # Compute quantal size
+                middle_frame = int(np.floor(scan.num_frames / 2))
+                mini_scan = scan[:, :, max(middle_frame - 2000, 0): middle_frame + 2000]
+                results = quality.compute_quantal_size(mini_scan)
+                min_intensity, max_intensity, _, _, quantal_size, zero_level = results
+                quantal_frame = (np.mean(mini_scan, axis=-1) - zero_level) / quantal_size
+                self.QuantalSize().insert1({**slice_key, 'min_intensity': min_intensity,
+                                            'max_intensity': max_intensity,
+                                            'quantal_size': quantal_size,
+                                            'zero_level': zero_level,
+                                            'quantal_frame': quantal_frame})
+
+                self.notify(slice_key, frames, mean_intensities, contrasts)
+
+    def notify(self, key, summary_frames, mean_intensities, contrasts):
+        """ Sends slack notification for a single slice + channel combination. """
+        # Send summary frames
+        import imageio
+        video_filename = '/tmp/' + key_hash(key) + '.gif'
+        percentile_99th = np.percentile(summary_frames, 99.5)
+        summary_frames = np.clip(summary_frames, None, percentile_99th)
+        summary_frames = signal.float2uint8(summary_frames).transpose([2, 0, 1])
+        imageio.mimsave(video_filename, summary_frames, duration=0.4)
+
+        msg = 'Quality for `{}` has been populated.'.format(key)
+        (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=video_filename,
+                                                                   file_title='summary frames')
+
+        # Send intensity and contrasts
+        import seaborn as sns
+        with sns.axes_style('white'):
+            fig, axes = plt.subplots(2, 1, figsize=(15, 8), sharex=True)
+
+        fig.suptitle('Slice {}, channel {}'.format(key['slice'], key['channel']))
+        axes[0].set_title('Mean intensity')
+        axes[0].plot(mean_intensities)
+        axes[0].set_ylabel('Pixel intensities')
+        axes[1].set_title('Contrast (99 - 1 percentile)')
+        axes[1].plot(contrasts)
+        axes[1].set_xlabel('Frames')
+        axes[1].set_ylabel('Pixel intensities')
+        img_filename = '/tmp/' + key_hash(key) + '.png'
+        fig.savefig(img_filename)
+        plt.close(fig)
+        sns.reset_orig()
+
+        (notify.SlackUser() & (experiment.Session() & key)).notify(file=img_filename,
+                                                                   file_title='quality traces')
+
+
+schema.spawn_missing_classes()
