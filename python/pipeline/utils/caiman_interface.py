@@ -101,8 +101,9 @@ def extract_masks(scan, num_components=200, num_background_components=1,
                    'init_params': {'K': num_components_per_patch, 'gSig': np.array(soma_diameter)/2,
                                    'method': init_method, 'alpha_snmf': snmf_alpha,
                                    'nb': num_background_components, 'ssub': 1, 'tsub': 1,
-                                   'options_local_NMF': 'UNUSED.', 'normalize_init': True},
-                                   # ssub, tsub, options_local_NMF, normalize_init unnecessary (same as default values)
+                                   'options_local_NMF': 'UNUSED.', 'normalize_init': True,
+                                   'rolling_sum': False, 'rolling_length': 'UNUSED'},
+                                   # ssub, tsub, options_local_NMF, normalize_init, rolling_sum unnecessary (same as default values)
                    'merging' : {'thr': 'UNUSED.'}}
 
         # Initialize per patch
@@ -130,8 +131,8 @@ def extract_masks(scan, num_components=200, num_background_components=1,
                                       res[3], maxIter=3)
             initial_A, initial_C, initial_b, initial_f = res
         else:
-            print("Warning: Running sparse_nmf initialization on the entire field of view "
-                  "takes a lot of time.")
+            print('Warning: Running sparse_nmf initialization on the entire field of view '
+                  'takes a lot of time.')
             res = initialization.initialize_components(scan, K=num_components,
                                                        nb=num_background_components, method=init_method,
                                                        alpha_snmf=snmf_alpha)
@@ -154,12 +155,11 @@ def extract_masks(scan, num_components=200, num_background_components=1,
 
     # Update masks
     log('Updating masks...')
-    A, b, C, f = spatial.update_spatial_components(mmap_scan, initial_C,initial_f, initial_A,
+    A, b, C, f = spatial.update_spatial_components(mmap_scan, initial_C, initial_f, initial_A, b_in=initial_b,
                                                    sn=pixels_noise, dims=(image_height, image_width),
                                                    method='dilate', dview=direct_view,
                                                    n_pixels_per_process=num_pixels_per_process,
-                                                   nb=num_background_components,
-                                                   method_ls='lasso_lars')
+                                                   nb=num_background_components)
 
     # Update traces (no impulse response modelling p=0)
     log('Updating traces...')
@@ -178,12 +178,11 @@ def extract_masks(scan, num_components=200, num_background_components=1,
 
     # Refine masks
     log('Refining masks...')
-    A, b, C, f = spatial.update_spatial_components(mmap_scan, C, f, A, sn=pixels_noise,
+    A, b, C, f = spatial.update_spatial_components(mmap_scan, C, f, A, b_in=b, sn=pixels_noise,
                                                    dims=(image_height, image_width),
                                                    method='dilate', dview=direct_view,
                                                    n_pixels_per_process=num_pixels_per_process,
-                                                   nb=num_background_components,
-                                                   method_ls='lasso_lars')
+                                                   nb=num_background_components)
 
     # Refine traces
     log('Refining traces...')
