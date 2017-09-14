@@ -56,7 +56,7 @@ class ScanInfo(dj.Imported):
 
     @property
     def key_source(self):
-        rigs = [{'rig': '2P2'}, {'rig': '2P3'}, {'rig': '2P5'}]
+        rigs = [{'rig': '2P2'}, {'rig': '2P3'}, {'rig': '2P5'}, {'rig': '3P1'}]
         reso_sessions = (experiment.Session() & rigs)
         reso_scans = (experiment.Scan() - experiment.ScanIgnored()) & reso_sessions
         return reso_scans * (Version() & {'reso_version': CURRENT_VERSION})
@@ -70,55 +70,6 @@ class ScanInfo(dj.Imported):
         z           : float             # (um) absolute depth with respect to the surface of the cortex
         """
 
-    class QuantalSize(dj.Part):
-        definition = """ # quantal size in images
-
-        -> ScanInfo
-        -> shared.Slice
-        -> shared.Channel
-        ---
-        min_intensity               : int           # min value in movie
-        max_intensity               : int           # max value in movie
-        intensities                 : longblob      # intensities for fitting variances
-        variances                   : longblob      # variances for each intensity
-        quantal_size                : float         # variance slope, corresponds to quantal size
-        zero_level                  : int           # level corresponding to zero (computed from variance dependence)
-        quantal_frame               : longblob      # average frame expressed in quanta
-        median_quantum_rate         : float         # median value in frame
-        percentile95_quantum_rate   : float         # 95th percentile in frame
-        """
-
-        def _make_tuples(self, key, scan, slice_id, channel):
-            # Create results tuple
-            tuple_ = key.copy()
-            tuple_['slice'] = slice_id + 1
-            tuple_['channel'] = channel + 1
-
-            # Compute quantal size
-            middle_frame = int(np.floor(scan.num_frames / 2))
-            frames = slice(max(middle_frame - 2000, 0), middle_frame + 2000)
-            mini_scan = scan[slice_id, :, :, channel, frames]
-            results = quality.compute_quantal_size(mini_scan)
-
-            # Add results to tuple
-            tuple_['min_intensity'] = results[0]
-            tuple_['max_intensity'] = results[1]
-            tuple_['intensities'] = results[2]
-            tuple_['variances'] = results[3]
-            tuple_['quantal_size'] = results[4]
-            tuple_['zero_level'] = results[5]
-
-            # Compute average frame rescaled with the quantal size
-            mean_frame = np.mean(mini_scan, axis=-1)
-            average_frame = (mean_frame - tuple_['zero_level']) / tuple_['quantal_size']
-            tuple_['quantal_frame'] = average_frame
-            tuple_['median_quantum_rate'] = np.median(average_frame)
-            tuple_['percentile95_quantum_rate'] = np.percentile(average_frame, 95)
-
-            dj.conn().is_connected
-
-            # Insert
-            self.insert1(tuple_)
 
     def _make_tuples(self, key):
         """ Read some scan parameters, compute FOV in microns and quantal size."""
@@ -169,12 +120,6 @@ class ScanInfo(dj.Imported):
         z_zero = (experiment.Scan() & key).fetch1('depth')  # true depth at ScanImage's 0
         for slice_id, z_slice in enumerate(scan.field_depths):
             ScanInfo.Slice().insert1({**key, 'slice': slice_id + 1, 'z': z_zero + z_slice})
-
-        # Compute quantal size for all slice/channel combinations
-        for slice_id in range(scan.num_fields):
-            print('Computing quantal size for slice', slice_id + 1)
-            for channel in range(scan.num_channels):
-                ScanInfo.QuantalSize()._make_tuples(key, scan, slice_id, channel)
 
         self.notify(key)
 
@@ -426,7 +371,7 @@ class MotionCorrection(dj.Computed):
         import matplotlib.animation as animation
 
         ## Set the figure
-        fig, axes = plt.subplots(1, 2)
+        fig, axes = plt.subplots(1, 2, sharex=True, sharey=True)
 
         axes[0].set_title('Original')
         im1 = axes[0].imshow(original_scan[:, :, 0], vmin=original_scan.min(),
@@ -496,7 +441,7 @@ class SummaryImages(dj.Computed):
 
         -> master
         ---
-        correlation_image           : longblob
+        correlation_image       : longblob
         """
 
     def _make_tuples(self, key):
@@ -521,6 +466,9 @@ class SummaryImages(dj.Computed):
                 # Correct scan
                 scan_ = scan[slice_id, :, :, channel, :]
                 scan_ = correct_motion(correct_raster(scan_))
+
+                # Subtract overall brightness/drift
+                scan_ -= scan_.mean(axis=(0, 1))
                 scan_ -= scan_.min()  # make nonnegative for lp-norm
 
                 # Insert in SummaryImages
@@ -605,7 +553,7 @@ class SegmentationTask(dj.Manual):
         if compartment == 'soma':
             num_components = slice_volume * 0.0001
         elif compartment == 'axon':
-            num_components = slice_volume * 0.001  # ten times as many neurons
+            num_components = slice_volume * 0.0005  # five times as many neurons
         else:
             PipelineException("Compartment type '{}' not recognized".format(compartment))
 
@@ -705,35 +653,29 @@ class Segmentation(dj.Computed):
             scan_ -= scan_.min()  # make nonnegative for caiman
 
             # Set CNMF parameters
-            ## Estimate number of components per slice and soma diameter in pixels
-            num_components = (SegmentationTask() & key).estimate_num_components()
-            soma_diameter = 14 / (ScanInfo() & key).microns_per_pixel  # assumption: somas are 14 microns across
-
             ## Set general parameters
             kwargs = {}
-            kwargs['num_components'] = num_components
+            kwargs['num_components'] = (SegmentationTask() & key).estimate_num_components()
             kwargs['num_background_components'] = 1
-            kwargs['merge_threshold'] = 0.8
-
-            ## Set performance/execution parameters (heuristically), decrease if memory overflows
-            kwargs['num_processes'] = 12  # Set to None for all cores available
-            kwargs['num_pixels_per_process'] = 10000
+            kwargs['merge_threshold'] = 0.7
 
             ## Set params specific to somatic or axonal/dendritic scans
             target = (SegmentationTask() & key).fetch1('compartment')
             if target == 'soma':
-                kwargs['init_method'] = 'greedy_roi'
-                kwargs['soma_diameter'] = tuple(soma_diameter)
                 kwargs['init_on_patches'] = False
+                kwargs['init_method'] = 'greedy_roi'
+                kwargs['soma_diameter'] = tuple(14 / (ScanInfo() & key).microns_per_pixel) # 14 x 14 microns
             else:  # axons/dendrites
+                kwargs['init_on_patches'] = True
                 kwargs['init_method'] = 'sparse_nmf'
                 kwargs['snmf_alpha'] = 500  # 10^2 to 10^3.5 is a good range
-                kwargs['init_on_patches'] = True
+                kwargs['patch_size'] = tuple(50 / (ScanInfo() & key).microns_per_pixel) # 40 x 40 microns
+                kwargs['proportion_patch_overlap'] = 0.2 # 20% overlap
+                kwargs['num_components_per_patch'] = 15
 
-            ## Set params specific to initialization on patches
-            if kwargs['init_on_patches']:
-                kwargs['patch_downsampling_factor'] = 4
-                kwargs['proportion_patch_overlap'] = 0.2
+            ## Set performance/execution parameters (heuristically), decrease if memory overflows
+            kwargs['num_processes'] = 12  # Set to None for all cores available
+            kwargs['num_pixels_per_process'] = 10000
 
             # Extract traces
             print('Extracting masks and traces (cnmf)...')
@@ -742,6 +684,7 @@ class Segmentation(dj.Computed):
 
             # Insert CNMF results
             print('Inserting masks, background components and traces...')
+            dj.conn()
 
             ## Insert in CNMF, Segmentation and Fluorescence
             Segmentation().insert1(key)
@@ -826,7 +769,7 @@ class Segmentation(dj.Computed):
             import matplotlib.animation as animation
 
             ## Set the figure
-            fig, axes = plt.subplots(2, 2)
+            fig, axes = plt.subplots(2, 2, sharex=True, sharey=True)
 
             axes[0, 0].set_title('Original (Y)')
             im1 = axes[0, 0].imshow(scan_[:, :, 0], vmin=scan_.min(), vmax=scan_.max())  # just a placeholder
@@ -916,22 +859,23 @@ class Segmentation(dj.Computed):
         # Get masks
         image_height, image_width = (ScanInfo() & self).fetch1('px_height', 'px_width')
         mask_pixels, mask_weights = mask_rel.fetch('pixels', 'weights', order_by='mask_id')
+        mask_weights = [w - w.min() for w in mask_weights] # make all weights nonnegative
 
         # Reshape masks
         masks = Segmentation.reshape_masks(mask_pixels, mask_weights, image_height, image_width)
 
         return masks
 
-    def plot_masks(self, first_n=None):
+    def plot_masks(self, threshold=0.99, first_n=None):
         """ Draw contours of masks over the correlation image (if available).
 
+        :param threshold: Threshold on the cumulative mass to define mask contours. Lower
+            for tighter contours.
         :param first_n: Number of masks to plot. None for all.
 
         :returns Figure. You can call show() on it.
         :rtype: matplotlib.figure.Figure
         """
-        from .utils import caiman_interface as cmn
-
         # Get masks
         masks = self.get_all_masks()
         if first_n is not None:
@@ -944,11 +888,24 @@ class Segmentation(dj.Computed):
         else:
             background_image = np.zeros(masks.shape[:-1])
 
-        # Draw contours
-        image_height, image_width = background_image.shape
+        # Plot background
+        image_height, image_width, num_masks = masks.shape
         figsize = np.array([image_width, image_height]) / min(image_height, image_width)
         fig = plt.figure(figsize=figsize * 7)
-        cmn.plot_masks(masks, background_image)
+        plt.imshow(background_image)
+
+        # Draw contours
+        cumsum_mask = np.empty([image_height, image_width])
+        for i in range(num_masks):
+            mask = masks[:, :, i]
+
+            ## Compute cumulative mass (similar to caiman)
+            indices = np.unravel_index(np.flip(np.argsort(mask, axis=None), axis=0), mask.shape) # max to min value in mask
+            cumsum_mask[indices] = np.cumsum(mask[indices]**2) / np.sum(mask**2)
+
+            ## Plot contour at desired threshold (with random color)
+            random_color = (np.random.rand(), np.random.rand(), np.random.rand())
+            plt.contour(cumsum_mask, [threshold], linewidths=0.8, colors=[random_color])
 
         return fig
 
@@ -1072,19 +1029,11 @@ class MaskClassification(dj.Computed):
             MaskClassification.Type().insert1({**key, 'mask_id': mask_id, 'type': mask_type})
 
 
-
-
 @schema
 class ScanSet(dj.Computed):
     definition = """ # set of all units in the same scan
     -> Fluorescence                 # processing done per slice
     """
-
-    def _job_key(self, key):
-        """
-        modify job key to reserve the entire scan.
-        """
-        return {k: v for k, v in key.items() if k not in ['slice', 'channel']}
 
     @property
     def key_source(self):
@@ -1416,4 +1365,149 @@ class ScanDone(dj.Computed):
         (notify.SlackUser() & (experiment.Session() & key)).notify(msg)
 
 
-# schema.spawn_missing_classes()
+
+# Quality schemas (could eventually be moved elsewhere, depends only on ScanInfo)
+@schema
+class Quality(dj.Computed):
+    definition = """ # different quality metrics for a scan (before corrections)
+
+    -> ScanInfo
+    """
+
+    @property
+    def key_source(self):
+        return ScanInfo() & {'reso_version': CURRENT_VERSION}
+
+    class MeanIntensity(dj.Part):
+        definition = """ # mean intensity values across time
+
+        -> Quality
+        -> shared.Slice
+        -> shared.Channel
+        ---
+        intensities                 : longblob
+        """
+
+    class SummaryFrames(dj.Part):
+        definition = """ # 16-part summary of the scan (mean of 16 blocks)
+
+        -> Quality
+        -> shared.Slice
+        -> shared.Channel
+        ---
+        summary                     : longblob      # h x w x 16
+        """
+
+    class Contrast(dj.Part):
+        definition = """ # difference between 99 and 1 percentile across time
+
+        -> Quality
+        -> shared.Slice
+        -> shared.Channel
+        ---
+        contrasts                   : longblob
+        """
+
+    class QuantalSize(dj.Part):
+        definition = """ # quantal size in images
+
+        -> ScanInfo
+        -> shared.Slice
+        -> shared.Channel
+        ---
+        min_intensity               : int           # min value in movie
+        max_intensity               : int           # max value in movie
+        quantal_size                : float         # variance slope, corresponds to quantal size
+        zero_level                  : int           # level corresponding to zero (computed from variance dependence)
+        quantal_frame               : longblob      # average frame expressed in quanta
+        """
+
+    def _make_tuples(self, key):
+        # Read the scan
+        scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
+        scan = scanreader.read_scan(scan_filename, dtype=np.float32)
+
+        # Insert in Quality
+        self.insert1(key)
+
+        for slice_id in range(scan.num_fields):
+            print('Computing quality metrics for slice', slice_id + 1)
+            for channel in range(scan.num_channels):
+                # Create results tuple
+                slice_key = key.copy()
+                slice_key['slice'] = slice_id + 1
+                slice_key['channel'] = channel + 1
+
+                #Load scan
+                scan_ = scan[slice_id, :, :, channel, :]
+
+                # Compute mean intensity
+                mean_intensities = np.mean(scan_, axis=(0, 1))
+                self.MeanIntensity().insert1({**slice_key, 'intensities': mean_intensities})
+
+                # Compute summary frames
+                frames = []
+                for chunk in np.array_split(scan_, 16, axis=-1):
+                    frames.append(np.mean(chunk, axis=-1))
+                frames = np.stack(frames, axis=-1)
+                self.SummaryFrames().insert1({**slice_key, 'summary': frames})
+
+                # Compute contrast
+                # np.percentile(scan_, [99, 1], axis=(0, 1)) creates two copies of the scan
+                contrasts = np.empty(scan.num_frames)
+                for i in range(scan.num_frames):
+                    percentiles = np.percentile(scan_[:, :, i], q=[1, 99])
+                    contrasts[i] = percentiles[1] - percentiles[0]
+                self.Contrast().insert1({**slice_key, 'contrasts': contrasts})
+
+                # Compute quantal size
+                middle_frame = int(np.floor(scan.num_frames / 2))
+                mini_scan = scan[:, :, max(middle_frame - 2000, 0): middle_frame + 2000]
+                results = quality.compute_quantal_size(mini_scan)
+                min_intensity, max_intensity, _, _, quantal_size, zero_level = results
+                quantal_frame = (np.mean(mini_scan, axis=-1) - zero_level) / quantal_size
+                self.QuantalSize().insert1({**slice_key, 'min_intensity': min_intensity,
+                                            'max_intensity': max_intensity,
+                                            'quantal_size': quantal_size,
+                                            'zero_level': zero_level,
+                                            'quantal_frame': quantal_frame})
+
+                self.notify(slice_key, frames, mean_intensities, contrasts)
+
+    def notify(self, key, summary_frames, mean_intensities, contrasts):
+        """ Sends slack notification for a single slice + channel combination. """
+        # Send summary frames
+        import imageio
+        video_filename = '/tmp/' + key_hash(key) + '.gif'
+        percentile_99th = np.percentile(summary_frames, 99.5)
+        summary_frames = np.clip(summary_frames, None, percentile_99th)
+        summary_frames = signal.float2uint8(summary_frames).transpose([2, 0, 1])
+        imageio.mimsave(video_filename, summary_frames, duration=0.4)
+
+        msg = 'Quality for `{}` has been populated.'.format(key)
+        (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=video_filename,
+                                                                   file_title='summary frames')
+
+        # Send intensity and contrasts
+        import seaborn as sns
+        with sns.axes_style('white'):
+            fig, axes = plt.subplots(2, 1, figsize=(15, 8), sharex=True)
+
+        fig.suptitle('Slice {}, channel {}'.format(key['slice'], key['channel']))
+        axes[0].set_title('Mean intensity')
+        axes[0].plot(mean_intensities)
+        axes[0].set_ylabel('Pixel intensities')
+        axes[1].set_title('Contrast (99 - 1 percentile)')
+        axes[1].plot(contrasts)
+        axes[1].set_xlabel('Frames')
+        axes[1].set_ylabel('Pixel intensities')
+        img_filename = '/tmp/' + key_hash(key) + '.png'
+        fig.savefig(img_filename)
+        plt.close(fig)
+        sns.reset_orig()
+
+        (notify.SlackUser() & (experiment.Session() & key)).notify(file=img_filename,
+                                                                   file_title='quality traces')
+
+
+schema.spawn_missing_classes()

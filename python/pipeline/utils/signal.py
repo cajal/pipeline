@@ -54,6 +54,7 @@ def local_max(x):
     k.sort()
     return k
 
+
 def spaced_max(x, min_interval, thresh=None):
     peaks = local_max(x)
     if thresh is not None:
@@ -70,9 +71,15 @@ def spaced_max(x, min_interval, thresh=None):
                 idx[-1] = i
     return np.array(idx)
 
+
 def longest_contiguous_block(idx):
     d = np.diff(idx)
     ix = np.hstack(([-1], np.where(d > 10*np.median(d))[0], [len(idx)]))
     f = [idx[ix[i] + 1: ix[i+1]] for i in range(len(ix)-1)]
     return f[np.argmax([len(e) for e in f])]
 
+def float2uint8(scan):
+    """ Converts an scan (or image) from floats to uint8 (preserving the range)."""
+    scan = (scan - scan.min()) / (scan.max() - scan.min())
+    scan = (scan * 255).astype(np.uint8, copy=False)
+    return scan
