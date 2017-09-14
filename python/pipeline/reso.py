@@ -71,13 +71,13 @@ class ScanInfo(dj.Imported):
         """
 
     def _make_tuples(self, key):
-        """ Read some scan parameters, compute FOV in microns and quantal size."""
+        """ Read some scan parameters and compute FOV in microns."""
         from decimal import Decimal
 
         # Read the scan
         print('Reading header...')
         scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
-        scan = scanreader.read_scan(scan_filename, dtype=np.float32)
+        scan = scanreader.read_scan(scan_filename)
 
         # Get attributes
         tuple_ = key.copy()  # in case key is reused somewhere else
@@ -222,8 +222,8 @@ class MotionCorrection(dj.Computed):
     template                        : longblob      # image used as alignment template
     y_shifts                        : longblob      # (pixels) y motion correction shifts
     x_shifts                        : longblob      # (pixels) x motion correction shifts
-    y_std                           : float         # (um) standard deviation of y shifts
-    x_std                           : float         # (um) standard deviation of x shifts
+    y_std                           : float         # (pixels) standard deviation of y shifts
+    x_std                           : float         # (pixels) standard deviation of x shifts
     y_outlier_frames                : longblob      # mask with true for frames with high y shifts (already corrected)
     x_outlier_frames                : longblob      # mask with true for frames with high x shifts (already corrected)
     align_time=CURRENT_TIMESTAMP    : timestamp     # automatic
@@ -243,8 +243,7 @@ class MotionCorrection(dj.Computed):
         scan = scanreader.read_scan(scan_filename, dtype=np.float32)
 
         # Get some params
-        um_height, px_height, um_width, px_width = \
-            (ScanInfo() & key).fetch1('um_height', 'px_height', 'um_width', 'px_width')
+        px_height, px_width = (ScanInfo() & key).fetch1('px_height', 'px_width')
 
         for slice_id in range(scan.num_fields):
             print('Correcting motion in slice', slice_id + 1)
@@ -662,9 +661,12 @@ class Segmentation(dj.Computed):
                 kwargs['init_on_patches'] = True
                 kwargs['init_method'] = 'sparse_nmf'
                 kwargs['snmf_alpha'] = 500  # 10^2 to 10^3.5 is a good range
-                kwargs['patch_size'] = tuple(50 / (ScanInfo() & key).microns_per_pixel) # 40 x 40 microns
+
+            # Set parameters for patch initialization
+            if kwargs['init_on_patches']:
+                kwargs['patch_size'] = tuple(50 / (ScanInfo() & key).microns_per_pixel) # 50 x 50 microns
                 kwargs['proportion_patch_overlap'] = 0.2 # 20% overlap
-                kwargs['num_components_per_patch'] = 15
+                kwargs['num_components_per_patch'] = 15 if target == 'axon' else 3
 
             ## Set performance/execution parameters (heuristically), decrease if memory overflows
             kwargs['num_processes'] = 12  # Set to None for all cores available
