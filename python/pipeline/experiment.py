@@ -351,8 +351,22 @@ class Aim(dj.Lookup):
     """
 
 
+class HasFilename:
+    """ Add local_filenames_as_wildcard property to Scan and Stack. """
+    @property
+    def local_filenames_as_wildcard(self):
+        """Returns the local filename for all parts of this scan (ends in *.tif)."""
+        scan_path = (Session() & self).fetch1('scan_path')
+        local_path = lab.Paths().get_local_path(scan_path)
+
+        scan_name = (self.__class__() & self).fetch1('filename')
+        local_filename = os.path.join(local_path, scan_name) + '*.tif'  # all parts
+
+        return local_filename
+
+
 @schema
-class Scan(dj.Manual):
+class Scan(dj.Manual, HasFilename):
     definition = """    # scanimage scan info
     -> Session
     scan_idx             : smallint                     # number of TIFF stack file
@@ -395,95 +409,30 @@ class Scan(dj.Manual):
         gdd: float  # gdd setting
         """
 
-    @property
-    def local_filenames_as_wildcard(self):
-        """Returns the local filename for all parts of this scan (ends in *.tif)."""
-        scan_path = (Session() & self).fetch1('scan_path')
-        local_path = lab.Paths().get_local_path(scan_path)
-
-        scan_name = (Scan() & self).fetch1('filename')
-        local_filename = os.path.join(local_path, scan_name) + '*.tif'  # all parts
-
-        return local_filename
-
 
 @schema
-class Stack(dj.Manual):
+class Stack(dj.Manual, HasFilename):
     definition = """
     # scanimage scan info
     -> Session
     stack_idx            : smallint                     # number of TIFF stack file
     ---
-    bottom_z             : int                          # z location at bottom of the stack
-    surf_z               : int                          # z location of surface
+    -> Lens
+    -> BrainArea
+    -> Software
     laser_wavelength     : int                          # (nm)
     laser_power          : int                          # (mW) to brain
+    filename                    : varchar(255)                  # file base name
+    bottom_z             : int                          # z location at bottom of the stack
+    surf_z               : int                          # z location of surface
     stack_notes          : varchar(4095)                # free-notes
     scan_ts=CURRENT_TIMESTAMP : timestamp               # don't edit
     """
-
 
 @schema
 class ScanIgnored(dj.Manual):
     definition = """  # scans to ignore
     -> Scan
     """
-
-
-def migrate_galvo_pipeline():
-    """
-    migration from the old schema
-    :return:
-    """
-    from .legacy import common, rf, psy
-    # migrate FOV calibration
-    FOV().insert(rf.FOV().proj('width', 'height', rig="setup", fov_ts="fov_date").fetch(), skip_duplicates=True)
-
-    # migrate Session
-    sessions_to_migrate = rf.Session() * common.Animal() & 'session_date>"2016-02"' & 'animal_id>0'
-    w = sessions_to_migrate.proj(
-        'session_date',
-        'anesthesia',
-        'session_ts',
-        'scan_path',
-        rig='setup',
-        behavior_path='hd5_path',
-        username='lcase(owner)',
-        pmt_filter_set='"2P3 red-green A"',
-        session_notes="concat(session_notes,';;', animal_notes)")
-    Session().insert(w.fetch(), skip_duplicates=True)
-
-    # migrate fluorophore
-    Session.Fluorophore().insert(sessions_to_migrate.proj('fluorophore').fetch(), skip_duplicates=True)
-
-    assert len(Session()) == len(Session.Fluorophore())
-
-    # migrate scans
-
-    scans = (rf.Session().proj('lens', 'file_base') * rf.Scan()).proj(
-        'lens',
-        'laser_wavelength',
-        'laser_power',
-        'scan_notes',
-        'scan_ts',
-        'depth',
-        software="'scanimage'",
-        version="5.1",
-        site_number='site',
-        filename="concat(file_base, '_', LPAD(file_num, 5, '0'))",
-        brain_area='cortical_area',
-    ) & Session()
-
-    Scan().insert(scans.fetch(as_dict=True), skip_duplicates=True)
-
-    # migrate stacks
-    Stack().insert(rf.Stack().proj(*Stack().heading.names))
-
-    eye_videos = (rf.Session() * rf.Scan()).proj(filename="concat(file_base,file_num,'behavior.avi')")
-    Scan.EyeVideo().insert(eye_videos, skip_duplicates=True)
-
-    wheel_files = (rf.Session() * rf.Scan()).proj(filename="concat(file_base,file_num,'0.h5')")
-    Scan.BehaviorFile().insert(wheel_files, skip_duplicates=True)
-
 
 schema.spawn_missing_classes()
