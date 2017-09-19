@@ -18,8 +18,8 @@ def erd():
 
 @schema
 class Fluorophore(dj.Lookup):
-    definition = """
-    # calcium-sensitive indicators
+    definition = """  # calcium-sensitive indicators
+
     fluorophore     : char(10)   # fluorophore short name
     -----
     dye_description = ''  : varchar(2048)
@@ -36,9 +36,9 @@ class Fluorophore(dj.Lookup):
     ]
 
     class EmissionSpectrum(dj.Part):
-        definition = """
-        # spectra of fluorophores in Ca++ loaded and Ca++ free state
-        ->Fluorophore
+        definition = """  # spectra of fluorophores in Ca++ loaded and Ca++ free state
+
+        -> Fluorophore
         loaded          : bool      # whether the spectrum is for Ca++ loaded or free state
         ---
         wavelength      : longblob  # wavelength in nm
@@ -61,8 +61,7 @@ class Fluorophore(dj.Lookup):
 
 @schema
 class Lens(dj.Lookup):
-    definition = """
-    # objective lens list
+    definition = """  # objective lens list
     lens    : char(4) # objective lens
     ---
     """
@@ -115,8 +114,8 @@ class Anesthesia(dj.Lookup):
 
 @schema
 class Person(dj.Lookup):
-    definition = """
-    # person information
+    definition = """  # person information
+
     username      : char(12)   # lab member
     ---
     full_name     : varchar(255)
@@ -143,6 +142,7 @@ class Person(dj.Lookup):
 @schema
 class BrainArea(dj.Lookup):
     definition = """
+
     brain_area          : char(12)     # short name for cortical area
     ---
     area_description    : varchar(255)
@@ -167,6 +167,7 @@ class BrainArea(dj.Lookup):
 @schema
 class Layer(dj.Lookup):
     definition = """
+
     layer                : char(12)     # short name for cortical layer
     ---
     layer_description    : varchar(255)
@@ -189,8 +190,8 @@ class Layer(dj.Lookup):
 
 @schema
 class Software(dj.Lookup):
-    definition = """
-    # recording software information
+    definition = """ # recording software information
+
     software        : varchar(20) # name of the software
     version         : char(10)    # version
     ---
@@ -211,8 +212,8 @@ class Software(dj.Lookup):
 
 @schema
 class Compartment(dj.Lookup):
-    definition = """
-    # cell compartments that can be imaged
+    definition = """  # cell compartments that can be imaged
+
     compartment         : char(16)
     ---
     """
@@ -221,7 +222,8 @@ class Compartment(dj.Lookup):
 
 @schema
 class PMTFilterSet(dj.Lookup):
-    definition = """  #  microscope filter sets: dichroic and PMT Filters
+    definition = """  # microscope filter sets: dichroic and PMT Filters
+
     pmt_filter_set          : varchar(16)       # short name of microscope filter set
     ----
     primary_dichroic        :  varchar(255)     #  passes the laser  (excitation/emission separation)
@@ -233,7 +235,8 @@ class PMTFilterSet(dj.Lookup):
         ['2P3 blue-green A', '680 nm long-pass?', '506 nm long-pass', 'purchased with Thorlabs microscope']]
 
     class Channel(dj.Part):
-        definition = """  #  PMT description including dichroic and filter
+        definition = """  # PMT description including dichroic and filter
+
         -> PMTFilterSet
         pmt_channel : tinyint   #  pmt_channel
         ---
@@ -253,8 +256,8 @@ class PMTFilterSet(dj.Lookup):
 
 @schema
 class LaserCalibration(dj.Manual):
-    definition = """
-    # stores measured values from the laser power calibration
+    definition = """  # stores measured values from the laser power calibration
+
     -> Rig
     calibration_ts      : timestamp         # calibration timestamp -- automatic
     ---
@@ -301,7 +304,8 @@ class LaserCalibration(dj.Manual):
 
 @schema
 class Session(dj.Manual):
-    definition = """ # imaging session
+    definition = """  # imaging session
+
     -> mice.Mice
     session                       : smallint            # session index for the mouse
     ---
@@ -317,8 +321,8 @@ class Session(dj.Manual):
     """
 
     class Fluorophore(dj.Part):
-        definition = """
-        # Fluorophores expressed in prep for the imaging session
+        definition = """  # fluorophores expressed in prep for the imaging session
+
         -> Session
         -> Fluorophore
         ---
@@ -326,8 +330,8 @@ class Session(dj.Manual):
         """
 
     class TargetStructure(dj.Part):
-        definition = """
-        # specifies which neuronal structure was imaged
+        definition = """  # specifies which neuronal structure was imaged
+
         -> Session
         -> Fluorophore
         -> Compartment
@@ -335,7 +339,8 @@ class Session(dj.Manual):
         """
 
     class PMTFilterSet(dj.Part):
-        definition = """ # Fluorophores expressed in prep for the imaging session
+        definition = """
+
         -> Session
         ---
         -> PMTFilterSet
@@ -344,7 +349,8 @@ class Session(dj.Manual):
 
 @schema
 class Aim(dj.Lookup):
-    definition = """  # Declared purpose of the scan
+    definition = """  # declared purpose of the scan
+
     aim                  : varchar(36)                  # short name for the purpose of the scan
     ---
     aim_description      : varchar(255)
@@ -352,7 +358,7 @@ class Aim(dj.Lookup):
 
 
 class HasFilename:
-    """ Add local_filenames_as_wildcard property to Scan and Stack. """
+    """ Mixin to add local_filenames_as_wildcard property to Scan and Stack. """
     @property
     def local_filenames_as_wildcard(self):
         """Returns the local filename for all parts of this scan (ends in *.tif)."""
@@ -368,66 +374,82 @@ class HasFilename:
 @schema
 class Scan(dj.Manual, HasFilename):
     definition = """    # scanimage scan info
+
     -> Session
-    scan_idx             : smallint                     # number of TIFF stack file
+    scan_idx                : smallint              # number of TIFF stack file
     ---
     -> Lens
     -> BrainArea
     -> Aim
-    filename             : varchar(255)                 # file base name
-    depth=0              : int                          # (um) manual depth measurement with respect to the surface of the cortex where fastZ = 0
-    scan_notes           : varchar(4095)                # free-notes
-    site_number=0        : tinyint                      # site number
+    filename                : varchar(255)          # file base name
+    depth=0                 : int                   # (um) manual depth measurement with respect to the surface of the cortex where fastZ = 0
+    scan_notes              : varchar(4095)         # free-notes
+    site_number=0           : tinyint               # site number
     -> Software
-    scan_ts              : timestamp                    # don't edit
+    scan_ts                 : timestamp             # don't edit
     """
 
     class EyeVideo(dj.Part):
-        definition = """
-        # name of the eye tracking video
+        definition = """  # name of the eye tracking video
 
         -> Scan
         ---
-        filename        : varchar(50)                   # filename of the video
+        filename            : varchar(50)                   # filename of the video
         """
 
     class BehaviorFile(dj.Part):
-        definition = """
-        # name of the running wheel file
+        definition = """  # name of the running wheel file
 
         -> Scan
         ---
-        filename        : varchar(50)                   # filename of the video
+        filename            : varchar(50)                   # filename of the video
         """
 
     class Laser(dj.Part):
-        definition = """  # Laser parameters for the scan
+        definition = """  # laser parameters for the scan
+
         -> Scan
         ---
-        wavelength: float  # (nm)
-        power: float  # (mW) to brain
-        gdd: float  # gdd setting
+        wavelength          : float                         # (nm)
+        power               : float                         # (mW) to brain
+        gdd                 : float                         # gdd setting
         """
 
 
 @schema
-class Stack(dj.Manual, HasFilename):
-    definition = """
-    # scanimage scan info
+class Stack(dj.Manual):
+    definition = """ # structural stack information
     -> Session
-    stack_idx            : smallint                     # number of TIFF stack file
+    stack_idx               : smallint              # id of the stack
     ---
     -> Lens
     -> BrainArea
+    -> Aim
     -> Software
-    laser_wavelength     : int                          # (nm)
-    laser_power          : int                          # (mW) to brain
-    filename                    : varchar(255)                  # file base name
-    bottom_z             : int                          # z location at bottom of the stack
-    surf_z               : int                          # z location of surface
-    stack_notes          : varchar(4095)                # free-notes
-    scan_ts=CURRENT_TIMESTAMP : timestamp               # don't edit
+    surf_depth=0            : float                 # ScanImage's z at cortex surface
+    top_depth               : smallint              # (um) depth at top of the stack
+    bottom_depth            : smallint              # (um) depth at bottom of stack
+    stack_notes             : varchar(4095)         # free notes
+    stack_ts=CURRENT_TIMESTAMP : timestamp          # don't edit
     """
+
+    class Filenames(dj.Part, HasFilename):
+        definition = """ # filenames that compose one stack
+
+        -> Stack
+        filename            : varchar(255)          # file base name
+        ---
+        """
+
+    class Laser(dj.Part):
+        definition = """  # laser parameters for the stack
+
+        -> Stack
+        ---
+        wavelength          : int                   # (nm)
+        max_power           : float                 # (mW) to brain
+        gdd                 : float                 # gdd setting
+        """
 
 @schema
 class ScanIgnored(dj.Manual):
