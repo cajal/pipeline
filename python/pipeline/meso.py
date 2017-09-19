@@ -653,7 +653,7 @@ class Segmentation(dj.Computed):
             ## Set params specific to somatic or axonal/dendritic scans
             target = (SegmentationTask() & key).fetch1('compartment')
             if target == 'soma':
-                kwargs['init_on_patches'] = False
+                kwargs['init_on_patches'] = True if key['segmentation_method'] == 3 else False
                 kwargs['init_method'] = 'greedy_roi'
                 kwargs['soma_diameter'] = tuple(14 / (ScanInfo.Field() & key).microns_per_pixel) # 14 x 14 microns
             else:  # axons/dendrites
@@ -817,7 +817,7 @@ class Segmentation(dj.Computed):
         # Create masks
         if key['segmentation_method'] == 1:  # manual
             Segmentation.Manual()._make_tuples(key)
-        elif key['segmentation_method'] == 2:  # nmf
+        elif key['segmentation_method'] in [2, 3]:  # nmf
             Segmentation.CNMF()._make_tuples(key)
         else:
             msg = 'Unrecognized segmentation method {}'.format(key['segmentation_method'])
