@@ -663,7 +663,7 @@ class Segmentation(dj.Computed):
 
             # Set parameters for patch initialization
             if kwargs['init_on_patches']:
-                kwargs['patch_size'] = tuple(50 / (ScanInfo() & key).microns_per_pixel) # 50 x 50 microns
+                kwargs['patch_size'] = tuple(50 / (ScanInfo.Field() & key).microns_per_pixel) # 50 x 50 microns
                 kwargs['proportion_patch_overlap'] = 0.2 # 20% overlap
                 kwargs['num_components_per_patch'] = 15 if target == 'axon' else 3
 
