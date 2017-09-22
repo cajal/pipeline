@@ -1464,7 +1464,7 @@ class Quality(dj.Computed):
 
                 # Compute quantal size
                 middle_frame = int(np.floor(scan.num_frames / 2))
-                mini_scan = scan[:, :, max(middle_frame - 2000, 0): middle_frame + 2000]
+                mini_scan = scan_[:, :, max(middle_frame - 2000, 0): middle_frame + 2000]
                 results = quality.compute_quantal_size(mini_scan)
                 min_intensity, max_intensity, _, _, quantal_size, zero_level = results
                 quantal_frame = (np.mean(mini_scan, axis=-1) - zero_level) / quantal_size
