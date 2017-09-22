@@ -433,7 +433,7 @@ class Stack(dj.Manual):
     stack_ts=CURRENT_TIMESTAMP : timestamp          # don't edit
     """
 
-    class Filenames(dj.Part, HasFilename):
+    class Filename(dj.Part, HasFilename):
         definition = """ # filenames that compose one stack
 
         -> Stack
