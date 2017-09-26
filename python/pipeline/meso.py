@@ -649,6 +649,7 @@ class Segmentation(dj.Computed):
             kwargs['num_components'] = (SegmentationTask() & key).estimate_num_components()
             kwargs['num_background_components'] = 1
             kwargs['merge_threshold'] = 0.7
+            kwargs['fps'] = scan.fps
 
             ## Set params specific to somatic or axonal/dendritic scans
             target = (SegmentationTask() & key).fetch1('compartment')
@@ -665,7 +666,7 @@ class Segmentation(dj.Computed):
             if kwargs['init_on_patches']:
                 kwargs['patch_size'] = tuple(50 / (ScanInfo.Field() & key).microns_per_pixel) # 50 x 50 microns
                 kwargs['proportion_patch_overlap'] = 0.2 # 20% overlap
-                kwargs['num_components_per_patch'] = 15 if target == 'axon' else 3
+                kwargs['num_components_per_patch'] = 5 if target == 'soma' else 15
 
             ## Set performance/execution parameters (heuristically), decrease if memory overflows
             kwargs['num_processes'] = 12  # Set to None for all cores available
