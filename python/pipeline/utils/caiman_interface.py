@@ -193,7 +193,7 @@ def extract_masks(scan, num_components=200, num_background_components=1,
     # Removing bad components (more stringent criteria)
     log('Removing bad components...')
     good_indices, _ = components_evaluation.estimate_components_quality(C + YrA, scan, A,
-        C, b, f, final_frate=fps, r_values_min=0.8, fitness_min=-35, fitness_delta_min=-35)
+        C, b, f, final_frate=fps, r_values_min=0.8, fitness_min=-40, fitness_delta_min=-40)
     A = A.toarray()[:, good_indices]
     C = C[good_indices]
     YrA = YrA[good_indices]
