@@ -426,7 +426,6 @@ class Stack(dj.Manual):
     -> BrainArea
     -> Aim
     -> Software
-    surf_depth=0            : float                 # ScanImage's z at cortex surface
     top_depth               : smallint              # (um) depth at top of the stack
     bottom_depth            : smallint              # (um) depth at bottom of stack
     stack_notes             : varchar(4095)         # free notes
@@ -434,11 +433,13 @@ class Stack(dj.Manual):
     """
 
     class Filename(dj.Part, HasFilename):
-        definition = """ # filenames that compose one stack
+        definition = """ # filenames that compose one stack (used in resonant and 3p scans)
 
         -> Stack
-        filename            : varchar(255)          # file base name
+        filename_idx        : tinyint               # id of the file
         ---
+        filename            : varchar(255)          # file base name
+        surf_depth=0        : float                 # ScanImage's z at cortex surface
         """
 
     class Laser(dj.Part):
