@@ -112,7 +112,7 @@ class ScanInfo(dj.Imported):
         # Insert slice information
         z_zero = (experiment.Scan() & key).fetch1('depth')  # true depth at ScanImage's 0
         for slice_id, z_slice in enumerate(scan.field_depths):
-            ScanInfo.Slice().insert1({**key, 'slice': slice_id + 1, 'z': z_zero + z_slice})
+            ScanInfo.Slice().insert1({**key, 'slice': slice_id + 1, 'z': z_zero - z_slice})
 
         self.notify(key)
 
