@@ -1426,7 +1426,7 @@ class Quality(dj.Computed):
     class QuantalSize(dj.Part):
         definition = """ # quantal size in images
 
-        -> ScanInfo
+        -> Quality
         -> shared.Field
         -> shared.Channel
         ---
