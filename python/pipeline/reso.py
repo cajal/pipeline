@@ -625,12 +625,15 @@ class Segmentation(dj.Computed):
             """
             from .utils import caiman_interface as cmn
             import json
+            import uuid
+            import os
 
             print('')
             print('*' * 85)
             print('Processing {}'.format(key))
 
             # Load scan
+            print('Loading the scan...')
             channel = key['channel'] - 1
             slice_id = key['slice'] - 1
             scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
@@ -673,10 +676,19 @@ class Segmentation(dj.Computed):
             kwargs['num_processes'] = 12  # Set to None for all cores available
             kwargs['num_pixels_per_process'] = 10000
 
+            # Save as memory mapped file (as expected by CaImAn)
+            print('Creating memory mapped file...')
+            mmap_scan = cmn._save_as_memmap(scan_, base_name='/tmp/caiman-{}'.format(uuid.uuid4()))
+            scan_ = mmap_scan.reshape(scan_.shape, order='F') # deallocates original memory
+
             # Extract traces
             print('Extracting masks and traces (cnmf)...')
-            cnmf_result = cmn.extract_masks(scan_, **kwargs)
+            cnmf_result = cmn.extract_masks(scan_, mmap_scan, **kwargs)
             (masks, traces, background_masks, background_traces, raw_traces) = cnmf_result
+
+            # Delete memory mapped scan
+            print('Deleting memory mapped scan...')
+            os.remove(mmap_scan.filename)
 
             # Insert CNMF results
             print('Inserting masks, background components and traces...')
