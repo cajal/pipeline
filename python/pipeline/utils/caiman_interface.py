@@ -5,7 +5,6 @@ from caiman.utils import visualization
 from caiman.source_extraction.cnmf import map_reduce, initialization, pre_processing, \
                                           merging, spatial, temporal, deconvolution
 import glob, os, time
-import uuid
 
 def log(*messages):
     """ Simple logging function."""
@@ -13,7 +12,7 @@ def log(*messages):
     print(formatted_time, *messages, flush=True)
 
 
-def extract_masks(scan, num_components=200, num_background_components=1,
+def extract_masks(scan, mmap_scan, num_components=200, num_background_components=1,
                   merge_threshold=0.8, init_on_patches=True, init_method='greedy_roi',
                   soma_diameter=(14, 14), snmf_alpha=None, patch_size=(50, 50),
                   proportion_patch_overlap=0.2, num_components_per_patch=5,
@@ -29,6 +28,7 @@ def extract_masks(scan, num_components=200, num_background_components=1,
         temporal update
 
     :param np.array scan: 3-dimensional scan (image_height, image_width, num_frames).
+    :param np.memmap mmap_scan: 2-d scan (image_height * image_width, num_frames)
     :param int num_components: An estimate of the number of spatial components in the scan
     :param int num_background_components: Number of components to model the background.
     :param int merge_threshold: Maximal temporal correlation allowed between the activity
@@ -69,10 +69,6 @@ def extract_masks(scan, num_components=200, num_background_components=1,
     """
     # Get some params
     image_height, image_width, num_frames = scan.shape
-
-    # Save as memory mapped file (as expected by CaImAn)
-    log('Creating memory mapped file...')
-    mmap_scan = _save_as_memmap(scan, base_name='/tmp/caiman-{}'.format(uuid.uuid4()))
 
     # Start the ipyparallel cluster
     client, direct_view, num_processes = cluster.setup_cluster(n_processes=num_processes)
@@ -200,9 +196,6 @@ def extract_masks(scan, num_components=200, num_background_components=1,
 
     log('Done.')
 
-    # Delete memory mapped scan
-    os.remove(mmap_scan.filename)
-
     # Stop ipyparallel cluster
     client.close()
     cluster.stop_server()
@@ -227,11 +220,12 @@ def extract_masks(scan, num_components=200, num_background_components=1,
     return masks, traces, background_masks, background_traces, raw_traces
 
 
-def _save_as_memmap(scan, base_name='caiman'):
+def _save_as_memmap(scan, base_name='caiman', chunk_size=5000):
     """Save the scan as a memory mapped file as expected by caiman
 
     :param np.array scan: Scan to save shaped (image_height, image_width, num_frames)
     :param string base_name: Base file name for the scan. No underscores.
+    :param int chunk_size: Write the mmap_scan chunk frames at a time. Memory efficient.
 
     :returns: Filename of the mmap file.
     :rtype: string
@@ -246,7 +240,9 @@ def _save_as_memmap(scan, base_name='caiman'):
 
     # Create memory mapped file
     mmap_scan = np.memmap(filename, mode='w+', shape=(num_pixels, num_frames), dtype=np.float32)
-    mmap_scan[:] = scan.reshape(num_pixels, num_frames, order='F')
+    for i in range(0, num_frames, chunk_size):
+        chunk = scan[..., i: i + chunk_size].reshape((num_pixels, -1), order='F')
+        mmap_scan[:, i: i + chunk_size] = chunk
     mmap_scan.flush()
 
     return mmap_scan
