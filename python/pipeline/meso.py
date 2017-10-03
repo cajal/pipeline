@@ -247,7 +247,7 @@ class MotionCorrection(dj.Computed):
 
         # Read the scan
         scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
-        scan = scanreader.read_scan(scan_filename, dtype=np.float32)
+        scan = scanreader.read_scan(scan_filename)
 
         for field_id in range(scan.num_fields):
             print('Correcting motion in field', field_id + 1)
@@ -268,6 +268,7 @@ class MotionCorrection(dj.Computed):
             skip_rows = int(round(px_height * 0.10))
             skip_cols = int(round(px_width * 0.10))
             scan_ = scan[field_id, skip_rows: -skip_rows, skip_cols: -skip_cols, channel, :]  # height x width x frames
+            scan_ = scan_.astype(np.float32, copy=False)
 
             # Correct raster effects (needed for subpixel changes in y)
             correct_raster = (RasterCorrection() & key & {'field': field_id + 1}).get_correct_raster()
@@ -407,14 +408,8 @@ class MotionCorrection(dj.Computed):
         y_shifts, x_shifts = self.fetch1('y_shifts', 'x_shifts')
         xy_motion = np.stack([x_shifts, y_shifts])
 
-        def my_lambda_function(scan, indices=None):
-            if indices is None:
-                return galvo_corrections.correct_motion(scan, xy_motion)
-            else:
-                return galvo_corrections.correct_motion(scan, xy_motion[:, indices])
-
-        return my_lambda_function
-
+        return lambda scan, indices=slice(None): galvo_corrections.correct_motion(scan,
+                                                 xy_motion[:, indices])
 
 @schema
 class SummaryImages(dj.Computed):
@@ -1239,7 +1234,7 @@ class Activity(dj.Computed):
     """
 
     def _make_tuples(self, key):
-        print('Creating activity traces...')
+        print('Creating activity traces for', key)
 
         # Get fluorescence
         fps = (ScanInfo() & key).fetch1('fps')
