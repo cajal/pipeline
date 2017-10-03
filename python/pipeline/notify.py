@@ -30,7 +30,7 @@ class SlackUser(dj.Manual):
         if self:
             from slacker import Slacker
             api_key, user = (self * SlackConnection()).fetch1('api_key','slack_user')
-            s = Slacker(api_key)
+            s = Slacker(api_key, timeout=60)
 
             if message: # None or ''
                 s.chat.post_message('@' + user, message, as_user=True)

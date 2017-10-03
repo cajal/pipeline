@@ -101,11 +101,11 @@ class ScanInfo(dj.Imported):
             return np.array([um_height / px_height, um_width / px_width])
 
     def _make_tuples(self, key):
-        """ Read some scan parameters and compute quantal size."""
+        """ Read and store some scan parameters."""
         # Read the scan
         print('Reading header...')
         scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
-        scan = scanreader.read_scan(scan_filename, dtype=np.float32)
+        scan = scanreader.read_scan(scan_filename)
 
         # Get attributes
         tuple_ = key.copy()  # in case key is reused somewhere else
@@ -229,8 +229,8 @@ class MotionCorrection(dj.Computed):
     template                        : longblob      # image used as alignment template
     y_shifts                        : longblob      # (pixels) y motion correction shifts
     x_shifts                        : longblob      # (pixels) x motion correction shifts
-    y_std                           : float         # (um) standard deviation of y shifts
-    x_std                           : float         # (um) standard deviation of x shifts
+    y_std                           : float         # (pixels) standard deviation of y shifts
+    x_std                           : float         # (pixels) standard deviation of x shifts
     y_outlier_frames                : longblob      # mask with true for frames with high y shifts (already corrected)
     x_outlier_frames                : longblob      # mask with true for frames with high x shifts (already corrected)
     align_time=CURRENT_TIMESTAMP    : timestamp     # automatic
@@ -247,15 +247,14 @@ class MotionCorrection(dj.Computed):
 
         # Read the scan
         scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
-        scan = scanreader.read_scan(scan_filename, dtype=np.float32)
+        scan = scanreader.read_scan(scan_filename)
 
         for field_id in range(scan.num_fields):
             print('Correcting motion in field', field_id + 1)
 
             # Get some params
             field = (ScanInfo.Field() & key & {'field': field_id + 1})
-            um_height, px_height, um_width, px_width = field.fetch1('um_height', 'px_height',
-                                                                    'um_width', 'px_width')
+            px_height, px_width = field.fetch1('px_height', 'px_width')
 
             # Select channel
             correction_channel = (CorrectionChannel() & key & {'field': field_id + 1})
@@ -269,6 +268,7 @@ class MotionCorrection(dj.Computed):
             skip_rows = int(round(px_height * 0.10))
             skip_cols = int(round(px_width * 0.10))
             scan_ = scan[field_id, skip_rows: -skip_rows, skip_cols: -skip_cols, channel, :]  # height x width x frames
+            scan_ = scan_.astype(np.float32, copy=False)
 
             # Correct raster effects (needed for subpixel changes in y)
             correct_raster = (RasterCorrection() & key & {'field': field_id + 1}).get_correct_raster()
@@ -408,14 +408,8 @@ class MotionCorrection(dj.Computed):
         y_shifts, x_shifts = self.fetch1('y_shifts', 'x_shifts')
         xy_motion = np.stack([x_shifts, y_shifts])
 
-        def my_lambda_function(scan, indices=None):
-            if indices is None:
-                return galvo_corrections.correct_motion(scan, xy_motion)
-            else:
-                return galvo_corrections.correct_motion(scan, xy_motion[:, indices])
-
-        return my_lambda_function
-
+        return lambda scan, indices=slice(None): galvo_corrections.correct_motion(scan,
+                                                 xy_motion[:, indices])
 
 @schema
 class SummaryImages(dj.Computed):
@@ -625,12 +619,15 @@ class Segmentation(dj.Computed):
             """
             from .utils import caiman_interface as cmn
             import json
+            import uuid
+            import os
 
             print('')
             print('*' * 85)
             print('Processing {}'.format(key))
 
             # Load scan
+            print('Loading the scan...')
             channel = key['channel'] - 1
             field_id = key['field'] - 1
             scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
@@ -650,29 +647,42 @@ class Segmentation(dj.Computed):
             kwargs['num_components'] = (SegmentationTask() & key).estimate_num_components()
             kwargs['num_background_components'] = 1
             kwargs['merge_threshold'] = 0.7
+            kwargs['fps'] = scan.fps
 
             ## Set params specific to somatic or axonal/dendritic scans
             target = (SegmentationTask() & key).fetch1('compartment')
             if target == 'soma':
-                kwargs['init_on_patches'] = False
+                kwargs['init_on_patches'] = True if key['segmentation_method'] == 3 else False
                 kwargs['init_method'] = 'greedy_roi'
                 kwargs['soma_diameter'] = tuple(14 / (ScanInfo.Field() & key).microns_per_pixel) # 14 x 14 microns
             else:  # axons/dendrites
                 kwargs['init_on_patches'] = True
                 kwargs['init_method'] = 'sparse_nmf'
                 kwargs['snmf_alpha'] = 500  # 10^2 to 10^3.5 is a good range
-                kwargs['patch_size'] = tuple(50 / (ScanInfo.Field() & key).microns_per_pixel) # 40 x 40 microns
+
+            # Set parameters for patch initialization
+            if kwargs['init_on_patches']:
+                kwargs['patch_size'] = tuple(50 / (ScanInfo.Field() & key).microns_per_pixel) # 50 x 50 microns
                 kwargs['proportion_patch_overlap'] = 0.2 # 20% overlap
-                kwargs['num_components_per_patch'] = 15
+                kwargs['num_components_per_patch'] = 5 if target == 'soma' else 15
 
             ## Set performance/execution parameters (heuristically), decrease if memory overflows
             kwargs['num_processes'] = 12  # Set to None for all cores available
             kwargs['num_pixels_per_process'] = 10000
 
+            # Save as memory mapped file (as expected by CaImAn)
+            print('Creating memory mapped file...')
+            mmap_scan = cmn._save_as_memmap(scan_, base_name='/tmp/caiman-{}'.format(uuid.uuid4()))
+            scan_ = mmap_scan.reshape(scan_.shape, order='F') # deallocates original memory
+
             # Extract traces
             print('Extracting masks and traces (cnmf)...')
-            cnmf_result = cmn.extract_masks(scan_, **kwargs)
+            cnmf_result = cmn.extract_masks(scan_, mmap_scan, **kwargs)
             (masks, traces, background_masks, background_traces, raw_traces) = cnmf_result
+
+            # Delete memory mapped scan
+            print('Deleting memory mapped scan...')
+            os.remove(mmap_scan.filename)
 
             # Insert CNMF results
             print('Inserting masks, background components and traces...')
@@ -815,7 +825,7 @@ class Segmentation(dj.Computed):
         # Create masks
         if key['segmentation_method'] == 1:  # manual
             Segmentation.Manual()._make_tuples(key)
-        elif key['segmentation_method'] == 2:  # nmf
+        elif key['segmentation_method'] in [2, 3]:  # nmf
             Segmentation.CNMF()._make_tuples(key)
         else:
             msg = 'Unrecognized segmentation method {}'.format(key['segmentation_method'])
@@ -1224,7 +1234,7 @@ class Activity(dj.Computed):
     """
 
     def _make_tuples(self, key):
-        print('Creating activity traces...')
+        print('Creating activity traces for', key)
 
         # Get fluorescence
         fps = (ScanInfo() & key).fetch1('fps')
@@ -1411,7 +1421,7 @@ class Quality(dj.Computed):
     class QuantalSize(dj.Part):
         definition = """ # quantal size in images
 
-        -> ScanInfo
+        -> Quality
         -> shared.Field
         -> shared.Channel
         ---
@@ -1462,7 +1472,7 @@ class Quality(dj.Computed):
 
                 # Compute quantal size
                 middle_frame = int(np.floor(scan.num_frames / 2))
-                mini_scan = scan[:, :, max(middle_frame - 2000, 0): middle_frame + 2000]
+                mini_scan = scan_[:, :, max(middle_frame - 2000, 0): middle_frame + 2000]
                 results = quality.compute_quantal_size(mini_scan)
                 min_intensity, max_intensity, _, _, quantal_size, zero_level = results
                 quantal_frame = (np.mean(mini_scan, axis=-1) - zero_level) / quantal_size
