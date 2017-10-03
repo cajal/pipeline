@@ -5,7 +5,6 @@ from caiman.utils import visualization
 from caiman.source_extraction.cnmf import map_reduce, initialization, pre_processing, \
                                           merging, spatial, temporal, deconvolution
 import glob, os, time
-import uuid
 
 def log(*messages):
     """ Simple logging function."""
@@ -13,12 +12,11 @@ def log(*messages):
     print(formatted_time, *messages, flush=True)
 
 
-def extract_masks(scan, num_components=200, num_background_components=1,
-                  merge_threshold=0.8, init_on_patches=False, init_method='greedy_roi',
-                  soma_diameter=(10, 10), snmf_alpha=None, patch_size=None,
-                  proportion_patch_overlap=None, num_components_per_patch=None,
-                  num_processes=12, num_pixels_per_process=5000,
-                  remove_bad_components=False, fps=None):
+def extract_masks(scan, mmap_scan, num_components=200, num_background_components=1,
+                  merge_threshold=0.8, init_on_patches=True, init_method='greedy_roi',
+                  soma_diameter=(14, 14), snmf_alpha=None, patch_size=(50, 50),
+                  proportion_patch_overlap=0.2, num_components_per_patch=5,
+                  num_processes=12, num_pixels_per_process=5000, fps=15):
     """ Extract masks from multi-photon scans using CNMF.
 
     Uses constrained non-negative matrix factorization to find spatial components (masks)
@@ -30,6 +28,7 @@ def extract_masks(scan, num_components=200, num_background_components=1,
         temporal update
 
     :param np.array scan: 3-dimensional scan (image_height, image_width, num_frames).
+    :param np.memmap mmap_scan: 2-d scan (image_height * image_width, num_frames)
     :param int num_components: An estimate of the number of spatial components in the scan
     :param int num_background_components: Number of components to model the background.
     :param int merge_threshold: Maximal temporal correlation allowed between the activity
@@ -52,8 +51,7 @@ def extract_masks(scan, num_components=200, num_background_components=1,
         processes as available cores.
     :param int num_pixels_per_process: Number of pixels that a process handles each
         iteration.
-    :param remove_bad_components: ...
-    :param fps: ...
+    :param fps: Frame rate. Used for temporal downsampling and to remove bad components.
 
     :returns: Weighted masks (image_height x image_width x num_components). Inferred
         location of each component.
@@ -71,11 +69,6 @@ def extract_masks(scan, num_components=200, num_background_components=1,
     """
     # Get some params
     image_height, image_width, num_frames = scan.shape
-
-    # Save as memory mapped file in F order (that's how caiman wants it)
-    log('Creating memory mapped file...')
-    base_name = 'caiman-{}'.format(uuid.uuid4())
-    mmap_scan = _save_as_memmap(scan, '/tmp/{}'.format(base_name), order='F')
 
     # Start the ipyparallel cluster
     client, direct_view, num_processes = cluster.setup_cluster(n_processes=num_processes)
@@ -100,9 +93,10 @@ def extract_masks(scan, num_components=200, num_background_components=1,
                    'temporal_params': {'p': 0, 'method': 'UNUSED.', 'block_size': 'UNUSED.'},
                    'init_params': {'K': num_components_per_patch, 'gSig': np.array(soma_diameter)/2,
                                    'method': init_method, 'alpha_snmf': snmf_alpha,
-                                   'nb': num_background_components, 'ssub': 1, 'tsub': 1,
-                                   'options_local_NMF': 'UNUSED.', 'normalize_init': True},
-                                   # ssub, tsub, options_local_NMF, normalize_init unnecessary (same as default values)
+                                   'nb': num_background_components, 'ssub': 1, 'tsub': max(int(fps / 5), 1),
+                                   'options_local_NMF': 'UNUSED.', 'normalize_init': True,
+                                   'rolling_sum': True, 'rolling_length': 100},
+                                   # ssub, tsub, options_local_NMF, normalize_init, rolling_sum unnecessary (same as default values)
                    'merging' : {'thr': 'UNUSED.'}}
 
         # Initialize per patch
@@ -112,13 +106,16 @@ def extract_masks(scan, num_components=200, num_background_components=1,
         initial_A, initial_C, YrA, initial_b, initial_f, pixels_noise, _ = res
 
         # Merge spatially overlapping components
-        res = merging.merge_components(mmap_scan, initial_A, initial_b, initial_C, initial_f,
-                                       initial_C, pixels_noise, {'p': 0, 'method': 'cvxpy'},
-                                       None, dview=direct_view, thr=merge_threshold)
-        initial_A, initial_C, num_components, merged_ROIs, S, bl, c1, neurons_noise, g = res
+        merged_masks = ['dummy']
+        while len(merged_masks) > 0:
+            res = merging.merge_components(mmap_scan, initial_A, initial_b, initial_C,
+                                           initial_f, initial_C, pixels_noise,
+                                           {'p': 0, 'method': 'cvxpy'}, spatial_params=None,
+                                           dview=direct_view, thr=merge_threshold, mx=np.Inf)
+            initial_A, initial_C, num_components, merged_masks, S, bl, c1, neurons_noise, g = res
 
         # Delete log files (one per patch)
-        log_files = glob.glob('{}*_LOG_*'.format(base_name))
+        log_files = glob.glob('caiman*_LOG_*')
         for log_file in log_files:
             os.remove(log_file)
     else:
@@ -130,23 +127,20 @@ def extract_masks(scan, num_components=200, num_background_components=1,
                                       res[3], maxIter=3)
             initial_A, initial_C, initial_b, initial_f = res
         else:
-            print("Warning: Running sparse_nmf initialization on the entire field of view "
-                  "takes a lot of time.")
+            print('Warning: Running sparse_nmf initialization on the entire field of view '
+                  'takes a lot of time.')
             res = initialization.initialize_components(scan, K=num_components,
                                                        nb=num_background_components, method=init_method,
                                                        alpha_snmf=snmf_alpha)
             initial_A, initial_C, initial_b, initial_f, _ = res
 
-    # Remove bad components
-    if remove_bad_components:
-        log('Removing bad components...')
-        # TODO: Ask Andrea to document this: what each threshold mean and how are defaults chosen.
-        good_indices, _, _, _, _ = components_evaluation.estimate_components_quality(initial_C,
-            scan, initial_A, initial_C, initial_b, initial_f, final_frate=fps, r_values_min=0.5,
-            fitness_min=-15, fitness_delta_min=-15, return_all=True, N=5)
-
-        initial_A = initial_A[:, good_indices]
-        initial_C = initial_C[good_indices]
+    # Remove bad components (based on spatial consistency and spiking activity)
+    log('Removing bad components...')
+    good_indices, _ = components_evaluation.estimate_components_quality(initial_C, scan,
+        initial_A, initial_C, initial_b, initial_f, final_frate=fps, r_values_min=0.7,
+        fitness_min=-20, fitness_delta_min=-20)
+    initial_A = initial_A[:, good_indices]
+    initial_C = initial_C[good_indices]
 
     # Estimate noise per pixel
     log('Calculating noise per pixel...')
@@ -154,12 +148,11 @@ def extract_masks(scan, num_components=200, num_background_components=1,
 
     # Update masks
     log('Updating masks...')
-    A, b, C, f = spatial.update_spatial_components(mmap_scan, initial_C,initial_f, initial_A,
+    A, b, C, f = spatial.update_spatial_components(mmap_scan, initial_C, initial_f, initial_A, b_in=initial_b,
                                                    sn=pixels_noise, dims=(image_height, image_width),
                                                    method='dilate', dview=direct_view,
                                                    n_pixels_per_process=num_pixels_per_process,
-                                                   nb=num_background_components,
-                                                   method_ls='lasso_lars')
+                                                   nb=num_background_components)
 
     # Update traces (no impulse response modelling p=0)
     log('Updating traces...')
@@ -171,19 +164,20 @@ def extract_masks(scan, num_components=200, num_background_components=1,
 
     # Merge components
     log('Merging overlapping (and temporally correlated) masks...')
-    res = merging.merge_components(mmap_scan, A, b, C, f, S, pixels_noise, {'p': 0, 'method': 'cvxpy'},
-                                   None, dview=direct_view, thr=merge_threshold, bl=bl,
-                                   c1=c1, sn=neurons_noise, g=g)
-    A, C, num_components, merged_pairs, S, bl, c1, neurons_noise, g = res
+    merged_masks = ['dummy']
+    while len(merged_masks) > 0:
+        res = merging.merge_components(mmap_scan, A, b, C, f, S, pixels_noise, {'p': 0, 'method': 'cvxpy'},
+                                       None, dview=direct_view, thr=merge_threshold, bl=bl,
+                                       c1=c1, sn=neurons_noise, g=g)
+        A, C, num_components, merged_masks, S, bl, c1, neurons_noise, g = res
 
     # Refine masks
     log('Refining masks...')
-    A, b, C, f = spatial.update_spatial_components(mmap_scan, C, f, A, sn=pixels_noise,
+    A, b, C, f = spatial.update_spatial_components(mmap_scan, C, f, A, b_in=b, sn=pixels_noise,
                                                    dims=(image_height, image_width),
                                                    method='dilate', dview=direct_view,
                                                    n_pixels_per_process=num_pixels_per_process,
-                                                   nb=num_background_components,
-                                                   method_ls='lasso_lars')
+                                                   nb=num_background_components)
 
     # Refine traces
     log('Refining traces...')
@@ -192,17 +186,22 @@ def extract_masks(scan, num_components=200, num_background_components=1,
                                               dview=direct_view)
     C, A, b, f, S, bl, c1, neurons_noise, g, YrA = res
 
-    log('Done.')
+    # Removing bad components (more stringent criteria)
+    log('Removing bad components...')
+    good_indices, _ = components_evaluation.estimate_components_quality(C + YrA, scan, A,
+        C, b, f, final_frate=fps, r_values_min=0.8, fitness_min=-40, fitness_delta_min=-40)
+    A = A.toarray()[:, good_indices]
+    C = C[good_indices]
+    YrA = YrA[good_indices]
 
-    # Delete memory mapped scan
-    os.remove(mmap_scan.filename)
+    log('Done.')
 
     # Stop ipyparallel cluster
     client.close()
     cluster.stop_server()
 
     # Get results
-    masks = A.toarray().reshape((image_height, image_width, -1), order='F') # h x w x num_components
+    masks = A.reshape((image_height, image_width, -1), order='F') # h x w x num_components
     traces = C  # num_components x num_frames
     background_masks = b.reshape((image_height, image_width, -1), order='F') # h x w x num_components
     background_traces = f  # num_background_components x num_frames
@@ -221,12 +220,12 @@ def extract_masks(scan, num_components=200, num_background_components=1,
     return masks, traces, background_masks, background_traces, raw_traces
 
 
-def _save_as_memmap(scan, base_name='caiman', order='C'):
+def _save_as_memmap(scan, base_name='caiman', chunk_size=5000):
     """Save the scan as a memory mapped file as expected by caiman
 
     :param np.array scan: Scan to save shaped (image_height, image_width, num_frames)
     :param string base_name: Base file name for the scan. No underscores.
-    :param string order: Order of the array: either 'C' or 'F'.
+    :param int chunk_size: Write the mmap_scan chunk frames at a time. Memory efficient.
 
     :returns: Filename of the mmap file.
     :rtype: string
@@ -236,13 +235,14 @@ def _save_as_memmap(scan, base_name='caiman', order='C'):
     num_pixels = image_height * image_width
 
     # Build filename
-    filename = '{}_d1_{}_d2_{}_d3_1_order_{}_frames_{}_.mmap'.format(base_name, image_height,
-                                                               image_width, order, num_frames)
+    filename = '{}_d1_{}_d2_{}_d3_1_order_C_frames_{}_.mmap'.format(base_name, image_height,
+                                                                    image_width, num_frames)
 
     # Create memory mapped file
-    mmap_scan = np.memmap(filename, mode='w+', dtype=np.float32, order=order,
-                          shape=(num_pixels, num_frames))
-    mmap_scan[:] = scan.reshape(num_pixels, num_frames, order=order)
+    mmap_scan = np.memmap(filename, mode='w+', shape=(num_pixels, num_frames), dtype=np.float32)
+    for i in range(0, num_frames, chunk_size):
+        chunk = scan[..., i: i + chunk_size].reshape((num_pixels, -1), order='F')
+        mmap_scan[:, i: i + chunk_size] = chunk
     mmap_scan.flush()
 
     return mmap_scan

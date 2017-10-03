@@ -37,7 +37,8 @@ class SegmentationMethod(dj.Lookup):
 
     contents = [
     [1, 'manual', '', 'matlab'],
-    [2, 'nmf', 'constrained non-negative matrix factorization from Pnevmatikakis et al. (2016)', 'python']
+    [2, 'nmf', 'constrained non-negative matrix factorization from Pnevmatikakis et al. (2016)', 'python'],
+    [3, 'nmf-patches', 'same as nmf but initialized in small image patches', 'python']
     ]
 
 @schema
