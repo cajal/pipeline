@@ -1,11 +1,10 @@
 """Interface to the CaImAn package (https://github.com/simonsfoundation/CaImAn)."""
 import numpy as np
-from caiman import cluster, mmapping
+from caiman import cluster, components_evaluation
 from caiman.utils import visualization
 from caiman.source_extraction.cnmf import map_reduce, initialization, pre_processing, \
                                           merging, spatial, temporal, deconvolution
 import glob, os, time
-
 
 def log(*messages):
     """ Simple logging function."""
@@ -13,11 +12,11 @@ def log(*messages):
     print(formatted_time, *messages, flush=True)
 
 
-def extract_masks(scan, num_components=200, merge_threshold=0.8,
-                  num_background_components=4, num_processes=12,
-                  num_pixels_per_process=5000, init_method='greedy_roi',
-                  soma_radius=(5, 5), snmf_alpha=None, init_on_patches=False,
-                  patch_downsampling_factor=None, proportion_patch_overlap=None):
+def extract_masks(scan, mmap_scan, num_components=200, num_background_components=1,
+                  merge_threshold=0.8, init_on_patches=True, init_method='greedy_roi',
+                  soma_diameter=(14, 14), snmf_alpha=None, patch_size=(50, 50),
+                  proportion_patch_overlap=0.2, num_components_per_patch=5,
+                  num_processes=12, num_pixels_per_process=5000, fps=15):
     """ Extract masks from multi-photon scans using CNMF.
 
     Uses constrained non-negative matrix factorization to find spatial components (masks)
@@ -29,29 +28,30 @@ def extract_masks(scan, num_components=200, merge_threshold=0.8,
         temporal update
 
     :param np.array scan: 3-dimensional scan (image_height, image_width, num_frames).
+    :param np.memmap mmap_scan: 2-d scan (image_height * image_width, num_frames)
     :param int num_components: An estimate of the number of spatial components in the scan
+    :param int num_background_components: Number of components to model the background.
     :param int merge_threshold: Maximal temporal correlation allowed between the activity
         of overlapping components before merging them.
-    :param int num_background_components:  Number of background components to use.
-    :param int num_processes: Number of processes to run in parallel. None for as many
-        processes as available cores.
-    :param int num_pixels_per_process: Number of pixels that a process handles each
-        iteration.
+    :param bool init_on_patches: If True, run the initialization methods on small patches
+        of the scan rather than on the whole image.
     :param string init_method: Initialization method for the components.
         'greedy_roi': Look for a gaussian-shaped patch, apply rank-1 NMF, store
             components, calculate residual scan and repeat for num_components.
         'sparse_nmf': Regularized non-negative matrix factorization (as impl. in sklearn)
-        'local_nmf': ...
-    :param (float, float) soma_radius: Estimated neuron radius in y and x (pixels). Used
-        in'greedy_roi' initialization to define the size of the gaussian window.
-    :param int snmf_alpha: Regularization parameter (alpha) for the sparse NMF (if used).
-    :param bool init_on_patches: If True, run the initialization methods on small patches
-        of the scan rather than on the whole image.
-    :param float patch_downsampling_factor: Image dimensions are divided by this factor
-        to obtain patch dimensions, e.g., if original size is 256x256 and factor is 10,
-        patches will be 26x26.
+    :param (float, float) soma_diameter: Estimated neuron size in y and x (pixels). Used
+        in'greedy_roi' initialization to search for neurons of this size.
+    :param int snmf_alpha: Regularization parameter (alpha) for sparse NMF (if used).
+    :param (float, float) patch_size: Size of the patches in y and x (pixels).
     :param float proportion_patch_overlap: Patches are sampled in a sliding window. This
-        controls how much overlap is between adjacent patches (0 for none, 0.9 for 90%)
+        controls how much overlap is between adjacent patches (0 for none, 0.9 for 90%).
+    :param int num_components_per_patch: Number of components per patch (used if
+        init_on_patches=True)
+    :param int num_processes: Number of processes to run in parallel. None for as many
+        processes as available cores.
+    :param int num_pixels_per_process: Number of pixels that a process handles each
+        iteration.
+    :param fps: Frame rate. Used for temporal downsampling and to remove bad components.
 
     :returns: Weighted masks (image_height x image_width x num_components). Inferred
         location of each component.
@@ -67,91 +67,96 @@ def extract_masks(scan, num_components=200, merge_threshold=0.8,
         some components will be merged or deleted.
     ..warning:: Better results if scans are nonnegative.
     """
-    log('Starting CNMF...')
-
-    # Save as memory mapped file in F order (that's how caiman wants it)
-    mmap_filename = _save_as_memmap(scan, base_name='/tmp/caiman', order='F')
-
-    # 'Load' scan
-    mmap_scan, (image_height, image_width), num_frames = mmapping.load_memmap(mmap_filename)
-    images = np.reshape(mmap_scan.T, (num_frames, image_height, image_width), order='F')
+    # Get some params
+    image_height, image_width, num_frames = scan.shape
 
     # Start the ipyparallel cluster
     client, direct_view, num_processes = cluster.setup_cluster(n_processes=num_processes)
-
-    # ******* transcribed from caiman ************
-    Y = np.transpose(images, [1, 2, 0]) # (x, y, t)
-    Yr = np.transpose(np.reshape(images, (num_frames, -1), order='F')) # (t, pixels)
 
     # Initialize components
     log('Initializing components...')
     if init_on_patches:
         # TODO: Redo this (per-patch initialization) in a nicer/more efficient way
 
-        # Calculate some parameters
-        patch_size = np.array([image_height, image_width]) / patch_downsampling_factor
-        num_components_per_patch = num_components / patch_downsampling_factor**2
-        num_components_per_patch = max(num_components_per_patch, 1) # at least 1
-        overlap_in_pixels = patch_size * proportion_patch_overlap
-
         # Make sure they are integers
+        patch_size = np.array(patch_size)
         half_patch_size = np.int32(np.round(patch_size / 2))
         num_components_per_patch = int(round(num_components_per_patch))
-        overlap_in_pixels = np.int32(np.round(overlap_in_pixels))
+        patch_overlap = np.int32(np.round(patch_size * proportion_patch_overlap))
 
         # Create options dictionary (needed for run_CNMF_patches)
         options = {'patch_params': {'only_init': True, 'remove_very_bad_comps': False, # remove_very_bads_comps unnecesary (same as default)
                                     'ssub': 'UNUSED.', 'tsub': 'UNUSED',
-                                    'skip_refinement': 'UNUSED.'}, # remove_very_bads_comps unnecesary (same as default)
+                                    'skip_refinement': 'UNUSED.'},
                    'preprocess_params': {'check_nan': False}, # check_nan is unnecessary (same as default value)
                    'spatial_params': {'nb': num_background_components}, # nb is unnecessary, it is pased to the function and in init_params
                    'temporal_params': {'p': 0, 'method': 'UNUSED.', 'block_size': 'UNUSED.'},
-                   'init_params': {'K': num_components_per_patch, 'gSig': soma_radius,
+                   'init_params': {'K': num_components_per_patch, 'gSig': np.array(soma_diameter)/2,
                                    'method': init_method, 'alpha_snmf': snmf_alpha,
-                                   'nb': num_background_components, 'ssub': 1, 'tsub': 1,
-                                   'options_local_NMF': 'UNUSED.', 'normalize_init': True},
-                                   # ssub, tsub, options_local_NMF, normalize_init unnecessary (same as default values)
+                                   'nb': num_background_components, 'ssub': 1, 'tsub': max(int(fps / 5), 1),
+                                   'options_local_NMF': 'UNUSED.', 'normalize_init': True,
+                                   'rolling_sum': True, 'rolling_length': 100},
+                                   # ssub, tsub, options_local_NMF, normalize_init, rolling_sum unnecessary (same as default values)
                    'merging' : {'thr': 'UNUSED.'}}
 
         # Initialize per patch
-        res = map_reduce.run_CNMF_patches(mmap_filename, (image_height, image_width, num_frames),
-                                          options, rf=half_patch_size, stride=overlap_in_pixels,
+        res = map_reduce.run_CNMF_patches(mmap_scan.filename, (image_height, image_width, num_frames),
+                                          options, rf=half_patch_size, stride=patch_overlap,
                                           gnb=num_background_components, dview=direct_view)
         initial_A, initial_C, YrA, initial_b, initial_f, pixels_noise, _ = res
 
         # Merge spatially overlapping components
-        res = merging.merge_components(Yr, initial_A, initial_b, initial_C, initial_f,
-                                       initial_C, pixels_noise, {'p': 0, 'method': 'cvxpy'},
-                                       None, dview=direct_view, thr=merge_threshold)
-        initial_A, initial_C, num_components, merged_ROIs, S, bl, c1, neurons_noise, g = res
+        merged_masks = ['dummy']
+        while len(merged_masks) > 0:
+            res = merging.merge_components(mmap_scan, initial_A, initial_b, initial_C,
+                                           initial_f, initial_C, pixels_noise,
+                                           {'p': 0, 'method': 'cvxpy'}, spatial_params=None,
+                                           dview=direct_view, thr=merge_threshold, mx=np.Inf)
+            initial_A, initial_C, num_components, merged_masks, S, bl, c1, neurons_noise, g = res
 
         # Delete log files (one per patch)
         log_files = glob.glob('caiman*_LOG_*')
         for log_file in log_files:
             os.remove(log_file)
     else:
-        res = initialization.initialize_components(Y, K=num_components, gSig=soma_radius,
-                                                   nb=num_background_components,
-                                                   method=init_method, alpha_snmf=snmf_alpha)
-        initial_A, initial_C, initial_b, initial_f, _ = res
+        if init_method == 'greedy_roi':
+            res = _greedyROI(scan, num_components, soma_diameter, num_background_components)
+            log('Refining initial components (HALS)...')
+            res = initialization.hals(scan, res[0].reshape([image_height * image_width, -1], order='F'),
+                                      res[1], res[2].reshape([image_height * image_width, -1], order='F'),
+                                      res[3], maxIter=3)
+            initial_A, initial_C, initial_b, initial_f = res
+        else:
+            print('Warning: Running sparse_nmf initialization on the entire field of view '
+                  'takes a lot of time.')
+            res = initialization.initialize_components(scan, K=num_components,
+                                                       nb=num_background_components, method=init_method,
+                                                       alpha_snmf=snmf_alpha)
+            initial_A, initial_C, initial_b, initial_f, _ = res
+
+    # Remove bad components (based on spatial consistency and spiking activity)
+    log('Removing bad components...')
+    good_indices, _ = components_evaluation.estimate_components_quality(initial_C, scan,
+        initial_A, initial_C, initial_b, initial_f, final_frate=fps, r_values_min=0.7,
+        fitness_min=-20, fitness_delta_min=-20)
+    initial_A = initial_A[:, good_indices]
+    initial_C = initial_C[good_indices]
 
     # Estimate noise per pixel
     log('Calculating noise per pixel...')
-    pixels_noise, _ = pre_processing.get_noise_fft_parallel(Yr, num_pixels_per_process,
-                                                            direct_view)
+    pixels_noise, _ = pre_processing.get_noise_fft_parallel(mmap_scan, num_pixels_per_process, direct_view)
 
     # Update masks
     log('Updating masks...')
-    A, b, C, f = spatial.update_spatial_components(Yr, initial_C, initial_f, initial_A,
+    A, b, C, f = spatial.update_spatial_components(mmap_scan, initial_C, initial_f, initial_A, b_in=initial_b,
                                                    sn=pixels_noise, dims=(image_height, image_width),
                                                    method='dilate', dview=direct_view,
                                                    n_pixels_per_process=num_pixels_per_process,
-                                                   nb=num_background_components,
-                                                   method_ls='lasso_lars')
+                                                   nb=num_background_components)
 
     # Update traces (no impulse response modelling p=0)
     log('Updating traces...')
-    res = temporal.update_temporal_components(Yr, A, b, C, f, nb=num_background_components,
+    res = temporal.update_temporal_components(mmap_scan, A, b, C, f, nb=num_background_components,
                                               block_size=10000, p=0, method='cvxpy',
                                               dview=direct_view)
     C, A, b, f, S, bl, c1, neurons_noise, g, YrA = res
@@ -159,39 +164,44 @@ def extract_masks(scan, num_components=200, merge_threshold=0.8,
 
     # Merge components
     log('Merging overlapping (and temporally correlated) masks...')
-    res = merging.merge_components(Yr, A, b, C, f, S, pixels_noise, {'p': 0, 'method': 'cvxpy'},
-                                   None, dview=direct_view, thr=merge_threshold, bl=bl,
-                                   c1=c1, sn=neurons_noise, g=g)
-    A, C, num_components, merged_pairs, S, bl, c1, neurons_noise, g = res
+    merged_masks = ['dummy']
+    while len(merged_masks) > 0:
+        res = merging.merge_components(mmap_scan, A, b, C, f, S, pixels_noise, {'p': 0, 'method': 'cvxpy'},
+                                       None, dview=direct_view, thr=merge_threshold, bl=bl,
+                                       c1=c1, sn=neurons_noise, g=g)
+        A, C, num_components, merged_masks, S, bl, c1, neurons_noise, g = res
 
     # Refine masks
     log('Refining masks...')
-    A, b, C, f = spatial.update_spatial_components(Yr, C, f, A, sn=pixels_noise,
+    A, b, C, f = spatial.update_spatial_components(mmap_scan, C, f, A, b_in=b, sn=pixels_noise,
                                                    dims=(image_height, image_width),
                                                    method='dilate', dview=direct_view,
                                                    n_pixels_per_process=num_pixels_per_process,
-                                                   nb=num_background_components,
-                                                   method_ls='lasso_lars')
+                                                   nb=num_background_components)
 
     # Refine traces
     log('Refining traces...')
-    res = temporal.update_temporal_components(Yr, A, b, C, f, nb=num_background_components,
+    res = temporal.update_temporal_components(mmap_scan, A, b, C, f, nb=num_background_components,
                                               block_size=10000, p=0, method='cvxpy',
                                               dview=direct_view)
     C, A, b, f, S, bl, c1, neurons_noise, g, YrA = res
 
+    # Removing bad components (more stringent criteria)
+    log('Removing bad components...')
+    good_indices, _ = components_evaluation.estimate_components_quality(C + YrA, scan, A,
+        C, b, f, final_frate=fps, r_values_min=0.8, fitness_min=-40, fitness_delta_min=-40)
+    A = A.toarray()[:, good_indices]
+    C = C[good_indices]
+    YrA = YrA[good_indices]
+
     log('Done.')
-    #*********************
 
     # Stop ipyparallel cluster
     client.close()
     cluster.stop_server()
 
-    # Delete memory mapped scan
-    os.remove(mmap_filename)
-
     # Get results
-    masks = A.toarray().reshape((image_height, image_width, -1), order='F') # h x w x num_components
+    masks = A.reshape((image_height, image_width, -1), order='F') # h x w x num_components
     traces = C  # num_components x num_frames
     background_masks = b.reshape((image_height, image_width, -1), order='F') # h x w x num_components
     background_traces = f  # num_background_components x num_frames
@@ -210,12 +220,12 @@ def extract_masks(scan, num_components=200, merge_threshold=0.8,
     return masks, traces, background_masks, background_traces, raw_traces
 
 
-def _save_as_memmap(scan, base_name='caiman', order='C'):
+def _save_as_memmap(scan, base_name='caiman', chunk_size=5000):
     """Save the scan as a memory mapped file as expected by caiman
 
     :param np.array scan: Scan to save shaped (image_height, image_width, num_frames)
-    :param string base_name: Base file name for the scan.
-    :param string order: Order of the array: either 'C' or 'F'.
+    :param string base_name: Base file name for the scan. No underscores.
+    :param int chunk_size: Write the mmap_scan chunk frames at a time. Memory efficient.
 
     :returns: Filename of the mmap file.
     :rtype: string
@@ -225,16 +235,124 @@ def _save_as_memmap(scan, base_name='caiman', order='C'):
     num_pixels = image_height * image_width
 
     # Build filename
-    filename = '{}_d1_{}_d2_{}_d3_1_order_{}_frames_{}_.mmap'.format(base_name, image_height,
-                                                               image_width, order, num_frames)
+    filename = '{}_d1_{}_d2_{}_d3_1_order_C_frames_{}_.mmap'.format(base_name, image_height,
+                                                                    image_width, num_frames)
 
     # Create memory mapped file
-    mmap_file = np.memmap(filename, mode='w+', dtype=np.float32, order=order,
-                          shape=(num_pixels, num_frames))
-    mmap_file[:] = scan.reshape(num_pixels, num_frames, order=order)
-    mmap_file.flush()
+    mmap_scan = np.memmap(filename, mode='w+', shape=(num_pixels, num_frames), dtype=np.float32)
+    for i in range(0, num_frames, chunk_size):
+        chunk = scan[..., i: i + chunk_size].reshape((num_pixels, -1), order='F')
+        mmap_scan[:, i: i + chunk_size] = chunk
+    mmap_scan.flush()
 
-    return filename
+    return mmap_scan
+
+
+def _greedyROI(scan, num_components=200, neuron_size=(11, 11),
+               num_background_components=1):
+    """ Initialize components by searching for gaussian shaped, highly active squares.
+    #one by one by moving a gaussian window over every pixel and
+    taking the highest activation as the center of the next neuron.
+
+    :param np.array scan: 3-dimensional scan (image_height, image_width, num_frames).
+    :param int num_components: The desired number of components.
+    :param (float, float) neuron_size: Expected size of the somas in pixels (y, x).
+    :param int num_background_components: Number of components that model the background.
+    """
+    from scipy import ndimage
+
+    # Get some params
+    image_height, image_width, num_frames = scan.shape
+
+    # Get the gaussian kernel
+    gaussian_stddev = np.array(neuron_size) / 4 # entire neuron in four standard deviations
+    gaussian_kernel = _gaussian2d(gaussian_stddev)
+
+    # Create residual scan (scan minus background)
+    residual_scan = scan - np.mean(scan, axis=(0, 1)) # image-wise brightness
+    background = ndimage.gaussian_filter(np.mean(residual_scan, axis=-1), neuron_size)
+    residual_scan -= np.expand_dims(background, -1)
+
+    # Create components
+    masks = np.zeros([image_height, image_width, num_components], dtype=np.float32)
+    traces = np.zeros([num_components, num_frames], dtype=np.float32)
+    mean_frame = np.mean(residual_scan, axis=-1)
+    for i in range(num_components):
+
+        # Get center of next component
+        neuron_locations = ndimage.gaussian_filter(mean_frame, gaussian_stddev)
+        y, x = np.unravel_index(np.argmax(neuron_locations), [image_height, image_width])
+
+        # Compute initial trace (bit messy because of edges)
+        half_kernel = np.fix(np.array(gaussian_kernel.shape) / 2).astype(np.int32)
+        big_yslice = slice(max(y - half_kernel[0], 0), y + half_kernel[0] + 1)
+        big_xslice = slice(max(x - half_kernel[1], 0), x + half_kernel[1] + 1)
+        kernel_yslice = slice(max(0, half_kernel[0] - y),
+                              None if image_height > y + half_kernel[0] else image_height - y - half_kernel[0] - 1)
+        kernel_xslice = slice(max(0, half_kernel[1] - x),
+                              None if image_width > x + half_kernel[1] else image_width - x - half_kernel[1] - 1)
+        cropped_kernel = gaussian_kernel[kernel_yslice, kernel_xslice]
+        trace = np.average(residual_scan[big_yslice, big_xslice].reshape(-1, num_frames),
+                           weights=cropped_kernel.ravel(), axis=0)
+
+        # Get mask and trace using 1-rank NMF
+        half_neuron = np.fix(np.array(neuron_size) / 2).astype(np.int32)
+        yslice = slice(max(y - half_neuron[0], 0), y + half_neuron[0] + 1)
+        xslice = slice(max(x - half_neuron[1], 0), x + half_neuron[1] + 1)
+        mask, trace = _rank1_NMF(residual_scan[yslice, xslice], trace)
+
+        # Update residual scan
+        neuron_activity = np.expand_dims(mask, -1) * trace
+        residual_scan[yslice, xslice] -= neuron_activity
+        mean_frame[yslice, xslice] = np.mean(residual_scan[yslice, xslice], axis=-1)
+
+        # Store results
+        masks[yslice, xslice, i] = mask
+        traces[i] = trace
+
+    # Create background components
+    residual_scan += np.mean(scan, axis=(0, 1)) # add back overall brightness
+    residual_scan += np.expand_dims(background, -1) # and background
+    if num_background_components == 1:
+        background_masks = np.expand_dims(np.mean(residual_scan, axis=-1), axis=-1)
+        background_traces = np.expand_dims(np.mean(residual_scan, axis=(0, 1)), axis=0)
+    else:
+        from sklearn.decomposition import NMF
+        print("Warning: Fitting more than one background component uses scikit-learn's "
+              "NMF and may take some time.""")
+        model = NMF(num_background_components, random_state=123, verbose=True)
+
+        flat_masks = model.fit_transform(residual_scan.reshape(-1, num_frames))
+        background_masks = flat_masks.reshape([image_height, image_width, -1])
+        background_traces = model.components_
+
+    return masks, traces, background_masks, background_traces
+
+
+def _gaussian2d(stddev, truncate=4):
+    """ Creates a 2-d gaussian kernel truncated at 4 standard deviations (8 in total).
+
+    :param (float, float) stddev: Standard deviations in y and x.
+    :param float truncate: Number of stddevs at each side of the kernel.
+
+    ..note:: Kernel sizes will always be odd.
+    """
+    from matplotlib import mlab
+    half_kernel = np.round(stddev * truncate) # kernel_size = 2 * half_kernel + 1
+    y, x = np.meshgrid(np.arange(-half_kernel[0], half_kernel[0] + 1),
+                       np.arange(-half_kernel[1], half_kernel[1] + 1))
+    kernel = mlab.bivariate_normal(x, y, sigmay=stddev[0], sigmax=stddev[1])
+    return kernel
+
+
+# Based on caiman.source_extraction.cnmf.initialization.finetune()
+def _rank1_NMF(scan, trace, num_iterations=5):
+    num_frames = scan.shape[-1]
+    for i in range(num_iterations):
+        mask = np.maximum(np.dot(scan, trace), 0)
+        mask  = mask * np.sum(mask) / np.sum(mask ** 2)
+        trace = np.average(scan.reshape(-1, num_frames), weights=mask.ravel(), axis=0)
+    return mask, trace
 
 
 def deconvolve(trace, AR_order=2):
@@ -252,44 +370,6 @@ def deconvolve(trace, AR_order=2):
         method='cvxpy', bas_nonneg=False, fudge_factor=0.96) # fudge_factor is a regularization term
 
     return spike_trace, AR_coeffs
-
-
-def order_components(masks, correlation_image):
-    """ Order masks according to brightness and density in the correlation image.
-
-    :param np.array masks: Masks (image_height x image_width x num_components).
-    :param array correlation_image: Correlation image (image_height x image_width).
-
-    :return: Indices that would order the masks (num_components).
-    :rtype: np.array
-    """
-    # Reshape and normalize masks to sum 1 (num_pixels x num_components)
-    reshaped_masks = masks.reshape(-1, masks.shape[-1])
-    norm_masks = reshaped_masks / reshaped_masks.sum(axis=0)
-
-    # Calculate correlation_image value weighted by the mask
-    quality_measure = (correlation_image.ravel()).dot(norm_masks)
-
-    # Calculate new order according to this measure
-    new_order = np.flipud(quality_measure.argsort())  # highest first
-
-    return new_order
-
-
-def plot_masks(masks, background_image):
-    """ Plot masks over a background image.
-
-    :param np.array masks: Masks (image_height x image_width x num_components)
-    :param np.array background_image: Image (image_height x image_width) to plot in the
-        background. Mean or correlation image look fine.
-    """
-    # Reshape masks
-    image_height, image_width, num_components = masks.shape
-    masks = masks.reshape(-1, num_components, order='F')
-
-    # Plot contours
-    visualization.plot_contours(masks, background_image, vmin=background_image.min(),
-                                vmax=background_image.max(), thr_method='nrg', nrgthr=0.995)
 
 
 def get_centroids(masks):
@@ -310,7 +390,6 @@ def get_centroids(masks):
     centroids = np.array([coordinate['CoM'] for coordinate in coordinates])
 
     return centroids
-
 
 
 
@@ -402,7 +481,7 @@ def demix_and_deconvolve_with_cnmf(scan, num_components=200, AR_order=2,
     from caiman.source_extraction.cnmf import cnmf
 
     # Save as memory mapped file in F order (that's how caiman wants it)
-    mmap_filename = _save_as_memmap(scan, base_name='/tmp/caiman', order='F')
+    mmap_filename = _save_as_memmap(scan, base_name='/tmp/caiman', order='F').filename
 
     # 'Load' scan
     mmap_scan, (image_height, image_width), num_frames = caiman.load_memmap(mmap_filename)
