@@ -100,60 +100,12 @@ class ScanInfo(dj.Imported):
                                                                    'um_width', 'px_width')
             return np.array([um_height / px_height, um_width / px_width])
 
-    class QuantalSize(dj.Part):
-        definition = """ # quantal size in images
-
-        -> ScanInfo
-        -> shared.Field
-        -> shared.Channel
-        ---
-        min_intensity               : int           # min value in movie
-        max_intensity               : int           # max value in movie
-        intensities                 : longblob      # intensities for fitting variances
-        variances                   : longblob      # variances for each intensity
-        quantal_size                : float         # variance slope, corresponds to quantal size
-        zero_level                  : int           # level corresponding to zero (computed from variance dependence)
-        quantal_frame               : longblob      # average frame expressed in quanta
-        median_quantum_rate         : float         # median value in frame
-        percentile95_quantum_rate   : float         # 95th percentile in frame
-        """
-
-        def _make_tuples(self, key, scan, field_id, channel):
-            # Create results tuple
-            tuple_ = key.copy()
-            tuple_['field'] = field_id + 1
-            tuple_['channel'] = channel + 1
-
-            # Compute quantal size
-            middle_frame = int(np.floor(scan.num_frames / 2))
-            frames = slice(max(middle_frame - 2000, 0), middle_frame + 2000)
-            mini_scan = scan[field_id, :, :, channel, frames]
-            results = quality.compute_quantal_size(mini_scan)
-
-            # Add results to tuple
-            tuple_['min_intensity'] = results[0]
-            tuple_['max_intensity'] = results[1]
-            tuple_['intensities'] = results[2]
-            tuple_['variances'] = results[3]
-            tuple_['quantal_size'] = results[4]
-            tuple_['zero_level'] = results[5]
-
-            # Compute average frame rescaled with the quantal size
-            mean_frame = np.mean(mini_scan, axis=-1)
-            average_frame = (mean_frame - tuple_['zero_level']) / tuple_['quantal_size']
-            tuple_['quantal_frame'] = average_frame
-            tuple_['median_quantum_rate'] = np.median(average_frame)
-            tuple_['percentile95_quantum_rate'] = np.percentile(average_frame, 95)
-
-            # Insert
-            self.insert1(tuple_)
-
     def _make_tuples(self, key):
-        """ Read some scan parameters and compute quantal size."""
+        """ Read and store some scan parameters."""
         # Read the scan
         print('Reading header...')
         scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
-        scan = scanreader.read_scan(scan_filename, dtype=np.float32)
+        scan = scanreader.read_scan(scan_filename)
 
         # Get attributes
         tuple_ = key.copy()  # in case key is reused somewhere else
@@ -175,12 +127,6 @@ class ScanInfo(dj.Imported):
         # Insert field information
         for field_id in range(scan.num_fields):
             ScanInfo.Field()._make_tuples(key, scan, field_id)
-
-        # Compute quantal size for all field/channel combinations
-        for field_id in range(scan.num_fields):
-            print('Computing quantal size for field', field_id + 1)
-            for channel in range(scan.num_channels):
-                ScanInfo.QuantalSize()._make_tuples(key, scan, field_id, channel)
 
         self.notify(key)
 
@@ -283,8 +229,8 @@ class MotionCorrection(dj.Computed):
     template                        : longblob      # image used as alignment template
     y_shifts                        : longblob      # (pixels) y motion correction shifts
     x_shifts                        : longblob      # (pixels) x motion correction shifts
-    y_std                           : float         # (um) standard deviation of y shifts
-    x_std                           : float         # (um) standard deviation of x shifts
+    y_std                           : float         # (pixels) standard deviation of y shifts
+    x_std                           : float         # (pixels) standard deviation of x shifts
     y_outlier_frames                : longblob      # mask with true for frames with high y shifts (already corrected)
     x_outlier_frames                : longblob      # mask with true for frames with high x shifts (already corrected)
     align_time=CURRENT_TIMESTAMP    : timestamp     # automatic
@@ -301,15 +247,14 @@ class MotionCorrection(dj.Computed):
 
         # Read the scan
         scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
-        scan = scanreader.read_scan(scan_filename, dtype=np.float32)
+        scan = scanreader.read_scan(scan_filename)
 
         for field_id in range(scan.num_fields):
             print('Correcting motion in field', field_id + 1)
 
             # Get some params
             field = (ScanInfo.Field() & key & {'field': field_id + 1})
-            um_height, px_height, um_width, px_width = field.fetch1('um_height', 'px_height',
-                                                                    'um_width', 'px_width')
+            px_height, px_width = field.fetch1('px_height', 'px_width')
 
             # Select channel
             correction_channel = (CorrectionChannel() & key & {'field': field_id + 1})
@@ -323,6 +268,7 @@ class MotionCorrection(dj.Computed):
             skip_rows = int(round(px_height * 0.10))
             skip_cols = int(round(px_width * 0.10))
             scan_ = scan[field_id, skip_rows: -skip_rows, skip_cols: -skip_cols, channel, :]  # height x width x frames
+            scan_ = scan_.astype(np.float32, copy=False)
 
             # Correct raster effects (needed for subpixel changes in y)
             correct_raster = (RasterCorrection() & key & {'field': field_id + 1}).get_correct_raster()
@@ -426,7 +372,7 @@ class MotionCorrection(dj.Computed):
         import matplotlib.animation as animation
 
         ## Set the figure
-        fig, axes = plt.subplots(1, 2)
+        fig, axes = plt.subplots(1, 2, sharex=True, sharey=True)
 
         axes[0].set_title('Original')
         im1 = axes[0].imshow(original_scan[:, :, 0], vmin=original_scan.min(),
@@ -462,14 +408,8 @@ class MotionCorrection(dj.Computed):
         y_shifts, x_shifts = self.fetch1('y_shifts', 'x_shifts')
         xy_motion = np.stack([x_shifts, y_shifts])
 
-        def my_lambda_function(scan, indices=None):
-            if indices is None:
-                return galvo_corrections.correct_motion(scan, xy_motion)
-            else:
-                return galvo_corrections.correct_motion(scan, xy_motion[:, indices])
-
-        return my_lambda_function
-
+        return lambda scan, indices=slice(None): galvo_corrections.correct_motion(scan,
+                                                 xy_motion[:, indices])
 
 @schema
 class SummaryImages(dj.Computed):
@@ -505,7 +445,7 @@ class SummaryImages(dj.Computed):
 
         # Read the scan
         scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
-        scan = scanreader.read_scan(scan_filename, dtype=np.float32)
+        scan = scanreader.read_scan(scan_filename)
 
         for field_id in range(scan.num_fields):
             print('Computing summary images for field', field_id + 1)
@@ -520,8 +460,11 @@ class SummaryImages(dj.Computed):
                 tuple_['channel'] = channel + 1
 
                 # Correct scan
-                scan_ = scan[field_id, :, :, channel, :]
+                scan_ = scan[field_id, :, :, channel, :].astype(np.float32, copy=False)
                 scan_ = correct_motion(correct_raster(scan_))
+
+                # Subtract overall brightness/drift
+                scan_ -= scan_.mean(axis=(0, 1))
                 scan_ -= scan_.min()  # make nonnegative for lp-norm
 
                 # Insert in SummaryImages
@@ -606,7 +549,7 @@ class SegmentationTask(dj.Manual):
         if compartment == 'soma':
             num_components = field_volume * 0.0001
         elif compartment == 'axon':
-            num_components = field_volume * 0.001  # ten times as many neurons
+            num_components = field_volume * 0.0005  # five times as many neurons
         else:
             PipelineException("Compartment type '{}' not recognized".format(compartment))
 
@@ -676,17 +619,20 @@ class Segmentation(dj.Computed):
             """
             from .utils import caiman_interface as cmn
             import json
+            import uuid
+            import os
 
             print('')
             print('*' * 85)
             print('Processing {}'.format(key))
 
             # Load scan
+            print('Loading the scan...')
             channel = key['channel'] - 1
             field_id = key['field'] - 1
             scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
-            scan = scanreader.read_scan(scan_filename, dtype=np.float32)
-            scan_ = scan[field_id, :, :, channel, :]
+            scan = scanreader.read_scan(scan_filename)
+            scan_ = scan[field_id, :, :, channel, :].astype(np.float32, copy=False)
 
             # Correct scan
             print('Correcting scan...')
@@ -696,44 +642,51 @@ class Segmentation(dj.Computed):
             scan_ -= scan_.min()  # make nonnegative for caiman
 
             # Set CNMF parameters
-            ## Estimate number of components per field and soma radius in pixels
-            num_components = (SegmentationTask() & key).estimate_num_components()
-            soma_radius_in_pixels = 7 / (ScanInfo.Field() & key).microns_per_pixel  # assumption: radius is 7 microns
-
             ## Set general parameters
             kwargs = {}
-            kwargs['num_components'] = num_components
-            kwargs['merge_threshold'] = 0.8
+            kwargs['num_components'] = (SegmentationTask() & key).estimate_num_components()
+            kwargs['num_background_components'] = 1
+            kwargs['merge_threshold'] = 0.7
+            kwargs['fps'] = scan.fps
+
+            ## Set params specific to somatic or axonal/dendritic scans
+            target = (SegmentationTask() & key).fetch1('compartment')
+            if target == 'soma':
+                kwargs['init_on_patches'] = True if key['segmentation_method'] == 3 else False
+                kwargs['init_method'] = 'greedy_roi'
+                kwargs['soma_diameter'] = tuple(14 / (ScanInfo.Field() & key).microns_per_pixel) # 14 x 14 microns
+            else:  # axons/dendrites
+                kwargs['init_on_patches'] = True
+                kwargs['init_method'] = 'sparse_nmf'
+                kwargs['snmf_alpha'] = 500  # 10^2 to 10^3.5 is a good range
+
+            # Set parameters for patch initialization
+            if kwargs['init_on_patches']:
+                kwargs['patch_size'] = tuple(50 / (ScanInfo.Field() & key).microns_per_pixel) # 50 x 50 microns
+                kwargs['proportion_patch_overlap'] = 0.2 # 20% overlap
+                kwargs['num_components_per_patch'] = 5 if target == 'soma' else 15
 
             ## Set performance/execution parameters (heuristically), decrease if memory overflows
             kwargs['num_processes'] = 12  # Set to None for all cores available
             kwargs['num_pixels_per_process'] = 10000
 
-            ## Set params specific to somatic or axonal/dendritic scans
-            target = (SegmentationTask() & key).fetch1('compartment')
-            if target == 'soma':
-                kwargs['init_method'] = 'greedy_roi'
-                kwargs['soma_radius'] = tuple(soma_radius_in_pixels)
-                kwargs['num_background_components'] = 4
-                kwargs['init_on_patches'] = False
-            else:  # axons/dendrites
-                kwargs['init_method'] = 'sparse_nmf'
-                kwargs['snmf_alpha'] = 500  # 10^2 to 10^3.5 is a good range
-                kwargs['num_background_components'] = 1
-                kwargs['init_on_patches'] = True
-
-            ## Set params specific to initialization on patches
-            if kwargs['init_on_patches']:
-                kwargs['patch_downsampling_factor'] = 4
-                kwargs['proportion_patch_overlap'] = 0.2
+            # Save as memory mapped file (as expected by CaImAn)
+            print('Creating memory mapped file...')
+            mmap_scan = cmn._save_as_memmap(scan_, base_name='/tmp/caiman-{}'.format(uuid.uuid4()))
+            scan_ = mmap_scan.reshape(scan_.shape, order='F') # deallocates original memory
 
             # Extract traces
             print('Extracting masks and traces (cnmf)...')
-            cnmf_result = cmn.extract_masks(scan_, **kwargs)
+            cnmf_result = cmn.extract_masks(scan_, mmap_scan, **kwargs)
             (masks, traces, background_masks, background_traces, raw_traces) = cnmf_result
+
+            # Delete memory mapped scan
+            print('Deleting memory mapped scan...')
+            os.remove(mmap_scan.filename)
 
             # Insert CNMF results
             print('Inserting masks, background components and traces...')
+            dj.conn()
 
             ## Insert in CNMF, Segmentation and Fluorescence
             Segmentation().insert1(key)
@@ -818,7 +771,7 @@ class Segmentation(dj.Computed):
             import matplotlib.animation as animation
 
             ## Set the figure
-            fig, axes = plt.subplots(2, 2)
+            fig, axes = plt.subplots(2, 2, sharex=True, sharey=True)
 
             axes[0, 0].set_title('Original (Y)')
             im1 = axes[0, 0].imshow(scan_[:, :, 0], vmin=scan_.min(), vmax=scan_.max())  # just a placeholder
@@ -872,7 +825,7 @@ class Segmentation(dj.Computed):
         # Create masks
         if key['segmentation_method'] == 1:  # manual
             Segmentation.Manual()._make_tuples(key)
-        elif key['segmentation_method'] == 2:  # nmf
+        elif key['segmentation_method'] in [2, 3]:  # nmf
             Segmentation.CNMF()._make_tuples(key)
         else:
             msg = 'Unrecognized segmentation method {}'.format(key['segmentation_method'])
@@ -908,20 +861,23 @@ class Segmentation(dj.Computed):
         # Get masks
         image_height, image_width = (ScanInfo.Field() & self).fetch1('px_height', 'px_width')
         mask_pixels, mask_weights = mask_rel.fetch('pixels', 'weights', order_by='mask_id')
+        mask_weights = [w - w.min() for w in mask_weights] # make all weights positive
 
         # Reshape masks
         masks = Segmentation.reshape_masks(mask_pixels, mask_weights, image_height, image_width)
 
         return masks
 
-    def plot_masks(self, first_n=None):
+    def plot_masks(self, threshold=0.99, first_n=None):
         """ Draw contours of masks over the correlation image (if available).
 
+        :param threshold: Threshold on the cumulative mass to define mask contours. Lower
+            for tighter contours.
         :param first_n: Number of masks to plot. None for all.
-        :returns: None
-        """
-        from .utils import caiman_interface as cmn
 
+        :returns Figure. You can call show() on it.
+        :rtype: matplotlib.figure.Figure
+        """
         # Get masks
         masks = self.get_all_masks()
         if first_n is not None:
@@ -934,11 +890,24 @@ class Segmentation(dj.Computed):
         else:
             background_image = np.zeros(masks.shape[:-1])
 
-        # Draw contours
-        image_height, image_width = background_image.shape
+        # Plot background
+        image_height, image_width, num_masks = masks.shape
         figsize = np.array([image_width, image_height]) / min(image_height, image_width)
-        fig = plt.figure(figsize=7 * figsize)
-        cmn.plot_masks(masks, background_image)
+        fig = plt.figure(figsize=figsize * 7)
+        plt.imshow(background_image)
+
+        # Draw contours
+        cumsum_mask = np.empty([image_height, image_width])
+        for i in range(num_masks):
+            mask = masks[:, :, i]
+
+            ## Compute cumulative mass (similar to caiman)
+            indices = np.unravel_index(np.flip(np.argsort(mask, axis=None), axis=0), mask.shape) # max to min value in mask
+            cumsum_mask[indices] = np.cumsum(mask[indices]**2) / np.sum(mask**2)
+
+            ## Plot contour at desired threshold (with random color)
+            random_color = (np.random.rand(), np.random.rand(), np.random.rand())
+            plt.contour(cumsum_mask, [threshold], linewidths=0.8, colors=[random_color])
 
         return fig
 
@@ -969,8 +938,8 @@ class Fluorescence(dj.Computed):
         field_id = key['field'] - 1
         channel = key['channel'] - 1
         scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
-        scan = scanreader.read_scan(scan_filename, dtype=np.float32)
-        scan_ = scan[field_id, :, :, channel, :]
+        scan = scanreader.read_scan(scan_filename)
+        scan_ = scan[field_id, :, :, channel, :].astype(np.float32, copy=False)
 
         # Correct the scan
         print('Correcting scan...')
@@ -1265,7 +1234,7 @@ class Activity(dj.Computed):
     """
 
     def _make_tuples(self, key):
-        print('Creating activity traces...')
+        print('Creating activity traces for', key)
 
         # Get fluorescence
         fps = (ScanInfo() & key).fetch1('fps')
@@ -1404,6 +1373,151 @@ class ScanDone(dj.Computed):
     def notify(self, key):
         msg = 'ScanDone for `{}` has been populated.'.format(key)
         (notify.SlackUser() & (experiment.Session() & key)).notify(msg)
+
+
+
+
+@schema
+class Quality(dj.Computed):
+    definition = """ # different quality metrics for a scan (before corrections)
+
+    -> ScanInfo
+    """
+
+    @property
+    def key_source(self):
+        return ScanInfo() & {'meso_version': CURRENT_VERSION}
+
+    class MeanIntensity(dj.Part):
+        definition = """ # mean intensity values across time
+
+        -> Quality
+        -> shared.Field
+        -> shared.Channel
+        ---
+        intensities                 : longblob
+        """
+
+    class SummaryFrames(dj.Part):
+        definition = """ # 16-part summary of the scan (mean of 16 blocks)
+
+        -> Quality
+        -> shared.Field
+        -> shared.Channel
+        ---
+        summary                     : longblob      # h x w x 16
+        """
+
+    class Contrast(dj.Part):
+        definition = """ # difference between 99 and 1 percentile across time
+
+        -> Quality
+        -> shared.Field
+        -> shared.Channel
+        ---
+        contrasts                   : longblob
+        """
+
+    class QuantalSize(dj.Part):
+        definition = """ # quantal size in images
+
+        -> Quality
+        -> shared.Field
+        -> shared.Channel
+        ---
+        min_intensity               : int           # min value in movie
+        max_intensity               : int           # max value in movie
+        quantal_size                : float         # variance slope, corresponds to quantal size
+        zero_level                  : int           # level corresponding to zero (computed from variance dependence)
+        quantal_frame               : longblob      # average frame expressed in quanta
+        """
+
+    def _make_tuples(self, key):
+        # Read the scan
+        scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
+        scan = scanreader.read_scan(scan_filename)
+
+        # Insert in Quality
+        self.insert1(key)
+
+        for field_id in range(scan.num_fields):
+            print('Computing quality metrics for field', field_id + 1)
+            for channel in range(scan.num_channels):
+                # Create results tuple
+                field_key = key.copy()
+                field_key['field'] = field_id + 1
+                field_key['channel'] = channel + 1
+
+                #Load scan
+                scan_ = scan[field_id, :, :, channel, :].astype(np.float32, copy=False)
+
+                # Compute mean intensity
+                mean_intensities = np.mean(scan_, axis=(0, 1))
+                self.MeanIntensity().insert1({**field_key, 'intensities': mean_intensities})
+
+                # Compute summary frames
+                frames = []
+                for chunk in np.array_split(scan_, 16, axis=-1):
+                    frames.append(np.mean(chunk, axis=-1))
+                frames = np.stack(frames, axis=-1)
+                self.SummaryFrames().insert1({**field_key, 'summary': frames})
+
+                # Compute contrast
+                # np.percentile(scan_, [99, 1], axis=(0, 1)) creates two copies of the scan
+                contrasts = np.empty(scan.num_frames)
+                for i in range(scan.num_frames):
+                    percentiles = np.percentile(scan_[:, :, i], q=[1, 99])
+                    contrasts[i] = percentiles[1] - percentiles[0]
+                self.Contrast().insert1({**field_key, 'contrasts': contrasts})
+
+                # Compute quantal size
+                middle_frame = int(np.floor(scan.num_frames / 2))
+                mini_scan = scan_[:, :, max(middle_frame - 2000, 0): middle_frame + 2000]
+                results = quality.compute_quantal_size(mini_scan)
+                min_intensity, max_intensity, _, _, quantal_size, zero_level = results
+                quantal_frame = (np.mean(mini_scan, axis=-1) - zero_level) / quantal_size
+                self.QuantalSize().insert1({**field_key, 'min_intensity': min_intensity,
+                                            'max_intensity': max_intensity,
+                                            'quantal_size': quantal_size,
+                                            'zero_level': zero_level,
+                                            'quantal_frame': quantal_frame})
+
+                self.notify(field_key, frames, mean_intensities, contrasts)
+
+    def notify(self, key, summary_frames, mean_intensities, contrasts):
+        """ Sends slack notification for a single slice + channel combination. """
+        # Send summary frames
+        import imageio
+        video_filename = '/tmp/' + key_hash(key) + '.gif'
+        percentile_99th = np.percentile(summary_frames, 99.5)
+        summary_frames = np.clip(summary_frames, None, percentile_99th)
+        summary_frames = signal.float2uint8(summary_frames).transpose([2, 0, 1])
+        imageio.mimsave(video_filename, summary_frames, duration=0.4)
+
+        msg = 'Quality for `{}` has been populated.'.format(key)
+        (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=video_filename,
+                                                                   file_title='summary frames')
+
+        # Send intensity and contrasts
+        import seaborn as sns
+        with sns.axes_style('white'):
+            fig, axes = plt.subplots(2, 1, figsize=(15, 8), sharex=True)
+
+        fig.suptitle('Field {}, channel {}'.format(key['field'], key['channel']))
+        axes[0].set_title('Mean intensity')
+        axes[0].plot(mean_intensities)
+        axes[0].set_ylabel('Pixel intensities')
+        axes[1].set_title('Contrast (99 - 1 percentile)')
+        axes[1].plot(contrasts)
+        axes[1].set_xlabel('Frames')
+        axes[1].set_ylabel('Pixel intensities')
+        img_filename = '/tmp/' + key_hash(key) + '.png'
+        fig.savefig(img_filename)
+        plt.close(fig)
+        sns.reset_orig()
+
+        (notify.SlackUser() & (experiment.Session() & key)).notify(file=img_filename,
+                                                                   file_title='quality traces')
 
 
 schema.spawn_missing_classes()
