@@ -133,15 +133,7 @@ class Eye(dj.Imported):
         frames =  key.pop('preview_frames')
         self.notify(key, frames)
 
-        # trackable = input('Is the quality good enough to be tracked? [Y/n]')
-        # if trackable.lower() == 'n':
-        #     self.insert1(key)
-        #     self.Ignore().insert1(key, ignore_extra_field=True)
-        # else:
-        #     extra_parameters = input('Do you want to use modified tracking parameters? [N/y]')
-        #     if extra_parameters.lower() == 'y':
-        #         self.ManualParameters().insert1(dict(key, tracking_parameters=self._get_modified_parameters()),
-        #                                         ignore_extra_fields=True)
+
 
     def notify(self, key, frames):
         import imageio
@@ -167,6 +159,7 @@ class TrackingTask(dj.Manual):
     eye_roi                     : tinyblob  # manual roi containing eye in full-size movie
     """
 
+
     class ManualParameters(dj.Part):
         definition = """
         # manual tracking parameters overwriting the default settings
@@ -181,6 +174,29 @@ class TrackingTask(dj.Manual):
         -> master
         ---
         """
+
+    def enter_roi(self, key):
+        key = (Eye() & key).fetch1(dj.key) # complete key
+        frames = (Eye() & key).fetch1('preview_frames')
+        try:
+            import cv2
+            print('Drag window and print q when done')
+            rg = CVROIGrabber(frames.mean(axis=2))
+            rg.grab()
+        except ImportError:
+            rg = ROIGrabber(frames.mean(axis=2))
+
+        key['eye_roi'] = rg.roi
+        self.insert1(key)
+        trackable = input('Is the quality good enough to be tracked? [Y/n]')
+        if trackable.lower() == 'n':
+            self.insert1(key)
+            self.Ignore().insert1(key, ignore_extra_field=True)
+        else:
+            extra_parameters = input('Do you want to use modified tracking parameters? [N/y]')
+            if extra_parameters.lower() == 'y':
+                self.ManualParameters().insert1(dict(key, tracking_parameters=self._get_modified_parameters()),
+                                                ignore_extra_fields=True)
 
 
 @schema
@@ -205,7 +221,7 @@ class TrackedVideo(dj.Computed):
         frame_intensity=NULL     : float         # std of the frame
         """
 
-    key_source = Eye() * TrackingTask() - Eye.Ignore()
+    key_source = Eye() * TrackingTask() - TrackingTask.Ignore()
 
     def _make_tuples(self, key):
         print("Populating", key)
