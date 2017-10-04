@@ -128,6 +128,10 @@ class ScanInfo(dj.Imported):
         for field_id in range(scan.num_fields):
             ScanInfo.Field()._make_tuples(key, scan, field_id)
 
+        # Fill in CorrectionChannel if only one channel
+        if scan.num_channels == 1:
+            CorrectionChannel().fill_in(key)
+
         self.notify(key)
 
     def notify(self, key):
@@ -145,6 +149,10 @@ class CorrectionChannel(dj.Manual):
     -> shared.Channel
     """
 
+    def fill_in(self, key, channel=1):
+        for field_key in (ScanInfo.Field() & key).fetch(dj.key):
+            self.insert1({**field_key, 'channel': channel}, ignore_extra_fields=True,
+                         skip_duplicates=True)
 
 @schema
 class RasterCorrection(dj.Computed):
@@ -526,6 +534,12 @@ class SegmentationTask(dj.Manual):
     -> experiment.Compartment
     """
 
+    def fill_in(self, key, channel=1, segmentation_method=3, compartment='soma'):
+        for field_key in (ScanInfo.Field() & key).fetch(dj.key):
+            tuple_ = {**field_key, 'channel': channel, 'compartment': compartment,
+                      'segmentation_method': segmentation_method}
+            self.insert1(tuple_, ignore_extra_fields=True, skip_duplicates=True)
+
     def estimate_num_components(self):
         """ Estimates the number of components per field using simple rules of thumb.
 
@@ -603,6 +617,8 @@ class Segmentation(dj.Computed):
             # Show GUI with the current masks
             # User modifies it somehow to produce the new set of masks
             # Insert info in Segmentation -> Segmentation.Manual -> Segmentation.Mask -> MaskClassification -> MaskClassification.Type
+            # http://scikit-image.org/docs/dev/api/skimage.future.html#manual-lasso-segmentation (Python lasso masks)
+
 
     class CNMF(dj.Part):
         definition = """ # source extraction using constrained non-negative matrix factorization
