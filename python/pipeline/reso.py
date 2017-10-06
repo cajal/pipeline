@@ -288,7 +288,6 @@ class MotionCorrection(dj.Computed):
             # Compute smoothing window size
             size_in_ms = 300  # smooth over a 300 milliseconds window
             window_size = int(round(scan.fps * (size_in_ms / 1000)))  # in frames
-            window_size += 1 if window_size % 2 == 0 else 0  # make odd
 
             # Get motion correction shifts
             results = galvo_corrections.compute_motion_shifts(scan_, template,
@@ -686,6 +685,18 @@ class Segmentation(dj.Computed):
             kwargs['num_processes'] = 12  # Set to None for all cores available
             kwargs['num_pixels_per_process'] = 10000
 
+
+
+
+
+            ## Test
+            #scan_ = scan_[:, :]
+
+
+
+
+
+
             # Save as memory mapped file (as expected by CaImAn)
             print('Creating memory mapped file...')
             mmap_scan = cmn._save_as_memmap(scan_, base_name='/tmp/caiman-{}'.format(uuid.uuid4()))
@@ -703,6 +714,26 @@ class Segmentation(dj.Computed):
             # Insert CNMF results
             print('Inserting masks, background components and traces...')
             dj.conn()
+
+
+
+
+
+
+            # TEST
+#            num_masks = masks.shape[-1]
+#            new_masks = np.zeros([256, 256, num_masks])
+#            new_masks[:, :, :] = masks
+#            masks = new_masks
+#
+#            num_background_masks = background_masks.shape[-1]
+#            new_background_masks = np.zeros([256, 256, num_background_masks])
+#            new_background_masks[:, :, :] = background_masks
+#            background_masks = new_background_masks
+
+
+
+
 
             ## Insert in CNMF, Segmentation and Fluorescence
             Segmentation().insert1(key)

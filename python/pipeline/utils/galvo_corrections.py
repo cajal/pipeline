@@ -1,8 +1,10 @@
 """ Utilities for motion and raster correction of resonant scans. """
-from ..exceptions import PipelineException
 from scipy import interpolate  as interp
 from scipy import signal
 import numpy as np
+
+from ..exceptions import PipelineException
+from ..utils.signal import mirrconv
 
 def compute_raster_phase(image, temporal_fill_fraction):
     """ Compute raster correction for bidirectional resonant scanners.
@@ -144,10 +146,10 @@ def compute_motion_shifts(scan, template, in_place=True, num_processes=12,
 
     # Smooth the shifts temporally
     if smooth_shifts:
+        smoothing_window_size += 1 if smoothing_window_size % 2 == 0 else 0  # make odd
         smoothing_window = signal.hann(smoothing_window_size) + 0.05 # 0.05 raises it so edges are not zero.
-        norm_smoothing_window = smoothing_window / sum(smoothing_window)
-        y_shifts = signal.convolve(y_shifts, norm_smoothing_window, mode='same')
-        x_shifts = signal.convolve(x_shifts, norm_smoothing_window, mode='same')
+        y_shifts = mirrconv(y_shifts, smoothing_window / sum(smoothing_window))
+        x_shifts = mirrconv(x_shifts, smoothing_window / sum(smoothing_window))
 
     return y_shifts, x_shifts, y_outliers, x_outliers
 

@@ -22,22 +22,25 @@ def normalize(img):
     return (img - img.min()) / (img.max() - img.min())
 
 
-def mirrconv(s, h):
+def mirrconv(signal, f):
+    """ Convolution with mirrored ends to avoid edge artifacts.
+
+    :param np.array signal: One-dimensional signal.
+    :param np.array f: One-dimensional filter (length should be odd).
+    :returns: Filtered signal (same length as signal)
     """
-    Convolution where the ends are mirrored to have the same signal statistic.
+    if signal.ndim != 1 or f.ndim != 1:
+       raise ValueError('Only one-dimensional signals allowed.')
+    if len(f) % 2 != 1:
+        raise ValueError('Filter must have odd length')
+    if len(f) < 3:
+        return signal
 
-    Only works for one dimensional arrays/
+    n = len(f) // 2
+    padded_signal = np.hstack((signal[n - 1::-1], signal, signal[:-n - 1:-1]))
+    filtered_signal = np.convolve(padded_signal, f, mode='valid')
 
-    :param s: signal
-    :param h: filter (length must be odd)
-    :return: filtered signal of the same length
-    """
-    assert s.ndim == 1, "Only one dimensional signals allowed!"
-    assert h.ndim == 1, "Only one dimensional filters allowed!"
-    assert len(h) % 2 == 1, "Filter must have odd length"
-
-    n = h.size // 2
-    return np.convolve(np.hstack((s[n-1::-1], s, s[:-n-1:-1])), h, mode='valid')
+    return filtered_signal
 
 
 def local_max(x):
