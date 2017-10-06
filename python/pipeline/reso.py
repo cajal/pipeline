@@ -685,18 +685,6 @@ class Segmentation(dj.Computed):
             kwargs['num_processes'] = 12  # Set to None for all cores available
             kwargs['num_pixels_per_process'] = 10000
 
-
-
-
-
-            ## Test
-            #scan_ = scan_[:, :]
-
-
-
-
-
-
             # Save as memory mapped file (as expected by CaImAn)
             print('Creating memory mapped file...')
             mmap_scan = cmn._save_as_memmap(scan_, base_name='/tmp/caiman-{}'.format(uuid.uuid4()))
@@ -714,26 +702,6 @@ class Segmentation(dj.Computed):
             # Insert CNMF results
             print('Inserting masks, background components and traces...')
             dj.conn()
-
-
-
-
-
-
-            # TEST
-#            num_masks = masks.shape[-1]
-#            new_masks = np.zeros([256, 256, num_masks])
-#            new_masks[:, :, :] = masks
-#            masks = new_masks
-#
-#            num_background_masks = background_masks.shape[-1]
-#            new_background_masks = np.zeros([256, 256, num_background_masks])
-#            new_background_masks[:, :, :] = background_masks
-#            background_masks = new_background_masks
-
-
-
-
 
             ## Insert in CNMF, Segmentation and Fluorescence
             Segmentation().insert1(key)
