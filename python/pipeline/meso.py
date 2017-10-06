@@ -296,7 +296,6 @@ class MotionCorrection(dj.Computed):
             # Compute smoothing window size
             size_in_ms = 300  # smooth over a 300 milliseconds window
             window_size = int(round(scan.fps * (size_in_ms / 1000)))  # in frames
-            window_size += 1 if window_size % 2 == 0 else 0  # make odd
 
             # Get motion correction shifts
             results = galvo_corrections.compute_motion_shifts(scan_, template,
