@@ -300,8 +300,8 @@ class MotionCorrection(dj.Computed):
             # Get motion correction shifts
             results = galvo_corrections.compute_motion_shifts(scan_, template,
                                                               smoothing_window_size=window_size)
-            y_shifts = results[0] - results[0].mean()  # center motions around zero
-            x_shifts = results[1] - results[1].mean()
+            y_shifts = results[0] - np.median(results[0])  # center motions around zero
+            x_shifts = results[1] - np.median(results[1])
             tuple_['y_shifts'] = y_shifts
             tuple_['x_shifts'] = x_shifts
             tuple_['y_outlier_frames'] = results[2]
