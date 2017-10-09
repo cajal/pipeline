@@ -226,11 +226,11 @@ class TrackedVideo(dj.Computed):
     def _make_tuples(self, key):
         print("Populating", key)
         param = DEFAULT_PARAMETERS
-        if Eye.ManualParameters() & key:
-            param = json.loads((Eye.ManualParameters() & key).fetch1('tracking_parameters'))
+        if TrackingTask.ManualParameters() & key:
+            param = json.loads((TrackingTask.ManualParameters() & key).fetch1('tracking_parameters'))
             print('Using manual set parameters', param, flush=True)
 
-        roi = (Eye() & key).fetch1('eye_roi')
+        roi = (TrackingTask() & key).fetch1('eye_roi')
 
         avi_path = (Eye() & key).get_video_path()
         print(avi_path)
