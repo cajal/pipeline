@@ -114,6 +114,10 @@ class ScanInfo(dj.Imported):
         for slice_id, z_slice in enumerate(scan.field_depths):
             ScanInfo.Slice().insert1({**key, 'slice': slice_id + 1, 'z': z_zero - z_slice})
 
+        # Fill in CorrectionChannel if only one channel
+        if scan.num_channels == 1:
+            CorrectionChannel().fill_in(key)
+
         self.notify(key)
 
     def notify(self, key):
@@ -137,6 +141,11 @@ class CorrectionChannel(dj.Manual):
     ---
     -> shared.Channel
     """
+
+    def fill_in(self, key, channel=1):
+        for slice_key in (ScanInfo.Slice() & key).fetch(dj.key):
+            self.insert1({**slice_key, 'channel': channel}, ignore_extra_fields=True,
+                          skip_duplicates=True)
 
 
 @schema
@@ -516,6 +525,12 @@ class SegmentationTask(dj.Manual):
     ---
     -> experiment.Compartment
     """
+
+    def fill_in(self, key, channel=1, segmentation_method=3, compartment='soma'):
+        for slice_key in (ScanInfo.Slice() & key).fetch(dj.key):
+            tuple_ = {**slice_key, 'channel': channel, 'compartment': compartment,
+                      'segmentation_method': segmentation_method}
+            self.insert1(tuple_, ignore_extra_fields=True, skip_duplicates=True)
 
     def estimate_num_components(self):
         """ Estimates the number of components per slice using simple rules of thumb.
