@@ -85,18 +85,20 @@ def extract_masks(scan, mmap_scan, num_components=200, num_background_components
         patch_overlap = np.int32(np.round(patch_size * proportion_patch_overlap))
 
         # Create options dictionary (needed for run_CNMF_patches)
-        options = {'patch_params': {'only_init': True, 'remove_very_bad_comps': False, # remove_very_bads_comps unnecesary (same as default)
-                                    'ssub': 'UNUSED.', 'tsub': 'UNUSED',
-                                    'skip_refinement': 'UNUSED.'},
+        options = {'patch_params': {'ssub': 'UNUSED.', 'tsub': 'UNUSED', 'nb': num_background_components,
+                                    'only_init': True, 'skip_refinement': 'UNUSED.',
+                                    'remove_very_bad_comps': False}, # remove_very_bads_comps unnecesary (same as default)
                    'preprocess_params': {'check_nan': False}, # check_nan is unnecessary (same as default value)
                    'spatial_params': {'nb': num_background_components}, # nb is unnecessary, it is pased to the function and in init_params
                    'temporal_params': {'p': 0, 'method': 'UNUSED.', 'block_size': 'UNUSED.'},
                    'init_params': {'K': num_components_per_patch, 'gSig': np.array(soma_diameter)/2,
-                                   'method': init_method, 'alpha_snmf': snmf_alpha,
+                                   'gSiz': None, 'method': init_method, 'alpha_snmf': snmf_alpha,
                                    'nb': num_background_components, 'ssub': 1, 'tsub': max(int(fps / 5), 1),
                                    'options_local_NMF': 'UNUSED.', 'normalize_init': True,
-                                   'rolling_sum': True, 'rolling_length': 100},
-                                   # ssub, tsub, options_local_NMF, normalize_init, rolling_sum unnecessary (same as default values)
+                                   'rolling_sum': True, 'rolling_length': 100, 'min_corr': 'UNUSED',
+                                   'min_pnr': 'UNUSED', 'deconvolve_options_init': 'UNUSED',
+                                   'ring_size_factor': 'UNUSED', 'center_psf': 'UNUSED'},
+                                   # gSiz, ssub, tsub, options_local_NMF, normalize_init, rolling_sum unnecessary (same as default values)
                    'merging' : {'thr': 'UNUSED.'}}
 
         # Initialize per patch
@@ -159,7 +161,7 @@ def extract_masks(scan, mmap_scan, num_components=200, num_background_components
     res = temporal.update_temporal_components(mmap_scan, A, b, C, f, nb=num_background_components,
                                               block_size=10000, p=0, method='cvxpy',
                                               dview=direct_view)
-    C, A, b, f, S, bl, c1, neurons_noise, g, YrA = res
+    C, A, b, f, S, bl, c1, neurons_noise, g, YrA, _ = res
 
 
     # Merge components
@@ -184,7 +186,7 @@ def extract_masks(scan, mmap_scan, num_components=200, num_background_components
     res = temporal.update_temporal_components(mmap_scan, A, b, C, f, nb=num_background_components,
                                               block_size=10000, p=0, method='cvxpy',
                                               dview=direct_view)
-    C, A, b, f, S, bl, c1, neurons_noise, g, YrA = res
+    C, A, b, f, S, bl, c1, neurons_noise, g, YrA, _ = res
 
     # Removing bad components (more stringent criteria)
     log('Removing bad components...')
@@ -390,8 +392,6 @@ def get_centroids(masks):
     centroids = np.array([coordinate['CoM'] for coordinate in coordinates])
 
     return centroids
-
-
 
 
 
