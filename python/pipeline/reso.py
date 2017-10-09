@@ -1072,7 +1072,6 @@ class ScanSet(dj.Computed):
 
         -> ScanSet.Unit
         ---
-        -> shared.MaskType                  # type of the unit
         um_x                : smallint      # x-coordinate of centroid in motor coordinate system
         um_y                : smallint      # y-coordinate of centroid in motor coordinate system
         um_z                : smallint      # z-coordinate of mask relative to surface of the cortex
@@ -1099,14 +1098,6 @@ class ScanSet(dj.Computed):
         px_centroids = cmn.get_centroids(masks)
         um_centroids = um_center + (px_centroids - px_center) * (ScanInfo() & key).microns_per_pixel
 
-        # Get type from MaskClassification if available, else SegmentationTask
-        if MaskClassification() & key:
-            ids, types = (MaskClassification.Type() & key).fetch('mask_id', 'type')
-            get_type = lambda mask_id: types[ids == mask_id].item()
-        else:
-            mask_type = (SegmentationTask() & key).fetch1('compartment')
-            get_type = lambda mask_id: mask_type
-
         # Get next unit_id for scan
         unit_rel = (ScanSet.Unit().proj() & key)
         unit_id = np.max(unit_rel.fetch('unit_id')) + 1 if unit_rel else 1
@@ -1120,8 +1111,8 @@ class ScanSet(dj.Computed):
                                                                 um_centroids, px_centroids):
             ScanSet.Unit().insert1({**key, 'unit_id': unit_id, 'mask_id': mask_id})
 
-            unit_info = {**key, 'unit_id': unit_id, 'type': get_type(mask_id), 'um_x': um_x,
-                         'um_y': um_y, 'um_z': um_z, 'px_x': px_x, 'px_y': px_y}
+            unit_info = {**key, 'unit_id': unit_id, 'um_x': um_x, 'um_y': um_y,
+                         'um_z': um_z, 'px_x': px_x, 'px_y': px_y}
             ScanSet.UnitInfo().insert1(unit_info, ignore_extra_fields=True)
 
         self.notify(key)
