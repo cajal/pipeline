@@ -1008,7 +1008,7 @@ class MaskClassification(dj.Computed):
 
     @property
     def key_source(self):
-        return (Segmentation() * SummaryImages() * shared.ClassificationMethod() &
+        return (Segmentation() * shared.ClassificationMethod() &
                 {'meso_version': CURRENT_VERSION})
 
     class Type(dj.Part):
