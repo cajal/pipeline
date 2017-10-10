@@ -53,7 +53,7 @@ class ClassificationMethod(dj.Lookup):
 
     contents = [
     [1, 'manual', 'masks classified by visual inspection', 'python'],
-    [2, 'cnn', 'classification made by a trained convolutional network', 'python']
+    [2, 'cnn-caiman', 'classification made by a trained convolutional network', 'python']
     ]
 
 @schema
