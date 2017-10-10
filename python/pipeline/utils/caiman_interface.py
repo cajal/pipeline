@@ -394,6 +394,27 @@ def get_centroids(masks):
     return centroids
 
 
+def classify_masks(masks, soma_diameter=(14, 14)):
+    """ Uses a convolutional network to predict the probability per mask of being a soma.
+
+    :param np.array masks: Masks (image_height x image_width x num_components)
+
+    :returns: Soma predictions (num_components).
+    """
+    # Reshape masks
+    image_height, image_width, num_components = masks.shape
+    masks = masks.reshape(-1, num_components, order='F')
+
+    # Prepare input
+    from scipy.sparse import coo_matrix
+    masks = coo_matrix(masks)
+    soma_radius = np.int32(np.round(np.array(soma_diameter)/2))
+
+    model_path = '/data/CaImAn/use_cases/CaImAnpaper/cnn_model'
+    probs, _ = components_evaluation.evaluate_components_CNN(masks, (image_height, image_width),
+                                                             soma_radius, model_name=model_path)
+
+    return probs[:, 1]
 
 
 
