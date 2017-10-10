@@ -1025,16 +1025,17 @@ class MaskClassification(dj.Computed):
         image_height, image_width = (ScanInfo.Field() & key).fetch1('px_height', 'px_width')
         mask_ids, pixels, weights = (Segmentation.Mask() & key).fetch('mask_id', 'pixels', 'weights')
         masks = Segmentation.reshape_masks(pixels, weights, image_height, image_width)
-        masks = masks.transpose([2, 0, 1])  # num_masks, image_height, image_width
 
         # Classify masks
         if key['classification_method'] == 1:  # manual
             template = (SummaryImages.Correlation() & key).fetch1('correlation_image')
+            masks = masks.transpose([2, 0, 1])  # num_masks, image_height, image_width
             mask_types = mask_classification.classify_manual(masks, template)
-        elif key['classification_method'] == 2:  # cnn
-            raise PipelineException('Convnet not yet implemented.')
-            # template = (SummaryImages.Correlation() & key).fetch1('correlation_image')
-            # mask_types = mask_classification.classify_cnn(masks, template)
+        elif key['classification_method'] == 2:  # cnn-caiman
+            from .utils import caiman_interface as cmn
+            soma_diameter = tuple(14 / (ScanInfo.Field() & key).microns_per_pixel)
+            probs = cmn.classify_masks(masks, soma_diameter)
+            mask_types = ['soma' if prob > 0.75 else 'artifact' for prob in probs]
         else:
             msg = 'Unrecognized classification method {}'.format(key['classification_method'])
             raise PipelineException(msg)
@@ -1045,6 +1046,67 @@ class MaskClassification(dj.Computed):
         self.insert1(key)
         for mask_id, mask_type in zip(mask_ids, mask_types):
             MaskClassification.Type().insert1({**key, 'mask_id': mask_id, 'type': mask_type})
+
+        self.notify(key, mask_types)
+
+    def notify(self, key, mask_types):
+        mask_names = ['soma', 'axon', 'dendrite', 'neuropil', 'artifact', 'unknown']
+        mask_counts = [mask_types.count(name) for name in mask_names]
+
+        fig = (MaskClassification() & key).plot_masks()
+        img_filename = '/tmp/' + key_hash(key) + '.png'
+        fig.savefig(img_filename)
+        plt.close(fig)
+
+        msg = 'MaskClassification for `{}` has been populated.\n'.format(key)
+        msg += ', '.join('{} {}s'.format(c, n) for c, n in zip(mask_counts, mask_names))
+        (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
+                                                                   file_title='mask classes')
+
+    def plot_masks(self, threshold=0.99):
+        """ Draw contours of masks over the correlation image (if available) with different
+        colors per type
+
+        :param threshold: Threshold on the cumulative mass to define mask contours. Lower
+            for tighter contours.
+
+        :returns Figure. You can call show() on it.
+        :rtype: matplotlib.figure.Figure
+        """
+        # Get masks
+        masks = (Segmentation() & self).get_all_masks()
+        mask_types = (MaskClassification.Type() & self).fetch('type')
+        colormap = {'soma': 'b', 'axon': 'k', 'dendrite': 'c', 'neuropil': 'y',
+                    'artifact': 'r', 'unknown': 'w'}
+
+
+        # Get correlation image if defined, black background otherwise.
+        image_rel = SummaryImages.Correlation() & self
+        if image_rel:
+            background_image = image_rel.fetch1('correlation_image')
+        else:
+            background_image = np.zeros(masks.shape[:-1])
+
+        # Plot background
+        image_height, image_width, num_masks = masks.shape
+        figsize = np.array([image_width, image_height]) / min(image_height, image_width)
+        fig = plt.figure(figsize=figsize * 7)
+        plt.imshow(background_image)
+
+        # Draw contours
+        cumsum_mask = np.empty([image_height, image_width])
+        for i in range(num_masks):
+            mask = masks[:, :, i]
+            color = colormap[mask_types[i]]
+
+            ## Compute cumulative mass (similar to caiman)
+            indices = np.unravel_index(np.flip(np.argsort(mask, axis=None), axis=0), mask.shape) # max to min value in mask
+            cumsum_mask[indices] = np.cumsum(mask[indices]**2) / np.sum(mask**2)
+
+            ## Plot contour at desired threshold
+            plt.contour(cumsum_mask, [threshold], linewidths=0.8, colors=[color])
+
+        return fig
 
 
 @schema
