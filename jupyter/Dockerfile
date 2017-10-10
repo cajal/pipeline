@@ -1,4 +1,4 @@
-FROM ninai/pipeline
+FROM ninai/pipeline:latest
 
 MAINTAINER Fabian Sinz <sinz@bcm.edu>
 

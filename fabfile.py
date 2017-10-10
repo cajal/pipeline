@@ -13,6 +13,9 @@ env.builddir = env.builddir if hasattr(env, 'builddir') else '/tmp/'
 def on(which):
     env.hosts = getattr(env, which).split(',')
 
+def ps():
+    sudo('docker ps|grep pipeline')
+    
 def ssh():
     for host in env.hosts:
         local('ssh-copy-id {}'.format(host))
@@ -65,6 +68,9 @@ def build_latest(nocache=False, pull=True, repo='cajal'):
 
         sudo('docker build {} -t ninai/pipeline:latest .'.format(args))
 
+def pull_latest():
+    sudo('docker pull ninai/pipeline:latest')
+        
 def push_latest():
     sudo('docker push ninai/pipeline:latest')
 
