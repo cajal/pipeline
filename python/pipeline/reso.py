@@ -288,13 +288,12 @@ class MotionCorrection(dj.Computed):
             # Compute smoothing window size
             size_in_ms = 300  # smooth over a 300 milliseconds window
             window_size = int(round(scan.fps * (size_in_ms / 1000)))  # in frames
-            window_size += 1 if window_size % 2 == 0 else 0  # make odd
 
             # Get motion correction shifts
             results = galvo_corrections.compute_motion_shifts(scan_, template,
                                                               smoothing_window_size=window_size)
-            y_shifts = results[0] - results[0].mean()  # center motions around zero
-            x_shifts = results[1] - results[1].mean()
+            y_shifts = results[0] - np.median(results[0])  # center motions around zero
+            x_shifts = results[1] - np.median(results[1])
             tuple_['y_shifts'] = y_shifts
             tuple_['x_shifts'] = x_shifts
             tuple_['y_outlier_frames'] = results[2]
@@ -1000,7 +999,6 @@ class MaskClassification(dj.Computed):
     definition = """ # classification of segmented masks.
 
     -> Segmentation                     # animal_id, session, scan_idx, reso_version, slice, channel, segmentation_method
-    -> SummaryImages                    # animal_id, session, scan_idx, reso_version, slice, channel
     -> shared.ClassificationMethod
     ---
     classif_time=CURRENT_TIMESTAMP    : timestamp     # automatic
@@ -1008,7 +1006,7 @@ class MaskClassification(dj.Computed):
 
     @property
     def key_source(self):
-        return (Segmentation() * SummaryImages() * shared.ClassificationMethod() &
+        return (Segmentation() * shared.ClassificationMethod() &
                 {'reso_version': CURRENT_VERSION})
 
     class Type(dj.Part):
@@ -1025,16 +1023,21 @@ class MaskClassification(dj.Computed):
         image_height, image_width = (ScanInfo() & key).fetch1('px_height', 'px_width')
         mask_ids, pixels, weights = (Segmentation.Mask() & key).fetch('mask_id', 'pixels', 'weights')
         masks = Segmentation.reshape_masks(pixels, weights, image_height, image_width)
-        masks = masks.transpose([2, 0, 1])  # num_masks, image_height, image_width
 
         # Classify masks
         if key['classification_method'] == 1:  # manual
+            if not SummaryImages() & key:
+                msg = 'Need to populate SummaryImages before manual mask classification'
+                raise PipelineException(msg)
+
             template = (SummaryImages.Correlation() & key).fetch1('correlation_image')
+            masks = masks.transpose([2, 0, 1])  # num_masks, image_height, image_width
             mask_types = mask_classification.classify_manual(masks, template)
-        elif key['classification_method'] == 2:  # cnn
-            raise PipelineException('Convnet not yet implemented.')
-            # template = (SummaryImages.Correlation() & key).fetch1('image')
-            # mask_types = mask_classification.classify_cnn(masks, template)
+        elif key['classification_method'] == 2:  # cnn-caiman
+            from .utils import caiman_interface as cmn
+            soma_diameter = tuple(14 / (ScanInfo() & key).microns_per_pixel)
+            probs = cmn.classify_masks(masks, soma_diameter)
+            mask_types = ['soma' if prob > 0.75 else 'artifact' for prob in probs]
         else:
             msg = 'Unrecognized classification method {}'.format(key['classification_method'])
             raise PipelineException(msg)
@@ -1045,6 +1048,67 @@ class MaskClassification(dj.Computed):
         self.insert1(key)
         for mask_id, mask_type in zip(mask_ids, mask_types):
             MaskClassification.Type().insert1({**key, 'mask_id': mask_id, 'type': mask_type})
+
+        self.notify(key, mask_types)
+
+    def notify(self, key, mask_types):
+        mask_names = ['soma', 'axon', 'dendrite', 'neuropil', 'artifact', 'unknown']
+        mask_counts = [mask_types.count(name) for name in mask_names]
+
+        fig = (MaskClassification() & key).plot_masks()
+        img_filename = '/tmp/' + key_hash(key) + '.png'
+        fig.savefig(img_filename)
+        plt.close(fig)
+
+        msg = 'MaskClassification for `{}` has been populated.\n'.format(key)
+        msg += ', '.join('{} {}s'.format(c, n) for c, n in zip(mask_counts, mask_names))
+        (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
+                                                                   file_title='mask classes')
+
+    def plot_masks(self, threshold=0.99):
+        """ Draw contours of masks over the correlation image (if available) with different
+        colors per type
+
+        :param threshold: Threshold on the cumulative mass to define mask contours. Lower
+            for tighter contours.
+
+        :returns Figure. You can call show() on it.
+        :rtype: matplotlib.figure.Figure
+        """
+        # Get masks
+        masks = (Segmentation() & self).get_all_masks()
+        mask_types = (MaskClassification.Type() & self).fetch('type')
+        colormap = {'soma': 'b', 'axon': 'k', 'dendrite': 'c', 'neuropil': 'y',
+                    'artifact': 'r', 'unknown': 'w'}
+
+
+        # Get correlation image if defined, black background otherwise.
+        image_rel = SummaryImages.Correlation() & self
+        if image_rel:
+            background_image = image_rel.fetch1('correlation_image')
+        else:
+            background_image = np.zeros(masks.shape[:-1])
+
+        # Plot background
+        image_height, image_width, num_masks = masks.shape
+        figsize = np.array([image_width, image_height]) / min(image_height, image_width)
+        fig = plt.figure(figsize=figsize * 7)
+        plt.imshow(background_image)
+
+        # Draw contours
+        cumsum_mask = np.empty([image_height, image_width])
+        for i in range(num_masks):
+            mask = masks[:, :, i]
+            color = colormap[mask_types[i]]
+
+            ## Compute cumulative mass (similar to caiman)
+            indices = np.unravel_index(np.flip(np.argsort(mask, axis=None), axis=0), mask.shape) # max to min value in mask
+            cumsum_mask[indices] = np.cumsum(mask[indices]**2) / np.sum(mask**2)
+
+            ## Plot contour at desired threshold
+            plt.contour(cumsum_mask, [threshold], linewidths=0.8, colors=[color])
+
+        return fig
 
 
 @schema
@@ -1073,7 +1137,6 @@ class ScanSet(dj.Computed):
 
         -> ScanSet.Unit
         ---
-        -> shared.MaskType                  # type of the unit
         um_x                : smallint      # x-coordinate of centroid in motor coordinate system
         um_y                : smallint      # y-coordinate of centroid in motor coordinate system
         um_z                : smallint      # z-coordinate of mask relative to surface of the cortex
@@ -1100,14 +1163,6 @@ class ScanSet(dj.Computed):
         px_centroids = cmn.get_centroids(masks)
         um_centroids = um_center + (px_centroids - px_center) * (ScanInfo() & key).microns_per_pixel
 
-        # Get type from MaskClassification if available, else SegmentationTask
-        if MaskClassification() & key:
-            ids, types = (MaskClassification.Type() & key).fetch('mask_id', 'type')
-            get_type = lambda mask_id: types[ids == mask_id].item()
-        else:
-            mask_type = (SegmentationTask() & key).fetch1('compartment')
-            get_type = lambda mask_id: mask_type
-
         # Get next unit_id for scan
         unit_rel = (ScanSet.Unit().proj() & key)
         unit_id = np.max(unit_rel.fetch('unit_id')) + 1 if unit_rel else 1
@@ -1121,8 +1176,8 @@ class ScanSet(dj.Computed):
                                                                 um_centroids, px_centroids):
             ScanSet.Unit().insert1({**key, 'unit_id': unit_id, 'mask_id': mask_id})
 
-            unit_info = {**key, 'unit_id': unit_id, 'type': get_type(mask_id), 'um_x': um_x,
-                         'um_y': um_y, 'um_z': um_z, 'px_x': px_x, 'px_y': px_y}
+            unit_info = {**key, 'unit_id': unit_id, 'um_x': um_x, 'um_y': um_y,
+                         'um_z': um_z, 'px_x': px_x, 'px_y': px_y}
             ScanSet.UnitInfo().insert1(unit_info, ignore_extra_fields=True)
 
         self.notify(key)

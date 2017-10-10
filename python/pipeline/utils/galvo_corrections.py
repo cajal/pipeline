@@ -1,8 +1,10 @@
 """ Utilities for motion and raster correction of resonant scans. """
-from ..exceptions import PipelineException
 from scipy import interpolate  as interp
 from scipy import signal
 import numpy as np
+
+from ..exceptions import PipelineException
+from ..utils.signal import mirrconv
 
 def compute_raster_phase(image, temporal_fill_fraction):
     """ Compute raster correction for bidirectional resonant scanners.
@@ -144,10 +146,10 @@ def compute_motion_shifts(scan, template, in_place=True, num_processes=12,
 
     # Smooth the shifts temporally
     if smooth_shifts:
+        smoothing_window_size += 1 if smoothing_window_size % 2 == 0 else 0  # make odd
         smoothing_window = signal.hann(smoothing_window_size) + 0.05 # 0.05 raises it so edges are not zero.
-        norm_smoothing_window = smoothing_window / sum(smoothing_window)
-        y_shifts = signal.convolve(y_shifts, norm_smoothing_window, mode='same')
-        x_shifts = signal.convolve(x_shifts, norm_smoothing_window, mode='same')
+        y_shifts = mirrconv(y_shifts, smoothing_window / sum(smoothing_window))
+        x_shifts = mirrconv(x_shifts, smoothing_window / sum(smoothing_window))
 
     return y_shifts, x_shifts, y_outliers, x_outliers
 
@@ -215,12 +217,12 @@ def correct_raster(scan, raster_phase, temporal_fill_fraction, in_place=True):
 
         # Correct even rows of the image (0, 2, ...)
         interp_function = interp.interp1d(scan_angles, image[::2, :], bounds_error=False,
-                                          fill_value='extrapolate', copy=False)
+                                          fill_value=0, copy=(not in_place))
         reshaped_scan[::2, :, i] = interp_function(scan_angles + raster_phase)
 
         # Correct odd rows of the image (1, 3, ...)
         interp_function = interp.interp1d(scan_angles, image[1::2, :], bounds_error=False,
-                                          fill_value='extrapolate', copy=False)
+                                          fill_value=0, copy=(not in_place))
         reshaped_scan[1::2, :, i] = interp_function(scan_angles - raster_phase)
 
     scan = np.reshape(reshaped_scan, original_shape)
@@ -279,7 +281,8 @@ def correct_motion(scan, xy_shifts, in_place=True):
 
             # Create interpolation function
             interp_function = interp.interp2d(range(image_width), range(image_height),
-                                              image, kind='cubic', copy=False)
+                                              image, kind='linear', fill_value=0,
+                                              copy=(not in_place))
 
             # Evaluate on the original image plus offsets
             reshaped_scan[:, :, i] = interp_function(np.arange(image_width) + x_shift,
