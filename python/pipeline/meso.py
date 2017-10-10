@@ -1000,7 +1000,6 @@ class MaskClassification(dj.Computed):
     definition = """ # classification of segmented masks.
 
     -> Segmentation                     # animal_id, session, scan_idx, reso_version, field, channel, segmentation_method
-    -> SummaryImages                    # animal_id, session, scan_idx, reso_version, field, channel
     -> shared.ClassificationMethod
     ---
     classif_time=CURRENT_TIMESTAMP    : timestamp     # automatic
@@ -1028,6 +1027,10 @@ class MaskClassification(dj.Computed):
 
         # Classify masks
         if key['classification_method'] == 1:  # manual
+            if not SummaryImages() & key:
+                msg = 'Need to populate SummaryImages before manual mask classification'
+                raise PipelineException(msg)
+
             template = (SummaryImages.Correlation() & key).fetch1('correlation_image')
             masks = masks.transpose([2, 0, 1])  # num_masks, image_height, image_width
             mask_types = mask_classification.classify_manual(masks, template)
