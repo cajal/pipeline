@@ -84,6 +84,7 @@ RUN wget http://www.fftw.org/fftw-3.3.6-pl2.tar.gz && \
 
 
 # --- install CaImAn
+RUN pwd
 RUN apt-get update -y -q && \
     apt-get install -y software-properties-common && \
     wget -O - http://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add - && \
