@@ -217,12 +217,12 @@ def correct_raster(scan, raster_phase, temporal_fill_fraction, in_place=True):
 
         # Correct even rows of the image (0, 2, ...)
         interp_function = interp.interp1d(scan_angles, image[::2, :], bounds_error=False,
-                                          fill_value='extrapolate', copy=False)
+                                          fill_value=0, copy=(not in_place))
         reshaped_scan[::2, :, i] = interp_function(scan_angles + raster_phase)
 
         # Correct odd rows of the image (1, 3, ...)
         interp_function = interp.interp1d(scan_angles, image[1::2, :], bounds_error=False,
-                                          fill_value='extrapolate', copy=False)
+                                          fill_value=0, copy=(not in_place))
         reshaped_scan[1::2, :, i] = interp_function(scan_angles - raster_phase)
 
     scan = np.reshape(reshaped_scan, original_shape)
@@ -281,7 +281,8 @@ def correct_motion(scan, xy_shifts, in_place=True):
 
             # Create interpolation function
             interp_function = interp.interp2d(range(image_width), range(image_height),
-                                              image, kind='cubic', copy=False)
+                                              image, kind='linear', fill_value=0,
+                                              copy=(not in_place))
 
             # Evaluate on the original image plus offsets
             reshaped_scan[:, :, i] = interp_function(np.arange(image_width) + x_shift,
