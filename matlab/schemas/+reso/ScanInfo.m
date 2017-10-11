@@ -1,6 +1,6 @@
 %{
 # master table with general data about the scans
--> `pipeline_experiment`.`scan`
+-> experiment.Scan
 -> reso.Version
 ---
 nslices                     : tinyint                       # number of slices
@@ -27,7 +27,7 @@ classdef ScanInfo < dj.Imported
 
 		function makeTuples(self, key)
 		%!!! compute missing fields for key here
-			 self.insert(key)
+			 %self.insert(key)
 		end
 	end
 
