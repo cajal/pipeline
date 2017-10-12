@@ -1,5 +1,5 @@
 %{
-quality.QuantumSize (imported) # quantal size in images
+# quantal size in images
 -> preprocess.Prepare
 -> preprocess.Channel
 -> preprocess.Slice
@@ -18,10 +18,10 @@ percentile95_quantum_rate            : float                # 95th percentile in
 %}
 
 
-classdef QuantumSize < dj.Relvar & dj.AutoPopulate
+classdef QuantumSize < dj.Imported
     
     properties
-        popRel = preprocess.Prepare * preprocess.Channel * ...
+        keySource = preprocess.Prepare * preprocess.Channel * ...
             preprocess.Slice & preprocess.PrepareGalvoMotion & (preprocess.PrepareGalvo & 'nframes>8000')
     end
     

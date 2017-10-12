@@ -5,15 +5,7 @@ import numpy as np
 
 def compute_motion_shifts(field, template, smooth_shifts=True, smoothing_window_size=5,
                           max_fraction_yshift=0.10, max_fraction_xshift=0.10):
-    """ Compute shifts in x and y for rigid motion correction.
-    
-    A patch is taken from the center of each frame (the margin size that is not included
-    limits the maximum possible pixel shift in that dimension) and convolved with the 
-    template to get the amount of shifting needed to align the center of the frame with 
-    the template: 0 if center of frame = center of template. This is an approximation of 
-    the full 2-d convolution: works well if center patch is big and has the advantage of 
-    choosing a good shift inside the allowed limit and not having a preference for zero
-    shifts.
+    """ Compute shifts in x and y for subpixel rigid motion correction.
     
     A positive x_shift means that the image needs to be moved x_shift pixels left, a 
     positive y_shift means the image needs to be moved y_shift pixels up.
@@ -34,10 +26,6 @@ def compute_motion_shifts(field, template, smooth_shifts=True, smoothing_window_
     if field.ndim == 2:
         field = np.expand_dims(field, -1)
 
-    # Assert template is float. signal.correlate needs one of its arguments to be float
-    if not np.issubdtype(template.dtype, np.float):
-        template = template.astype(np.float32)
-
     # Get some params
     image_height, image_width, num_frames = field.shape
     max_y_shift = round(image_height * max_fraction_yshift)  # max num_pixels to move in y
@@ -45,59 +33,74 @@ def compute_motion_shifts(field, template, smooth_shifts=True, smoothing_window_
     skip_rows = round(image_height * 0.10)  # rows near the top or bottom have artifacts
     skip_cols = round(image_width * 0.10)  # so do columns
 
-    # Discard some rows/cols and cut center patch of frames
+    # Discard some rows/cols
     template = template[skip_rows: -skip_rows, skip_cols: -skip_cols]
-    frame_centers = field[skip_rows + max_y_shift: -skip_rows - max_y_shift,
-                    skip_cols + max_x_shift: -skip_cols - max_x_shift, :]
+    field = field[skip_rows : -skip_rows, skip_cols: -skip_cols, :]
 
-    y_shifts = np.zeros(num_frames)
-    x_shifts = np.zeros(num_frames)
+    # Get fourier transform of template
+    template_freq = np.fft.fftn(template)
+
+    # Compute subpixel shifts per image (verbatim from skimage.feature.register_translation)
+    y_shifts = np.empty(num_frames)
+    x_shifts = np.empty(num_frames)
     for i in range(num_frames):
+        image_freq = np.fft.fftn(field[:, :, i])
+        # yx_shift = feature.register_translation(image_freq, template_freq, 10,
+        #                                        space='fourier')[0]
 
-        # Convolve frame center on template and find highest value.
-        conv_image = signal.correlate(template, frame_centers[:, :, i], mode='valid')
-        y_shift, x_shift = np.unravel_index(np.argmax(conv_image), conv_image.shape)
-        y_shifts[i] = max_y_shift - y_shift
-        x_shifts[i] = max_x_shift - x_shift
+        # To avoid the overhead of register_translation (which computes a set of other
+        # things other than the motion correction shifts), we copy only the relevant code
+        # from skimage.feature.register_translation
+        src_freq = image_freq
+        target_freq = template_freq
+        upsample_factor = 10 # motion correction to a tenth of a pixel
 
-        # if align_subpixels:
-        #     """Transcribed from commons.ne7.ip.measureShift.m."""
-        #     from scipy import fftpack
-        #     fxcorr = fftpack.fft2(field[:, :, i]) * np.conj(fftpack.fft2(template))
-        #
-        #     # Shift by the whole number of pixels
-        #     half_height = np.floor(image_height / 2)
-        #     half_width = np.floor(image_width / 2)
-        #     y_freqs = np.arange(-half_height, half_height + image_height % 2) / image_height
-        #     x_freqs = np.arange(-half_width, half_width + image_width % 2) / image_width
-        #     shifts_in_freq = np.outer(np.exp(2 * np.pi * y_shifts[i] * 1j * y_freqs),
-        #                               np.exp(2 * np.pi * x_shifts[i] * 1j * x_freqs))
-        #     shifted_fxcorr = fxcorr * fftpack.fftshift(shifts_in_freq)
-        #
-        #     # Get phases and magnitudes from fxcorr
-        #     phases = fftpack.fftshift(np.angle(shifted_fxcorr))
-        #     magnitudes = fftpack.fftshift(np.abs(shifted_fxcorr))
-        #     y_weighted_magnitudes = (magnitudes.T * y_freqs).T
-        #     x_weighted_magnitudes = magnitudes * x_freqs
-        #     phase_times_magnitude = phases * magnitudes
-        #
-        #     # Select only those with low frequencies (half Nyquist, freqs < 0.25)
-        #     quarter_height = round(image_height / 4)
-        #     quarter_width = round(image_width / 4)
-        #     y_mag = y_weighted_magnitudes[quarter_height: -quarter_height, quarter_width: -quarter_width].ravel()
-        #     x_mag = x_weighted_magnitudes[quarter_height: -quarter_height, quarter_width: -quarter_width].ravel()
-        #     phase = phase_times_magnitude[quarter_height: -quarter_height, quarter_width: -quarter_width].ravel()
-        #
-        #     # To find the slope in y and x fit:
-        #     # phase_times_magnitude = y_shift * y_weighted_magnitudes
-        #     #                         + x_shift * x_weighted_magnitudes
-        #     A = np.stack([y_mag, x_mag], axis=1)
-        #     b = phase
-        #     y_slope, x_slope = np.linalg.lstsq(A, b)[0]
-        #
-        #     # Apply subpixel shifts
-        #     y_shifts[i] -= (y_slope / (2 * np.pi))
-        #     x_shifts[i] -= (x_slope / (2 * np.pi))
+        #########################################################################
+        from skimage.feature.register_translation import _upsampled_dft
+
+        # Whole-pixel shift - Compute cross-correlation by an IFFT
+        shape = src_freq.shape
+        image_product = src_freq * target_freq.conj()
+        cross_correlation = np.fft.ifftn(image_product)
+
+        # Locate maximum
+        maxima = np.unravel_index(np.argmax(np.abs(cross_correlation)),
+                                  cross_correlation.shape)
+        midpoints = np.array([np.fix(axis_size / 2) for axis_size in shape])
+
+        shifts = np.array(maxima, dtype=np.float64)
+        shifts[shifts > midpoints] -= np.array(shape)[shifts > midpoints]
+
+        # Initial shift estimate in upsampled grid
+        shifts = np.round(shifts * upsample_factor) / upsample_factor
+        upsampled_region_size = np.ceil(upsample_factor * 1.5)
+        # Center of output array at dftshift + 1
+        dftshift = np.fix(upsampled_region_size / 2.0)
+        upsample_factor = np.array(upsample_factor, dtype=np.float64)
+        normalization = (src_freq.size * upsample_factor ** 2)
+        # Matrix multiply DFT around the current shift estimate
+        sample_region_offset = dftshift - shifts * upsample_factor
+        cross_correlation = _upsampled_dft(image_product.conj(), upsampled_region_size,
+                                           upsample_factor, sample_region_offset).conj()
+        cross_correlation /= normalization
+        # Locate maximum and map back to original pixel grid
+        maxima = np.array(np.unravel_index(
+            np.argmax(np.abs(cross_correlation)),
+            cross_correlation.shape),
+            dtype=np.float64)
+        maxima -= dftshift
+        shifts = shifts + maxima / upsample_factor
+        ################################################################################
+        yx_shift = shifts
+
+        y_shifts[i] = yx_shift[0]
+        x_shifts[i] = yx_shift[1]
+
+    # Limit max shift
+    extreme_y_shifts = abs(y_shifts) > max_y_shift
+    extreme_x_shifts = abs(x_shifts) > max_x_shift
+    y_shifts[extreme_y_shifts] = (np.sign(y_shifts) * max_y_shift)[extreme_y_shifts]
+    x_shifts[extreme_x_shifts] = (np.sign(x_shifts) * max_x_shift)[extreme_x_shifts]
 
     if smooth_shifts:
         # Temporal smoothing of the y and x shifts
@@ -155,33 +158,6 @@ def compute_raster_phase(image, temporal_fill_fraction):
                                        shifted_odds[:, skip_cols: -skip_cols]))
         angle_shift = angle_shifts[np.argmax(match_values)]
 
-    # Old version
-    # Create time index
-    # half_width = image_width / 2
-    # time_range = ((np.arange(image_width) + 0.5) - half_width) / half_width # sin(angle)
-    # time_range = time_range * temporal_fill_fraction # scan is off on the edges,
-    # This houdl have been temporal
-    # scan_angles = np.arcsin(time_range)
-
-    # Iteratively find the best raster phase, by shifting odd and even rows.
-    # raster_phase = 0
-    # step = 0.02
-    # phase_shifts = np.array([-0.5, -0.25, -0.1, 0.1, 0.25, 0.5])
-    # even_interp = interp.interp1d(sin_index, even_rows)
-    # odd_interp = interp.interp1d(sin_index, odd_rows)
-    # while step > 1e-4:
-    #     phases = raster_phase + (step * phase_shifts) * spatial_fill_fraction
-    #     match = []
-    #     for new_phase in phases:
-    #         shifted_evens = even_interp(np.sin(scan_angles + new_phase) / spatial_fill_fraction)
-    #         shifted_odds = odd_interp(np.sin(scan_angles - new_phase) / spatial_fill_fraction)
-    #         match.append(np.sum(shifted_evens[:, 10:-10] * shifted_odds[:, 10:-10]))
-    #
-    #     A = np.stack([phases**2, phases, np.ones_like(phases)])
-    #     b = np.array(match)
-    #     alpha_2, alpha_1, alpha_0 = np.linalg.lstsq(A, b)[0]
-    #     raster_phase = max(alpha_2, min(phases[-1], -(alpha_1/alpha_2) / 2))
-    #     step = step/4
     return angle_shift
 
 def correct_motion(scan, xy_shifts, in_place=True):
@@ -208,7 +184,7 @@ def correct_motion(scan, xy_shifts, in_place=True):
 
     # Assert scan is float (integer precision is not good enough)
     if not np.issubdtype(scan.dtype, np.float):
-        print('Changing scan type from', str(scan.dtype), 'to double')
+        print('Warning: Changing scan type from', str(scan.dtype), 'to np.float32')
         scan = scan.astype(np.float32, copy=(not in_place))
     elif not in_place:
         scan = scan.copy() # copy it anyway preserving the original dtype
@@ -276,10 +252,10 @@ def correct_raster(scan, raster_phase, temporal_fill_fraction, in_place=True):
 
     # Assert scan is float
     if not np.issubdtype(scan.dtype, np.float):
-        print('Changing scan type from', str(scan.dtype), 'to float')
-        scan = scan.astype(np.float32, copy=(not in_place))
+         print('Warning: Changing scan type from', str(scan.dtype), 'to np.float32')
+         scan = scan.astype(np.float32, copy=(not in_place))
     elif not in_place:
-        scan = scan.copy() # copy it anyway preserving the original dtype
+         scan = scan.copy() # copy it anyway preserving the original float dtype
 
     # Get some dimensions
     original_shape = scan.shape

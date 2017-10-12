@@ -128,7 +128,7 @@ class Prepare(dj.Imported):
             else:
                 num_components = slice_volume * 0.0001
 
-            return round(num_components)
+            return int(round(num_components))
 
         def estimate_soma_radius_in_pixels(self):
             """ Estimates the radius of a neuron in the scan (in pixels). Assumes soma is
@@ -257,6 +257,7 @@ class Prepare(dj.Imported):
             correct_raster = (Prepare.Galvo() & key).get_correct_raster()
 
             for field_id in range(scan.num_fields):
+                print('Correcting field', field_id + 1)
                 field = scan[field_id, :, :, channel, :] # 3-d (height, width, frames)
                 key['slice'] = field_id + 1
 
@@ -298,7 +299,31 @@ class Prepare(dj.Imported):
         frame  : longblob     # average frame after Anscombe, max-weighting,
         """
         def _make_tuples(self, key, scan):
-           pass
+            p = 6 # used for the weighted average
+
+            # Get raster correcting function
+            correct_raster = (Prepare.Galvo() & key).get_correct_raster()
+
+            for field_id in range(scan.num_fields):
+                for channel_id in range(scan.num_channels):
+                    new_tuple = key.copy()
+                    new_tuple['channel'] = channel_id + 1
+                    new_tuple['slice'] = field_id + 1
+
+                    # Get motion correction function
+                    galvomotion_rel = (Prepare.GalvoMotion() & key & {'slice': field_id + 1})
+                    correct_motion = galvomotion_rel.get_correct_motion()
+
+                    # Correct field
+                    field = scan[field_id, :, :, channel_id, :]
+                    field = correct_motion(correct_raster(field))
+
+                    # l-p norm of each pixel over time
+                    field[field < 0] = 0
+                    new_tuple['frame'] = np.mean(field ** p, axis=-1) ** (1 / p)
+
+                    # Insert new tuple
+                    self.insert1(new_tuple)
 
     class Aod(dj.Part):
         definition = """   # information about AOD scans
@@ -322,7 +347,7 @@ class Prepare(dj.Imported):
             # Read the scan
             import scanreader
             scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
-            scan = scanreader.read_scan(scan_filename, join_contiguous=False)
+            scan = scanreader.read_scan(scan_filename)
 
             # Select channel to use for raster and motion correction according to dye used
             fluorophore = (experiment.Session.Fluorophore() & key).fetch1['fluorophore']
@@ -340,6 +365,7 @@ class Prepare(dj.Imported):
             Prepare.GalvoMotion()._make_tuples(key, scan, channel)
 
             # Prepare average frame
+            print('Computing average corrected frame...')
             Prepare.GalvoAverageFrame()._make_tuples(key, scan)
 
 
@@ -366,7 +392,7 @@ class Prepare(dj.Imported):
         import scanreader
         scan_filename = (experiment.Scan() & self).local_filenames_as_wildcard
         scan = scanreader.read_scan(scan_filename)
-        scan = np.double(scan[field - 1, :, :, channel - 1, start_index: stop_index])
+        scan = scan[field - 1, :, :, channel - 1, start_index: stop_index]
         original_scan = scan.copy()
 
         # Correct the scan
@@ -730,12 +756,12 @@ class ExtractRaw(dj.Imported):
 
         # Read the scan
         import scanreader
-        scan_filename = (experiment.Scan() & self).local_filenames_as_wildcard
+        scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
         scan = scanreader.read_scan(scan_filename)
 
         # Estimate number of components per slice
         num_components = (Prepare.Galvo() & key).estimate_num_components_per_slice()
-        num_components += int(0.2 * num_components) # add 20% more just to be sure
+        num_components += int(round(0.2 * num_components)) # add 20% more just to be sure
 
         # Estimate the radius of a neuron in the scan (used for somatic scans)
         soma_radius_in_pixels = (Prepare.Galvo() & key).estimate_soma_radius_in_pixels()
@@ -774,10 +800,10 @@ class ExtractRaw(dj.Imported):
             current_trace_id = 1 # to count traces over one channel, ids start at 1
 
             # Over each slice in the channel
-            for slice in range(scan.num_slices):
+            for slice in range(scan.num_fields):
                 # Load the scan
                 print('Loading scan...')
-                field = (scan[slice, :, :, channel, :]).astype(np.float32, copy=False)
+                field = scan[slice, :, :, channel, :]
 
                 # Correct scan
                 print('Correcting scan...')
@@ -860,14 +886,14 @@ class ExtractRaw(dj.Imported):
         """
         # Get fps and calculate total number of frames
         fps = (Prepare.Galvo() & self).fetch1['fps']
-        num_video_frames = round(fps * seconds)
+        num_video_frames = int(round(fps * seconds))
         stop_index = start_index + num_video_frames
 
         # Load the scan
         import scanreader
         scan_filename = (experiment.Scan() & self).local_filenames_as_wildcard
         scan = scanreader.read_scan(scan_filename)
-        scan = np.double(scan[field - 1, :, :, channel - 1, start_index: stop_index])
+        scan = scan[field - 1, :, :, channel - 1, start_index: stop_index]
 
         # Correct the scan
         correct_motion = (Prepare.GalvoMotion() & self & {'slice': field}).get_correct_motion()
@@ -979,6 +1005,31 @@ class ExtractRaw(dj.Imported):
 
         # Draw contours
         cmn.plot_contours(location_matrix, correlation_image)
+
+    def plot_centroids(self, slice=1, channel=1, first_n=None):
+        """ Draw centroids of masks over the correlation image.
+
+        :param slice: Scan slice to use
+        :param channel: Scan channel to use
+        :param first_n: Number of masks to plot. None for all.
+        :returns: None
+        """
+        from .utils import caiman_interface as cmn
+
+        # Get location matrix
+        location_matrix = self.get_all_masks(slice, channel)
+
+        # Select first n components
+        if first_n is not None:
+            location_matrix = location_matrix[:, :, :first_n]
+
+        # Get correlation image if defined
+        image_rel = ExtractRaw.GalvoCorrelationImage() & self & {'slice': slice,
+                                                                 'channel': channel}
+        correlation_image = image_rel.fetch1['correlation_image'] if image_rel else None
+
+        # Draw centroids
+        cmn.plot_centroids(location_matrix, correlation_image)
 
     def plot_impulse_responses(self, slice=1, channel=1, num_timepoints=100):
         """ Plots the individual impulse response functions for all traces assuming an
