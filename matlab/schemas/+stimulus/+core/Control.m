@@ -123,6 +123,7 @@ classdef Control < handle
                 flip = 0;
             end
             self.screen.setFlipCount(flip)
+            self.screen.frameStep = 1;
             
             if ~stimulus.core.Visual.DEBUG
                 HideCursor

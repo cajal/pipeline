@@ -1,5 +1,5 @@
 %{
-tuning.OriMap (imported) # pixelwise responses to full-field directional stimuli
+# pixelwise responses to full-field directional stimuli
 -> tuning.OriDesignMatrix
 -> preprocess.PrepareGalvo
 -> preprocess.Slice
@@ -10,10 +10,10 @@ dof_map                     : longblob                      # degrees of in orig
 %}
 
 
-classdef OriMap < dj.Relvar & dj.AutoPopulate
+classdef OriMap < dj.Imported
 
-	properties
-		popRel = tuning.OriDesignMatrix*preprocess.PrepareGalvo*preprocess.Slice & 'slice>=1 and slice<=nslices'
+	properties(Constant)
+		keySource = tuning.OriDesignMatrix*preprocess.PrepareGalvo*preprocess.Slice & 'slice>=1 and slice<=nslices'
 	end
 
 	methods(Access=protected)
@@ -48,9 +48,13 @@ classdef OriMap < dj.Relvar & dj.AutoPopulate
                 frame = fixMotion(fixRaster(double(reader(:,:,1,key.slice,frames(iframe)))), frames(iframe));
                 X(iframe,:) = frame(:);
             end
+            
+            % remove periods where the design matrix has nans
             ix = any(isnan(X),2);
             X(ix,:) = [];
             designMatrix(ix,:) = [];
+            
+            % normalize traces
             M = mean(X);
             X = bsxfun(@minus, X, M);
             X = bsxfun(@rdivide, X, M);
