@@ -1,8 +1,7 @@
 %{
 # activity inferred from fluorescence traces
--> reso.ScanSet
-<<<<<<< HEAD
--> shared.SpikeMethod
+-> meso.ScanSet
+-> `pipeline_shared`.`#spike_method`
 ---
 activity_time=CURRENT_TIMESTAMP: timestamp                  # automatic
 %}
