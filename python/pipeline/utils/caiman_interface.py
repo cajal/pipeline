@@ -368,8 +368,9 @@ def deconvolve(trace, AR_order=2):
     :returns: AR coefficients (AR_order) that model the calcium response:
             c(t) = c(t-1) * AR_coeffs[0] + c(t-2) * AR_coeffs[1] + ...
     """
-    _, _, _, AR_coeffs, _, spike_trace = deconvolution.constrained_foopsi(trace, p=AR_order,
-        method='cvxpy', bas_nonneg=False, fudge_factor=0.96) # fudge_factor is a regularization term
+    _, _, _, AR_coeffs, _, spike_trace, _ = deconvolution.constrained_foopsi(trace,
+        p=AR_order, method='cvxpy', bas_nonneg=False, fudge_factor=0.96)
+        # fudge_factor is a regularization term
 
     return spike_trace, AR_coeffs
 
