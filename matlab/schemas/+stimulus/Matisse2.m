@@ -84,7 +84,7 @@ classdef Matisse2 < dj.Manual & stimulus.core.Visual
         function showTrial(self, cond)
             % verify that pattern parameters match display settings
             assert(~isempty(self.fps), 'Cannot obtain the refresh rate')
-            assert(abs(self.fps - cond.fps)/cond.fps < 0.05, 'incorrect monitor frame rate')
+            %assert(abs(self.fps - cond.fps)/cond.fps < 0.05, 'incorrect monitor frame rate')
             assert((self.rect(3)/self.rect(4) - cond.pattern_aspect)/cond.pattern_aspect < 0.05, 'incorrect pattern aspect')
             
             % blank the screen if there is a blanking period
