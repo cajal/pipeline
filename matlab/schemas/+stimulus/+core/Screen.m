@@ -41,6 +41,7 @@ classdef Screen < handle
                 sca
                 % pix screen with the largest screen number
                 screen = max(Screen('Screens'));
+                screen = 1;
                 [self.win, self.rect] = Screen('OpenWindow',screen,127,[],[],[],[],[], ...
                     mor(kPsychNeedFastBackingStore,kPsychNeed16BPCFloat));
                 AssertGLSL
