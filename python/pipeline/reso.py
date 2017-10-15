@@ -189,9 +189,10 @@ class RasterCorrection(dj.Computed):
             mini_scan = scan[slice_id, :, :, channel, frames]
 
             # Create template (average frame tapered to avoid edge artifacts)
-            taper = np.sqrt(np.outer(tukey(scan.image_height, 0.2),
-                                     tukey(scan.image_width, 0.2)))
-            template = np.mean(mini_scan, axis=-1) * taper
+            taper = np.sqrt(np.outer(tukey(scan.image_height, 0.4),
+                                     tukey(scan.image_width, 0.4)))
+            anscombed = 2 * np.sqrt(mini_scan - mini_scan.min() + 3 / 8) # anscombe transform
+            template = np.mean(anscombed, axis=-1) * taper
             tuple_['template'] = template
 
             # Compute raster correction parameters
@@ -208,7 +209,7 @@ class RasterCorrection(dj.Computed):
 
     def notify(self, key):
         msg = 'RasterCorrection for `{}` has been populated.'.format(key)
-        msg += '\nRaster phases: {}'.format((self & key).fetch('raster_phase'))
+        msg += '\nRaster phases: {}'.format((self & key).fetch1('raster_phase'))
         (notify.SlackUser() & (experiment.Session() & key)).notify(msg)
 
     def get_correct_raster(self):
@@ -216,10 +217,11 @@ class RasterCorrection(dj.Computed):
         raster_phase = self.fetch1('raster_phase')
         fill_fraction = (ScanInfo() & self).fetch1('fill_fraction')
         if raster_phase == 0:
-            return lambda scan: scan.astype(np.float32, copy=False)
+            correct_raster = lambda scan: scan.astype(np.float32, copy=False)
         else:
-            return lambda scan: galvo_corrections.correct_raster(scan, raster_phase,
-                                                                 fill_fraction)
+            correct_raster = lambda scan: galvo_corrections.correct_raster(scan,
+                                                             raster_phase, fill_fraction)
+        return correct_raster
 
 
 @schema
