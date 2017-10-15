@@ -220,7 +220,7 @@ class RasterCorrection(dj.Computed):
 
     def get_correct_raster(self):
         """ Returns a function to perform raster correction on the scan. """
-        raster_phase = self.fetch1('raster_phase')
+        raster_phase = self.fetch('raster_phase')
         fill_fraction = (ScanInfo() & self).fetch1('fill_fraction')
         if raster_phase == 0:
             correct_raster = lambda scan: scan.astype(np.float32, copy=False)
