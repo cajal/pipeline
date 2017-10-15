@@ -209,7 +209,7 @@ class RasterCorrection(dj.Computed):
 
     def notify(self, key):
         msg = 'RasterCorrection for `{}` has been populated.'.format(key)
-        msg += '\nRaster phases: {}'.format((self & key).fetch1('raster_phase'))
+        msg += '\nRaster phases: {}'.format((self & key).fetch('raster_phase'))
         (notify.SlackUser() & (experiment.Session() & key)).notify(msg)
 
     def get_correct_raster(self):
