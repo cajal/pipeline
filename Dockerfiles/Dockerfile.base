@@ -84,6 +84,7 @@ RUN wget http://www.fftw.org/fftw-3.3.6-pl2.tar.gz && \
 
 
 # --- install CaImAn
+RUN pwd
 RUN apt-get update -y -q && \
     apt-get install -y software-properties-common && \
     wget -O - http://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add - && \
@@ -94,10 +95,9 @@ RUN apt-get update -y -q && \
     export LLVM_CONFIG=/usr/lib/llvm-3.9/bin/llvm-config && \ 
     git clone --recursive https://github.com/ecobost/CaImAn.git && \
     pip3 install cython scikit-image ipyparallel psutil numba && \
-    pip3 install -r CaImAn/requirements_pip.txt && \
+    pip3 install peakutils tqdm && \
     pip3 install git+https://github.com/j-friedrich/OASIS.git && \
-    pip3 install future cvxpy
-    pip3 install keras
+    pip3 install future cvxpy keras
 
 RUN grep -vwE "install_requires=" CaImAn/setup.py > tmp && mv tmp CaImAn/setup.py &&\
     pip3 install -e CaImAn/
