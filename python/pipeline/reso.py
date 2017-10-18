@@ -557,6 +557,8 @@ class SegmentationTask(dj.Manual):
             num_components = slice_volume * 0.0001
         elif compartment == 'axon':
             num_components = slice_volume * 0.0005  # five times as many neurons
+        elif compartment == 'bouton':
+            num_components = slice_volume * 0.001   # 10 times as many neurons
         else:
             PipelineException("Compartment type '{}' not recognized".format(compartment))
 
@@ -661,27 +663,49 @@ class Segmentation(dj.Computed):
             # Set CNMF parameters
             ## Set general parameters
             kwargs = {}
-            kwargs['num_components'] = (SegmentationTask() & key).estimate_num_components()
             kwargs['num_background_components'] = 1
             kwargs['merge_threshold'] = 0.7
             kwargs['fps'] = scan.fps
 
-            ## Set params specific to somatic or axonal/dendritic scans
+            # Set params specific to method and segmentation target
             target = (SegmentationTask() & key).fetch1('compartment')
-            if target == 'soma':
-                kwargs['init_on_patches'] = True if key['segmentation_method'] == 3 else False
-                kwargs['init_method'] = 'greedy_roi'
-                kwargs['soma_diameter'] = tuple(14 / (ScanInfo() & key).microns_per_pixel) # 14 x 14 microns
-            else:  # axons/dendrites
+            if key['segmentation_method'] == 2: # nmf
+                if target == 'axon':
+                    kwargs['init_on_patches'] = True
+                    kwargs['num_components_per_patch'] = 15
+                    kwargs['init_method'] = 'sparse_nmf'
+                    kwargs['snmf_alpha'] = 500  # 10^2 to 10^3.5 is a good range
+                    kwargs['patch_size'] = tuple(50 / (ScanInfo.Field() & key).microns_per_pixel) # 50 x 50 microns
+                    kwargs['proportion_patch_overlap'] = 0.2 # 20% overlap
+                elif target == 'bouton':
+                    kwargs['init_on_patches'] = False
+                    kwargs['num_components'] = (SegmentationTask() & key).estimate_num_components()
+                    kwargs['init_method'] = 'greedy_roi'
+                    kwargs['soma_diameter'] = tuple(2 / (ScanInfo.Field() & key).microns_per_pixel)
+                else: # soma
+                    kwargs['init_on_patches'] = False
+                    kwargs['num_components'] = (SegmentationTask() & key).estimate_num_components()
+                    kwargs['init_method'] = 'greedy_roi'
+                    kwargs['soma_diameter'] = tuple(14 / (ScanInfo.Field() & key).microns_per_pixel)
+            else: #nmf-patches
                 kwargs['init_on_patches'] = True
-                kwargs['init_method'] = 'sparse_nmf'
-                kwargs['snmf_alpha'] = 500  # 10^2 to 10^3.5 is a good range
-
-            # Set parameters for patch initialization
-            if kwargs['init_on_patches']:
-                kwargs['patch_size'] = tuple(50 / (ScanInfo() & key).microns_per_pixel) # 50 x 50 microns
                 kwargs['proportion_patch_overlap'] = 0.2 # 20% overlap
-                kwargs['num_components_per_patch'] = 5 if target == 'soma' else 15
+                if target == 'axon':
+                    kwargs['num_components_per_patch'] = 15
+                    kwargs['init_method'] = 'sparse_nmf'
+                    kwargs['snmf_alpha'] = 500  # 10^2 to 10^3.5 is a good range
+                    kwargs['patch_size'] = tuple(50 / (ScanInfo.Field() & key).microns_per_pixel) # 50 x 50 microns
+                elif target == 'bouton':
+                    kwargs['num_components_per_patch'] = 5
+                    kwargs['init_method'] = 'greedy_roi'
+                    kwargs['patch_size'] = tuple(20 / (ScanInfo.Field() & key).microns_per_pixel) # 20 x 20 microns
+                    kwargs['soma_diameter'] = tuple(2 / (ScanInfo.Field() & key).microns_per_pixel)
+                else: # soma
+                    kwargs['num_components_per_patch'] = 5
+                    kwargs['init_method'] = 'greedy_roi'
+                    kwargs['patch_size'] = tuple(50 / (ScanInfo.Field() & key).microns_per_pixel)
+                    kwargs['soma_diameter'] = tuple(14 / (ScanInfo.Field() & key).microns_per_pixel)
+
 
             ## Set performance/execution parameters (heuristically), decrease if memory overflows
             kwargs['num_processes'] = 12  # Set to None for all cores available
