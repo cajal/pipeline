@@ -217,7 +217,7 @@ class Compartment(dj.Lookup):
     compartment         : char(16)
     ---
     """
-    contents = [['axon'], ['soma']]
+    contents = [['axon'], ['soma'], ['bouton']]
 
 
 @schema
@@ -414,7 +414,6 @@ class Scan(dj.Manual, HasFilename):
         power               : float                         # (mW) to brain
         gdd                 : float                         # gdd setting
         """
-
 
 @schema
 class Stack(dj.Manual):

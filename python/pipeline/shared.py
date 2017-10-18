@@ -5,13 +5,6 @@ import datajoint as dj
 schema = dj.schema('pipeline_shared', locals())
 
 @schema
-class Slice(dj.Lookup):
-    definition = """  # slices in resonant scans
-    slice       : tinyint
-    """
-    contents = [[i] for i in range(1, 13)]
-
-@schema
 class Field(dj.Lookup):
     definition = """ # fields in mesoscope scans
     field       : tinyint
@@ -26,6 +19,14 @@ class Channel(dj.Lookup):
     contents = [[i] for i in range(1, 5)]
 
 @schema
+class PipelineVersion(dj.Lookup):
+    definition = """ # versions for the reso pipeline
+
+    pipe_version                    : smallint
+    """
+    contents = [[i] for i in range(3)]
+
+@schema
 class SegmentationMethod(dj.Lookup):
     definition = """ # methods for mask extraction for multi-photon scans
     segmentation_method         : tinyint
@@ -38,7 +39,8 @@ class SegmentationMethod(dj.Lookup):
     contents = [
     [1, 'manual', '', 'matlab'],
     [2, 'nmf', 'constrained non-negative matrix factorization from Pnevmatikakis et al. (2016)', 'python'],
-    [3, 'nmf-patches', 'same as nmf but initialized in small image patches', 'python']
+    [3, 'nmf-patches', 'same as nmf but initialized in small image patches', 'python'],
+    [4, 'nmf-boutons', 'nmf for axonal terminals', 'python']
     ]
 
 @schema
