@@ -15,18 +15,14 @@ CURRENT_VERSION = 1
 
 
 @schema
-class Version(dj.Lookup):
+class Version(dj.Manual):
     definition = """ # versions for the meso pipeline
 
-    meso_version                    : smallint
+    -> shared.PipelineVersion
     ---
     description = ''                : varchar(256)      # any notes on this version
     date = CURRENT_TIMESTAMP        : timestamp         # automatic
     """
-    contents = [
-        {'meso_version': 0, 'description': 'test'},
-        {'meso_version': 1, 'description': 'first release'}
-    ]
 
 
 @schema
@@ -53,7 +49,7 @@ class ScanInfo(dj.Imported):
     def key_source(self):
         meso_sessions = (experiment.Session() & {'rig': '2P4'})
         meso_scans = (experiment.Scan() - experiment.ScanIgnored()) & meso_sessions
-        return meso_scans * (Version() & {'meso_version': CURRENT_VERSION})
+        return meso_scans * (Version() & {'pipe_version': CURRENT_VERSION})
 
     class Field(dj.Part):
         definition = """ # field-specific scan information
@@ -169,7 +165,7 @@ class RasterCorrection(dj.Computed):
     def key_source(self):
         # Run make_tuples once per scan iff correction channel has been set for all fields
         scans = (ScanInfo() & CorrectionChannel()) - (ScanInfo.Field() - CorrectionChannel())
-        return scans & {'meso_version': CURRENT_VERSION}
+        return scans & {'pipe_version': CURRENT_VERSION}
 
     def _make_tuples(self, key):
         from scipy.signal import tukey
@@ -195,9 +191,10 @@ class RasterCorrection(dj.Computed):
             mini_scan = scan[field_id, :, :, channel, frames]
 
             # Create template (average frame tapered to avoid edge artifacts)
-            taper = np.sqrt(np.outer(tukey(scan.field_heights[field_id], 0.2),
-                                     tukey(scan.field_widths[field_id], 0.2)))
-            template = np.mean(mini_scan, axis=-1) * taper
+            taper = np.sqrt(np.outer(tukey(scan.field_heights[field_id], 0.4),
+                                     tukey(scan.field_widths[field_id], 0.4)))
+            anscombed = 2 * np.sqrt(mini_scan - mini_scan.min() + 3 / 8) # anscombe transform
+            template = np.mean(anscombed, axis=-1) * taper
             tuple_['template'] = template
 
             # Compute raster correction parameters
@@ -222,10 +219,11 @@ class RasterCorrection(dj.Computed):
         raster_phase = self.fetch1('raster_phase')
         fill_fraction = (ScanInfo() & self).fetch1('fill_fraction')
         if raster_phase == 0:
-            return lambda scan: scan.astype(np.float32, copy=False)
+            correct_raster = lambda scan: scan.astype(np.float32, copy=False)
         else:
-            return lambda scan: galvo_corrections.correct_raster(scan, raster_phase,
-                                                                 fill_fraction)
+            correct_raster = lambda scan: galvo_corrections.correct_raster(scan,
+                                                             raster_phase, fill_fraction)
+        return correct_raster
 
 
 @schema
@@ -247,7 +245,7 @@ class MotionCorrection(dj.Computed):
     @property
     def key_source(self):
         # Run make_tuples once per scan iff RasterCorrection is done
-        return ScanInfo() & RasterCorrection() & {'meso_version': CURRENT_VERSION}
+        return ScanInfo() & RasterCorrection() & {'pipe_version': CURRENT_VERSION}
 
     def _make_tuples(self, key):
         """Computes the motion shifts per frame needed to correct the scan."""
@@ -429,7 +427,7 @@ class SummaryImages(dj.Computed):
     @property
     def key_source(self):
         # Run make_tuples once per scan iff MotionCorrection is done
-        return ScanInfo() & MotionCorrection() & {'meso_version': CURRENT_VERSION}
+        return ScanInfo() & MotionCorrection() & {'pipe_version': CURRENT_VERSION}
 
     class Average(dj.Part):
         definition = """ # l6-norm of each pixel across time
@@ -552,7 +550,7 @@ class SegmentationTask(dj.Manual):
         """
 
         # Get field dimensions (in micrometers)
-        scan = (ScanInfo.Field() & self & {'meso_version': CURRENT_VERSION})
+        scan = (ScanInfo.Field() & self & {'pipe_version': CURRENT_VERSION})
         field_height, field_width = scan.fetch1('um_height', 'um_width')
         field_thickness = 10  # assumption
         field_volume = field_width * field_height * field_thickness
@@ -563,6 +561,8 @@ class SegmentationTask(dj.Manual):
             num_components = field_volume * 0.0001
         elif compartment == 'axon':
             num_components = field_volume * 0.0005  # five times as many neurons
+        elif compartment == 'bouton':
+            num_components = field_volume * 0.001   # ten times as many neurons
         else:
             PipelineException("Compartment type '{}' not recognized".format(compartment))
 
@@ -591,7 +591,7 @@ class Segmentation(dj.Computed):
 
     @property
     def key_source(self):
-        return MotionCorrection() * SegmentationTask() & {'meso_version': CURRENT_VERSION}
+        return MotionCorrection() * SegmentationTask() & {'pipe_version': CURRENT_VERSION}
 
     class Mask(dj.Part):
         definition = """ # mask produced by segmentation.
@@ -659,27 +659,49 @@ class Segmentation(dj.Computed):
             # Set CNMF parameters
             ## Set general parameters
             kwargs = {}
-            kwargs['num_components'] = (SegmentationTask() & key).estimate_num_components()
             kwargs['num_background_components'] = 1
             kwargs['merge_threshold'] = 0.7
             kwargs['fps'] = scan.fps
 
-            ## Set params specific to somatic or axonal/dendritic scans
+            # Set params specific to method and segmentation target
             target = (SegmentationTask() & key).fetch1('compartment')
-            if target == 'soma':
-                kwargs['init_on_patches'] = True if key['segmentation_method'] == 3 else False
-                kwargs['init_method'] = 'greedy_roi'
-                kwargs['soma_diameter'] = tuple(14 / (ScanInfo.Field() & key).microns_per_pixel) # 14 x 14 microns
-            else:  # axons/dendrites
-                kwargs['init_on_patches'] = True
-                kwargs['init_method'] = 'sparse_nmf'
-                kwargs['snmf_alpha'] = 500  # 10^2 to 10^3.5 is a good range
 
-            # Set parameters for patch initialization
-            if kwargs['init_on_patches']:
-                kwargs['patch_size'] = tuple(50 / (ScanInfo.Field() & key).microns_per_pixel) # 50 x 50 microns
+            if key['segmentation_method'] == 2: # nmf
+                if target == 'axon':
+                    kwargs['init_on_patches'] = True
+                    kwargs['proportion_patch_overlap'] = 0.2 # 20% overlap
+                    kwargs['num_components_per_patch'] = 15
+                    kwargs['init_method'] = 'sparse_nmf'
+                    kwargs['snmf_alpha'] = 500  # 10^2 to 10^3.5 is a good range
+                    kwargs['patch_size'] = tuple(50 / (ScanInfo.Field() & key).microns_per_pixel) # 50 x 50 microns
+                elif target == 'bouton':
+                    kwargs['init_on_patches'] = False
+                    kwargs['num_components'] = (SegmentationTask() & key).estimate_num_components()
+                    kwargs['init_method'] = 'greedy_roi'
+                    kwargs['soma_diameter'] = tuple(2 / (ScanInfo.Field() & key).microns_per_pixel)
+                else: # soma
+                    kwargs['init_on_patches'] = False
+                    kwargs['num_components'] = (SegmentationTask() & key).estimate_num_components()
+                    kwargs['init_method'] = 'greedy_roi'
+                    kwargs['soma_diameter'] = tuple(14 / (ScanInfo.Field() & key).microns_per_pixel)
+            else: #nmf-patches
+                kwargs['init_on_patches'] = True
                 kwargs['proportion_patch_overlap'] = 0.2 # 20% overlap
-                kwargs['num_components_per_patch'] = 5 if target == 'soma' else 15
+                if target == 'axon':
+                    kwargs['num_components_per_patch'] = 15
+                    kwargs['init_method'] = 'sparse_nmf'
+                    kwargs['snmf_alpha'] = 500  # 10^2 to 10^3.5 is a good range
+                    kwargs['patch_size'] = tuple(50 / (ScanInfo.Field() & key).microns_per_pixel) # 50 x 50 microns
+                elif target == 'bouton':
+                    kwargs['num_components_per_patch'] = 5
+                    kwargs['init_method'] = 'greedy_roi'
+                    kwargs['patch_size'] = tuple(20 / (ScanInfo.Field() & key).microns_per_pixel) # 20 x 20 microns
+                    kwargs['soma_diameter'] = tuple(2 / (ScanInfo.Field() & key).microns_per_pixel)
+                else: # soma
+                    kwargs['num_components_per_patch'] = 5
+                    kwargs['init_method'] = 'greedy_roi'
+                    kwargs['patch_size'] = tuple(50 / (ScanInfo.Field() & key).microns_per_pixel)
+                    kwargs['soma_diameter'] = tuple(14 / (ScanInfo.Field() & key).microns_per_pixel)
 
             ## Set performance/execution parameters (heuristically), decrease if memory overflows
             kwargs['num_processes'] = 12  # Set to None for all cores available
@@ -840,7 +862,7 @@ class Segmentation(dj.Computed):
         # Create masks
         if key['segmentation_method'] == 1:  # manual
             Segmentation.Manual()._make_tuples(key)
-        elif key['segmentation_method'] in [2, 3]:  # nmf
+        elif key['segmentation_method'] in [2, 3, 4]:  # nmf
             Segmentation.CNMF()._make_tuples(key)
         else:
             msg = 'Unrecognized segmentation method {}'.format(key['segmentation_method'])
@@ -936,7 +958,7 @@ class Fluorescence(dj.Computed):
 
     @property
     def key_source(self):
-        return Segmentation() & {'meso_version': CURRENT_VERSION}
+        return Segmentation() & {'pipe_version': CURRENT_VERSION}
 
     class Trace(dj.Part):
         definition = """
@@ -1008,7 +1030,7 @@ class MaskClassification(dj.Computed):
     @property
     def key_source(self):
         return (Segmentation() * shared.ClassificationMethod() &
-                {'meso_version': CURRENT_VERSION})
+                {'pipe_version': CURRENT_VERSION})
 
     class Type(dj.Part):
         definition = """
@@ -1121,7 +1143,7 @@ class ScanSet(dj.Computed):
 
     @property
     def key_source(self):
-        return Fluorescence() & {'meso_version': CURRENT_VERSION}
+        return Fluorescence() & {'pipe_version': CURRENT_VERSION}
 
     class Unit(dj.Part):
         definition = """ # single unit in the scan
@@ -1283,7 +1305,7 @@ class Activity(dj.Computed):
 
     @property
     def key_source(self):
-        return ScanSet() * shared.SpikeMethod() & {'meso_version': CURRENT_VERSION}
+        return ScanSet() * shared.SpikeMethod() & {'pipe_version': CURRENT_VERSION}
 
     class Trace(dj.Part):
         definition = """ # deconvolved calcium acitivity
@@ -1412,7 +1434,7 @@ class ScanDone(dj.Computed):
 
     @property
     def key_source(self):
-        return Activity() & {'meso_version': CURRENT_VERSION}
+        return Activity() & {'pipe_version': CURRENT_VERSION}
 
     @property
     def target(self):
@@ -1456,7 +1478,7 @@ class Quality(dj.Computed):
 
     @property
     def key_source(self):
-        return ScanInfo() & {'meso_version': CURRENT_VERSION}
+        return ScanInfo() & {'pipe_version': CURRENT_VERSION}
 
     class MeanIntensity(dj.Part):
         definition = """ # mean intensity values across time
