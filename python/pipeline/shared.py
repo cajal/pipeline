@@ -2,7 +2,7 @@
 
 import datajoint as dj
 
-schema = dj.schema('pipeline_shared', locals())
+schema = dj.schema('pipeline_shared', locals(), create_tables=False)
 
 @schema
 class Field(dj.Lookup):
