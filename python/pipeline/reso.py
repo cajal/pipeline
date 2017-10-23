@@ -11,12 +11,12 @@ from .utils import galvo_corrections, signal, quality, mask_classification
 from .exceptions import PipelineException
 
 
-schema = dj.schema('pipeline_reso', locals())
+schema = dj.schema('pipeline_reso', locals(), create_tables=False)
 CURRENT_VERSION = 1
 
 
 @schema
-class Version(dj.Lookup):
+class Version(dj.Manual):
     definition = """ # versions for the reso pipeline
 
     -> shared.PipelineVersion
@@ -1440,7 +1440,7 @@ class ScanDone(dj.Computed):
         """
 
     def _make_tuples(self, key):
-        scan_key = {k: v for k, v in key.items() if k not in ['field', 'channel']}
+        scan_key = {k: v for k, v in key.items() if k in self.heading}
 
         # Delete current ScanDone entry
         with dj.config(safemode=False):
@@ -1602,6 +1602,3 @@ class Quality(dj.Computed):
 
         (notify.SlackUser() & (experiment.Session() & key)).notify(file=img_filename,
                                                                    file_title='quality traces')
-
-
-schema.spawn_missing_classes()
