@@ -1,6 +1,5 @@
 %{
 # classification of segmented masks.
--> meso.SummaryImages
 -> meso.Segmentation
 -> `pipeline_shared`.`#classification_method`
 ---
@@ -14,7 +13,7 @@ classdef MaskClassification < dj.Computed
 
 		function makeTuples(self, key)
 		%!!! compute missing fields for key here
-			 self.insert(key)
+			 %self.insert(key)
 		end
 	end
 

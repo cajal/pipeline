@@ -1,6 +1,6 @@
 %{
 # channel to use for raster and motion correction
--> `pipeline_experiment`.`scan`
+-> experiment.Scan
 -> `pipeline_shared`.`#slice`
 ---
 -> `pipeline_shared`.`#channel`
