@@ -19,15 +19,11 @@ CURRENT_VERSION = 1
 class Version(dj.Lookup):
     definition = """ # versions for the reso pipeline
 
-    reso_version                    : smallint
+    -> shared.PipelineVersion
     ---
     description = ''                : varchar(256)      # any notes on this version
     date = CURRENT_TIMESTAMP        : timestamp         # automatic
     """
-    contents = [
-        {'reso_version': 0, 'description': 'test'},
-        {'reso_version': 1, 'description': 'first release'}
-    ]
 
 
 @schema
@@ -37,7 +33,7 @@ class ScanInfo(dj.Imported):
     -> experiment.Scan
     -> Version                                  # reso version
     ---
-    nslices                 : tinyint           # number of slices
+    nfields                 : tinyint           # number of fields
     nchannels               : tinyint           # number of channels
     nframes                 : int               # number of recorded frames
     nframes_requested       : int               # number of requested frames (from header)
@@ -59,13 +55,13 @@ class ScanInfo(dj.Imported):
         rigs = [{'rig': '2P2'}, {'rig': '2P3'}, {'rig': '2P5'}, {'rig': '3P1'}]
         reso_sessions = (experiment.Session() & rigs)
         reso_scans = (experiment.Scan() - experiment.ScanIgnored()) & reso_sessions
-        return reso_scans * (Version() & {'reso_version': CURRENT_VERSION})
+        return reso_scans * (Version() & {'pipe_version': CURRENT_VERSION})
 
-    class Slice(dj.Part):
-        definition = """ # slice-specific scan information
+    class Field(dj.Part):
+        definition = """ # field-specific information
 
         -> ScanInfo
-        -> shared.Slice
+        -> shared.Field
         ---
         z           : float             # (um) absolute depth with respect to the surface of the cortex
         """
@@ -84,7 +80,7 @@ class ScanInfo(dj.Imported):
 
         # Get attributes
         tuple_ = key.copy()  # in case key is reused somewhere else
-        tuple_['nslices'] = scan.num_fields
+        tuple_['nfields'] = scan.num_fields
         tuple_['nchannels'] = scan.num_channels
         tuple_['nframes'] = scan.num_frames
         tuple_['nframes_requested'] = scan.num_requested_frames
@@ -116,10 +112,10 @@ class ScanInfo(dj.Imported):
         # Insert in ScanInfo
         self.insert1(tuple_)
 
-        # Insert slice information
+        # Insert field information
         z_zero = (experiment.Scan() & key).fetch1('depth')  # true depth at ScanImage's 0
-        for slice_id, z_slice in enumerate(scan.field_depths):
-            ScanInfo.Slice().insert1({**key, 'slice': slice_id + 1, 'z': z_zero - z_slice})
+        for field_id, field_z in enumerate(scan.field_depths):
+            ScanInfo.Field().insert1({**key, 'field': field_id + 1, 'z': z_zero - field_z})
 
         # Fill in CorrectionChannel if only one channel
         if scan.num_channels == 1:
@@ -144,14 +140,14 @@ class CorrectionChannel(dj.Manual):
     definition = """ # channel to use for raster and motion correction
 
     -> experiment.Scan
-    -> shared.Slice
+    -> shared.Field
     ---
     -> shared.Channel
     """
 
     def fill_in(self, key, channel=1):
-        for slice_key in (ScanInfo.Slice() & key).fetch(dj.key):
-            self.insert1({**slice_key, 'channel': channel}, ignore_extra_fields=True,
+        for field_key in (ScanInfo.Field() & key).fetch(dj.key):
+            self.insert1({**field_key, 'channel': channel}, ignore_extra_fields=True,
                           skip_duplicates=True)
 
 
@@ -160,7 +156,7 @@ class RasterCorrection(dj.Computed):
     definition = """ # raster correction for bidirectional resonant scans
 
     -> ScanInfo                         # animal_id, session, scan_idx, version
-    -> CorrectionChannel                # animal_id, session, scan_idx, slice
+    -> CorrectionChannel                # animal_id, session, scan_idx, field
     ---
     template            : longblob      # average frame from the middle of the movie
     raster_phase        : float         # difference between expected and recorded scan angle
@@ -168,9 +164,9 @@ class RasterCorrection(dj.Computed):
 
     @property
     def key_source(self):
-        # Run make_tuples once per scan iff correction channel has been set for all slices
-        scans = (ScanInfo() & CorrectionChannel()) - (ScanInfo.Slice() - CorrectionChannel())
-        return scans & {'reso_version': CURRENT_VERSION}
+        # Run make_tuples once per scan iff correction channel has been set for all fields
+        scans = (ScanInfo() & CorrectionChannel()) - (ScanInfo.Field() - CorrectionChannel())
+        return scans & {'pipe_version': CURRENT_VERSION}
 
     def _make_tuples(self, key):
         from scipy.signal import tukey
@@ -179,26 +175,27 @@ class RasterCorrection(dj.Computed):
         scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
         scan = scanreader.read_scan(scan_filename, dtype=np.float32)
 
-        for slice_id in range(scan.num_fields):
-            print('Computing raster correction for slice', slice_id + 1)
+        for field_id in range(scan.num_fields):
+            print('Computing raster correction for field', field_id + 1)
 
             # Select channel
-            correction_channel = (CorrectionChannel() & key & {'slice': slice_id + 1})
+            correction_channel = (CorrectionChannel() & key & {'field': field_id + 1})
             channel = correction_channel.fetch1('channel') - 1
 
             # Create results tuple
             tuple_ = key.copy()
-            tuple_['slice'] = slice_id + 1
+            tuple_['field'] = field_id + 1
 
             # Load some frames from the middle of the scan
             middle_frame =  int(np.floor(scan.num_frames / 2))
             frames = slice(max(middle_frame - 1000, 0), middle_frame + 1000)
-            mini_scan = scan[slice_id, :, :, channel, frames]
+            mini_scan = scan[field_id, :, :, channel, frames]
 
             # Create template (average frame tapered to avoid edge artifacts)
-            taper = np.sqrt(np.outer(tukey(scan.image_height, 0.2),
-                                     tukey(scan.image_width, 0.2)))
-            template = np.mean(mini_scan, axis=-1) * taper
+            taper = np.sqrt(np.outer(tukey(scan.image_height, 0.4),
+                                     tukey(scan.image_width, 0.4)))
+            anscombed = 2 * np.sqrt(mini_scan - mini_scan.min() + 3 / 8) # anscombe transform
+            template = np.mean(anscombed, axis=-1) * taper
             tuple_['template'] = template
 
             # Compute raster correction parameters
@@ -223,10 +220,11 @@ class RasterCorrection(dj.Computed):
         raster_phase = self.fetch1('raster_phase')
         fill_fraction = (ScanInfo() & self).fetch1('fill_fraction')
         if raster_phase == 0:
-            return lambda scan: scan.astype(np.float32, copy=False)
+            correct_raster = lambda scan: scan.astype(np.float32, copy=False)
         else:
-            return lambda scan: galvo_corrections.correct_raster(scan, raster_phase,
-                                                                 fill_fraction)
+            correct_raster = lambda scan: galvo_corrections.correct_raster(scan,
+                                                             raster_phase, fill_fraction)
+        return correct_raster
 
 
 @schema
@@ -248,7 +246,7 @@ class MotionCorrection(dj.Computed):
     @property
     def key_source(self):
         # Run make_tuples once per scan iff RasterCorrection is done
-        return ScanInfo() & RasterCorrection() & {'reso_version': CURRENT_VERSION}
+        return ScanInfo() & RasterCorrection() & {'pipe_version': CURRENT_VERSION}
 
     def _make_tuples(self, key):
         """Computes the motion shifts per frame needed to correct the scan."""
@@ -261,24 +259,24 @@ class MotionCorrection(dj.Computed):
         # Get some params
         px_height, px_width = (ScanInfo() & key).fetch1('px_height', 'px_width')
 
-        for slice_id in range(scan.num_fields):
-            print('Correcting motion in slice', slice_id + 1)
+        for field_id in range(scan.num_fields):
+            print('Correcting motion in field', field_id + 1)
 
             # Select channel
-            correction_channel = (CorrectionChannel() & key & {'slice': slice_id + 1})
+            correction_channel = (CorrectionChannel() & key & {'field': field_id + 1})
             channel = correction_channel.fetch1('channel') - 1
 
             # Create results tuple
             tuple_ = key.copy()
-            tuple_['slice'] = slice_id + 1
+            tuple_['field'] = field_id + 1
 
             # Load scan (we discard some rows/cols to avoid edge artifacts)
             skip_rows = int(round(px_height * 0.10))
             skip_cols = int(round(px_width * 0.10))
-            scan_ = scan[slice_id, skip_rows: -skip_rows, skip_cols: -skip_cols, channel, :]  # height x width x frames
+            scan_ = scan[field_id, skip_rows: -skip_rows, skip_cols: -skip_cols, channel, :]  # height x width x frames
 
             # Correct raster effects (needed for subpixel changes in y)
-            correct_raster = (RasterCorrection() & key & {'slice': slice_id + 1}).get_correct_raster()
+            correct_raster = (RasterCorrection() & key & {'field': field_id + 1}).get_correct_raster()
             scan_ = correct_raster(scan_)
             scan_ -= scan_.min()  # make nonnegative for fft
 
@@ -328,8 +326,8 @@ class MotionCorrection(dj.Computed):
                                      sharey=True)
         axes = [axes] if scan.num_fields == 1 else axes # make list if single axis object
         for i in range(scan.num_fields):
-            y_shifts, x_shifts = (self & key & {'slice': i + 1}).fetch1('y_shifts', 'x_shifts')
-            axes[i].set_title('Shifts for slice {}'.format(i + 1))
+            y_shifts, x_shifts = (self & key & {'field': i + 1}).fetch1('y_shifts', 'x_shifts')
+            axes[i].set_title('Shifts for field {}'.format(i + 1))
             axes[i].plot(seconds, y_shifts, label='y shifts')
             axes[i].plot(seconds, x_shifts, label='x shifts')
             axes[i].set_ylabel('Pixels')
@@ -366,7 +364,7 @@ class MotionCorrection(dj.Computed):
         # Load the scan
         scan_filename = (experiment.Scan() & self).local_filenames_as_wildcard
         scan = scanreader.read_scan(scan_filename, dtype=np.float32)
-        scan_ = scan[self.fetch1('slice') - 1, :, :, channel - 1, start_index: stop_index]
+        scan_ = scan[self.fetch1('field') - 1, :, :, channel - 1, start_index: stop_index]
         original_scan = scan_.copy()
 
         # Correct the scan
@@ -419,7 +417,7 @@ class MotionCorrection(dj.Computed):
 
 @schema
 class SummaryImages(dj.Computed):
-    definition = """ # summary images for each slice and channel after corrections
+    definition = """ # summary images for each field and channel after corrections
 
     -> MotionCorrection
     -> shared.Channel
@@ -428,7 +426,7 @@ class SummaryImages(dj.Computed):
     @property
     def key_source(self):
         # Run make_tuples once per scan iff MotionCorrection is done
-        return ScanInfo() & MotionCorrection() & {'reso_version': CURRENT_VERSION}
+        return ScanInfo() & MotionCorrection() & {'pipe_version': CURRENT_VERSION}
 
     class Average(dj.Part):
         definition = """ # l6-norm of each pixel across time
@@ -453,20 +451,20 @@ class SummaryImages(dj.Computed):
         scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
         scan = scanreader.read_scan(scan_filename, dtype=np.float32)
 
-        for slice_id in range(scan.num_fields):
-            print('Computing summary images for slice', slice_id + 1)
+        for field_id in range(scan.num_fields):
+            print('Computing summary images for field', field_id + 1)
 
             # Get raster and motion correction functions
-            correct_raster = (RasterCorrection() & key & {'slice': slice_id + 1}).get_correct_raster()
-            correct_motion = (MotionCorrection() & key & {'slice': slice_id + 1}).get_correct_motion()
+            correct_raster = (RasterCorrection() & key & {'field': field_id + 1}).get_correct_raster()
+            correct_motion = (MotionCorrection() & key & {'field': field_id + 1}).get_correct_motion()
 
             for channel in range(scan.num_channels):
                 tuple_ = key.copy()
-                tuple_['slice'] = slice_id + 1
+                tuple_['field'] = field_id + 1
                 tuple_['channel'] = channel + 1
 
                 # Correct scan
-                scan_ = scan[slice_id, :, :, channel, :]
+                scan_ = scan[field_id, :, :, channel, :]
                 scan_ = correct_motion(correct_raster(scan_))
 
                 # Subtract overall brightness/drift
@@ -490,12 +488,12 @@ class SummaryImages(dj.Computed):
                 del scan_
                 gc.collect()
 
-            self.notify({**key, 'slice': slice_id + 1}, scan.num_channels)  # once per slice
+            self.notify({**key, 'field': field_id + 1}, scan.num_channels)  # once per field
 
     def notify(self, key, num_channels):
         fig, axes = plt.subplots(num_channels, 2, squeeze=False, figsize=(12, 5 * num_channels))
 
-        fig.suptitle('Slice {}'.format(key['slice']))
+        fig.suptitle('Field {}'.format(key['field']))
         axes[0, 0].set_title('Average')
         axes[0, 1].set_title('Correlation')
         for ax in axes.ravel():
@@ -525,7 +523,7 @@ class SegmentationTask(dj.Manual):
     definition = """ # defines the target of segmentation and the channel to use
 
     -> experiment.Scan
-    -> shared.Slice
+    -> shared.Field
     -> shared.Channel
     -> shared.SegmentationMethod
     ---
@@ -533,13 +531,13 @@ class SegmentationTask(dj.Manual):
     """
 
     def fill_in(self, key, channel=1, segmentation_method=3, compartment='soma'):
-        for slice_key in (ScanInfo.Slice() & key).fetch(dj.key):
-            tuple_ = {**slice_key, 'channel': channel, 'compartment': compartment,
+        for field_key in (ScanInfo.Field() & key).fetch(dj.key):
+            tuple_ = {**field_key, 'channel': channel, 'compartment': compartment,
                       'segmentation_method': segmentation_method}
             self.insert1(tuple_, ignore_extra_fields=True, skip_duplicates=True)
 
     def estimate_num_components(self):
-        """ Estimates the number of components per slice using simple rules of thumb.
+        """ Estimates the number of components per field using simple rules of thumb.
 
         For somatic scans, estimate number of neurons based on:
         (100x100x100)um^3 = 1e6 um^3 -> 1e2 neurons; (1x1x1)mm^3 = 1e9 um^3 -> 1e5 neurons
@@ -550,18 +548,20 @@ class SegmentationTask(dj.Manual):
         :rtype: int
         """
 
-        # Get slice dimensions (in micrometers)
-        scan = (ScanInfo() & self & {'reso_version': CURRENT_VERSION})
-        slice_height, slice_width = scan.fetch1('um_height', 'um_width')
-        slice_thickness = 10  # assumption
-        slice_volume = slice_width * slice_height * slice_thickness
+        # Get field dimensions (in microns)
+        scan = (ScanInfo() & self & {'pipe_version': CURRENT_VERSION})
+        field_height, field_width = scan.fetch1('um_height', 'um_width')
+        field_thickness = 10  # assumption
+        field_volume = field_width * field_height * field_thickness
 
         # Estimate number of components
         compartment = self.fetch1('compartment')
         if compartment == 'soma':
-            num_components = slice_volume * 0.0001
+            num_components = field_volume * 0.0001
         elif compartment == 'axon':
-            num_components = slice_volume * 0.0005  # five times as many neurons
+            num_components = field_volume * 0.0005  # five times as many neurons
+        elif compartment == 'bouton':
+            num_components = field_volume * 0.001   # 10 times as many neurons
         else:
             PipelineException("Compartment type '{}' not recognized".format(compartment))
 
@@ -569,10 +569,10 @@ class SegmentationTask(dj.Manual):
 
 @schema
 class DoNotSegment(dj.Manual):
-    definition = """ # slice/channels that should not be segmented (used for web interface only)
+    definition = """ # field/channels that should not be segmented (used for web interface only)
 
     -> experiment.Scan
-    -> shared.Slice
+    -> shared.Field
     -> shared.Channel
     """
 
@@ -581,15 +581,15 @@ class DoNotSegment(dj.Manual):
 class Segmentation(dj.Computed):
     definition = """ # Different mask segmentations.
 
-    -> MotionCorrection         # animal_id, session, scan_idx, version, slice
-    -> SegmentationTask         # animal_id, session, scan_idx, slice, channel, segmentation_method
+    -> MotionCorrection         # animal_id, session, scan_idx, version, field
+    -> SegmentationTask         # animal_id, session, scan_idx, field, channel, segmentation_method
     ---
     segmentation_time=CURRENT_TIMESTAMP     : timestamp     # automatic
     """
 
     @property
     def key_source(self):
-        return MotionCorrection() * SegmentationTask() & {'reso_version': CURRENT_VERSION}
+        return MotionCorrection() * SegmentationTask() & {'pipe_version': CURRENT_VERSION}
 
     class Mask(dj.Part):
         definition = """ # mask produced by segmentation.
@@ -651,10 +651,10 @@ class Segmentation(dj.Computed):
             # Load scan
             print('Loading the scan...')
             channel = key['channel'] - 1
-            slice_id = key['slice'] - 1
+            field_id = key['field'] - 1
             scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
             scan = scanreader.read_scan(scan_filename, dtype=np.float32)
-            scan_ = scan[slice_id, :, :, channel, :]
+            scan_ = scan[field_id, :, :, channel, :]
 
             # Correct scan
             print('Correcting scan...')
@@ -666,27 +666,49 @@ class Segmentation(dj.Computed):
             # Set CNMF parameters
             ## Set general parameters
             kwargs = {}
-            kwargs['num_components'] = (SegmentationTask() & key).estimate_num_components()
             kwargs['num_background_components'] = 1
             kwargs['merge_threshold'] = 0.7
             kwargs['fps'] = scan.fps
 
-            ## Set params specific to somatic or axonal/dendritic scans
+            # Set params specific to method and segmentation target
             target = (SegmentationTask() & key).fetch1('compartment')
-            if target == 'soma':
-                kwargs['init_on_patches'] = True if key['segmentation_method'] == 3 else False
-                kwargs['init_method'] = 'greedy_roi'
-                kwargs['soma_diameter'] = tuple(14 / (ScanInfo() & key).microns_per_pixel) # 14 x 14 microns
-            else:  # axons/dendrites
+            if key['segmentation_method'] == 2: # nmf
+                if target == 'axon':
+                    kwargs['init_on_patches'] = True
+                    kwargs['proportion_patch_overlap'] = 0.2 # 20% overlap
+                    kwargs['num_components_per_patch'] = 15
+                    kwargs['init_method'] = 'sparse_nmf'
+                    kwargs['snmf_alpha'] = 500  # 10^2 to 10^3.5 is a good range
+                    kwargs['patch_size'] = tuple(50 / (ScanInfo() & key).microns_per_pixel) # 50 x 50 microns
+                elif target == 'bouton':
+                    kwargs['init_on_patches'] = False
+                    kwargs['num_components'] = (SegmentationTask() & key).estimate_num_components()
+                    kwargs['init_method'] = 'greedy_roi'
+                    kwargs['soma_diameter'] = tuple(2 / (ScanInfo() & key).microns_per_pixel)
+                else: # soma
+                    kwargs['init_on_patches'] = False
+                    kwargs['num_components'] = (SegmentationTask() & key).estimate_num_components()
+                    kwargs['init_method'] = 'greedy_roi'
+                    kwargs['soma_diameter'] = tuple(14 / (ScanInfo() & key).microns_per_pixel)
+            else: #nmf-patches
                 kwargs['init_on_patches'] = True
-                kwargs['init_method'] = 'sparse_nmf'
-                kwargs['snmf_alpha'] = 500  # 10^2 to 10^3.5 is a good range
-
-            # Set parameters for patch initialization
-            if kwargs['init_on_patches']:
-                kwargs['patch_size'] = tuple(50 / (ScanInfo() & key).microns_per_pixel) # 50 x 50 microns
                 kwargs['proportion_patch_overlap'] = 0.2 # 20% overlap
-                kwargs['num_components_per_patch'] = 5 if target == 'soma' else 15
+                if target == 'axon':
+                    kwargs['num_components_per_patch'] = 15
+                    kwargs['init_method'] = 'sparse_nmf'
+                    kwargs['snmf_alpha'] = 500  # 10^2 to 10^3.5 is a good range
+                    kwargs['patch_size'] = tuple(50 / (ScanInfo() & key).microns_per_pixel) # 50 x 50 microns
+                elif target == 'bouton':
+                    kwargs['num_components_per_patch'] = 5
+                    kwargs['init_method'] = 'greedy_roi'
+                    kwargs['patch_size'] = tuple(20 / (ScanInfo() & key).microns_per_pixel) # 20 x 20 microns
+                    kwargs['soma_diameter'] = tuple(2 / (ScanInfo() & key).microns_per_pixel)
+                else: # soma
+                    kwargs['num_components_per_patch'] = 5
+                    kwargs['init_method'] = 'greedy_roi'
+                    kwargs['patch_size'] = tuple(50 / (ScanInfo() & key).microns_per_pixel)
+                    kwargs['soma_diameter'] = tuple(14 / (ScanInfo() & key).microns_per_pixel)
+
 
             ## Set performance/execution parameters (heuristically), decrease if memory overflows
             kwargs['num_processes'] = 12  # Set to None for all cores available
@@ -753,10 +775,10 @@ class Segmentation(dj.Computed):
 
             # Load the scan
             channel = self.fetch1('channel') - 1
-            slice_id = self.fetch1('slice') - 1
+            field_id = self.fetch1('field') - 1
             scan_filename = (experiment.Scan() & self).local_filenames_as_wildcard
             scan = scanreader.read_scan(scan_filename, dtype=np.float32)
-            scan_ = scan[slice_id, :, :, channel, start_index: stop_index]
+            scan_ = scan[field_id, :, :, channel, start_index: stop_index]
 
             # Correct the scan
             correct_raster = (RasterCorrection() & self).get_correct_raster()
@@ -938,12 +960,12 @@ class Segmentation(dj.Computed):
 class Fluorescence(dj.Computed):
     definition = """  # fluorescence traces before spike extraction or filtering
 
-    -> Segmentation   # animal_id, session, scan_idx, reso_version, slice, channel, segmentation_method
+    -> Segmentation   # animal_id, session, scan_idx, pipe_version, field, channel, segmentation_method
     """
 
     @property
     def key_source(self):
-        return Segmentation() & {'reso_version': CURRENT_VERSION}
+        return Segmentation() & {'pipe_version': CURRENT_VERSION}
 
     class Trace(dj.Part):
         definition = """
@@ -957,11 +979,11 @@ class Fluorescence(dj.Computed):
     def _make_tuples(self, key):
         # Load scan
         print('Loading scan...')
-        slice_id = key['slice'] - 1
+        field_id = key['field'] - 1
         channel = key['channel'] - 1
         scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
         scan = scanreader.read_scan(scan_filename, dtype=np.float32)
-        scan_ = scan[slice_id, :, :, channel, :]
+        scan_ = scan[field_id, :, :, channel, :]
 
         # Correct the scan
         print('Correcting scan...')
@@ -1005,7 +1027,7 @@ class Fluorescence(dj.Computed):
 class MaskClassification(dj.Computed):
     definition = """ # classification of segmented masks.
 
-    -> Segmentation                     # animal_id, session, scan_idx, reso_version, slice, channel, segmentation_method
+    -> Segmentation                     # animal_id, session, scan_idx, pipe_version, field, channel, segmentation_method
     -> shared.ClassificationMethod
     ---
     classif_time=CURRENT_TIMESTAMP    : timestamp     # automatic
@@ -1014,7 +1036,7 @@ class MaskClassification(dj.Computed):
     @property
     def key_source(self):
         return (Segmentation() * shared.ClassificationMethod() &
-                {'reso_version': CURRENT_VERSION})
+                {'pipe_version': CURRENT_VERSION})
 
     class Type(dj.Part):
         definition = """
@@ -1122,12 +1144,12 @@ class MaskClassification(dj.Computed):
 @schema
 class ScanSet(dj.Computed):
     definition = """ # set of all units in the same scan
-    -> Fluorescence                 # processing done per slice
+    -> Fluorescence                 # processing done per field
     """
 
     @property
     def key_source(self):
-        return Fluorescence() & {'reso_version': CURRENT_VERSION}
+        return Fluorescence() & {'pipe_version': CURRENT_VERSION}
 
     class Unit(dj.Part):
         definition = """ # single unit in the scan
@@ -1153,8 +1175,8 @@ class ScanSet(dj.Computed):
         """
 
     def job_key(self, key):
-        # Force reservation key to be per scan so diff slices are not run in parallel
-        return {k: v for k, v in key.items() if k not in ['slice', 'channel']}
+        # Force reservation key to be per scan so diff fields are not run in parallel
+        return {k: v for k, v in key.items() if k not in ['field', 'channel']}
 
     def _make_tuples(self, key):
         from pipeline.utils import caiman_interface as cmn
@@ -1167,7 +1189,7 @@ class ScanSet(dj.Computed):
         # Compute units' coordinates
         px_center = [image_height / 2, image_width / 2]
         um_center = (ScanInfo() & key).fetch1('y', 'x')
-        um_z = (ScanInfo.Slice() & key).fetch1('z')
+        um_z = (ScanInfo.Field() & key).fetch1('z')
         px_centroids = cmn.get_centroids(masks)
         um_centroids = um_center + (px_centroids - px_center) * (ScanInfo() & key).microns_per_pixel
 
@@ -1201,7 +1223,7 @@ class ScanSet(dj.Computed):
                                                                    file_title='unit centroids')
 
     def plot_centroids(self, first_n=None):
-        """ Draw masks centroids over the correlation image. Works on a single slice/channel
+        """ Draw masks centroids over the correlation image. Works on a single field/channel
 
         :param first_n: Number of masks to plot. None for all
 
@@ -1255,7 +1277,7 @@ class ScanSet(dj.Computed):
         return fig
 
     def get_all_centroids(self, centroid_type='um'):
-        """ Returns the centroids for all units in the scan. Could also be limited by slice.
+        """ Returns the centroids for all units in the scan. Could also be limited by field.
 
         Centroid type is either 'um' or 'px':
             'um': Array (num_units x 3) with x, y, z in motor coordinate system (microns).
@@ -1275,7 +1297,7 @@ class ScanSet(dj.Computed):
 class Activity(dj.Computed):
     definition = """ # activity inferred from fluorescence traces
 
-    -> ScanSet                                        # processing done per slice
+    -> ScanSet                                        # processing done per field
     -> shared.SpikeMethod
     ---
     activity_time=CURRENT_TIMESTAMP   : timestamp     # automatic
@@ -1283,7 +1305,7 @@ class Activity(dj.Computed):
 
     @property
     def key_source(self):
-        return ScanSet() * shared.SpikeMethod() & {'reso_version': CURRENT_VERSION}
+        return ScanSet() * shared.SpikeMethod() & {'pipe_version': CURRENT_VERSION}
 
     class Trace(dj.Part):
         definition = """ # deconvolved calcium acitivity
@@ -1404,7 +1426,7 @@ class Activity(dj.Computed):
 
 @schema
 class ScanDone(dj.Computed):
-    definition = """ # scans that are fully processed (updated every time a slice is added)
+    definition = """ # scans that are fully processed (updated every time a field is added)
 
     -> ScanInfo
     -> shared.SegmentationMethod
@@ -1413,21 +1435,21 @@ class ScanDone(dj.Computed):
 
     @property
     def key_source(self):
-        return Activity() & {'reso_version': CURRENT_VERSION}
+        return Activity() & {'pipe_version': CURRENT_VERSION}
 
     @property
     def target(self):
-        return ScanDone.Partial() # trigger make_tuples for slices in Activity that aren't in ScanDone.Partial
+        return ScanDone.Partial() # trigger make_tuples for fields in Activity that aren't in ScanDone.Partial
 
     class Partial(dj.Part):
-        definition = """ # slices that have been processed in the current scan
+        definition = """ # fields that have been processed in the current scan
 
         -> ScanDone
         -> Activity
         """
 
     def _make_tuples(self, key):
-        scan_key = {k: v for k, v in key.items() if k not in ['slice', 'channel']}
+        scan_key = {k: v for k, v in key.items() if k not in ['field', 'channel']}
 
         # Delete current ScanDone entry
         with dj.config(safemode=False):
@@ -1436,7 +1458,7 @@ class ScanDone(dj.Computed):
         # Reinsert in ScanDone
         self.insert1(scan_key)
 
-        # Insert all processed slices in Partial
+        # Insert all processed fields in Partial
         ScanDone.Partial().insert((Activity() & scan_key).proj())
 
         self.notify(scan_key)
@@ -1457,13 +1479,13 @@ class Quality(dj.Computed):
 
     @property
     def key_source(self):
-        return ScanInfo() & {'reso_version': CURRENT_VERSION}
+        return ScanInfo() & {'pipe_version': CURRENT_VERSION}
 
     class MeanIntensity(dj.Part):
         definition = """ # mean intensity values across time
 
         -> Quality
-        -> shared.Slice
+        -> shared.Field
         -> shared.Channel
         ---
         intensities                 : longblob
@@ -1473,7 +1495,7 @@ class Quality(dj.Computed):
         definition = """ # 16-part summary of the scan (mean of 16 blocks)
 
         -> Quality
-        -> shared.Slice
+        -> shared.Field
         -> shared.Channel
         ---
         summary                     : longblob      # h x w x 16
@@ -1483,7 +1505,7 @@ class Quality(dj.Computed):
         definition = """ # difference between 99 and 1 percentile across time
 
         -> Quality
-        -> shared.Slice
+        -> shared.Field
         -> shared.Channel
         ---
         contrasts                   : longblob
@@ -1493,7 +1515,7 @@ class Quality(dj.Computed):
         definition = """ # quantal size in images
 
         -> Quality
-        -> shared.Slice
+        -> shared.Field
         -> shared.Channel
         ---
         min_intensity               : int           # min value in movie
@@ -1511,27 +1533,27 @@ class Quality(dj.Computed):
         # Insert in Quality
         self.insert1(key)
 
-        for slice_id in range(scan.num_fields):
-            print('Computing quality metrics for slice', slice_id + 1)
+        for field_id in range(scan.num_fields):
+            print('Computing quality metrics for field', field_id + 1)
             for channel in range(scan.num_channels):
                 # Create results tuple
-                slice_key = key.copy()
-                slice_key['slice'] = slice_id + 1
-                slice_key['channel'] = channel + 1
+                field_key = key.copy()
+                field_key['field'] = field_id + 1
+                field_key['channel'] = channel + 1
 
                 #Load scan
-                scan_ = scan[slice_id, :, :, channel, :]
+                scan_ = scan[field_id, :, :, channel, :]
 
                 # Compute mean intensity
                 mean_intensities = np.mean(scan_, axis=(0, 1))
-                self.MeanIntensity().insert1({**slice_key, 'intensities': mean_intensities})
+                self.MeanIntensity().insert1({**field_key, 'intensities': mean_intensities})
 
                 # Compute summary frames
                 frames = []
                 for chunk in np.array_split(scan_, 16, axis=-1):
                     frames.append(np.mean(chunk, axis=-1))
                 frames = np.stack(frames, axis=-1)
-                self.SummaryFrames().insert1({**slice_key, 'summary': frames})
+                self.SummaryFrames().insert1({**field_key, 'summary': frames})
 
                 # Compute contrast
                 # np.percentile(scan_, [99, 1], axis=(0, 1)) creates two copies of the scan
@@ -1539,7 +1561,7 @@ class Quality(dj.Computed):
                 for i in range(scan.num_frames):
                     percentiles = np.percentile(scan_[:, :, i], q=[1, 99])
                     contrasts[i] = percentiles[1] - percentiles[0]
-                self.Contrast().insert1({**slice_key, 'contrasts': contrasts})
+                self.Contrast().insert1({**field_key, 'contrasts': contrasts})
 
                 # Compute quantal size
                 middle_frame = int(np.floor(scan.num_frames / 2))
@@ -1547,16 +1569,16 @@ class Quality(dj.Computed):
                 results = quality.compute_quantal_size(mini_scan)
                 min_intensity, max_intensity, _, _, quantal_size, zero_level = results
                 quantal_frame = (np.mean(mini_scan, axis=-1) - zero_level) / quantal_size
-                self.QuantalSize().insert1({**slice_key, 'min_intensity': min_intensity,
+                self.QuantalSize().insert1({**field_key, 'min_intensity': min_intensity,
                                             'max_intensity': max_intensity,
                                             'quantal_size': quantal_size,
                                             'zero_level': zero_level,
                                             'quantal_frame': quantal_frame})
 
-                self.notify(slice_key, frames, mean_intensities, contrasts)
+                self.notify(field_key, frames, mean_intensities, contrasts)
 
     def notify(self, key, summary_frames, mean_intensities, contrasts):
-        """ Sends slack notification for a single slice + channel combination. """
+        """ Sends slack notification for a single field + channel combination. """
         # Send summary frames
         import imageio
         video_filename = '/tmp/' + key_hash(key) + '.gif'
@@ -1574,7 +1596,7 @@ class Quality(dj.Computed):
         with sns.axes_style('white'):
             fig, axes = plt.subplots(2, 1, figsize=(15, 8), sharex=True)
 
-        fig.suptitle('Slice {}, channel {}'.format(key['slice'], key['channel']))
+        fig.suptitle('Field {}, channel {}'.format(key['field'], key['channel']))
         axes[0].set_title('Mean intensity')
         axes[0].plot(mean_intensities)
         axes[0].set_ylabel('Pixel intensities')
