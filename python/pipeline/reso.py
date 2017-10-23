@@ -1050,6 +1050,7 @@ class MaskClassification(dj.Computed):
             raise PipelineException(msg)
 
         print('Generated types:', mask_types)
+        dj.conn().is_connected
 
         # Insert results
         self.insert1(key)
