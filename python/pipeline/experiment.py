@@ -8,7 +8,7 @@ from commons import lab
 
 assert StrictVersion(dj.__version__) >= StrictVersion('0.2.7')
 
-schema = dj.schema('pipeline_experiment', locals())
+schema = dj.schema('pipeline_experiment', locals(), create_tables=False)
 
 
 def erd():
