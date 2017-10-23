@@ -1440,7 +1440,7 @@ class ScanDone(dj.Computed):
         """
 
     def _make_tuples(self, key):
-        scan_key = {k: v for k, v in key.items() if k not in ['field', 'channel']}
+        scan_key = {k: v for k, v in key.items() if k in self.heading}
 
         # Delete current ScanDone entry
         with dj.config(safemode=False):
