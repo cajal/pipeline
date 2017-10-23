@@ -1,6 +1,10 @@
+from distutils.version import StrictVersion
+import sys
 import datajoint as dj
 from . import experiment, reso, meso, shared
 from .exceptions import PipelineException
+
+assert StrictVersion(dj.__version__) >= StrictVersion('0.8.2'), "Please upgrade datajoint to 0.8.2+"
 
 
 schema = dj.schema('pipeline_fuse', locals())
@@ -48,7 +52,13 @@ class ScanDone(dj.Computed):
 
 
     def resolve(self):
+        """
+        Given a fuse.ScanDone() object, return the corresponding
+        module.ScanDone() object and the module itself.
+        :return: scanDone,  module
+        """
         if len(dj.U('pipe') & self) != 1:
             raise PipelineException('cannot query from multiple pipelines at once.  Please narrow down your restriction')
-        return (reso.ScanDone() & self) or (meso.ScanDone() & self)
+        scanDone = (reso.ScanDone() & self) or (meso.ScanDone() & self)
+        return scanDone, sys.modules[scanDone.__module__]
 
