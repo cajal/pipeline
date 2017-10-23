@@ -3,7 +3,7 @@
 -> stack.StackInfo
 roi_id                      : tinyint                       # same as ScanImage's
 ---
--> `pipeline_experiment`.`stack__filename`
+-> experiment.StackFilename
 field_ids                   : blob                          # list of field_ids (0-index) sorted from shallower to deeper
 x                           : float                         # (um) center of ROI in the motor coordinate system
 y                           : float                         # (um) center of ROI in the motor coordinate system

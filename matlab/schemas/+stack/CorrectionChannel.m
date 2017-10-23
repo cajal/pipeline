@@ -1,8 +1,8 @@
 %{
 # channel to use for raster and motion correction
--> `pipeline_experiment`.`stack`
+-> experiment.Stack
 ---
--> `pipeline_shared`.`#channel`
+-> shared.Channel
 %}
 
 

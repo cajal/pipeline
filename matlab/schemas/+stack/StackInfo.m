@@ -1,6 +1,6 @@
 %{
 # master table with general data about the stacks
--> `pipeline_experiment`.`stack`
+-> experiment.Stack
 -> stack.Version
 ---
 nrois                       : tinyint                       # number of ROIs
