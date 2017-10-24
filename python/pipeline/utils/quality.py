@@ -18,6 +18,7 @@ def compute_quantal_size(scan):
     :returns: float the estimated quantal size
     :returns: float the estimated zero value
     """
+
     # Set some params
     num_frames = scan.shape[2]
     min_count = num_frames * 0.1  # pixel values with fewer appearances will be ignored
@@ -26,10 +27,10 @@ def compute_quantal_size(scan):
     # Make sure field is at least 32 bytes (int16 overflows if summed to itself)
     scan = scan.astype(np.float32, copy=False)
 
-    # Create pixel values and noise variances at each position in field
+    # Create pixel values at each position in field
     eps = 1e-4 # needed for np.round to not be biased towards even numbers (0.5 -> 1, 1.5 -> 2, 2.5 -> 3, etc.)
-    pixels = np.round((scan[:, :, :-1] + scan[:, :, 1:]) / 2 + eps).astype(np.int32)
-    variances = ((scan[:, :, :-1] - scan[:, :, 1:]) ** 2 / 2)
+    pixels = np.round((scan[:, :, :-1] + scan[:, :, 1:]) / 2 + eps)
+    pixels = pixels.astype(np.int16 if np.max(abs(pixels)) < 2 ** 15 else np.int32)
 
     # Compute a good range of pixel values (common, not too bright values)
     unique_pixels, counts = np.unique(pixels, return_counts=True)
@@ -38,23 +39,26 @@ def compute_quantal_size(scan):
     max_acceptable_intensity = min(max_intensity, max_acceptable_intensity)
     pixels_mask = np.logical_and(pixels >= min_intensity, pixels <= max_acceptable_intensity)
 
-    # Select pixel values in range
-    intensities = pixels[pixels_mask]
-    unique_intensities, counts = np.unique(intensities, return_counts=True)
+    # Select pixels in good range
+    pixels = pixels[pixels_mask]
+    unique_pixels, counts = np.unique(pixels, return_counts=True)
 
-    # Select noise variances in range
-    variances = variances[pixels_mask]
-    variance_sum = np.bincount(intensities - min_intensity, weights=variances)  # sum of variances per pixel value
-    variance_sum = variance_sum[unique_intensities - min_intensity] # select those from defined intensities
+    # Compute noise variance
+    variances = ((scan[:, :, :-1] - scan[:, :, 1:]) ** 2 / 2)[pixels_mask]
+    pixels -= min_intensity
+    variance_sum = np.zeros(len(unique_pixels)) # sum of variances per pixel value
+    for i in range(0, len(pixels), int(1e8)):  # chunk it for memory efficiency
+        variance_sum += np.bincount(pixels[i: i + int(1e8)], weights=variances[i: i + int(1e8)],
+                                    minlength=len(unique_pixels))
     unique_variances = variance_sum / counts # average variance per intensity
 
     # Compute quantal size (by fitting a linear regressor to predict the variance from intensity)
-    X = unique_intensities.reshape(-1, 1)
+    X = unique_pixels.reshape(-1, 1)
     y = unique_variances
     model = TheilSenRegressor() # robust regression
     model.fit(X, y)
     quantal_size = model.coef_[0]
     zero_level = - model.intercept_ / model.coef_[0]
 
-    return (min_intensity, max_intensity, unique_intensities, unique_variances,
+    return (min_intensity, max_intensity, unique_pixels, unique_variances,
            quantal_size, zero_level)
