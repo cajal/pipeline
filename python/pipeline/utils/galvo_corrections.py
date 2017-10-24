@@ -55,7 +55,7 @@ def compute_raster_phase(image, temporal_fill_fraction):
     return angle_shift
 
 
-def compute_motion_shifts(scan, template, in_place=True, num_processes=12,
+def compute_motion_shifts(scan, template, in_place=True, num_threads=12,
                           fix_outliers=True, outlier_threshold=0.05, smooth_shifts=True,
                           smoothing_window_size=5):
     """ Compute shifts in x and y for rigid subpixel motion correction.
@@ -67,7 +67,7 @@ def compute_motion_shifts(scan, template, in_place=True, num_processes=12,
     :param np.array scan: 2 or 3-dimensional scan (image_height, image_width[, num_frames]).
     :param np.array template: 2-d template image. Each frame in scan is aligned to this.
     :param bool in_place: Whether the scan can be overwritten.
-    :param int num_proceses: Number of threads used for the ffts.
+    :param int num_threads: Number of threads used for the ffts.
     :param bool fix_outliers: If True, look for spikes in motion shifts and sets them to
         the mean around them.
     :param float outlier_threshold: Threshold (as a fraction of dimension length) for
@@ -93,8 +93,6 @@ def compute_motion_shifts(scan, template, in_place=True, num_processes=12,
     # Get some params
     image_height, image_width, num_frames = scan.shape
     dims = np.array([image_height, image_width])
-    max_y_shift = round(image_height * outlier_threshold)
-    max_x_shift = round(image_width * outlier_threshold)
 
     # Compute params used in the subpixel registration
     upsample_factor = 10 # motion correction to a tenth of a pixel
@@ -104,9 +102,9 @@ def compute_motion_shifts(scan, template, in_place=True, num_processes=12,
 
     # Prepare fftw
     frame = pyfftw.empty_aligned(dims, dtype='complex64')
-    fft = pyfftw.builders.fft2(frame, threads=num_processes, overwrite_input=in_place,
+    fft = pyfftw.builders.fft2(frame, threads=num_threads, overwrite_input=in_place,
                                avoid_copy=True)
-    ifft = pyfftw.builders.ifft2(frame, threads=num_processes, overwrite_input=in_place,
+    ifft = pyfftw.builders.ifft2(frame, threads=num_threads, overwrite_input=in_place,
                                  avoid_copy=True)
 
     # Get fourier transform of template
@@ -141,6 +139,8 @@ def compute_motion_shifts(scan, template, in_place=True, num_processes=12,
     y_outliers = None
     x_outliers = None
     if fix_outliers:
+        max_y_shift = round(image_height * outlier_threshold)
+        max_x_shift = round(image_width * outlier_threshold)
         y_shifts, y_outliers = _fix_outliers(y_shifts, max_y_shift)
         x_shifts, x_outliers = _fix_outliers(x_shifts, max_x_shift)
 
