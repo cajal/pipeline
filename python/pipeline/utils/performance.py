@@ -229,7 +229,6 @@ def parallel_quality_metrics(chunks, results):
 
         # Mean frame
         mean_frame = np.mean(chunk, axis=-1, dtype=float)
-        print(time.ctime(), 'Done:', frames)
 
         # Save results
         results.append((mean_intensity, contrast, mean_frame))
