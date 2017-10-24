@@ -1590,13 +1590,14 @@ class Quality(dj.Computed):
                 # Map: Compute quality metrics in parallel
                 results = performance.map_frames(performance.parallel_quality_metrics,
                                                  scan, field_id=field_id, y=slice(None),
-                                                 x=slice(None), channel=channel)
+                                                 x=slice(None), channel=channel,
+                                                 chunk_size_in_GB=0.5)
 
                 # Reduce
                 mean_intensities = np.concatenate([r[0] for r in results])
                 contrasts = np.concatenate([r[1] for r in results])
                 mean_groups = np.array_split([r[2] for r in results], 16) # 16 groups
-                frames = np.stack([np.mean(g, axis=0) for g in mean_groups], axis=-1)
+                frames = np.stack([np.mean(g, axis=0) for g in mean_groups if g.any()], axis=-1)
 
                 # Compute quantal size
                 middle_frame = int(np.floor(scan.num_frames / 2))
