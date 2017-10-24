@@ -4,7 +4,7 @@ import time
 
 
 def map_frames(f, scan, field_id, y, x, channel, kwargs={}, chunk_size_in_GB=1,
-               num_processes=8, queue_size=10):
+               num_processes=8, queue_size=8):
     """ Apply function f to chunks of the scan (divided in the temporal axis).
 
     :param function f: Function that receives two positional arguments:
