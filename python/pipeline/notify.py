@@ -28,15 +28,18 @@ class SlackUser(dj.Manual):
 
     def notify(self, message=None, file = None, file_title=None, file_comment=None):
         if self:
-            from slacker import Slacker
-            api_key, user = (self * SlackConnection()).fetch1('api_key','slack_user')
-            s = Slacker(api_key, timeout=60)
-
-            if message: # None or ''
-                s.chat.post_message('@' + user, message, as_user=True)
-            if file is not None:
-                s.files.upload(file_=file, channels='@' + user,
-                               title=file_title, initial_comment=file_comment)
+            try:
+                from slacker import Slacker
+            except ModuleNotFoundError:
+                pass
+            else:
+                api_key, user = (self * SlackConnection()).fetch1('api_key','slack_user')
+                s = Slacker(api_key, timeout=60)
+                if message: # None or ''
+                    s.chat.post_message('@' + user, message, as_user=True)
+                if file is not None:
+                    s.files.upload(file_=file, channels='@' + user,
+                                   title=file_title, initial_comment=file_comment)
 
 def temporary_image(array, key):
     import matplotlib

@@ -1,6 +1,6 @@
 %{
 # Used for the webinterface
--> `pipeline_experiment`.`scan`
+-> experiment.Scan
 -> `pipeline_shared`.`#slice`
 -> `pipeline_shared`.`#channel`
 %}
