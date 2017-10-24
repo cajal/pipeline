@@ -129,6 +129,7 @@ class ScanInfo(dj.Imported):
 
         self.notify(key)
 
+    @notify.ignore_exceptions
     def notify(self, key):
         msg = 'ScanInfo for `{}` has been populated.'.format(key)
         (notify.SlackUser() & (experiment.Session() & key)).notify(msg)
@@ -208,6 +209,7 @@ class RasterCorrection(dj.Computed):
 
         self.notify(key)
 
+    @notify.ignore_exceptions
     def notify(self, key):
         msg = 'RasterCorrection for `{}` has been populated.'.format(key)
         msg += '\nRaster phases: {}'.format((self & key).fetch('raster_phase'))
@@ -332,6 +334,7 @@ class MotionCorrection(dj.Computed):
 
         self.notify(key, scan)
 
+    @notify.ignore_exceptions
     def notify(self, key, scan):
         import seaborn as sns
 
@@ -520,6 +523,7 @@ class SummaryImages(dj.Computed):
 
             self.notify({**key, 'field': field_id + 1}, scan.num_channels)  # once per field
 
+    @notify.ignore_exceptions
     def notify(self, key, num_channels):
         fig, axes = plt.subplots(num_channels, 2, squeeze=False, figsize=(12, 5 * num_channels))
 
@@ -910,6 +914,7 @@ class Segmentation(dj.Computed):
             msg = 'Unrecognized segmentation method {}'.format(key['segmentation_method'])
             raise PipelineException(msg)
 
+    @notify.ignore_exceptions
     def notify(self, key):
         fig = (Segmentation() & key).plot_masks()
         img_filename = '/tmp/' + key_hash(key) + '.png'
@@ -1042,6 +1047,7 @@ class Fluorescence(dj.Computed):
 
         self.notify(key)
 
+    @notify.ignore_exceptions
     def notify(self, key):
         fig = plt.figure(figsize=(15, 4))
         plt.plot((Fluorescence() & key).get_all_traces().T)
@@ -1116,6 +1122,7 @@ class MaskClassification(dj.Computed):
 
         self.notify(key, mask_types)
 
+    @notify.ignore_exceptions
     def notify(self, key, mask_types):
         mask_names = ['soma', 'axon', 'dendrite', 'neuropil', 'artifact', 'unknown']
         mask_counts = [mask_types.count(name) for name in mask_names]
@@ -1255,6 +1262,7 @@ class ScanSet(dj.Computed):
 
         self.notify(key)
 
+    @notify.ignore_exceptions
     def notify(self, key):
         fig = (ScanSet() & key).plot_centroids()
         img_filename = '/tmp/' + key_hash(key) + '.png'
@@ -1411,6 +1419,7 @@ class Activity(dj.Computed):
 
         self.notify(key)
 
+    @notify.ignore_exceptions
     def notify(self, key):
         fig = plt.figure(figsize=(15, 4))
         plt.plot((Activity() & key).get_all_spikes().T)
@@ -1504,6 +1513,7 @@ class ScanDone(dj.Computed):
 
         self.notify(scan_key)
 
+    @notify.ignore_exceptions
     def notify(self, key):
         msg = 'ScanDone for `{}` has been populated.'.format(key)
         (notify.SlackUser() & (experiment.Session() & key)).notify(msg)
@@ -1609,6 +1619,7 @@ class Quality(dj.Computed):
 
                 self.notify(field_key, frames, mean_intensities, contrasts)
 
+    @notify.ignore_exceptions
     def notify(self, key, summary_frames, mean_intensities, contrasts):
         """ Sends slack notification for a single slice + channel combination. """
         # Send summary frames
