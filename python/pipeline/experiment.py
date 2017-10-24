@@ -7,7 +7,7 @@ import os
 from commons import lab
 
 
-schema = dj.schema('pipeline_experiment', locals())
+schema = dj.schema('pipeline_experiment', locals(), create_tables=False)
 
 
 def erd():
