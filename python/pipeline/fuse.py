@@ -23,6 +23,7 @@ class Resolver:
     This mixin class populates tables that fuse two pipelines
     """
 
+
     def _make_tuples(self, key):
         # find the matching pipeline from those specified in self.mapping
         try:
@@ -33,6 +34,8 @@ class Resolver:
                     'The key source yielded a key from an uknown pipeline')
         self.insert1(dict(key, pipe=pipe))
         dest().insert(src() & key, ignore_extra_fields=True)
+        module = sys.modules[src.__module__]
+        self.Unit().insert(self * module.ScanSet.Unit() & key, ignore_extra_fields=True)
 
 
     def resolve(self):
@@ -61,6 +64,13 @@ class Activity(Resolver, dj.Computed):
     ---
     -> Pipe
     """
+
+    class Unit(dj.Part):
+        definition = """
+        # Unit that reproduces the units from <module>.ScanSet.Unit
+        -> master
+        unit_id  : int   # unique per scan & segmentation method
+        """
 
     @property
     def key_source(self):
@@ -97,7 +107,17 @@ class ScanDone(Resolver, dj.Computed):
     -> Pipe
     """
 
-    key_source = meso.ScanDone().proj() + reso.ScanDone().proj()
+    class Unit(dj.Part):
+        definition = """
+        # Unit that reproduces the units from <module>.ScanSet.Unit
+        -> master
+        unit_id  : int   # unique per scan & segmentation method
+        """
+
+    @property
+    def key_source(self):
+        assert StrictVersion(dj.__version__) >= StrictVersion('0.9.0'), "Please upgrade datajoint to version 0.9.0+"
+        return meso.ScanDone().proj() + reso.ScanDone().proj()
 
     class Reso(dj.Part):
         definition = """
