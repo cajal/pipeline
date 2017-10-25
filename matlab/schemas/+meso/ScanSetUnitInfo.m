@@ -2,7 +2,6 @@
 # unit type, coordinates and delay time
 -> meso.ScanSetUnit
 ---
--> `pipeline_shared`.`#mask_type`
 um_x                        : smallint                      # x-coordinate of centroid in motor coordinate system
 um_y                        : smallint                      # y-coordinate of centroid in motor coordinate system
 um_z                        : smallint                      # z-coordinate of mask relative to surface of the cortex
@@ -18,7 +17,7 @@ classdef ScanSetUnitInfo < dj.Computed
 
 		function makeTuples(self, key)
 		%!!! compute missing fields for key here
-			 self.insert(key)
+			 %self.insert(key)
 		end
 	end
 
