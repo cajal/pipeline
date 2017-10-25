@@ -4,7 +4,6 @@ import datajoint as dj
 from . import experiment, reso, meso, shared
 from .exceptions import PipelineException
 
-assert StrictVersion(dj.__version__) >= StrictVersion('0.9.0'), "Please upgrade datajoint to 0.9.0+"
 
 
 schema = dj.schema('pipeline_fuse', locals())
@@ -63,7 +62,10 @@ class Activity(Resolver, dj.Computed):
     -> Pipe
     """
 
-    key_source = meso.Activity().proj() + reso.Activity().proj()
+    @property
+    def key_source(self):
+        assert StrictVersion(dj.__version__) >= StrictVersion('0.9.0'), "Please upgrade datajoint to version 0.9.0+"
+        return meso.Activity().proj() + reso.Activity().proj()
 
     class Reso(dj.Part):
         definition = """
