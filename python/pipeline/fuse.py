@@ -35,17 +35,18 @@ class Resolver:
         module = sys.modules[src.__module__]
         self.Unit().insert(self * module.ScanSet.Unit() & key, ignore_extra_fields=True)
 
-    def resolve(self):
+    @property
+    def module(self):
         """
-        Given a fuse.Activity() object, for example return the corresponding
-        module.Activity() object and the module itself.
-        :return: (activity,  module) where activity is the module.Activity for the right module
+        (fuse.Activity() & key).module is the module where the activity resides.
+        Throws an error if the activity comes from multiple modules.
+        Does the same thing for fuse.ScanDone() or any other subclass of Resolver
         """
         pipes = (dj.U('pipe') & self).fetch('pipe')
         if len(pipes) != 1:
             raise PipelineException('Please restrict query to a single pipeline.')
         rel, _ = self.mapping[pipes[0]]
-        return rel() & self, sys.modules[rel.__module__]
+        return sys.modules[rel.__module__]
 
 
 @schema
