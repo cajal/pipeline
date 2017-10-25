@@ -4,7 +4,7 @@ import datajoint as dj
 from . import experiment, reso, meso, shared
 from .exceptions import PipelineException
 
-assert StrictVersion(dj.__version__) >= StrictVersion('0.8.2'), "Please upgrade datajoint to 0.8.2+"
+assert StrictVersion(dj.__version__) >= StrictVersion('0.9.0'), "Please upgrade datajoint to 0.9.0+"
 
 
 schema = dj.schema('pipeline_fuse', locals())
