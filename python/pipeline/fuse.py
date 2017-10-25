@@ -25,14 +25,13 @@ class Resolver:
     """
 
     def _make_tuples(self, key):
-
-        for pipe, (src, dest) in self.mapping.items():
-            if src() & key:
-                break
-        else:
-            raise PipelineException(
+        # find the matching pipeline from those specified in self.mapping
+        try:
+            pipe, src, dest = next(pipe, src, dest
+                    for pipe, (src, dest) in self.mapping.items() if src() & key)
+        except StopIteration:
+            raise DataJointError(
                     'The key source yielded a key from an uknown pipeline')
-
         self.insert1(dict(key, pipe=pipe))
         dest().insert(src() & key, ignore_extra_fields=True)
 
