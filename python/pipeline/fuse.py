@@ -1,12 +1,12 @@
-from distutils.version import StrictVersion
 import sys
 import datajoint as dj
+from distutils.version import StrictVersion
 from . import experiment, reso, meso, shared
 from .exceptions import PipelineException
 
 
-
 schema = dj.schema('pipeline_fuse', locals())
+
 
 @schema
 class Pipe(dj.Lookup):
@@ -17,12 +17,10 @@ class Pipe(dj.Lookup):
     contents = zip(('reso', 'meso'))
 
 
-
 class Resolver:
     """
     This mixin class populates tables that fuse two pipelines
     """
-
 
     def _make_tuples(self, key):
         # find the matching pipeline from those specified in self.mapping
@@ -37,18 +35,17 @@ class Resolver:
         module = sys.modules[src.__module__]
         self.Unit().insert(self * module.ScanSet.Unit() & key, ignore_extra_fields=True)
 
-
     def resolve(self):
         """
-        Given a fuse.Activity() object, return the corresponding
+        Given a fuse.Activity() object, for example return the corresponding
         module.Activity() object and the module itself.
         :return: (activity,  module) where activity is the module.Activity for the right module
         """
-        if len(dj.U('pipe') & self) != 1:
+        pipes = (dj.U('pipe') & self).fetch('pipe')
+        if len(pipes) != 1:
             raise PipelineException('Please restrict query to a single pipeline.')
-        for _, rel in self.mapping.values():
-            if rel:
-                return rel, sys.modules[rel.__module__]
+        rel, _ = self.mapping[pipes[0]]
+        return rel() & self, sys.modules[rel.__module__]
 
 
 @schema
