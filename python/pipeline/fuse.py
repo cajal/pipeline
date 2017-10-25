@@ -27,8 +27,8 @@ class Resolver:
     def _make_tuples(self, key):
         # find the matching pipeline from those specified in self.mapping
         try:
-            pipe, src, dest = next(pipe, src, dest
-                    for pipe, (src, dest) in self.mapping.items() if src() & key)
+            pipe, src, dest = next(((pipe, src, dest)
+                for pipe, (src, dest) in self.mapping.items() if src() & key))
         except StopIteration:
             raise PipelineException(
                     'The key source yielded a key from an uknown pipeline')
