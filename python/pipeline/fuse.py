@@ -30,7 +30,7 @@ class Resolver:
             pipe, src, dest = next(pipe, src, dest
                     for pipe, (src, dest) in self.mapping.items() if src() & key)
         except StopIteration:
-            raise DataJointError(
+            raise PipelineException(
                     'The key source yielded a key from an uknown pipeline')
         self.insert1(dict(key, pipe=pipe))
         dest().insert(src() & key, ignore_extra_fields=True)
