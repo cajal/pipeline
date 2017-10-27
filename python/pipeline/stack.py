@@ -540,6 +540,10 @@ class CorrectedStack(dj.Computed):
 
     -> Corrections.Stitched
     """
+    @property
+    def key_source(self):
+        return Corrections.Stitched() & {'pipe_version': CURRENT_VERSION}
+
 
     class Slice(dj.Part):
         definition = """ # single slice of one stack
