@@ -55,7 +55,7 @@ def compute_raster_phase(image, temporal_fill_fraction):
     return angle_shift
 
 
-def compute_motion_shifts(scan, template, in_place=True, num_threads=12,
+def compute_motion_shifts(scan, template, in_place=True, num_threads=8,
                           fix_outliers=True, outlier_threshold=0.05, smooth_shifts=True,
                           smoothing_window_size=5):
     """ Compute shifts in x and y for rigid subpixel motion correction.
