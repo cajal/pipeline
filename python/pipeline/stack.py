@@ -239,13 +239,13 @@ class Corrections(dj.Computed):
             self.insert1({**key, 'raster_phase': raster_phase, 'raster_std': raster_std})
 
         def correct(self, roi):
-            """ Correct roi with parameters extracted from self.
+            """ Correct roi with parameters extracted from self. In place.
 
             :param np.array roi: ROI (fields, image_height, image_width, frames).
             """
             raster_phase = self.fetch1('raster_phase')
             fill_fraction = (StackInfo() & self).fetch1('fill_fraction')
-            if raster_phase == 0:
+            if abs(raster_phase) < 1e-7:
                 corrected_roi = roi.astype(np.float32, copy=False)
             else:
                 roi = roi.transpose([1, 2, 3, 0])
@@ -345,14 +345,15 @@ class Corrections(dj.Computed):
                           'y_aligns': y_aligns, 'x_aligns': x_aligns})
 
         def correct(self, roi):
-            """ Correct roi with parameters extracted from self.
+            """ Correct roi with parameters extracted from self. In place
 
                 :param np.array roi: ROI (fields, image_height, image_width, frames).
             """
             y_shifts, x_shifts = self.fetch1('y_shifts', 'x_shifts')
-            corrected = [galvo_corrections.correct_motion(field, (x_shifts[i], y_shifts[i]))
-                         for i, field in enumerate(roi)]
-            return np.stack(corrected)
+            corrected = roi # in_place
+            for i, field in enumerate(roi):
+                corrected[i] = galvo_corrections.correct_motion(field, (x_shifts[i], y_shifts[i]))
+            return corrected
 
 
     class Stitched(dj.Part):
@@ -444,6 +445,7 @@ class Corrections(dj.Computed):
 
 
     def _make_tuples(self, key):
+        print('Correcting stack', key)
         # Insert in Corrections
         self.insert1(key)
 
@@ -474,6 +476,9 @@ class Corrections(dj.Computed):
             Corrections.Motion()._make_tuples(roi_key, corrected_roi, sps)
             corrected_roi = (Corrections.Motion() & roi_key).correct(corrected_roi)
 
+            # Mean over frames
+            corrected_roi = corrected_roi.mean(axis=-1) # frees original memory
+
             # Discard some fields at the top and bottom and some pixels to avoid artifacts
             skip_rows = max(1, int(round(0.005 * corrected_roi.shape[1])))  # 0.5 %
             skip_columns = max(1, int(round(0.005 * corrected_roi.shape[2])))  # 0.5 %
@@ -481,7 +486,7 @@ class Corrections(dj.Computed):
                                           skip_columns: -skip_columns]
 
             # Create ROI object
-            rois.append(stitching.StitchedROI(corrected_roi.mean(axis=-1), x=roi_tuple['x'],
+            rois.append(stitching.StitchedROI(corrected_roi, x=roi_tuple['x'],
                                               y=roi_tuple['y'], z=roi_tuple['z'],
                                               id_=roi_tuple['roi_id']))
 
@@ -579,8 +584,11 @@ class CorrectedStack(dj.Computed):
                 # Motion correction
                 corrected_roi = (Corrections.Motion() & roi_info).correct(corrected_roi)
 
+                # Mean over frames
+                corrected_roi = corrected_roi.mean(axis=-1) # frees original memory
+
                 # Create ROI object
-                rois.append(stitching.StitchedROI(corrected_roi.mean(axis=-1), x=roi_coord['x'],
+                rois.append(stitching.StitchedROI(corrected_roi, x=roi_coord['x'],
                                               y=roi_coord['y'], z=roi_coord['z'],
                                               id_=roi_coord['roi_id']))
 
