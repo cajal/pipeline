@@ -629,10 +629,10 @@ class CorrectedStack(dj.Computed):
             initial_z = (Corrections.Stitched() & key).fetch1('z')
             z_step = (StackInfo() & key).fetch1('z_step')
             for i, slice_ in enumerate(volume):
-                self.Slice().insert1({**key, 'channel': channel, 'islice': i,
+                self.Slice().insert1({**key, 'channel': channel + 1, 'islice': i,
                                       'slice': slice_, 'z': initial_z + i * z_step})
 
-            self.notify({**key, 'channel': channel}, volume)
+            self.notify({**key, 'channel': channel + 1}, volume)
 
     def notify(self, key, volume):
         import imageio
