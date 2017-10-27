@@ -219,7 +219,7 @@ class RasterCorrection(dj.Computed):
         """ Returns a function to perform raster correction on the scan. """
         raster_phase = self.fetch1('raster_phase')
         fill_fraction = (ScanInfo() & self).fetch1('fill_fraction')
-        if abs(raster_phase) > 1e-7:
+        if abs(raster_phase) < 1e-7:
             correct_raster = lambda scan: scan.astype(np.float32, copy=False)
         else:
             correct_raster = lambda scan: galvo_corrections.correct_raster(scan,
@@ -291,10 +291,9 @@ class MotionCorrection(dj.Computed):
             f = performance.parallel_motion_shifts # function to map
             raster_phase = (RasterCorrection() & key & {'field': field_id + 1}).fetch1('raster_phase')
             fill_fraction = (ScanInfo() & key).fetch1('fill_fraction')
+            kwargs = {'raster_phase': raster_phase, 'fill_fraction': fill_fraction, 'template': template}
             results = performance.map_frames(f, scan, field_id=field_id, y=slice(skip_rows, -skip_rows),
-                                             x=slice(skip_cols, -skip_cols), channel=channel,
-                                             kwargs={'raster_phase': raster_phase, 'fill_fraction': fill_fraction,
-                                                     'template': template})
+                                             x=slice(skip_cols, -skip_cols), channel=channel, kwargs=kwargs)
 
             # Reduce
             y_shifts = np.zeros(scan.num_frames)
@@ -478,11 +477,10 @@ class SummaryImages(dj.Computed):
                 raster_phase = (RasterCorrection() & key & {'field': field_id + 1}).fetch1('raster_phase')
                 fill_fraction = (ScanInfo() & key).fetch1('fill_fraction')
                 y_shifts, x_shifts = (MotionCorrection() & key & {'field': field_id + 1}).fetch1('y_shifts', 'x_shifts')
+                kwargs = {'raster_phase': raster_phase, 'fill_fraction': fill_fraction,
+                          'y_shifts': y_shifts, 'x_shifts': x_shifts}
                 results = performance.map_frames(f, scan, field_id=field_id, y=slice(None),
-                                                 x=slice(None), channel=channel,
-                                                 kwargs={'raster_phase': raster_phase,
-                                                         'fill_fraction': fill_fraction,
-                                                         'y_shifts': y_shifts, 'x_shifts': x_shifts})
+                                                 x=slice(None), channel=channel, kwargs=kwargs)
 
                 # Reduce: Compute correlation image
                 sum_x = np.sum([r[0] for r in results], axis=0) # h x w
@@ -681,7 +679,7 @@ class Segmentation(dj.Computed):
             num_frames = (ScanInfo() & key).fetch1('nframes')
 
             # Read scan
-            print('Reading the scan...')
+            print('Reading scan...')
             scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
             scan = scanreader.read_scan(scan_filename)
 
@@ -697,12 +695,10 @@ class Segmentation(dj.Computed):
             raster_phase = (RasterCorrection() & key).fetch1('raster_phase')
             fill_fraction = (ScanInfo() & key).fetch1('fill_fraction')
             y_shifts, x_shifts = (MotionCorrection() & key).fetch1('y_shifts', 'x_shifts')
+            kwargs = {'raster_phase': raster_phase, 'fill_fraction': fill_fraction,
+                      'y_shifts': y_shifts, 'x_shifts': x_shifts, 'mmap_scan': mmap_scan}
             results = performance.map_frames(f, scan, field_id=field_id, y=slice(None),
-                                             x=slice(None), channel=channel,
-                                             kwargs={'raster_phase': raster_phase,
-                                                     'fill_fraction': fill_fraction,
-                                                     'y_shifts': y_shifts, 'x_shifts': x_shifts,
-                                                     'mmap_scan': mmap_scan})
+                                             x=slice(None), channel=channel, kwargs=kwargs)
 
             # Reduce: Use the minimum values to make memory mapped scan nonnegative
             mmap_scan -= np.min(results)  # bit inefficient but necessary
@@ -1018,31 +1014,30 @@ class Fluorescence(dj.Computed):
 
     def _make_tuples(self, key):
         # Load scan
-        print('Loading scan...')
+        print('Reading scan...')
         field_id = key['field'] - 1
         channel = key['channel'] - 1
         scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
         scan = scanreader.read_scan(scan_filename)
-        scan_ = scan[field_id, :, :, channel, :].astype(np.float32, copy=False)
 
-        # Correct the scan
-        print('Correcting scan...')
-        correct_raster = (RasterCorrection() & key).get_correct_raster()
-        correct_motion = (MotionCorrection() & key).get_correct_motion()
-        scan_ = correct_motion(correct_raster(scan_))
-
-        # Get masks
+        # Map: Extract traces
         print('Creating fluorescence traces...')
-        image_height, image_width = (ScanInfo.Field() & key).fetch1('px_height', 'px_width')
+        f = performance.parallel_fluorescence # function to map
+        raster_phase = (RasterCorrection() & key).fetch1('raster_phase')
+        fill_fraction = (ScanInfo() & key).fetch1('fill_fraction')
+        y_shifts, x_shifts = (MotionCorrection() & key).fetch1('y_shifts', 'x_shifts')
         mask_ids, pixels, weights = (Segmentation.Mask() & key).fetch('mask_id', 'pixels', 'weights')
-        masks = Segmentation.reshape_masks(pixels, weights, image_height, image_width)
-        masks = masks.transpose([2, 0, 1])
+        kwargs = {'raster_phase': raster_phase, 'fill_fraction': fill_fraction, 'y_shifts': y_shifts,
+                  'x_shifts': x_shifts, 'mask_pixels': pixels, 'mask_weights': weights}
+        results = performance.map_frames(f, scan, field_id=field_id, y=slice(None),
+                                         x=slice(None), channel=channel, kwargs=kwargs)
 
+        # Reduce: Concatenate across frames
+        traces = np.concatenate(results, axis=1)
+
+        # Insert
         self.insert1(key)
-        for mask_id, mask in zip(mask_ids, masks):
-            trace = np.average(scan_.reshape(-1, scan.num_frames), weights=mask.ravel(),
-                               axis=0)
-
+        for mask_id, trace in zip(mask_ids, traces):
             Fluorescence.Trace().insert1({**key, 'mask_id': mask_id, 'trace': trace})
 
         self.notify(key)
