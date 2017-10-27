@@ -627,7 +627,7 @@ class CorrectedStack(dj.Computed):
 
             # Insert each slice
             initial_z = (Corrections.Stitched() & key).fetch1('z')
-            z_step = (StackInfo() & key).fetch('z_step')
+            z_step = (StackInfo() & key).fetch1('z_step')
             for i, slice_ in enumerate(volume):
                 self.Slice().insert1({**key, 'channel': channel, 'islice': i,
                                       'slice': slice_, 'z': initial_z + i * z_step})
