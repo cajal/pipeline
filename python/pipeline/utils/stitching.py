@@ -24,12 +24,13 @@ class _ROI():
 
 class StitchedROI():
     """ Receives ROIs and its coordinates and blends them into a single volume. """
-    def __init__(self, roi, x, y, z, id_):
-        self.volume = roi
+    def __init__(self, roi, x, y, z, id_, dtype=np.float32):
+        self.volume = roi.astype(dtype, copy=False)
+        self.dtype = dtype
         self.x = x
         self.y = y
         self.z = z
-        self.mask = np.ones([self.height, self.width])
+        self.mask = np.ones([self.height, self.width], dtype=np.float32)
         self.roi_coordinates = [_ROI(id_, x, y, z)] # bookkeeping
 
     @property
@@ -100,13 +101,13 @@ class StitchedROI():
             roi.mask[..., :taper_size] *= taper
 
         # Initialize empty (big) rois
-        mask1 = np.zeros([output_height, output_width])
-        roi1 = np.zeros([self.depth, output_height, output_width], dtype=np.float32)
+        mask1 = np.zeros([output_height, output_width], dtype=np.float32)
+        roi1 = np.zeros([self.depth, output_height, output_width], dtype=self.dtype)
         mask1[:self.height, :self.width] = self.mask
         roi1[:, :self.height, :self.width] = self.volume
 
-        mask2 = np.zeros([output_height, output_width])
-        roi2 = np.zeros([roi.depth, output_height, output_width], dtype=np.float32)
+        mask2 = np.zeros([output_height, output_width], dtype=np.float32)
+        roi2 = np.zeros([roi.depth, output_height, output_width], dtype=roi.dtype)
         mask2[:roi.height, :roi.width] = roi.mask
         roi2[:, :roi.height, :roi.width] = roi.volume
 
@@ -246,14 +247,8 @@ def linear_stitch(left, right, max_overlap=0.5):
 
     # Compute cross-correlation
     corr = np.zeros(left_strip.shape[-2:])
-
-#TODO: Get rid of this prints
-    print('sup!')
     for l, r in zip(left_strip, template):
-        #corr += match_template(l, r, pad_input=True)
-        c = match_template(l, r, pad_input=True, constant_values=np.mean(l))
-        corr += c
-        print(np.unravel_index(np.argmax(c), c.shape))
+        corr += match_template(l, r, pad_input=True, constant_values=np.mean(l))
     corr /= num_slices
 
     # Get best match

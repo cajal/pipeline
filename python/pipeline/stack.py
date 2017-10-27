@@ -5,15 +5,16 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scanreader
 from scipy import signal
+import itertools
 
 from . import experiment, notify, shared
-from .utils import galvo_corrections
-from .utils import stitching
+from .utils import galvo_corrections, stitching
 from .utils.signal import mirrconv, float2uint8
+from .exceptions import PipelineException
 
 
 schema = dj.schema('pipeline_stack', locals())
-CURRENT_VERSION = 0
+CURRENT_VERSION = 1
 
 
 @schema
@@ -182,315 +183,182 @@ class CorrectionChannel(dj.Manual):
 
 
 @schema
-class RasterCorrection(dj.Computed):
-    definition = """ # raster correction for bidirectional resonant scans
-
-    -> StackInfo.ROI                        # animal_id, session, stack_idx, roi_id, version
-    -> CorrectionChannel                    # animal_id, session, stack_idx
-    ---
-    raster_phase           : float          # difference between expected and recorded scan angle
-    raster_std             : float          # standard deviation among raster phases in different slices
+class Corrections(dj.Computed):
+    definition = """ # stack corrections
+    -> StackInfo                    # animal_id, session, stack_idx, pipe_version
+    -> CorrectionChannel            # animal_id, session, stack_idx
     """
-
     @property
     def key_source(self):
-        return StackInfo.ROI() * CorrectionChannel() & {'pipe_version': CURRENT_VERSION}
+        return StackInfo() * CorrectionChannel() & {'pipe_version': CURRENT_VERSION}
 
-    def _make_tuples(self, key):
-        print('Computing raster correction for ROI', key)
 
-        # Get some params
-        res = (StackInfo.ROI() & key).fetch1('bidirectional', 'px_height', 'px_width', 'field_ids')
-        is_bidirectional, image_height, image_width, field_ids = res
-        correction_channel = (CorrectionChannel() & key).fetch1('channel') - 1
+    class Raster(dj.Part):
+        definition = """ # raster correction for bidirectional resonant scans
 
-        if is_bidirectional:
-            # Read the ROI
-            filename_rel = (experiment.Stack.Filename() & (StackInfo.ROI() & key))
-            roi_filename = filename_rel.local_filenames_as_wildcard
-            roi = scanreader.read_stack(roi_filename, dtype=np.float32)
+        -> Corrections
+        -> StackInfo.ROI                        # animal_id, session, stack_idx, roi_id, version
+        ---
+        raster_phase           : float          # difference between expected and recorded scan angle
+        raster_std             : float          # standard deviation among raster phases in different slices
+        """
 
-            # Drop 10% of slices in the top and bottom and taper to avoid edge artifacts
-            skip_fields = max(1, int(round(len(field_ids) * 0.10)))
-            taper = np.sqrt(np.outer(signal.tukey(image_height, 0.4),
-                                     signal.tukey(image_width, 0.4)))
+        def _make_tuples(self, key, roi):
+            """ Compute raster phase discarding top and bottom 10% of slices and tapering
+            edges to avoid edge artifacts
 
-            # Compute raster phase for each slice and take the mean
-            raster_phases = []
-            for field_id in field_ids[skip_fields:-skip_fields]:
-                # Create template (average frame tapered to avoid edge artifacts)
-                slice_= roi[field_id, :, :, correction_channel, :]
-                anscombed = 2 * np.sqrt(slice_ - slice_.min() + 3 / 8) # anscombe transform
-                template = np.mean(anscombed, axis=-1) * taper
+            :param dict key: Dictionary with ROI key attributes.
+            :param np.array roi: ROI (fields, image_height, image_width, frames).
+            """
+            if (StackInfo.ROI() & key).fetch1('bidirectional'):
+                num_fields, image_height, image_width, num_frames = roi.shape
 
-                # Compute raster correction
-                raster_phases.append(galvo_corrections.compute_raster_phase(template,
-                                                             roi.temporal_fill_fraction))
-            raster_phase = np.mean(raster_phases)
-            raster_std = np.std(raster_phases)
-            print('Raster phases per slice: ', raster_phases)
-        else:
-            raster_phase = 0
-            raster_std = 0
+                # Compute some parameters
+                fill_fraction = (StackInfo() & key).fetch1('fill_fraction')
+                skip_fields = max(1, int(round(num_fields * 0.10)))
+                taper = np.sqrt(np.outer(signal.tukey(image_height, 0.4),
+                                         signal.tukey(image_width, 0.4)))
 
-        # Insert
-        self.insert1({**key, 'raster_phase': raster_phase, 'raster_std': raster_std})
+                # Compute raster phase for each slice and take the mean
+                raster_phases = []
+                for slice_ in roi[skip_fields: -skip_fields]:
+                    # Create template (average frame tapered to avoid edge artifacts)
+                    anscombed = 2 * np.sqrt(slice_ - slice_.min() + 3 / 8) # anscombe transform
+                    template = np.mean(anscombed, axis=-1) * taper
 
-        self.notify(key)
+                    # Compute raster correction
+                    raster_phases.append(galvo_corrections.compute_raster_phase(template,
+                                                                                fill_fraction))
+                raster_phase = np.mean(raster_phases)
+                raster_std = np.std(raster_phases)
+            else:
+                raster_phase = 0
+                raster_std = 0
 
-    def notify(self, key):
-        msg = 'RasterCorrection for `{}` has been populated.'.format(key)
-        msg += '\nRaster phase: {}'.format((self & key).fetch1('raster_phase'))
-        (notify.SlackUser() & (experiment.Session() & key)).notify(msg)
+            # Insert
+            self.insert1({**key, 'raster_phase': raster_phase, 'raster_std': raster_std})
 
-    def get_correct_raster(self):
-        """ Returns a function to perform raster correction on the 4-d ROI. """
-        raster_phase = self.fetch1('raster_phase')
-        fill_fraction = (StackInfo() & self).fetch1('fill_fraction')
-        if raster_phase == 0:
-            correct_raster = lambda roi: roi.astype(np.float32, copy=False)
-        else:
-            def correct_raster(roi):
+        def correct(self, roi):
+            """ Correct roi with parameters extracted from self.
+
+            :param np.array roi: ROI (fields, image_height, image_width, frames).
+            """
+            raster_phase = self.fetch1('raster_phase')
+            fill_fraction = (StackInfo() & self).fetch1('fill_fraction')
+            if raster_phase == 0:
+                corrected_roi = roi.astype(np.float32, copy=False)
+            else:
                 roi = roi.transpose([1, 2, 3, 0])
                 corrected_roi = galvo_corrections.correct_raster(roi, raster_phase, fill_fraction)
-                return corrected_roi.transpose([3, 0, 1, 2])
-        return correct_raster
+                corrected_roi = corrected_roi.transpose([3, 0, 1, 2])
+            return corrected_roi
 
 
-@schema
-class MotionCorrection(dj.Computed):
-    definition = """ # motion correction for each slice in the stack
+    class Motion(dj.Part):
+        definition = """ # motion correction for each slice in the stack (frame-to-frame and slice-to-slice)
 
-    -> RasterCorrection
-    ---
-    y_shifts                        : longblob      # (pixels) y motion correction shifts (num_slices x num_frames)
-    x_shifts                        : longblob      # (pixels) x motion correction shifts (num_slices x num_frames)
-    """
+        -> Corrections
+        -> StackInfo.ROI
+        ---
+        y_shifts            : longblob      # y motion correction shifts (num_slices x num_frames)
+        x_shifts            : longblob      # x motion correction shifts (num_slices x num_frames)
+        y_aligns            : longblob      # isolated slice-to-slice alignment shifts (num_slices)
+        x_aligns            : longblob      # isolated slice-to-slice alignment shifts (num_slices)
+        """
 
-    @property
-    def key_source(self):
-        return RasterCorrection() & {'pipe_version': CURRENT_VERSION}
+        def _make_tuples(self, key, roi, sps):
+            """ Compute motion shifts to align frames over time and over slices.
 
-    def _make_tuples(self, key):
-        from scipy import ndimage
-
-        print('Computing motion correction for ROI', key)
-
-        # Get some params
-        res = (StackInfo.ROI() & key).fetch1('nframes', 'px_height', 'px_width', 'field_ids')
-        num_frames, image_height, image_width, field_ids = res
-        correction_channel = (CorrectionChannel() & key).fetch1('channel') - 1
-
-        y_shifts = np.zeros([len(field_ids), num_frames])
-        x_shifts = np.zeros([len(field_ids), num_frames])
-        if num_frames > 1:
-            # Read the ROI
-            filename_rel = (experiment.Stack.Filename() & (StackInfo.ROI() & key))
-            roi_filename = filename_rel.local_filenames_as_wildcard
-            roi = scanreader.read_stack(roi_filename, dtype=np.float32)
-            roi_ = roi[field_ids, :, :, correction_channel, :]
-
-            # Correct raster effects
-            correct_raster = (RasterCorrection() & key).get_correct_raster()
-            corrected_roi = correct_raster(roi_)
+            :param dict key: Dictionary with ROI key attributes.
+            :param np.array roi: Raster corrected ROI (fields, height, width, frames).
+            :param float sps: Slices per second.
+            """
+            from scipy import ndimage
 
             # Discard some rows/cols to avoid edge artifacts
+            num_fields, image_height, image_width, num_frames = roi.shape
             skip_rows = int(round(image_height * 0.10))
             skip_cols = int(round(image_width * 0.10))
-            roi_ = corrected_roi[:, skip_rows: -skip_rows, skip_cols: -skip_cols, :]
-            roi_ -= roi_.min() # make nonnegative for fft
+            roi = roi[:, skip_rows: -skip_rows, skip_cols: -skip_cols, :]
 
             # Compute smoothing window size
             size_in_ms = 300  # smooth over a 300 milliseconds window
-            slices_per_second = roi.fps * roi.num_scanning_depths
-            window_size = int(round(slices_per_second * (size_in_ms / 1000)))  # in frames
+            window_size = int(round(sps * (size_in_ms / 1000)))  # in frames
 
-            for i, field in enumerate(roi_): # height x width x frames
-                shifted = field.copy()
-                for j in range(3):
-                    # Create template
-                    anscombed = 2 * np.sqrt(shifted + 3 / 8) # anscombe transform
-                    template = np.mean(anscombed, axis=-1)
-                    template = ndimage.gaussian_filter(template, 0.6)
-
-                    # Compute motion correction shifts
-                    results = galvo_corrections.compute_motion_shifts(field, template,
-                        in_place=False, fix_outliers=False, smoothing_window_size=window_size)
-
-                    # Center motions around zero
-                    y_shifts[i] = results[0] - results[0].mean()
-                    x_shifts[i] = results[1] - results[1].mean()
-
-                    # Apply shifts
-                    xy_shifts = np.stack([x_shifts[i], y_shifts[i]])
-                    shifted = galvo_corrections.correct_motion(field, xy_shifts, in_place=False)
-
-        # Insert
-        self.insert1({**key, 'y_shifts': y_shifts, 'x_shifts': x_shifts})
-
-        self.notify(key, y_shifts, x_shifts)
-
-    def notify(self, key, y_shifts, x_shifts):
-        import seaborn as sns
-
-        num_slices, num_frames = y_shifts.shape
-        fps = (StackInfo.ROI() & key).fetch1('fps') * num_slices
-        seconds = np.arange(num_frames) / fps
-
-        with sns.axes_style('white'):
-            fig, axes = plt.subplots(2, 1, figsize=(15, 8), sharex=True, sharey=True)
-
-        axes[0].set_title('Shifts in y for all slices')
-        axes[0].plot(seconds, y_shifts.T)
-        axes[1].set_title('Shifts in x for all slices')
-        axes[1].plot(seconds, x_shifts.T)
-        axes[0].set_ylabel('Pixels')
-        axes[1].set_ylabel('Pixels')
-        axes[1].set_xlabel('Seconds')
-        fig.tight_layout()
-        img_filename = '/tmp/' + key_hash(key) + '.png'
-        fig.savefig(img_filename)
-        plt.close(fig)
-        sns.reset_orig()
-
-        msg = 'MotionCorrection for `{}` has been populated.'.format(key)
-        (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
-                                                                   file_title='motion shifts')
-
-    def get_correct_motion(self):
-        """ Returns a function to perform motion correction in the 4-d ROI."""
-        y_shifts, x_shifts = self.fetch1('y_shifts', 'x_shifts')
-        def correct_motion(roi):
-            corrected = []
+            # Compute shifts
+            y_shifts = np.zeros([num_fields, num_frames]) # frame to frame shifts
+            x_shifts = np.zeros([num_fields, num_frames])
+            y_aligns = np.zeros(num_fields) # slice to slice shifts
+            x_aligns = np.zeros(num_fields)
+            previous = None
             for i, field in enumerate(roi):
-                xy_shifts = [x_shifts[i], y_shifts[i]]
-                corrected.append(galvo_corrections.correct_motion(field, xy_shifts))
+                corrected = field.copy() # leave input intact
+
+                # Frame to frame alignment
+                if num_frames > 1:
+                    for j in range(3):
+                        # Create template from previous
+                        anscombed = 2 * np.sqrt(corrected - corrected.min() + 3 / 8) # anscombe transform
+                        template = np.mean(anscombed, axis=-1)
+                        template = ndimage.gaussian_filter(template, 0.6)
+
+                        # Compute motion correction shifts
+                        results = galvo_corrections.compute_motion_shifts(field, template,
+                            in_place=False, fix_outliers=False, smoothing_window_size=window_size)
+
+                        # Center motions around zero
+                        y_shifts[i] = results[0] - results[0].mean()
+                        x_shifts[i] = results[1] - results[1].mean()
+
+                        # Apply shifts
+                        xy_shifts = np.stack([x_shifts[i], y_shifts[i]])
+                        corrected = galvo_corrections.correct_motion(field, xy_shifts, in_place=False)
+
+                # Interslice alignment
+                if previous is not None:
+                    # Align current slice to previous one
+                    results = galvo_corrections.compute_motion_shifts(corrected.mean(axis=-1),
+                        previous.mean(axis=-1), fix_outliers=False, smooth_shifts=False, in_place=False)
+
+                    # Reject alignment shifts higher than 2.5% image height/width
+                    y_align = results[0][0] if abs(results[0][0]) < image_height * 0.025 else 0
+                    x_align = results[1][0] if abs(results[1][0]) < image_width * 0.025 else 0
+
+                    # Update shifts (shift of i -1 plus the shift to align i to i-1)
+                    y_aligns[i] = y_aligns[i - 1] + y_align
+                    x_aligns[i] = x_aligns[i - 1] + x_align
+
+                previous = corrected
+
+            # Detrend alignment shifts (to decrease influence of vessels going through the slices)
+            filter_size = int(round(40 / (StackInfo() & key).fetch1('z_step'))) # 40 microns in z
+            smoothing_filter = signal.hann(filter_size + 1 if filter_size % 2 == 0 else 0)
+            y_aligns -= mirrconv(y_aligns, smoothing_filter / sum(smoothing_filter))
+            x_aligns -= mirrconv(x_aligns, smoothing_filter/ sum(smoothing_filter))
+
+            # Compute final shifts (frame-to-frame plus slice-to-slice)
+            y_shifts = y_shifts + np.expand_dims(y_aligns, axis=-1)
+            x_shifts = x_shifts + np.expand_dims(x_aligns, axis=-1)
+
+            # Insert
+            self.insert1({**key, 'y_shifts': y_shifts, 'x_shifts': x_shifts,
+                          'y_aligns': y_aligns, 'x_aligns': x_aligns})
+
+        def correct(self, roi):
+            """ Correct roi with parameters extracted from self.
+
+                :param np.array roi: ROI (fields, image_height, image_width, frames).
+            """
+            y_shifts, x_shifts = self.fetch1('y_shifts', 'x_shifts')
+            corrected = [galvo_corrections.correct_motion(field, (x_shifts[i], y_shifts[i]))
+                         for i, field in enumerate(roi)]
             return np.stack(corrected)
-        return correct_motion
 
-@schema
-class Alignment(dj.Computed):
-    definition = """ # inter-slice alignment
-    -> MotionCorrection
-    ---
-    y_shifts                : longblob
-    x_shifts                : longblob
-    """
 
-    @property
-    def key_source(self):
-        return MotionCorrection() & {'pipe_version': CURRENT_VERSION}
+    class Stitched(dj.Part):
+        definition = """ # union of ROIs from a stack (usually one per stack)
 
-    def _make_tuples(self, key):
-        print('Computing alignment for ROI', key)
-
-        # Get some params
-        res = (StackInfo.ROI() & key).fetch1('px_height', 'px_width', 'field_ids')
-        image_height, image_width, field_ids = res
-        correction_channel = (CorrectionChannel() & key).fetch1('channel') - 1
-        num_slices = len(field_ids)
-
-        # Read ROI
-        filename_rel = (experiment.Stack.Filename() & (StackInfo.ROI() & key))
-        roi_filename = filename_rel.local_filenames_as_wildcard
-        roi = scanreader.read_stack(roi_filename, dtype=np.float32)
-        roi_ = roi[field_ids, :, :, correction_channel, :]
-
-        # Correct raster and motion effects
-        correct_raster = (RasterCorrection() & key).get_correct_raster()
-        correct_motion = (MotionCorrection() & key).get_correct_motion()
-        corrected_roi = correct_motion(correct_raster(roi_)).mean(axis=-1)
-
-        # Discard some rows/cols to avoid edge artifacts
-        skip_rows = int(round(image_height * 0.10))
-        skip_cols = int(round(image_width * 0.10))
-        roi_ = corrected_roi[:, skip_rows: -skip_rows, skip_cols: -skip_cols]
-
-#        # Increase contrast
-#        enhanced_roi = np.empty(roi_.shape, dtype=np.float32)
-#        for i, slice_ in enumerate(roi_):
-#            a_min, a_max = np.percentile(slice_, (25, 75))
-#            enhanced_roi[i] = np.clip(slice_, a_min=a_min, a_max=a_max)
-#        roi_ = enhanced_roi
-
-        # Compute shifts per slice
-        y_shifts = np.zeros(num_slices)
-        x_shifts = np.zeros(num_slices)
-        for i in range(1, num_slices):
-            results = galvo_corrections.compute_motion_shifts(roi_[i], roi_[i - 1],
-                                fix_outliers=False, smooth_shifts=False, in_place=False)
-
-            print('y, x shifts', results[0][0], results[1][0])
-
-            # Reject shifts that are higher than 2.5% image height/width
-            y_shift = results[0][0] if abs(results[0][0]) < image_height * 0.025 else 0
-            x_shift = results[1][0] if abs(results[1][0]) < image_width * 0.025 else 0
-
-            # Update shifts (shift of i -1 plus the shift to align i to i-1)
-            y_shifts[i] = y_shifts[i - 1] + y_shift
-            x_shifts[i] = x_shifts[i - 1] + x_shift
-
-        # Detrend (to discard influence of vessels going through the slices)
-        filter_size = int(round(40 / (StackInfo() & key).fetch1('z_step'))) # 40 microns in z
-        smoothing_filter = signal.hann(filter_size + 1 if filter_size % 2 == 0 else 0)
-        y_shifts -= mirrconv(y_shifts, smoothing_filter / sum(smoothing_filter))
-        x_shifts -= mirrconv(x_shifts, smoothing_filter/ sum(smoothing_filter))
-
-        # Center shifts
-        y_shifts -= y_shifts.mean()
-        x_shifts -= x_shifts.mean()
-
-        # Insert
-        self.insert1({**key, 'y_shifts': y_shifts, 'x_shifts': x_shifts})
-
-        self.notify(key, y_shifts, x_shifts)
-
-    def notify(self, key, y_shifts, x_shifts):
-        import seaborn as sns
-
-        initial_z = (StackInfo.ROI() & key).fetch1('z')
-        z_step = (StackInfo() & key).fetch1('z_step')
-        depths = initial_z + z_step * np.arange(len(y_shifts))
-
-        with sns.axes_style('white'):
-            fig = plt.figure(figsize=(15, 8))
-
-        plt.plot(depths, y_shifts, label='Y shifts')
-        plt.plot(depths, x_shifts, label='X shifts')
-        plt.ylabel('Pixels')
-        plt.xlabel('Depth')
-        plt.legend()
-        fig.tight_layout()
-        img_filename = '/tmp/' + key_hash(key) + '.png'
-        fig.savefig(img_filename)
-        plt.close(fig)
-        sns.reset_orig()
-
-        msg = 'Alignment for `{}` has been populated.'.format(key)
-        (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
-                                                                   file_title='alignment')
-
-    def get_align(self):
-        """ Returns a function to align slices in the stack. """
-        y_shifts, x_shifts = self.fetch1('y_shifts', 'x_shifts')
-        correct_alignment = lambda roi: np.stack([galvo_corrections.correct_motion(slice_, (x, y))
-                                                  for slice_, x, y in zip(roi, x_shifts, y_shifts)])
-        return correct_alignment
-
-@schema
-class Stitching(dj.Computed):
-    definition = """ # stitches together overlapping rois
-    -> StackInfo
-    """
-    @property
-    def key_source(self):
-        # run iff all ROIs have been processed
-        stacks = StackInfo() - (StackInfo.ROI() - Alignment())
-        return stacks & {'pipe_version': CURRENT_VERSION}
-
-    class Volume(dj.Part):
-        definition = """ # union of ROIs from a stack (usually one volume per stack)
-        -> Stitching
+        -> Corrections
         volume_id       : tinyint           # id of this volume
         ---
         x               : float             # (um) center of ROI in a volume-wise coordinate system
@@ -504,47 +372,107 @@ class Stitching(dj.Computed):
         um_depth        : float             # depth in microns
         """
 
-#        def get_stitch(self):
-#            """ Returns a function that stitches all ROIS of this volume. """
-#            y_shifts, x_shifts = self.fetch1('y_shifts', 'x_shifts')
-#
-#            # What would be the ionput t this function
-#            return lambda roi: np.stack([galvo_corrections.correct_motion(f, [x_shifts[i], y_shifts[i]])
-#                                 for i, f in enumerate(roi)]):
+        def _make_tuples(self, key, rois):
+            # Stitch rois recursively
+            two_rois_joined = True
+            while two_rois_joined:
+                two_rois_joined = False
+
+                # Join rows
+                for roi1, roi2 in itertools.combinations(rois, 2):
+                    if roi1.is_aside_to(roi2):
+                        if roi1.left_or_right(roi2) == stitching.Position.LEFT: # 2|1
+                            left, right = roi2, roi1
+                        else: # 1|2
+                            left, right = roi1, roi2
+
+                        # Compute translation, join them and update roi list
+                        delta_x, delta_y = stitching.linear_stitch(left.volume, right.volume)
+                        left.join_with(right, left.x + delta_x, left.y + delta_y)
+                        rois.remove(right)
+
+                        two_rois_joined=True
+                        break # restart joining
+
+                # Join columns
+                [roi.rot90() for roi in rois]
+                for roi1, roi2 in itertools.combinations(rois, 2):
+                    if roi1.is_aside_to(roi2):
+                        if roi1.left_or_right(roi2) == stitching.Position.LEFT: # 2|1
+                            left, right = roi2, roi1
+                        else: # 1|2
+                            left, right = roi1, roi2
+
+                        # Compute translation, join them and update roi list
+                        delta_x, delta_y = stitching.linear_stitch(left.volume, right.volume)
+                        left.join_with(right, left.x + delta_x, left.y + delta_y)
+                        rois.remove(right)
+
+                        two_rois_joined=True
+                        break # restart joining
+                [roi.rot270() for roi in rois]
+
+            # Insert each stitched volume
+            for volume_id, roi in enumerate(rois):
+                tuple_ = {**key, 'volume_id': volume_id, 'x': roi.x, 'y': roi.y, 'z': roi.z,
+                          'px_height': roi.height, 'px_width': roi.width}
+                one_roi = StackInfo.ROI() & key & {'roi_id': roi.roi_coordinates[0].id} # get one roi from those forming the volume
+                tuple_['px_depth'] = one_roi.fetch1('px_depth') # same as original rois
+                tuple_['um_height'] = roi.height * one_roi.microns_per_pixel[0]
+                tuple_['um_width'] = roi.width * one_roi.microns_per_pixel[1]
+                tuple_['um_depth'] = one_roi.fetch1('um_depth') # same as original rois
+                Corrections.Stitched().insert1(tuple_)
+
+                # Insert coordinates of each ROI forming this volume
+                for roi_coord in roi.roi_coordinates:
+                    tuple_ = {**key, 'roi_id': roi_coord.id, 'volume_id': volume_id,
+                              'x': roi_coord.x, 'y': roi_coord.y, 'z': roi_coord.z}
+                    Corrections.ROICoordinates().insert1(tuple_)
+
 
     class ROICoordinates(dj.Part):
-        definition = """ # coordinates for each ROI in a volume
+        definition = """ # coordinates for each ROI in the stitched volume
+
+        -> Corrections
         -> StackInfo.ROI
         ---
-        -> Stitching.Volume
+        -> Corrections.Stitched
         x               : float             # (pixels) center of ROI in a volume-wise coordinate system
         y               : float             # (pixels) center of ROI in a volume-wise coordinate system
         z               : float             # (pixels) initial depth in a volume-wise coordinate system
         """
 
-    def _make_tuples(self, key):
-        import itertools
 
-        print('Stitching ROIS for stack', key)
+    def _make_tuples(self, key):
+        # Insert in Corrections
+        self.insert1(key)
 
         # Get some params
         correction_channel = (CorrectionChannel() & key).fetch1('channel') - 1
         num_slices = (StackInfo.ROI() & key).fetch('px_depth')
         skip_fields = int(round(min(num_slices) * 0.10)) # to avoid artifacts near the top and bottom
 
-        # Read ROIs forming this stack
-        rois = []
+        # Compute raster and motion correction per ROI
+        rois = []  # stores ROI objects used below for stitching
         for roi_tuple in (StackInfo.ROI() & key).fetch():
+            roi_key = {**key, 'roi_id': roi_tuple['roi_id']}
+
+            print('Computing corrections for ROI', roi_tuple['roi_id'])
+
             # Load ROI
             roi_filename = (experiment.Stack.Filename() & roi_tuple).local_filenames_as_wildcard
-            roi = scanreader.read_stack(roi_filename, dtype=np.float32)
-            roi_ = roi[roi_tuple['field_ids'], :, :, correction_channel, :]
+            roi = scanreader.read_stack(roi_filename)
+            corrected_roi = roi[roi_tuple['field_ids'], :, :, correction_channel, :]
+            corrected_roi = corrected_roi.astype(np.float32, copy=False)
 
-            # Correct
-            correct_raster = (RasterCorrection() & roi_tuple).get_correct_raster()
-            correct_motion = (MotionCorrection() & roi_tuple).get_correct_motion()
-            align = (Alignment() & roi_tuple).get_align()
-            corrected_roi = align(correct_motion(correct_raster(roi_)).mean(axis=-1))
+            # Raster correction
+            Corrections.Raster()._make_tuples(roi_key, corrected_roi)
+            corrected_roi = (Corrections.Raster() & roi_key).correct(corrected_roi)
+
+            # Motion correction
+            sps = roi.fps * roi.num_scanning_depths # slices per second
+            Corrections.Motion()._make_tuples(roi_key, corrected_roi, sps)
+            corrected_roi = (Corrections.Motion() & roi_key).correct(corrected_roi)
 
             # Discard some fields at the top and bottom and some pixels to avoid artifacts
             skip_rows = max(1, int(round(0.005 * corrected_roi.shape[1])))  # 0.5 %
@@ -553,97 +481,171 @@ class Stitching(dj.Computed):
                                           skip_columns: -skip_columns]
 
             # Create ROI object
-            rois.append(stitching.StitchedROI(corrected_roi, x=roi_tuple['x'],
+            rois.append(stitching.StitchedROI(corrected_roi.mean(axis=-1), x=roi_tuple['x'],
                                               y=roi_tuple['y'], z=roi_tuple['z'],
                                               id_=roi_tuple['roi_id']))
 
+        # Stitch overlapping fields
+        print('Computing stitching parameters')
+        Corrections.Stitched()._make_tuples(key, rois)
 
-        two_rois_joined = True
-        while two_rois_joined:
-            two_rois_joined = False
+        self.notify(key)
 
-            # Join rows
-            for roi1, roi2 in itertools.combinations(rois, 2):
-                if roi1.is_aside_to(roi2):
-                    if roi1.left_or_right(roi2) == stitching.Position.LEFT: # 2|1
-                        left, right = roi2, roi1
-                    else: # 1|2
-                        left, right = roi1, roi2
+    @notify.ignore_exceptions
+    def notify(self, key):
+        import seaborn as sns
 
-                    # Compute translation, join them and update roi list
-                    delta_x, delta_y = stitching.linear_stitch(left.volume, right.volume)
-                    left.join_with(right, left.x + delta_x, left.y + delta_y)
-                    rois.remove(right)
+        notifier = (notify.SlackUser() & (experiment.Session() & key))
+        notifier.notify('Corrections for stack {} have been populated'.format(key))
 
-                    two_rois_joined=True
-                    break; # restart joining
+        raster_phases = (self.Raster() & key).fetch('raster_phase')
+        notifier.notify('Raster phases: {}'.format(raster_phases))
 
-            # Join columns
-            [roi.rot90() for roi in rois]
-            for roi1, roi2 in itertools.combinations(rois, 2):
-                if roi1.is_aside_to(roi2):
-                    if roi1.left_or_right(roi2) == stitching.Position.LEFT: # 2|1
-                        left, right = roi2, roi1
-                    else: # 1|2
-                        left, right = roi1, roi2
+        num_rois = (StackInfo() & key).fetch1('nrois')
+        with sns.axes_style('white'):
+                fig, axes = plt.subplots(num_rois, 1, figsize=(13, 5 * num_rois), sharex=True, sharey=True)
+        fig.suptitle('Shifts in y (blue) and x (red). Scatter dots for different timepoints.')
+        axes = [axes] if num_rois == 1 else axes  # make list if single axis object
+        for ax in axes.ravel():
+            ax.set_ylabel('Pixels')
+        axes[-1].set_xlabel('Depth')
+        for i, roi_key in enumerate((StackInfo.ROI() & key).fetch.keys()):
+            y_shifts, x_shifts = (self.Motion() & roi_key).fetch1('y_shifts', 'x_shifts')
 
-                    # Compute translation, join them and update roi list
-                    delta_x, delta_y = stitching.linear_stitch(left.volume, right.volume)
-                    left.join_with(right, left.x + delta_x, left.y + delta_y)
-                    rois.remove(right)
+            initial_z = (StackInfo.ROI() & roi_key).fetch1('z')
+            z_step = (StackInfo() & key).fetch1('z_step')
+            depths = initial_z + z_step * np.arange(len(y_shifts))
 
-                    two_rois_joined=True
-                    break; # restart joining
-            [roi.rot270() for roi in rois]
+            axes[i].set_title('ROI {}'.format(roi_key['roi_id']))
+            axes[i].plot(depths, y_shifts, '.b')
+            axes[i].plot(depths, x_shifts, '.r')
+            fig.tight_layout()
+            img_filename = '/tmp/' + key_hash(key) + '.png'
+            fig.savefig(img_filename)
+            plt.close(fig)
 
-        # Trim rois to delete black spaces in edges
-        #[roi.trim() for roi in rois]
+        notifier.notify(file=img_filename, file_title='motion shifts')
+        sns.reset_orig()
 
-        # Insert in Stitching
+        for volume_key in (self.Stitched() & key).fetch.keys():
+            msg = 'Volume {}:'.format(volume_key['volume_id'])
+            for roi_coord in (self.ROICoordinates() & volume_key).fetch():
+                    msg += ' ROI 1 at {}, {} (x, y);'.format(roi_coord['x'], roi_coord['y'])
+            notifier.notify(msg)
+
+
+@schema
+class CorrectedStack(dj.Computed):
+    definition = """ # all slices of each stack after corrections.
+
+    -> Corrections.Stitched
+    """
+
+    class Slice(dj.Part):
+        definition = """ # single slice of one stack
+        -> CorrectedStack
+        -> shared.Channel
+        islice              : smallint          # index of slice in volume
+        ---
+        slice               : longblob          # image (height x width)
+        z                   : smallint          # slice depth in volume-wise coordinate system
+        """
+
+    def _make_tuples(self, key):
+        print('Correcting stack', key)
+
+        # Insert in CorrectedStack
         self.insert1(key)
 
-        # Insert each stitched volume
-        for volume_id, roi in enumerate(rois):
-            tuple_ = {**key, 'volume_id': volume_id, 'x': roi.x, 'y': roi.y, 'z': roi.z,
-                      'px_height': roi.height, 'px_width': roi.width}
-            one_roi = StackInfo.ROI() & key & {'roi_id': roi.roi_coordinates[0].id} # get one roi from those forming the volume
-            tuple_['px_depth'] = one_roi.fetch1('px_depth') # same as original rois
-            tuple_['um_height'] = roi.height * one_roi.microns_per_pixel[0]
-            tuple_['um_width'] = roi.width * one_roi.microns_per_pixel[1]
-            tuple_['um_depth'] = one_roi.fetch1('um_depth') # same as original rois
-            Stitching.Volume().insert1(tuple_)
+        for channel in range((StackInfo() & key).fetch1('nchannels')):
+            # Correct each ROI
+            rois = []
+            for roi_coord in (Corrections.ROICoordinates() & key).fetch():
+                roi_info = StackInfo.ROI() & (Corrections.ROICoordinates() & roi_coord).proj()
 
-            # Insert coordinates of each ROI forming this volume
-            for roi_coord in roi.roi_coordinates:
-                tuple_ = {**key, 'roi_id': roi_coord.id, 'volume_id': volume_id,
-                          'x': roi_coord.x, 'y': roi_coord.y, 'z': roi_coord.z}
-                Stitching.ROICoordinates().insert1(tuple_)
+                # Load ROI
+                roi_filename = (experiment.Stack.Filename() & roi_info).local_filenames_as_wildcard
+                roi = scanreader.read_stack(roi_filename)
+                corrected_roi = roi[roi_info.fetch1('field_ids'), :, :, channel, :]
+                corrected_roi = corrected_roi.astype(np.float32, copy=False)
 
+                # Raster correction
+                corrected_roi = (Corrections.Raster() & roi_info).correct(corrected_roi)
 
-        # Save stitched volumes (datajoint)
-        # TODO: Save here
-        for i, roi in enumerate(rois):
-            np.save('/data/pipeline/volume_{}.npy'.format(i), roi.volume)
-            pass
+                # Motion correction
+                corrected_roi = (Corrections.Motion() & roi_info).correct(corrected_roi)
 
-        self.notify(key, rois)
+                # Create ROI object
+                rois.append(stitching.StitchedROI(corrected_roi.mean(axis=-1), x=roi_coord['x'],
+                                              y=roi_coord['y'], z=roi_coord['z'],
+                                              id_=roi_coord['roi_id']))
 
-    def notify(self, key, rois):
+#             # Stitch them
+#            volume = rois[0]
+#            for next_roi in rois[1:]:
+#                volume.join_with(next_roi, next_roi.x, next_roi.y, smooth_blend=False)
+
+            # Stitch all rois together (this is convoluted because smooth blending in
+            # join_with assumes the second argument is to the right of the first)
+            two_rois_joined = True
+            while two_rois_joined:
+                two_rois_joined = False
+
+                # Join rows
+                for roi1, roi2 in itertools.combinations(rois, 2):
+                    if roi1.is_aside_to(roi2):
+                        if roi1.left_or_right(roi2) == stitching.Position.LEFT: # 2|1
+                            roi2.join_with(roi1, roi1.x, roi1.y)
+                            rois.remove(roi1)
+                        else: # 1|2
+                            roi1.join_with(roi2, roi2.x, roi2.y)
+                            rois.remove(roi2)
+
+                        two_rois_joined=True
+                        break # restart joining
+
+                # Join columns
+                [roi.rot90() for roi in rois]
+                for roi1, roi2 in itertools.combinations(rois, 2):
+                    if roi1.is_aside_to(roi2):
+                        if roi1.left_or_right(roi2) == stitching.Position.LEFT: # 2|1
+                            roi2.join_with(roi1, roi1.x, roi1.y)
+                            rois.remove(roi1)
+                        else: # 1|2
+                            roi1.join_with(roi2, roi2.x, roi2.y)
+                            rois.remove(roi2)
+
+                        two_rois_joined=True
+                        break # restart joining
+                [roi.rot270() for roi in rois]
+
+            if len(rois) != 1:
+                msg = 'ROIs for volume {} could not be stitched properly'.format(key)
+                raise PipelineException(msg)
+            volume = rois[0].volume
+            # volume.trim() # delete black spaces in edges
+
+            # Insert each slice
+            initial_z = (Corrections.Stitched() & key).fetch1('z')
+            z_step = (StackInfo() & key).fetch('z_step')
+            for i, slice_ in enumerate(volume):
+                print(slice_.dtype)
+                self.Slice().insert1({**key, 'channel': channel, 'islice': i,
+                                      'slice': slice_, 'z': initial_z + i * z_step})
+
+            self.notify({**key, 'channel': channel}, volume)
+
+    def notify(self, key, volume):
         import imageio
 
-        msg = 'Stitching for `{}` has been populated.'.format(key)
-        (notify.SlackUser() & (experiment.Session() & key)).notify(msg)
+        video_filename = '/tmp/' + key_hash(key) + '.gif'
+        stitched_roi = volume.volume[:: round(volume.depth / 5)] # volume at 5 diff depths
+        imageio.mimsave(video_filename, float2uint8(stitched_roi), duration=1)
 
-        # Send a gif with the stitched roi
-        for roi in rois:
-            video_filename = '/tmp/' + key_hash(key) + '.gif'
-            stitched_roi = roi.volume[:: round(roi.depth / 5)] # volume at 5 diff depths
-            imageio.mimsave(video_filename, float2uint8(stitched_roi), duration=1)
+        msg = 'CorrectedStack for {} has been populated.'.format(key)
+        (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=video_filename,
+                                                                   file_title='stitched ROI')
 
-            (notify.SlackUser() & (experiment.Session() & key)).notify(file=video_filename,
-                                                                file_title='stitched ROI')
-
-#class CorrectedStack to just correct all stackc
 
 # TODO: Add this in shared
 #class SegmentationMethod(dj.Lookup):
