@@ -1,13 +1,12 @@
-from distutils.version import StrictVersion
 import sys
 import datajoint as dj
+from distutils.version import StrictVersion
 from . import experiment, reso, meso, shared
 from .exceptions import PipelineException
 
-assert StrictVersion(dj.__version__) >= StrictVersion('0.8.2'), "Please upgrade datajoint to 0.8.2+"
-
 
 schema = dj.schema('pipeline_fuse', locals())
+
 
 @schema
 class Pipe(dj.Lookup):
@@ -18,36 +17,35 @@ class Pipe(dj.Lookup):
     contents = zip(('reso', 'meso'))
 
 
-
 class Resolver:
     """
     This mixin class populates tables that fuse two pipelines
     """
 
     def _make_tuples(self, key):
-
-        for pipe, (src, dest) in self.mapping.items():
-            if src() & key:
-                break
-        else:
+        # find the matching pipeline from those specified in self.mapping
+        try:
+            pipe, src, dest = next(((pipe, src, dest)
+                for pipe, (src, dest) in self.mapping.items() if src() & key))
+        except StopIteration:
             raise PipelineException(
                     'The key source yielded a key from an uknown pipeline')
-
         self.insert1(dict(key, pipe=pipe))
         dest().insert(src() & key, ignore_extra_fields=True)
+        return src
 
-
-    def resolve(self):
+    @property
+    def module(self):
         """
-        Given a fuse.Activity() object, return the corresponding
-        module.Activity() object and the module itself.
-        :return: (activity,  module) where activity is the module.Activity for the right module
+        (fuse.Activity() & key).module is the module where the activity resides.
+        Throws an error if the activity comes from multiple modules.
+        Does the same thing for fuse.ScanDone() or any other subclass of Resolver
         """
-        if len(dj.U('pipe') & self) != 1:
+        pipes = (dj.U('pipe') & self).fetch('pipe')
+        if len(pipes) != 1:
             raise PipelineException('Please restrict query to a single pipeline.')
-        for _, rel in self.mapping.values():
-            if rel:
-                return rel, sys.modules[rel.__module__]
+        rel, _ = self.mapping[pipes[0]]
+        return sys.modules[rel.__module__]
 
 
 @schema
@@ -64,7 +62,17 @@ class Activity(Resolver, dj.Computed):
     -> Pipe
     """
 
-    key_source = meso.Activity().proj() + reso.Activity().proj()
+    class Trace(dj.Part):
+        definition = """
+        # Trace corresponding to <module>.Activity.Trace
+        -> master
+        unit_id  : int   # unique per scan & segmentation method
+        """
+
+    @property
+    def key_source(self):
+        assert StrictVersion(dj.__version__) >= StrictVersion('0.9.0'), "Please upgrade datajoint to version 0.9.0+"
+        return meso.Activity().proj() + reso.Activity().proj()
 
     class Reso(dj.Part):
         definition = """
@@ -84,6 +92,12 @@ class Activity(Resolver, dj.Computed):
                 'reso': (reso.Activity, Activity.Reso)}
 
 
+    def _make_tuples(self, key):
+        src = super()._make_tuples(key)
+        module = sys.modules[src.__module__]
+        self.Trace().insert(self * module.Activity.Trace() & key, ignore_extra_fields=True)
+
+
 @schema
 class ScanDone(Resolver, dj.Computed):
     definition = """
@@ -96,7 +110,10 @@ class ScanDone(Resolver, dj.Computed):
     -> Pipe
     """
 
-    key_source = meso.ScanDone().proj() + reso.ScanDone().proj()
+    @property
+    def key_source(self):
+        assert StrictVersion(dj.__version__) >= StrictVersion('0.9.0'), "Please upgrade datajoint to version 0.9.0+"
+        return meso.ScanDone().proj() + reso.ScanDone().proj()
 
     class Reso(dj.Part):
         definition = """
