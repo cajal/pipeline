@@ -22,7 +22,7 @@ class Resolver:
     This mixin class populates tables that fuse two pipelines
     """
 
-    def make(self, key):
+    def _make_tuples(self, key):
         # find the matching pipeline from those specified in self.mapping
         try:
             pipe, src, dest = next(((pipe, src, dest)
@@ -92,8 +92,8 @@ class Activity(Resolver, dj.Computed):
                 'reso': (reso.Activity, Activity.Reso)}
 
 
-    def make(self, key):
-        src = super().make(key)
+    def _make_tuples(self, key):
+        src = super()._make_tuples(key)
         module = sys.modules[src.__module__]
         self.Trace().insert(self * module.Activity.Trace() & key, ignore_extra_fields=True)
 
