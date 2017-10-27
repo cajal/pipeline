@@ -626,18 +626,19 @@ class CorrectedStack(dj.Computed):
             if len(rois) != 1:
                 msg = 'ROIs for volume {} could not be stitched properly'.format(key)
                 raise PipelineException(msg)
-            volume = rois[0].volume
+            big_roi = rois[0]
             # volume.trim() # delete black spaces in edges
 
             # Insert each slice
             initial_z = (Corrections.Stitched() & key).fetch1('z')
             z_step = (StackInfo() & key).fetch1('z_step')
-            for i, slice_ in enumerate(volume):
+            for i, slice_ in enumerate(big_roi.volume):
                 self.Slice().insert1({**key, 'channel': channel + 1, 'islice': i,
                                       'slice': slice_, 'z': initial_z + i * z_step})
 
-            self.notify({**key, 'channel': channel + 1}, volume)
+            self.notify({**key, 'channel': channel + 1}, big_roi)
 
+    @notify.ignore_exceptions
     def notify(self, key, volume):
         import imageio
 
