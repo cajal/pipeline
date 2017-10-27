@@ -109,7 +109,7 @@ def parallel_summary_images(chunks, results, raster_phase, fill_fraction, y_shif
                             x_shifts):
     """ Compute statistics used to compute correlation image and l-6 norm image.
 
-        :param queue chunks: Queue with inputs to consume.
+    :param queue chunks: Queue with inputs to consume.
     :param list results: Where to put results.
     :param float raster_phase: Raster phase used for raster correction.
     :param float fill_fraction: Fill fraction used for raster correction.
@@ -201,6 +201,56 @@ def parallel_save_memmap(chunks, results, raster_phase, fill_fraction, y_shifts,
 
         # Save minimum value in results
         results.append(chunk.min())
+
+
+def parallel_fluorescence(chunks, results, raster_phase, fill_fraction, y_shifts,
+                         x_shifts, mask_pixels, mask_weights):
+    """ Correct scan and compute fluorescence traces for the given masks.
+
+    :param queue chunks: Queue with inputs to consume.
+    :param list results: Where to put results.
+    :param float raster_phase: Raster phase used for raster correction.
+    :param float fill_fraction: Fill fraction used for raster correction.
+    :param np.array y_shifts, x_shifts: Motion shifts to correct scan.
+    :param list of np.array mask_pixels: Each array is a list of indices where the mask
+        is defined. Indices start at 1 and mask has been flattened using F order (Matlab).
+    :param list of np.array mask_weights. Each array is the corresponding weights for the
+        indices passed in mask_pixels.
+
+    :returns: (traces x num_frames) array. Traces for each mask in this chunk.
+    """
+    while True:
+        # Read next chunk (process locks until something can be read)
+        frames, chunk = chunks.get()
+        if chunk is None:  # stop signal when all chunks have been processed
+            return
+
+        print(time.ctime(), 'Processing frames:', frames)
+
+        # Correct raster
+        chunk = chunk.astype(np.float32, copy=False)
+        if abs(raster_phase) > 1e-7:
+            chunk = galvo_corrections.correct_raster(chunk, raster_phase, fill_fraction)
+
+        # Correct motion
+        xy_motion = np.stack([x_shifts[frames], y_shifts[frames]])
+        chunk = galvo_corrections.correct_motion(chunk, xy_motion)
+
+        # Prepare some params
+        image_height, image_width, num_frames = chunk.shape
+        flat_chunk = chunk.reshape(-1, num_frames)
+        num_masks = len(mask_pixels)
+
+        # Extract signal per mask
+        traces = np.zeros([num_masks, num_frames], dtype=np.float32)
+        for i, (mp, mw) in enumerate(zip(mask_pixels, mask_weights)):
+            mask_as_vector = np.zeros(image_height * image_width, dtype=np.float32)
+            mask_as_vector[np.squeeze(mp - 1).astype(int)] = np.squeeze(mw)
+            mask = mask_as_vector.reshape(image_height, image_width, order='F')
+            traces[i] = np.average(flat_chunk, weights=mask.ravel(), axis=0)
+
+        # Save results
+        results.append(traces)
 
 
 def parallel_quality_metrics(chunks, results):
