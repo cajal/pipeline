@@ -750,7 +750,7 @@ class Segmentation(dj.Computed):
                     kwargs['soma_diameter'] = tuple(14 / (ScanInfo.Field() & key).microns_per_pixel)
 
             ## Set performance/execution parameters (heuristically), decrease if memory overflows
-            kwargs['num_processes'] = 12  # Set to None for all cores available
+            kwargs['num_processes'] = 8  # Set to None for all cores available
             kwargs['num_pixels_per_process'] = 10000
 
             # Extract traces
