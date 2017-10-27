@@ -197,10 +197,10 @@ class Corrections(dj.Computed):
         definition = """ # raster correction for bidirectional resonant scans
 
         -> Corrections
-        -> StackInfo.ROI                        # animal_id, session, stack_idx, roi_id, version
+        -> StackInfo.ROI                         # animal_id, session, stack_idx, roi_id, version
         ---
-        raster_phase           : float          # difference between expected and recorded scan angle
-        raster_std             : float          # standard deviation among raster phases in different slices
+        raster_phase            : float          # difference between expected and recorded scan angle
+        raster_std              : float          # standard deviation among raster phases in different slices
         """
 
         def _make_tuples(self, key, roi):
@@ -548,7 +548,7 @@ class CorrectedStack(dj.Computed):
         islice              : smallint          # index of slice in volume
         ---
         slice               : longblob          # image (height x width)
-        z                   : smallint          # slice depth in volume-wise coordinate system
+        z                   : float             # slice depth in volume-wise coordinate system
         """
 
     def _make_tuples(self, key):
@@ -629,7 +629,6 @@ class CorrectedStack(dj.Computed):
             initial_z = (Corrections.Stitched() & key).fetch1('z')
             z_step = (StackInfo() & key).fetch('z_step')
             for i, slice_ in enumerate(volume):
-                print(slice_.dtype)
                 self.Slice().insert1({**key, 'channel': channel, 'islice': i,
                                       'slice': slice_, 'z': initial_z + i * z_step})
 
