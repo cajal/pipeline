@@ -298,9 +298,9 @@ class MotionCorrection(dj.Computed):
             # Reduce
             y_shifts = np.zeros(scan.num_frames)
             x_shifts = np.zeros(scan.num_frames)
-            for result in results:
-                y_shifts[result[0]] = result[1]
-                x_shifts[result[0]] = result[2]
+            for frames, chunk_y_shifts, chunk_x_shifts in results:
+                y_shifts[frames] = chunk_y_shifts
+                x_shifts[frames] = chunk_x_shifts
 
             # Detect outliers
             y_shifts, y_outliers = galvo_corrections._fix_outliers(y_shifts, px_height * 0.05)
@@ -1032,8 +1032,10 @@ class Fluorescence(dj.Computed):
         results = performance.map_frames(f, scan, field_id=field_id, y=slice(None),
                                          x=slice(None), channel=channel, kwargs=kwargs)
 
-        # Reduce: Concatenate across frames
-        traces = np.concatenate(results, axis=1)
+        # Reduce: Concatenate
+        traces = np.zeros(len(mask_ids), scan.num_frames, dtype=np.float32)
+        for frames, chunk_traces in results:
+                traces[:, frames] = chunk_traces
 
         # Insert
         self.insert1(key)
@@ -1588,10 +1590,15 @@ class Quality(dj.Computed):
                                                  x=slice(None), channel=channel,
                                                  chunk_size_in_GB=0.5)
 
+
                 # Reduce
-                mean_intensities = np.concatenate([r[0] for r in results])
-                contrasts = np.concatenate([r[1] for r in results])
-                mean_groups = np.array_split([r[2] for r in results], 16) # 16 groups
+                mean_intensities = np.zeros(scan.num_frames)
+                contrasts = np.zeros(scan.num_frames)
+                for frames, chunk_mis, chunk_contrasts, _ in results:
+                    mean_intensities[frames] = chunk_mis
+                    contrasts[frames] = chunk_contrasts
+                sorted_results = sorted(results, key=lambda res: res[0])
+                mean_groups = np.array_split([r[2] for r in sorted_results], 16) # 16 groups
                 frames = np.stack([np.mean(g, axis=0) for g in mean_groups if g.any()], axis=-1)
 
                 # Compute quantal size

@@ -250,7 +250,7 @@ def parallel_fluorescence(chunks, results, raster_phase, fill_fraction, y_shifts
             traces[i] = np.average(flat_chunk, weights=mask.ravel(), axis=0)
 
         # Save results
-        results.append(traces)
+        results.append((frames, traces))
 
 
 def parallel_quality_metrics(chunks, results):
@@ -281,7 +281,7 @@ def parallel_quality_metrics(chunks, results):
         mean_frame = np.mean(chunk, axis=-1, dtype=float)
 
         # Save results
-        results.append((mean_intensity, contrast, mean_frame))
+        results.append((frames, mean_intensity, contrast, mean_frame))
 
 
 
