@@ -1595,7 +1595,7 @@ class Quality(dj.Computed):
                     mean_intensities[frames] = chunk_mis
                     contrasts[frames] = chunk_contrasts
                 sorted_results = sorted(results, key=lambda res: res[0])
-                mean_groups = np.array_split([r[2] for r in sorted_results], 16) # 16 groups
+                mean_groups = np.array_split([r[3] for r in sorted_results], 16) # 16 groups
                 frames = np.stack([np.mean(g, axis=0) for g in mean_groups if g.any()], axis=-1)
 
                 # Compute quantal size
