@@ -238,6 +238,7 @@ class TrackedVideo(dj.Computed):
         tr = PupilTracker(param)
         traces = tr.track(avi_path, roi - 1, display=config['display.tracking'])  # -1 because of matlab indices
 
+        dj.conn().is_connected
         key['tracking_parameters'] = json.dumps(param)
         self.insert1(key)
         fr = self.Frame()
@@ -256,7 +257,7 @@ class TrackedVideo(dj.Computed):
         """
         import seaborn as sns
         import matplotlib.pyplot as plt
-        plt.switch_backend('GTK3Agg')
+        # plt.switch_backend('GTK3Agg')
 
         for key in self.fetch.keys():
             print('Processing', key)
@@ -283,10 +284,10 @@ class TrackedVideo(dj.Computed):
                 pass
 
             fig.suptitle(
-                'animal id {animal_id} session {session} scan_idx {scan_idx} eye quality {eye_quality}'.format(**key))
+                'animal id {animal_id} session {session} scan_idx {scan_idx}'.format(**key))
             fig.tight_layout()
             sns.despine(fig)
-            fig.savefig(outdir + '/{animal_id}/AI{animal_id}SE{session}SI{scan_idx}EQ{eye_quality}.png'.format(**key))
+            fig.savefig(outdir + '/{animal_id}/AI{animal_id}SE{session}SI{scan_idx}.png'.format(**key))
             if show:
                 plt.show()
             else:
