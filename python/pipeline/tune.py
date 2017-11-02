@@ -9,7 +9,7 @@ from scipy.interpolate import interp1d
 from . import reso, experiment, stimulus
 
 
-schema = dj.schema('pipeline_tune', locals())
+schema = dj.schema('pipeline_tune', locals(), create_tables=True)
 
 
 @schema
