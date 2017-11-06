@@ -4,6 +4,15 @@ from datajoint.jobs import key_hash
 from .experiment import Person
 schema = dj.schema('pipeline_notification', locals())
 
+# Decorator for notification functions. Ignores exceptions.
+def ignore_exceptions(f):
+    def wrapper(*args, **kwargs):
+        try:
+            return f(*args, **kwargs)
+        except Exception as e:
+            print('Ignored exception:', e)
+    return wrapper
+
 @schema
 class SlackConnection(dj.Manual):
     definition = """
@@ -28,18 +37,15 @@ class SlackUser(dj.Manual):
 
     def notify(self, message=None, file = None, file_title=None, file_comment=None):
         if self:
-            try:
-                from slacker import Slacker
-            except ModuleNotFoundError:
-                pass
-            else:
-                api_key, user = (self * SlackConnection()).fetch1('api_key','slack_user')
-                s = Slacker(api_key, timeout=60)
-                if message: # None or ''
-                    s.chat.post_message('@' + user, message, as_user=True)
-                if file is not None:
-                    s.files.upload(file_=file, channels='@' + user,
-                                   title=file_title, initial_comment=file_comment)
+            from slacker import Slacker
+            api_key, user = (self * SlackConnection()).fetch1('api_key','slack_user')
+            s = Slacker(api_key, timeout=60)
+
+            if message: # None or ''
+                s.chat.post_message('@' + user, message, as_user=True)
+            if file is not None:
+                s.files.upload(file_=file, channels='@' + user,
+                               title=file_title, initial_comment=file_comment)
 
 def temporary_image(array, key):
     import matplotlib
