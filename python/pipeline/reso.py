@@ -276,11 +276,13 @@ class MotionCorrection(dj.Computed):
             scan_ = scan[field_id, skip_rows: -skip_rows, skip_cols: -skip_cols, channel, :]  # height x width x frames
 
             # Correct raster effects (needed for subpixel changes in y)
+            dj.conn().is_connected
             correct_raster = (RasterCorrection() & key & {'field': field_id + 1}).get_correct_raster()
             scan_ = correct_raster(scan_)
             scan_ -= scan_.min()  # make nonnegative for fft
 
             # Create template
+            dj.conn().is_connected
             middle_frame = int(np.floor(scan.num_frames / 2))
             mini_scan = scan_[:, :, max(middle_frame - 1000, 0): middle_frame + 1000]
             mini_scan = 2 * np.sqrt(mini_scan + 3 / 8)  # *
@@ -289,6 +291,7 @@ class MotionCorrection(dj.Computed):
             tuple_['template'] = template
             # * Anscombe tranform to normalize noise, increase contrast and decrease outliers' leverage
             # ** Small amount of gaussian smoothing to get rid of high frequency noise
+
 
             # Compute smoothing window size
             size_in_ms = 300  # smooth over a 300 milliseconds window
@@ -311,6 +314,7 @@ class MotionCorrection(dj.Computed):
             gc.collect()
 
             # Insert
+            dj.conn().is_connected
             self.insert1(tuple_)
 
         self.notify(key, scan)
@@ -457,6 +461,7 @@ class SummaryImages(dj.Computed):
             # Get raster and motion correction functions
             correct_raster = (RasterCorrection() & key & {'field': field_id + 1}).get_correct_raster()
             correct_motion = (MotionCorrection() & key & {'field': field_id + 1}).get_correct_motion()
+            dj.conn()
 
             for channel in range(scan.num_channels):
                 tuple_ = key.copy()
@@ -472,6 +477,7 @@ class SummaryImages(dj.Computed):
                 scan_ -= scan_.min()  # make nonnegative for lp-norm
 
                 # Insert in SummaryImages
+                dj.conn()
                 self.insert1(tuple_)
 
                 # Compute and insert correlation image
