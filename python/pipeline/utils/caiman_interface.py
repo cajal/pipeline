@@ -16,7 +16,7 @@ def extract_masks(scan, mmap_scan, num_components=200, num_background_components
                   merge_threshold=0.8, init_on_patches=True, init_method='greedy_roi',
                   soma_diameter=(14, 14), snmf_alpha=None, patch_size=(50, 50),
                   proportion_patch_overlap=0.2, num_components_per_patch=5,
-                  num_processes=12, num_pixels_per_process=5000, fps=15):
+                  num_processes=8, num_pixels_per_process=5000, fps=15):
     """ Extract masks from multi-photon scans using CNMF.
 
     Uses constrained non-negative matrix factorization to find spatial components (masks)
