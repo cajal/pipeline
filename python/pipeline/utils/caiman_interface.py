@@ -1,17 +1,31 @@
 """Interface to the CaImAn package (https://github.com/simonsfoundation/CaImAn)."""
 import numpy as np
-from caiman import cluster, components_evaluation
+import multiprocessing as mp
+from caiman import components_evaluation
 from caiman.utils import visualization
 from caiman.source_extraction.cnmf import map_reduce, initialization, pre_processing, \
                                           merging, spatial, temporal, deconvolution
-import glob, os, time
+import glob, os, sys, time
+
 
 def log(*messages):
     """ Simple logging function."""
     formatted_time = "[{}]".format(time.ctime())
-    print(formatted_time, *messages, flush=True)
+    print(formatted_time, *messages, flush=True, file=sys.__stdout__)
 
 
+def mute_function(f):
+    """ Decorator to ignore any standard output of the function."""
+    def wrapper(*args, **kwargs):
+        try:
+            sys.stdout = open(os.devnull, 'w')
+            return f(*args, **kwargs)
+        finally:
+            sys.stdout = sys.__stdout__ # go back to normal (even after exceptions)
+    return wrapper
+
+
+@mute_function
 def extract_masks(scan, mmap_scan, num_components=200, num_background_components=1,
                   merge_threshold=0.8, init_on_patches=True, init_method='greedy_roi',
                   soma_diameter=(14, 14), snmf_alpha=None, patch_size=(50, 50),
@@ -70,8 +84,9 @@ def extract_masks(scan, mmap_scan, num_components=200, num_background_components
     # Get some params
     image_height, image_width, num_frames = scan.shape
 
-    # Start the ipyparallel cluster
-    client, direct_view, num_processes = cluster.setup_cluster(n_processes=num_processes)
+    # Start processes
+    log('Starting {} processes'.format(num_processes))
+    pool = mp.Pool(processes=num_processes)
 
     # Initialize components
     log('Initializing components...')
@@ -104,7 +119,7 @@ def extract_masks(scan, mmap_scan, num_components=200, num_background_components
         # Initialize per patch
         res = map_reduce.run_CNMF_patches(mmap_scan.filename, (image_height, image_width, num_frames),
                                           options, rf=half_patch_size, stride=patch_overlap,
-                                          gnb=num_background_components, dview=direct_view)
+                                          gnb=num_background_components, dview=pool)
         initial_A, initial_C, YrA, initial_b, initial_f, pixels_noise, _ = res
 
         # Merge spatially overlapping components
@@ -112,8 +127,8 @@ def extract_masks(scan, mmap_scan, num_components=200, num_background_components
         while len(merged_masks) > 0:
             res = merging.merge_components(mmap_scan, initial_A, initial_b, initial_C,
                                            initial_f, initial_C, pixels_noise,
-                                           {'p': 0, 'method': 'cvxpy'}, spatial_params=None,
-                                           dview=direct_view, thr=merge_threshold, mx=np.Inf)
+                                           {'p': 0, 'method': 'cvxpy'}, spatial_params='UNUSED',
+                                           dview=pool, thr=merge_threshold, mx=np.Inf)
             initial_A, initial_C, num_components, merged_masks, S, bl, c1, neurons_noise, g = res
 
         # Delete log files (one per patch)
@@ -121,6 +136,7 @@ def extract_masks(scan, mmap_scan, num_components=200, num_background_components
         for log_file in log_files:
             os.remove(log_file)
     else:
+        from scipy.sparse import csr_matrix
         if init_method == 'greedy_roi':
             res = _greedyROI(scan, num_components, soma_diameter, num_background_components)
             log('Refining initial components (HALS)...')
@@ -131,36 +147,35 @@ def extract_masks(scan, mmap_scan, num_components=200, num_background_components
         else:
             print('Warning: Running sparse_nmf initialization on the entire field of view '
                   'takes a lot of time.')
-            res = initialization.initialize_components(scan, K=num_components,
-                                                       nb=num_background_components, method=init_method,
-                                                       alpha_snmf=snmf_alpha)
+            res = initialization.initialize_components(scan, K=num_components, nb=num_background_components,
+                                                       method=init_method, alpha_snmf=snmf_alpha)
             initial_A, initial_C, initial_b, initial_f, _ = res
+        initial_A = csr_matrix(initial_A)
 
     # Remove bad components (based on spatial consistency and spiking activity)
     log('Removing bad components...')
     good_indices, _ = components_evaluation.estimate_components_quality(initial_C, scan,
         initial_A, initial_C, initial_b, initial_f, final_frate=fps, r_values_min=0.7,
-        fitness_min=-20, fitness_delta_min=-20)
+        fitness_min=-20, fitness_delta_min=-20, dview=pool)
     initial_A = initial_A[:, good_indices]
     initial_C = initial_C[good_indices]
 
     # Estimate noise per pixel
     log('Calculating noise per pixel...')
-    pixels_noise, _ = pre_processing.get_noise_fft_parallel(mmap_scan, num_pixels_per_process, direct_view)
+    pixels_noise, _ = pre_processing.get_noise_fft_parallel(mmap_scan, num_pixels_per_process, pool)
 
     # Update masks
     log('Updating masks...')
     A, b, C, f = spatial.update_spatial_components(mmap_scan, initial_C, initial_f, initial_A, b_in=initial_b,
                                                    sn=pixels_noise, dims=(image_height, image_width),
-                                                   method='dilate', dview=direct_view,
+                                                   method='dilate', dview=pool,
                                                    n_pixels_per_process=num_pixels_per_process,
                                                    nb=num_background_components)
 
     # Update traces (no impulse response modelling p=0)
     log('Updating traces...')
     res = temporal.update_temporal_components(mmap_scan, A, b, C, f, nb=num_background_components,
-                                              block_size=10000, p=0, method='cvxpy',
-                                              dview=direct_view)
+                                              block_size=10000, p=0, method='cvxpy', dview=pool)
     C, A, b, f, S, bl, c1, neurons_noise, g, YrA, _ = res
 
 
@@ -169,38 +184,36 @@ def extract_masks(scan, mmap_scan, num_components=200, num_background_components
     merged_masks = ['dummy']
     while len(merged_masks) > 0:
         res = merging.merge_components(mmap_scan, A, b, C, f, S, pixels_noise, {'p': 0, 'method': 'cvxpy'},
-                                       None, dview=direct_view, thr=merge_threshold, bl=bl,
-                                       c1=c1, sn=neurons_noise, g=g)
+                                       'UNUSED', dview=pool, thr=merge_threshold, bl=bl, c1=c1,
+                                       sn=neurons_noise, g=g)
         A, C, num_components, merged_masks, S, bl, c1, neurons_noise, g = res
 
     # Refine masks
     log('Refining masks...')
     A, b, C, f = spatial.update_spatial_components(mmap_scan, C, f, A, b_in=b, sn=pixels_noise,
                                                    dims=(image_height, image_width),
-                                                   method='dilate', dview=direct_view,
+                                                   method='dilate', dview=pool,
                                                    n_pixels_per_process=num_pixels_per_process,
                                                    nb=num_background_components)
 
     # Refine traces
     log('Refining traces...')
     res = temporal.update_temporal_components(mmap_scan, A, b, C, f, nb=num_background_components,
-                                              block_size=10000, p=0, method='cvxpy',
-                                              dview=direct_view)
+                                              block_size=10000, p=0, method='cvxpy', dview=pool)
     C, A, b, f, S, bl, c1, neurons_noise, g, YrA, _ = res
 
     # Removing bad components (more stringent criteria)
     log('Removing bad components...')
     good_indices, _ = components_evaluation.estimate_components_quality(C + YrA, scan, A,
-        C, b, f, final_frate=fps, r_values_min=0.8, fitness_min=-40, fitness_delta_min=-40)
+        C, b, f, final_frate=fps, r_values_min=0.8, fitness_min=-40, fitness_delta_min=-40,
+        dview=pool)
     A = A.toarray()[:, good_indices]
     C = C[good_indices]
     YrA = YrA[good_indices]
 
-    log('Done.')
-
-    # Stop ipyparallel cluster
-    client.close()
-    cluster.stop_server()
+    # Stop processes
+    log('Done:', A.shape[-1], 'components found.')
+    pool.close()
 
     # Get results
     masks = A.reshape((image_height, image_width, -1), order='F') # h x w x num_components
