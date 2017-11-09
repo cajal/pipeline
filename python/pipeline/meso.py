@@ -779,6 +779,7 @@ class Segmentation(dj.Computed):
             ## Insert masks and traces (masks in Matlab format)
             num_masks = masks.shape[-1]
             masks = masks.reshape(-1, num_masks, order='F').T  # [num_masks x num_pixels] in F order
+            raw_traces = raw_traces.astype(np.float32, copy=False)
             for mask_id, mask, trace in zip(range(1, num_masks + 1), masks, raw_traces):
                 mask_pixels = np.where(mask)[0]
                 mask_weights = mask[mask_pixels]
@@ -1386,7 +1387,7 @@ class Activity(dj.Computed):
             import pyfnnd  # Install from https://github.com/cajal/PyFNND.git
 
             for unit_id, trace in zip(unit_ids, full_traces):
-                spike_trace = pyfnnd.deconvolve(trace, dt=1 / fps)[0]
+                spike_trace = pyfnnd.deconvolve(trace, dt=1 / fps)[0].astype(np.float32, copy=False)
                 Activity.Trace().insert1({**key, 'unit_id': unit_id, 'trace': spike_trace})
 
         elif key['spike_method'] == 3:  # stm
@@ -1398,18 +1399,21 @@ class Activity(dj.Computed):
                 trace_dict = {'calcium': np.atleast_2d(trace[start:end + 1]), 'fps': fps}
 
                 data = c2s.predict(c2s.preprocess([trace_dict], fps=fps), verbosity=0)
-                spike_trace = np.squeeze(data[0].pop('predictions'))
+                spike_trace = np.squeeze(data[0].pop('predictions')).astype(np.float32, copy=False)
 
                 Activity.Trace().insert1({**key, 'unit_id': unit_id, 'trace': spike_trace})
 
         elif key['spike_method'] == 5:  # nmf
             from pipeline.utils import caiman_interface as cmn
+            import multiprocessing as mp
 
-            for unit_id, trace in zip(unit_ids, full_traces):
-                spike_trace, ar_coeffs = cmn.deconvolve(trace)
-                Activity.Trace().insert1({**key, 'unit_id': unit_id, 'trace': spike_trace})
-                Activity.ARCoefficients().insert1({**key, 'unit_id': unit_id, 'g': ar_coeffs},
-                                                  ignore_extra_fields=True)
+            with mp.Pool(8) as pool:
+                results = pool.imap(cmn.deconvolve, full_traces)
+                for unit_id, (spike_trace, ar_coeffs) in zip(unit_ids, results):
+                    spike_trace = spike_trace.astype(np.float32, copy=False)
+                    Activity.Trace().insert1({**key, 'unit_id': unit_id, 'trace': spike_trace})
+                    Activity.ARCoefficients().insert1({**key, 'unit_id': unit_id, 'g': ar_coeffs},
+                                                      ignore_extra_fields=True)
         else:
             msg = 'Unrecognized spike method {}'.format(key['spike_method'])
             raise PipelineException(msg)
