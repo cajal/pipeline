@@ -18,7 +18,6 @@ def compute_quantal_size(scan):
     :returns: float the estimated quantal size
     :returns: float the estimated zero value
     """
-
     # Set some params
     num_frames = scan.shape[2]
     min_count = num_frames * 0.1  # pixel values with fewer appearances will be ignored
@@ -49,7 +48,7 @@ def compute_quantal_size(scan):
     variance_sum = np.zeros(len(unique_pixels)) # sum of variances per pixel value
     for i in range(0, len(pixels), int(1e8)):  # chunk it for memory efficiency
         variance_sum += np.bincount(pixels[i: i + int(1e8)], weights=variances[i: i + int(1e8)],
-                                    minlength=len(unique_pixels))
+                                    minlength=len(unique_pixels))[unique_pixels - min_intensity]
     unique_variances = variance_sum / counts # average variance per intensity
 
     # Compute quantal size (by fitting a linear regressor to predict the variance from intensity)
