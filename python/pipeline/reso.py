@@ -279,35 +279,17 @@ class MotionCorrection(dj.Computed):
                              channel, max(middle_frame - 1000, 0): middle_frame + 1000]
             mini_scan = mini_scan.astype(np.float32, copy=False)
 
-<<<<<<< HEAD
-            # Correct raster effects (needed for subpixel changes in y)
-            dj.conn().is_connected
-=======
             # Correct mini scan
->>>>>>> 70d894c93da05a2705d6be96b848713e525fc3e9
             correct_raster = (RasterCorrection() & key & {'field': field_id + 1}).get_correct_raster()
             mini_scan = correct_raster(mini_scan)
 
             # Create template
-<<<<<<< HEAD
-            dj.conn().is_connected
-            middle_frame = int(np.floor(scan.num_frames / 2))
-            mini_scan = scan_[:, :, max(middle_frame - 1000, 0): middle_frame + 1000]
-            mini_scan = 2 * np.sqrt(mini_scan + 3 / 8)  # *
-=======
             mini_scan = 2 * np.sqrt(mini_scan - mini_scan.min() + 3 / 8)  # *
->>>>>>> 70d894c93da05a2705d6be96b848713e525fc3e9
             template = np.mean(mini_scan, axis=-1)
             template = ndimage.gaussian_filter(template, 0.7)  # **
             # * Anscombe tranform to normalize noise, increase contrast and decrease outliers' leverage
             # ** Small amount of gaussian smoothing to get rid of high frequency noise
 
-<<<<<<< HEAD
-
-            # Compute smoothing window size
-            size_in_ms = 300  # smooth over a 300 milliseconds window
-            window_size = int(round(scan.fps * (size_in_ms / 1000)))  # in frames
-=======
             # Map: compute motion shifts in parallel
             f = performance.parallel_motion_shifts # function to map
             raster_phase = (RasterCorrection() & key & {'field': field_id + 1}).fetch1('raster_phase')
@@ -337,7 +319,6 @@ class MotionCorrection(dj.Computed):
             # Center shifts around zero
             y_shifts -= np.median(y_shifts)
             x_shifts -= np.median(x_shifts)
->>>>>>> 70d894c93da05a2705d6be96b848713e525fc3e9
 
             # Create results tuple
             tuple_ = key.copy()
@@ -494,43 +475,6 @@ class SummaryImages(dj.Computed):
         for field_id in range(scan.num_fields):
             print('Computing summary images for field', field_id + 1)
 
-<<<<<<< HEAD
-            # Get raster and motion correction functions
-            correct_raster = (RasterCorrection() & key & {'field': field_id + 1}).get_correct_raster()
-            correct_motion = (MotionCorrection() & key & {'field': field_id + 1}).get_correct_motion()
-            dj.conn()
-
-            for channel in range(scan.num_channels):
-                tuple_ = key.copy()
-                tuple_['field'] = field_id + 1
-                tuple_['channel'] = channel + 1
-
-                # Correct scan
-                scan_ = scan[field_id, :, :, channel, :]
-                scan_ = correct_motion(correct_raster(scan_))
-
-                # Subtract overall brightness/drift
-                scan_ -= scan_.mean(axis=(0, 1))
-                scan_ -= scan_.min()  # make nonnegative for lp-norm
-
-                # Insert in SummaryImages
-                dj.conn()
-                self.insert1(tuple_)
-
-                # Compute and insert correlation image
-                correlation_image = ci.compute_correlation_image(scan_)
-                SummaryImages.Correlation().insert1({**tuple_, 'correlation_image': correlation_image})
-
-                # Compute and insert lp-norm of each pixel over time
-                p = 6
-                scan_ = np.power(scan_, p, out=scan_)  # in place
-                average_image = np.sum(scan_, axis=-1, dtype=np.float64) ** (1 / p)
-                SummaryImages.Average().insert1({**tuple_, 'average_image': average_image})
-
-                # Free memory
-                del scan_
-                gc.collect()
-=======
             for channel in range(scan.num_channels):
                 # Map: Compute some statistics in different chunks of the scan
                 f = performance.parallel_summary_images # function to map
@@ -578,7 +522,6 @@ class SummaryImages(dj.Computed):
                 SummaryImages().insert1(field_key)
                 SummaryImages.Correlation().insert1({**field_key, 'correlation_image': correlation_image})
                 SummaryImages.Average().insert1({**field_key, 'average_image': average_image})
->>>>>>> 70d894c93da05a2705d6be96b848713e525fc3e9
 
             self.notify({**key, 'field': field_id + 1}, scan.num_channels)  # once per field
 
