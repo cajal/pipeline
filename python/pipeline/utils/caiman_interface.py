@@ -151,6 +151,7 @@ def extract_masks(scan, mmap_scan, num_components=200, num_background_components
                                                        method=init_method, alpha_snmf=snmf_alpha)
             initial_A, initial_C, initial_b, initial_f, _ = res
         initial_A = csr_matrix(initial_A)
+    log(initial_A.shape[-1], 'components found...')
 
     # Remove bad components (based on spatial consistency and spiking activity)
     log('Removing bad components...')
