@@ -108,7 +108,7 @@ def extract_masks(scan, mmap_scan, num_components=200, num_background_components
                    'temporal_params': {'p': 0, 'method': 'UNUSED.', 'block_size': 'UNUSED.'},
                    'init_params': {'K': num_components_per_patch, 'gSig': np.array(soma_diameter)/2,
                                    'gSiz': None, 'method': init_method, 'alpha_snmf': snmf_alpha,
-                                   'nb': num_background_components, 'ssub': 1, 'tsub': max(int(fps / 5), 1),
+                                   'nb': num_background_components, 'ssub': 1, 'tsub': max(int(fps / 2), 1),
                                    'options_local_NMF': 'UNUSED.', 'normalize_init': True,
                                    'rolling_sum': True, 'rolling_length': 100, 'min_corr': 'UNUSED',
                                    'min_pnr': 'UNUSED', 'deconvolve_options_init': 'UNUSED',
@@ -160,6 +160,7 @@ def extract_masks(scan, mmap_scan, num_components=200, num_background_components
         fitness_min=-20, fitness_delta_min=-20, dview=pool)
     initial_A = initial_A[:, good_indices]
     initial_C = initial_C[good_indices]
+    log(initial_A.shape[-1], 'components remaining...')
 
     # Estimate noise per pixel
     log('Calculating noise per pixel...')
@@ -211,9 +212,10 @@ def extract_masks(scan, mmap_scan, num_components=200, num_background_components
     A = A.toarray()[:, good_indices]
     C = C[good_indices]
     YrA = YrA[good_indices]
+    log(A.shape[-1], 'components remaining...')
 
     # Stop processes
-    log('Done:', A.shape[-1], 'components found.')
+    log('Done.')
     pool.close()
 
     # Get results
