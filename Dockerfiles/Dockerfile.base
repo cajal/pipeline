@@ -17,11 +17,13 @@ RUN \
     octave \
     wget \
     bzip2 \
+    nano \
     git
+
 
 RUN apt-get install -y build-essential cmake pkg-config libjpeg8-dev libtiff5-dev libjasper-dev \
     libpng12-dev libavcodec-dev libavformat-dev libswscale-dev libv4l-dev libxvidcore-dev libx264-dev \
-    libgtk-3-dev libatlas-base-dev ffmpeg locate libhdf5-dev nano && updatedb
+    libgtk-3-dev libatlas-base-dev ffmpeg locate libhdf5-dev && updatedb
 
 
 # because opencv 3.1.0 is currently not cuda8.0 compatible, we use an
@@ -100,12 +102,13 @@ RUN apt-get update -y -q && \
     export MKL_NUM_THREADS=1 && \
     export OPENBLAS_NUM_THREADS=1
 
+
 RUN grep -vwE "install_requires=" CaImAn/setup.py > tmp && mv tmp CaImAn/setup.py &&\
     pip3 install -e CaImAn/
+
 
 RUN pip3 install scikit-learn --upgrade && \
     pip3 install imreg_dft
 
-RUN pip3 install slacker
 
-ENTRYPOINT ["worker"]
+RUN pip3 install slacker
