@@ -474,9 +474,6 @@ class Corrections(dj.Computed):
                                               y=roi_tuple['y'], z=roi_tuple['z'],
                                               id_=roi_tuple['roi_id']))
 
-        import pdb
-        pdb.set_trace()
-
         # Stitch overlapping fields
         print('Computing stitching parameters')
         Corrections.Stitched()._make_tuples(key, rois)
@@ -498,7 +495,7 @@ class Corrections(dj.Computed):
                 fig, axes = plt.subplots(num_rois, 1, figsize=(13, 5 * num_rois), sharex=True, sharey=True)
         fig.suptitle('Shifts in y (blue) and x (red). Scatter dots for different timepoints.')
         axes = [axes] if num_rois == 1 else axes  # make list if single axis object
-        for ax in axes.ravel():
+        for ax in axes:
             ax.set_ylabel('Pixels')
         axes[-1].set_xlabel('Depth')
         for i, roi_key in enumerate((StackInfo.ROI() & key).fetch.keys()):
