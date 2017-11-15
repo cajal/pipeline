@@ -270,13 +270,13 @@ class PupilTracker:
         img_std = np.std(gray)
 
         small_gray = gray[slice(*eye_roi[0]), slice(*eye_roi[1])]
-        c = 0.05
-        p = 7
-        if self._running_avg is None:
-            self._running_avg = np.array(small_gray) ** p
-        else:
-            self._running_avg = c * np.array(small_gray) ** p + (1 - c) * self._running_avg
-            small_gray += self._running_avg.astype(np.uint8) - small_gray # big hack
+        # c = 0.05
+        # p = 7
+        # if self._running_avg is None:
+        #     self._running_avg = np.array(small_gray) ** p
+        # else:
+        #     self._running_avg = c * np.array(small_gray) ** p + (1 - c) * self._running_avg
+        #     small_gray += self._running_avg.astype(np.uint8) - small_gray # big hack
         blur = cv2.GaussianBlur(small_gray, (2*h+1, 2*h+1), 0) # play with blur
 
         _, thres = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
