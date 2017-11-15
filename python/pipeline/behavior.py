@@ -123,7 +123,7 @@ class Treadmill(dj.Computed):
 
         #insert and notify user
         self.insert1(key)
-        self.notify(key)
+        self.notify({k:key[k] for k in self.heading.primary_key})
 
     def notify(self, key):
         msg = 'behavior.Treadmill for `{}` has been populated.'.format(key)
