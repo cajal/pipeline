@@ -61,7 +61,8 @@ class ScanInfo(dj.Imported):
         -> ScanInfo
         -> shared.Field
         ---
-        z           : float             # (um) absolute depth with respect to the surface of the cortex
+        z               : float         # (um) absolute depth with respect to the surface of the cortex
+        delay_image     : longblob      # (ms) delay between the start of the scan and pixels in this field
         """
 
 
@@ -112,8 +113,10 @@ class ScanInfo(dj.Imported):
 
         # Insert field information
         z_zero = (experiment.Scan() & key).fetch1('depth')  # true depth at ScanImage's 0
-        for field_id, field_z in enumerate(scan.field_depths):
-            ScanInfo.Field().insert1({**key, 'field': field_id + 1, 'z': z_zero - field_z})
+        for field_id, (field_z, field_offsets) in enumerate(zip(scan.field_depths,
+                                                                scan.field_offsets)):
+            ScanInfo.Field().insert1({**key, 'field': field_id + 1, 'z': z_zero - field_z,
+                                      'delay_image': field_offsets})
 
         # Fill in CorrectionChannel if only one channel
         if scan.num_channels == 1:
@@ -791,6 +794,7 @@ class Segmentation(dj.Computed):
             ## Insert masks and traces (masks in Matlab format)
             num_masks = masks.shape[-1]
             masks = masks.reshape(-1, num_masks, order='F').T  # [num_masks x num_pixels] in F order
+            raw_traces = raw_traces.astype(np.float32, copy=False)
             for mask_id, mask, trace in zip(range(1, num_masks + 1), masks, raw_traces):
                 mask_pixels = np.where(mask)[0]
                 mask_weights = mask[mask_pixels]
@@ -1225,6 +1229,7 @@ class ScanSet(dj.Computed):
         um_z                : smallint      # z-coordinate of mask relative to surface of the cortex
         px_x                : smallint      # x-coordinate of centroid in the frame
         px_y                : smallint      # y-coordinate of centroid in the frame
+        ms_delay = 0        : smallint      # (ms) delay from start of frame to recording of this unit
         """
 
     def job_key(self, key):
@@ -1246,6 +1251,12 @@ class ScanSet(dj.Computed):
         px_centroids = cmn.get_centroids(masks)
         um_centroids = um_center + (px_centroids - px_center) * (ScanInfo() & key).microns_per_pixel
 
+        # Compute units' delays
+        delay_image = (ScanInfo.Field() & key).fetch1('delay_image')
+        delays = (np.sum(masks * np.expand_dims(delay_image, -1), axis=(0, 1)) /
+                  np.sum(masks, axis=(0, 1)))
+        delays = np.round(delays * 1e3).astype(np.int16)  # in milliseconds
+
         # Get next unit_id for scan
         unit_rel = (ScanSet.Unit().proj() & key)
         unit_id = np.max(unit_rel.fetch('unit_id')) + 1 if unit_rel else 1
@@ -1255,12 +1266,12 @@ class ScanSet(dj.Computed):
 
         # Insert units
         unit_ids = range(unit_id, unit_id + len(mask_ids) + 1)
-        for unit_id, mask_id, (um_y, um_x), (px_y, px_x) in zip(unit_ids, mask_ids,
-                                                                um_centroids, px_centroids):
+        for unit_id, mask_id, (um_y, um_x), (px_y, px_x), delay in zip(unit_ids, mask_ids,
+                                                                       um_centroids, px_centroids, delays):
             ScanSet.Unit().insert1({**key, 'unit_id': unit_id, 'mask_id': mask_id})
 
             unit_info = {**key, 'unit_id': unit_id, 'um_x': um_x, 'um_y': um_y,
-                         'um_z': um_z, 'px_x': px_x, 'px_y': px_y}
+                         'um_z': um_z, 'px_x': px_x, 'px_y': px_y, 'ms_delay': delay}
             ScanSet.UnitInfo().insert1(unit_info, ignore_extra_fields=True)
 
         self.notify(key)
@@ -1393,7 +1404,7 @@ class Activity(dj.Computed):
             import pyfnnd  # Install from https://github.com/cajal/PyFNND.git
 
             for unit_id, trace in zip(unit_ids, full_traces):
-                spike_trace = pyfnnd.deconvolve(trace, dt=1 / fps)[0]
+                spike_trace = pyfnnd.deconvolve(trace, dt=1 / fps)[0].astype(np.float32, copy=False)
                 Activity.Trace().insert1({**key, 'unit_id': unit_id, 'trace': spike_trace})
 
         elif key['spike_method'] == 3:  # stm
@@ -1405,18 +1416,21 @@ class Activity(dj.Computed):
                 trace_dict = {'calcium': np.atleast_2d(trace[start:end + 1]), 'fps': fps}
 
                 data = c2s.predict(c2s.preprocess([trace_dict], fps=fps), verbosity=0)
-                spike_trace = np.squeeze(data[0].pop('predictions'))
+                spike_trace = np.squeeze(data[0].pop('predictions')).astype(np.float32, copy=False)
 
                 Activity.Trace().insert1({**key, 'unit_id': unit_id, 'trace': spike_trace})
 
         elif key['spike_method'] == 5:  # nmf
             from pipeline.utils import caiman_interface as cmn
+            import multiprocessing as mp
 
-            for unit_id, trace in zip(unit_ids, full_traces):
-                spike_trace, ar_coeffs = cmn.deconvolve(trace)
-                Activity.Trace().insert1({**key, 'unit_id': unit_id, 'trace': spike_trace})
-                Activity.ARCoefficients().insert1({**key, 'unit_id': unit_id, 'g': ar_coeffs},
-                                                  ignore_extra_fields=True)
+            with mp.Pool(8) as pool:
+                results = pool.imap(cmn.deconvolve, full_traces)
+                for unit_id, (spike_trace, ar_coeffs) in zip(unit_ids, results):
+                    spike_trace = spike_trace.astype(np.float32, copy=False)
+                    Activity.Trace().insert1({**key, 'unit_id': unit_id, 'trace': spike_trace})
+                    Activity.ARCoefficients().insert1({**key, 'unit_id': unit_id, 'g': ar_coeffs},
+                                                      ignore_extra_fields=True)
         else:
             msg = 'Unrecognized spike method {}'.format(key['spike_method'])
             raise PipelineException(msg)
