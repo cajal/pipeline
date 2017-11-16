@@ -10,36 +10,20 @@ schema = dj.schema('pipeline_fuse', locals())
 
 @schema
 class Pipe(dj.Lookup):
-    definition = """
-    # Names of fused pipelines
-    pipe  : varchar(16)    # pipeline name
+    definition = """ # names of fused pipelines
+    pipe                : varchar(16)                   # pipeline name
     """
-    contents = zip(('reso', 'meso'))
+    contents = [['reso'], ['meso']]
 
 
 class Resolver:
-    """
-    This mixin class populates tables that fuse two pipelines
-    """
-
-    def _make_tuples(self, key):
-        # find the matching pipeline from those specified in self.mapping
-        try:
-            pipe, src, dest = next(((pipe, src, dest)
-                for pipe, (src, dest) in self.mapping.items() if src() & key))
-        except StopIteration:
-            raise PipelineException(
-                    'The key source yielded a key from an uknown pipeline')
-        self.insert1(dict(key, pipe=pipe))
-        dest().insert(src() & key, ignore_extra_fields=True)
-        return src
-
+    """ This mixin class populates tables that fuse two pipelines """
     @property
     def module(self):
-        """
-        (fuse.Activity() & key).module is the module where the activity resides.
-        Throws an error if the activity comes from multiple modules.
-        Does the same thing for fuse.ScanDone() or any other subclass of Resolver
+        """ (fuse.Activity() & key).module is the module where the activity resides.
+
+        Raises an exception if the activity comes from multiple modules. Works similarly
+        for other subclasses of Resolver.
         """
         pipes = (dj.U('pipe') & self).fetch('pipe')
         if len(pipes) != 1:
@@ -47,11 +31,70 @@ class Resolver:
         rel, _ = self.mapping[pipes[0]]
         return sys.modules[rel.__module__]
 
+    def _make_tuples(self, key):
+        # find the matching pipeline from those specified in self.mapping
+        try:
+            pipe, src, dest = next(((pipe, src, dest)
+                for pipe, (src, dest) in self.mapping.items() if src() & key))
+        except StopIteration:
+            raise PipelineException('The key source yielded a key from an uknown pipeline')
+        self.insert1({**key, 'pipe': pipe})
+        dest().insert(src() & key, ignore_extra_fields=True)
+        return src
+
+
+@schema
+class ScanSet(Resolver, dj.Computed):
+    definition = """ # set of units in the same scan
+    -> experiment.Scan
+    -> shared.PipelineVersion
+    -> shared.Field
+    -> shared.Channel
+    -> shared.SegmentationMethod
+    ---
+    -> Pipe
+    """
+    @property
+    def key_source(self):
+        assert StrictVersion(dj.__version__) >= StrictVersion('0.9.0'), "Please upgrade datajoint to version 0.9.0+"
+        return reso.ScanSet().proj() + meso.ScanSet().proj()
+
+    @property
+    def mapping(self):
+        return {'reso': (reso.ScanSet, ScanSet.Reso),
+                'meso': (meso.ScanSet, ScanSet.Meso)}
+
+    class Unit(dj.Part):
+        definition = """ # individual units corresponding to <module>.ScanSet.Unit
+        -> experiment.Scan
+        -> shared.PipelineVersion
+        -> shared.SegmentationMethod
+        unit_id                 : int       # unique per scan & segmentation method
+        ---
+        -> master                           # for it to act as a part table of ScanSet
+        """
+
+    class Reso(dj.Part):
+        definition = """
+        -> reso.ScanSet
+        -> master
+        """
+
+    class Meso(dj.Part):
+        definition = """
+        -> meso.ScanSet
+        -> master
+        """
+
+    def _make_tuples(self, key):
+        src = super()._make_tuples(key)
+        module = sys.modules[src.__module__]
+        self.Unit().insert(self * module.ScanSet.Unit() & key, ignore_extra_fields=True)
+
 
 @schema
 class Activity(Resolver, dj.Computed):
-    definition = """
-    # Calcium activity for a single field within a scan
+    definition = """ # calcium activity for a single field within a scan
     -> experiment.Scan
     -> shared.PipelineVersion
     -> shared.Field
@@ -61,36 +104,34 @@ class Activity(Resolver, dj.Computed):
     ---
     -> Pipe
     """
+    @property
+    def key_source(self):
+        assert StrictVersion(dj.__version__) >= StrictVersion('0.9.0'), "Please upgrade datajoint to version 0.9.0+"
+        return reso.Activity().proj() + meso.Activity().proj()
+
+    @property
+    def mapping(self):
+        return {'reso': (reso.Activity, Activity.Reso),
+                'meso': (meso.Activity, Activity.Meso)}
 
     class Trace(dj.Part):
         definition = """
         # Trace corresponding to <module>.Activity.Trace
         -> master
-        unit_id  : int   # unique per scan & segmentation method
+        unit_id                 : int           # unique per scan & segmentation method
         """
-
-    @property
-    def key_source(self):
-        assert StrictVersion(dj.__version__) >= StrictVersion('0.9.0'), "Please upgrade datajoint to version 0.9.0+"
-        return meso.Activity().proj() + reso.Activity().proj()
 
     class Reso(dj.Part):
         definition = """
         -> reso.Activity
-        -> Activity
+        -> master
         """
 
     class Meso(dj.Part):
         definition = """
         -> meso.Activity
-        -> Activity
+        -> master
         """
-
-    @property
-    def mapping(self):
-        return {'meso': (meso.Activity, Activity.Meso),
-                'reso': (reso.Activity, Activity.Reso)}
-
 
     def _make_tuples(self, key):
         src = super()._make_tuples(key)
@@ -100,8 +141,7 @@ class Activity(Resolver, dj.Computed):
 
 @schema
 class ScanDone(Resolver, dj.Computed):
-    definition = """
-    # Calcium activity for the whole scan (multiple scan fields)
+    definition = """ # calcium activity for the whole scan (multiple scan fields)
     -> experiment.Scan
     -> shared.PipelineVersion
     -> shared.SegmentationMethod
@@ -109,25 +149,24 @@ class ScanDone(Resolver, dj.Computed):
     ---
     -> Pipe
     """
-
     @property
     def key_source(self):
         assert StrictVersion(dj.__version__) >= StrictVersion('0.9.0'), "Please upgrade datajoint to version 0.9.0+"
-        return meso.ScanDone().proj() + reso.ScanDone().proj()
+        return reso.ScanDone().proj() + meso.ScanDone().proj()
+
+    @property
+    def mapping(self):
+        return {'reso': (reso.ScanDone, ScanDone.Reso),
+                'meso': (meso.ScanDone, ScanDone.Meso)}
 
     class Reso(dj.Part):
         definition = """
         -> reso.ScanDone
-        -> ScanDone
+        -> master
         """
 
     class Meso(dj.Part):
         definition = """
         -> meso.ScanDone
-        -> ScanDone
+        -> master
         """
-
-    @property
-    def mapping(self):
-        return {'meso': (meso.ScanDone, ScanDone.Meso),
-                'reso': (reso.ScanDone, ScanDone.Reso)}
