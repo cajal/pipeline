@@ -1,7 +1,7 @@
 import datajoint as dj
 from datajoint.jobs import key_hash
 
-from .experiment import Person
+from . import experiment
 schema = dj.schema('pipeline_notification', locals())
 
 # Decorator for notification functions. Ignores exceptions.
@@ -29,7 +29,7 @@ class SlackUser(dj.Manual):
     definition = """
     # information for user notification
 
-    -> Person
+    -> experiment.Person
     ---
     slack_user          : varchar(128) # user on slack
     -> SlackConnection
