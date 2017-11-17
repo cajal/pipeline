@@ -250,7 +250,6 @@ class MadAlexFrameSet(dj.Lookup):
                        repeats_nonshared=repeats_nonshared)
 
 
-
 @schema
 class MatisseCenterLoc(dj.Lookup):
     definition = """  # location of center for Matisse scans.
