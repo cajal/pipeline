@@ -3,7 +3,7 @@
 -> experiment.Scan
 -> reso.Version
 ---
-nslices                     : tinyint                       # number of slices
+nfields                     : tinyint                       # number of slices
 nchannels                   : tinyint                       # number of recorded channels
 nframes                     : int                           # number of recorded frames
 nframes_requested           : int                           # number of frames (from header)
@@ -27,7 +27,7 @@ classdef ScanInfo < dj.Imported
 
 		function makeTuples(self, key)
 		%!!! compute missing fields for key here
-			 %self.insert(key)
+% 			 self.insert(key)
 		end
 	end
 
