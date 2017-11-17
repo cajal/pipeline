@@ -282,7 +282,7 @@ class TrackedVideo(dj.Computed):
                 pass
 
             fig.suptitle(
-                'animal id {animal_id} session {session} scan_idx {scan_idx}  eye quality {eye_quality}'.format(**key))
+                'animal id {animal_id} session {session} scan_idx {scan_idx} eye quality {eye_quality}'.format(**key))
             fig.tight_layout()
             sns.despine(fig)
             fig.savefig(outdir + '/{animal_id}/AI{animal_id}SE{session}SI{scan_idx}EQ{eye_quality}.png'.format(**key))
