@@ -65,8 +65,7 @@ class Eye(dj.Imported):
 
         import cv2
 
-        rel = experiment.Session() * experiment.Scan.EyeVideo() * experiment.Scan.BehaviorFile().proj(
-            hdf_file='filename')
+        rel = experiment.Session() * experiment.Scan.EyeVideo() * experiment.Scan.BehaviorFile().proj(hdf_file='filename')
 
         info = (rel & key).fetch1()
 
