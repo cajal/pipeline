@@ -23,7 +23,7 @@ classdef FieldCoordinates < dj.Imported
         function alignScan(self,keyI,keyV)
             
             if nargin<3
-                keyV = fetch(map.OptImageBar & map.AreaMask & sprintf('animal_id=%d',keyI.animal_id));
+                keyV = fetch(map.OptImageBar & anatomy.AreaMask & sprintf('animal_id=%d',keyI.animal_id));
                 if isempty(keyV); error('No maps found!');else; keyV = keyV(1);end
             end
             
@@ -114,8 +114,8 @@ classdef FieldCoordinates < dj.Imported
             imV = fetch1(map.OptImageBar & keyVs,'vessels');
             
             % fetch images
-            [frames,x,y,tforms] = fetchn(preprocess.PrepareGalvoAverageFrame * self & 'channel = 1',...
-                'frame','x_offset','y_offset','tform');
+            [frames,x,y,tforms] = fetchn((meso.SummaryImagesAverage | reso.SummaryImagesAverage) * self & 'channel = 1',...
+                'average_image','x_offset','y_offset','tform');
             
             % plot
             figure
@@ -144,8 +144,8 @@ classdef FieldCoordinates < dj.Imported
             imV = fetch1(map.OptImageBar & keyVs,'vessels');
             
             % fetch images
-            [frames,x,y,tforms,depth,pxpitch] = fetchn(preprocess.PrepareGalvoAverageFrame * self & 'channel = 1',...
-                'frame','x_offset','y_offset','tform','depth','pxpitch');
+            [frames,x,y,tforms,depth,pxpitch] = fetchn((meso.SummaryImagesAverage | reso.SummaryImagesAverage) * self & 'channel = 1',...
+                'average_image','x_offset','y_offset','tform','depth','pxpitch');
             
             % plot
             figure
@@ -170,8 +170,8 @@ classdef FieldCoordinates < dj.Imported
             
             % fetch images
             [frame,x_offset,y_offset,tform] = ...
-                fetch1(preprocess.PrepareGalvoAverageFrame * self & 'channel = 1',...
-                'frame','x_offset','y_offset','tform');
+                fetch1((meso.SummaryImagesAverage | reso.SummaryImagesAverage) * self & 'channel = 1',...
+                'average_image','x_offset','y_offset','tform');
             
             sz = size(frame);
             imS = self.filterImage(self.normalize(frame),tform);
