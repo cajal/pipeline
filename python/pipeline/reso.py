@@ -65,7 +65,6 @@ class ScanInfo(dj.Imported):
         delay_image     : longblob      # (ms) delay between the start of the scan and pixels in this field
         """
 
-
     def _make_tuples(self, key):
         """ Read some scan parameters and compute FOV in microns."""
         from decimal import Decimal
@@ -74,8 +73,6 @@ class ScanInfo(dj.Imported):
         print('Reading header...')
         scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
         scan = scanreader.read_scan(scan_filename)
-
-        dj.conn().is_connected
 
         # Get attributes
         tuple_ = key.copy()  # in case key is reused somewhere else
@@ -93,8 +90,6 @@ class ScanInfo(dj.Imported):
         tuple_['usecs_per_line'] = scan.seconds_per_line * 1e6
         tuple_['fill_fraction'] = scan.temporal_fill_fraction
 
-        dj.conn().is_connected
-
         # Estimate height and width in microns using measured FOVs for similar setups
         fov_rel = (experiment.FOV() * experiment.Session() * experiment.Scan() & key
                    & 'session_date>=fov_ts')
@@ -105,8 +100,6 @@ class ScanInfo(dj.Imported):
         um_height, um_width = [float(um) * (closest_zoom / scan.zoom) for um in dims]
         tuple_['um_height'] = um_height * scan._y_angle_scale_factor
         tuple_['um_width'] = um_width * scan._x_angle_scale_factor
-
-        dj.conn().is_connected
 
         # Insert in ScanInfo
         self.insert1(tuple_)
@@ -335,7 +328,6 @@ class MotionCorrection(dj.Computed):
             tuple_['x_std'] = np.std(x_shifts)
 
             # Insert
-            dj.conn().is_connected
             self.insert1(tuple_)
 
         self.notify(key, scan)
@@ -1128,7 +1120,6 @@ class MaskClassification(dj.Computed):
             raise PipelineException(msg)
 
         print('Generated types:', mask_types)
-        dj.conn().is_connected
 
         # Insert results
         self.insert1(key)
@@ -1435,7 +1426,6 @@ class Activity(dj.Computed):
             msg = 'Unrecognized spike method {}'.format(key['spike_method'])
             raise PipelineException(msg)
 
-        dj.conn().is_connected
         self.notify(key)
 
     @notify.ignore_exceptions
