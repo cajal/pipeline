@@ -1,7 +1,7 @@
 %{
 # summary images for each slice and channel after corrections
 -> reso.MotionCorrection
--> `pipeline_shared`.`#channel`
+-> shared.Channel
 %}
 
 
@@ -11,7 +11,7 @@ classdef SummaryImages < dj.Computed
 
 		function makeTuples(self, key)
 		%!!! compute missing fields for key here
-			 %self.insert(key)
+% 			 self.insert(key)
 		end
 	end
 
