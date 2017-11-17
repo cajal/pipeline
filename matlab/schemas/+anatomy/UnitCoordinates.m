@@ -10,7 +10,7 @@ zloc                 : double # z location in micro meters relative to the surfa
 classdef UnitCoordinates < dj.Imported
     
     properties
-        keySource = map.ScanCoordinates * fuse.ScanSet
+        keySource = map.FieldCoordinates * fuse.ScanSet
     end
     
     methods (Access=protected)
@@ -51,7 +51,6 @@ classdef UnitCoordinates < dj.Imported
     methods
         function plot3d(self)
             plot3d(anatomy.FieldCoordinates & self)
-            
         end
     end
 end
