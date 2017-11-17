@@ -7,7 +7,7 @@ from .utils.h5 import read_video_hdf5, ts2sec
 from . import experiment, notify
 
 
-schema = dj.schema('pipeline_behavior', locals())
+schema = dj.schema('pipeline_treadmill', locals())
 
 
 @schema
