@@ -1,11 +1,10 @@
 %{
-# union of ROIs from a stack (usually one volume per stack)
--> stack.Stitching
-volume_id                   : tinyint                       # id of this volume
+# all slices of each stack after corrections.
+-> stack.CorrectionsStitched
 ---
-x                           : float                         # (um) center of ROI in a volume-wise coordinate system
-y                           : float                         # (um) center of ROI in a volume-wise coordinate system
-z                           : float                         # (um) initial depth in a volume-wise coordinate system
+x                           : float                         # (um) center of volume in a volume-wise coordinate system
+y                           : float                         # (um) center of volume in a volume-wise coordinate system
+z                           : float                         # (um) initial depth in the motor coordinate system
 px_height                   : smallint                      # lines per frame
 px_width                    : smallint                      # pixels per line
 px_depth                    : smallint                      # number of slices
@@ -15,13 +14,13 @@ um_depth                    : float                         # depth in microns
 %}
 
 
-classdef StitchingVolume < dj.Computed
+classdef CorrectedStack < dj.Computed
 
 	methods(Access=protected)
 
 		function makeTuples(self, key)
 		%!!! compute missing fields for key here
-			 self.insert(key)
+% 			 self.insert(key)
 		end
 	end
 

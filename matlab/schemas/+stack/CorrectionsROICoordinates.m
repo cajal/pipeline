@@ -1,21 +1,22 @@
 %{
-# coordinates for each ROI in a volume
+# coordinates for each ROI in the stitched volume
+-> stack.Corrections
 -> stack.StackInfoROI
 ---
--> stack.StitchingVolume
+-> stack.CorrectionsStitched
 x                           : float                         # (pixels) center of ROI in a volume-wise coordinate system
 y                           : float                         # (pixels) center of ROI in a volume-wise coordinate system
-z                           : float                         # (pixels) initial depth in a volume-wise coordinate system
+z                           : float                         # (pixels) initial depth in the motor coordinate system
 %}
 
 
-classdef StitchingROICoordinates < dj.Computed
+classdef CorrectionsROICoordinates < dj.Computed
 
 	methods(Access=protected)
 
 		function makeTuples(self, key)
 		%!!! compute missing fields for key here
-			 self.insert(key)
+% 			 self.insert(key)
 		end
 	end
 

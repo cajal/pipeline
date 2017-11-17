@@ -1,6 +1,6 @@
 %{
 # raster correction for bidirectional resonant scans
--> stack.CorrectionChannel
+-> stack.Corrections
 -> stack.StackInfoROI
 ---
 raster_phase                : float                         # difference between expected and recorded scan angle
@@ -8,13 +8,13 @@ raster_std                  : float                         # standard deviation
 %}
 
 
-classdef RasterCorrection < dj.Computed
+classdef CorrectionsRaster < dj.Computed
 
 	methods(Access=protected)
 
 		function makeTuples(self, key)
 		%!!! compute missing fields for key here
-			 self.insert(key)
+% 			 self.insert(key)
 		end
 	end
 
