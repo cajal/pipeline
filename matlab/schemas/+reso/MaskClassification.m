@@ -1,7 +1,7 @@
 %{
 # classification of segmented masks.
 -> reso.Segmentation
--> `pipeline_shared`.`#classification_method`
+-> shared.ClassificationMethod
 ---
 classif_time=CURRENT_TIMESTAMP: timestamp                   # automatic
 %}

@@ -1,7 +1,7 @@
 %{
 # single unit in the scan
 -> reso.ScanInfo
--> `pipeline_shared`.`#segmentation_method`
+-> shared.SegmentationMethod
 unit_id                     : int                           # unique per scan & segmentation method
 ---
 -> reso.ScanSet

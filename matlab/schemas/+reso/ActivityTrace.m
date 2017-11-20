@@ -1,7 +1,7 @@
 %{
 # deconvolved calcium acitivity
 -> reso.ScanSetUnit
--> `pipeline_shared`.`#spike_method`
+-> shared.SpikeMethod
 ---
 -> reso.Activity
 trace                       : longblob                      # 

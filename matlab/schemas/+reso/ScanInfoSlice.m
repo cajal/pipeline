@@ -1,7 +1,7 @@
 %{
 # slice-specific scan information
 -> reso.ScanInfo
--> `pipeline_shared`.`#slice`
+-> shared.Slice
 ---
 z                           : float                         # (um) absolute depth with respect to the surface of the cortex
 %}
