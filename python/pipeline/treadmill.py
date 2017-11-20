@@ -11,7 +11,7 @@ import datajoint as dj
 
 from scipy.interpolate import interp1d
 
-schema = dj.schema('pipeline_behavior', locals())
+schema = dj.schema('pipeline_treadmill', locals())
 
 
 @schema

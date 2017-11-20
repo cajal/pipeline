@@ -3,7 +3,7 @@
 -> reso.MaskClassification
 -> reso.SegmentationMask
 ---
--> `pipeline_shared`.`#mask_type`
+-> shared.MaskType
 %}
 
 

@@ -27,20 +27,20 @@ classdef Matisse < dj.Relvar
     methods(Static)
         
         function test()
-            cond.noise_seed = 100;
+            cond.noise_seed = 10;
             cond.pattern_width = 80;
             cond.pattern_upscale = 3;
             cond.pattern_aspect = 1.7;
             cond.ori = 0;
-            cond.outer_ori_delta = 0;
-            cond.ori_coherence = 2;
+            cond.outer_ori_delta = 90;
+            cond.ori_coherence = 16;
             cond.aperture_x = 0;
             cond.aperture_y = 0;
             cond.aperture_r = 0.2;
             cond.aperture_transition = 0.05;
             cond.annulus_alpha = 0.0;
-            cond.outer_contrast = 0;
-            cond.inner_contrast = 1;            
+            cond.outer_contrast = 0.1;
+            cond.inner_contrast = 0.1;            
             tic
             img = vis.Matisse.make(cond);
             toc
