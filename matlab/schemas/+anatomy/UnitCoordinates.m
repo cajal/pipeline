@@ -1,5 +1,5 @@
 %{
-anatomy.UnitCoordinates # mask center of mass of a segmented cell
+# mask center of mass of a segmented cell
 -> fuse.ScanSetUnit
 -----
 xloc                 : double # x location in microns relative to the center of reference map
@@ -7,10 +7,10 @@ yloc                 : double # y location in microns relative to the center of 
 zloc                 : double # z location in micro meters relative to the surface
 %}
 
-classdef UnitCoordinates < dj.Imported
+classdef UnitCoordinates < dj.Computed
     
     properties
-        keySource = map.FieldCoordinates * fuse.ScanSet
+        keySource = anatomy.FieldCoordinates * fuse.ScanSet
     end
     
     methods (Access=protected)

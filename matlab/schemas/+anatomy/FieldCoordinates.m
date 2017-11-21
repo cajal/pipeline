@@ -1,5 +1,5 @@
 %{
-anatomy.FieldCoordinates # Relative scan coordinates to a reference map
+# Relative scan coordinates to a reference map
 -> experiment.Scan
 field                   : tinyint         # field #
 ---
@@ -9,6 +9,8 @@ depth                   : double          # depth of slice from surface in micro
 tform                   : mediumblob      # transformation matrix for rotation,scale,flip relative to vessel map
 pxpitch                 : double          # estimated pixel pitch of the reference map (px)
 ref_key                 : mediumblob      # key of the reference vessel map
+ref_table               : varchar         # reference table
+ref_map                 : mediumblob      # reference vessel map
 %}
 
 classdef FieldCoordinates < dj.Imported
@@ -20,34 +22,49 @@ classdef FieldCoordinates < dj.Imported
     end
     
     methods
-        function alignScan(self,keyI,keyV)
+        function alignScan(self,keyI,REF,varargin)
             
-            if nargin<3
-                keyV = fetch(map.OptImageBar & anatomy.AreaMask & sprintf('animal_id=%d',keyI.animal_id));
-                if isempty(keyV); error('No maps found!');else; keyV = keyV(1);end
+            params.global_rotation = -30; % rotation of the ref_map 
+            params.ref_height = 3530;     % (microns) 
+            
+            params = getParams(params,varargin);
+            
+            ref_map = [];
+            ref_key = [];
+            ref_table = [];
+            
+            % handle image ref_map
+            if ismatrix(REF) && numel(REF)>4
+                ref_map = REF;
+            else
+                ref_table = REF.className;
             end
             
-            % get the intrinsic data
-            imV = fetch1(map.OptImageBar & keyV,'vessels');
-            
+            % get map from coresponding table
+            switch ref_table
+                case 'map.OptImageBar'
+                    % get the intrinsic vessel map
+                    [ref_map] = fetch1(REF,'vessels');
+                case 'meso.SummaryImagesAverage'
+                    ref_map = fetch(REF,'average_image');
+            end
+            assert(~isempty(ref_map),'No maps found!'); 
+               
             % get the scamimage reader
             [setup, depth] = fetch1(experiment.Scan * experiment.Session & keyI,...
                 'rig','depth');
             
-            % init tform params
+            % init tform params, specific to each setup
             tfp = struct('scale',1,'rotation',90,'fliplr',0,'flipud',0);
             
-            if strcmp(setup,'2P4')
-                global_rotation = -27.5;
-                
+            % get information from the scans depending on the setup
+            if strcmp(setup,'2P4')   
                 [x_pos, y_pos, slice_pos, fieldWidths, fieldHeights, fieldWidthsInMicrons, frames, field_num] = ...
                     fetchn(meso.ScanInfoField * meso.SummaryImagesAverage & keyI & 'channel = 1',...
                     'x','y','z','px_width','px_height','um_width','average_image','field');
                 x_pos = -x_pos;
             else
                 tfp.fliplr = 1;
-                global_rotation = -32;
-                
                 [fieldWidths, fieldHeights, fieldWidthsInMicrons, frames, slice_pos, field_num] = ...
                     fetchn(reso.ScanInfo * reso.SummaryImagesAverage & keyI & 'channel = 1',...
                     'px_width','px_height','um_width','average_image','z','field');
@@ -56,7 +73,6 @@ classdef FieldCoordinates < dj.Imported
             
             % calculate initial scale
             pxpitch = mean(fieldWidths.\fieldWidthsInMicrons);
-            FoV = 3530; % (mm) this is constant that depends on the Imager sensor size / lens / distance between lens-sensor
             
             % construct the big mesoscope field of view
             x_pos = x_pos/pxpitch;
@@ -73,15 +89,15 @@ classdef FieldCoordinates < dj.Imported
             
             % Align scans
             [x_offset, y_offset, rotation, tfp.scale, go] = ...
-                self.alignImages(self.normalize(imV),self.normalize(im),...
-                'scale',pxpitch/(FoV/size(imV,1)),'rotation',global_rotation);
+                self.alignImages(self.normalize(ref_map),self.normalize(im),...
+                'scale',pxpitch/(params.ref_height/size(ref_map,1)),'rotation',params.global_rotation);
             tfp.rotation = tfp.rotation + rotation;
             
             % Insert overlaping masks
             if go
                 for islice = 1:length(frames)
-                    x = size(imV,1)/2 - x_offset - size(frames{islice},2)*tfp.scale/2 - x_pos(islice)*tfp.scale;
-                    y = size(imV,2)/2 - y_offset - size(frames{islice},1)*tfp.scale/2 - y_pos(islice)*tfp.scale;
+                    x = size(ref_map,1)/2 - x_offset - size(frames{islice},2)*tfp.scale/2 - x_pos(islice)*tfp.scale+1;
+                    y = size(ref_map,2)/2 - y_offset - size(frames{islice},1)*tfp.scale/2 - y_pos(islice)*tfp.scale+1;
                     theta = abs(atand(y/x)) + 180;
                     if sign(x)>=0 && sign(y)<0
                         theta = 360 - theta;
@@ -98,9 +114,11 @@ classdef FieldCoordinates < dj.Imported
                     tuple.y_offset = sind(phi)*hyp;
                     tuple.tform = self.createTform(tfp);
                     tuple.pxpitch = pxpitch/tfp.scale; % estimated pixel pitch of the vessel map;
-                    tuple.ref_key = keyV;
+                    tuple.ref_key = ref_key;
                     tuple.depth = slice_pos(islice) - depth;
-                    makeTuples(map.ScanCoordinates,tuple)
+                    tuple.ref_table = ref_table;
+                    tuple.ref_map = ref_map;
+                    makeTuples(anatomy.FieldCoordinates,tuple)
                 end
             else
                 disp 'Exiting...'
@@ -109,25 +127,33 @@ classdef FieldCoordinates < dj.Imported
         
         function plot(self)
             
-            % get the intrinsic data
-            keyVs = cell2mat(fetchn( self,'ref_key'));
-            imV = fetch1(map.OptImageBar & keyVs,'vessels');
+            % get the ref_map
+            ref_map = fetch1(self & fuse.ScanDone,'ref_map');
+    
+            
+             % get the setup
+            setup = fetch1(experiment.Session & self, 'rig');
             
             % fetch images
-            [frames,x,y,tforms] = fetchn((meso.SummaryImagesAverage | reso.SummaryImagesAverage) * self & 'channel = 1',...
+            if strcmp(setup,'2P4')   
+             	[frames,x,y,tforms] = fetchn(meso.SummaryImagesAverage * self & 'channel = 1',...
                 'average_image','x_offset','y_offset','tform');
-            
+            else
+            	[frames,x,y,tforms] = fetchn(reso.SummaryImagesAverage * self & 'channel = 1',...
+                'average_image','x_offset','y_offset','tform');
+            end
+        
             % plot
             figure
-            im = zeros(size(imV,1),size(imV,2),3);
-            im(:,:,1) = self.normalize(imV);
+            im = zeros(size(ref_map,1),size(ref_map,2),3);
+            im(:,:,1) = self.normalize(ref_map);
             for islice = 1:length(frames)
                 
                 x_offset = x(islice);
                 y_offset = y(islice);
                 imS = self.filterImage(self.normalize(frames{islice}),tforms{islice});
-                YY = round(y_offset + size(imV,2)/2 - size(imS,2)/2);
-                XX = round(x_offset + size(imV,1)/2 - size(imS,1)/2);
+                YY = round(y_offset + size(ref_map,2)/2 - size(imS,2)/2);
+                XX = round(x_offset + size(ref_map,1)/2 - size(imS,1)/2);
                 
                 im(XX:size(imS,1)+XX-1,YY:size(imS,2)+YY-1,2) = ...
                     im(XX:size(imS,1)+XX-1,YY:size(imS,2)+YY-1,2) + self.normalize(abs(imS.^.7));
@@ -139,19 +165,26 @@ classdef FieldCoordinates < dj.Imported
         
         function plot3D(self)
             
-            % get the intrinsic data
-            keyVs = cell2mat(fetchn( self,'ref_key'));
-            imV = fetch1(map.OptImageBar & keyVs,'vessels');
+            % get the ref_map
+            ref_map = fetch1(self & fuse.ScanDone,'ref_map');
+            
+             % get the setup
+            setup = fetch1(experiment.Session & self, 'rig');
             
             % fetch images
-            [frames,x,y,tforms,depth,pxpitch] = fetchn((meso.SummaryImagesAverage | reso.SummaryImagesAverage) * self & 'channel = 1',...
-                'average_image','x_offset','y_offset','tform','depth','pxpitch');
+            if strcmp(setup,'2P4')   
+             	[frames,x,y,tforms,pxpitch] = fetchn(meso.SummaryImagesAverage * self & 'channel = 1',...
+                'average_image','x_offset','y_offset','tform','pxpitch');
+            else
+            	[frames,x,y,tforms,pxpitch] = fetchn(reso.SummaryImagesAverage * self & 'channel = 1',...
+                'average_image','x_offset','y_offset','tform','pxpitch');
+            end
             
             % plot
             figure
-            imV = self.normalize(imV*2.^2)*0.5;
-            imV = imV*50;
-            self.image3D(0,0,0,imV, abs(imV-max(imV(:)))*2,pxpitch(1));
+            ref_map = self.normalize(ref_map*2.^2)*0.5;
+            ref_map = ref_map*50;
+            self.image3D(0,0,0,ref_map, abs(ref_map-max(ref_map(:)))*2,pxpitch(1));
             for islice = 1:length(frames)
                 x_offset = x(islice);
                 y_offset = y(islice);
@@ -168,20 +201,34 @@ classdef FieldCoordinates < dj.Imported
         
         function fmask = filterMask(self,mask)
             
+             % get the setup
+            setup = fetch1(experiment.Session & self, 'rig');
+            
             % fetch images
-            [frame,x_offset,y_offset,tform] = ...
-                fetch1((meso.SummaryImagesAverage | reso.SummaryImagesAverage) * self & 'channel = 1',...
+            if strcmp(setup,'2P4')   
+             	[frame,x_offset,y_offset,tform] = fetch1(meso.SummaryImagesAverage * self & 'channel = 1',...
                 'average_image','x_offset','y_offset','tform');
+            else
+            	[frame,x_offset,y_offset,tform] = fetch1(reso.SummaryImagesAverage * self & 'channel = 1',...
+                'average_image','x_offset','y_offset','tform');
+            end
             
             sz = size(frame);
-            imS = self.filterImage(self.normalize(frame),tform);
-            YY = round(y_offset + size(mask,1)/2 - size(imS,1)/2);
-            XX = round(x_offset + size(mask,2)/2 - size(imS,2)/2);
+%             imS = self.filterImage(self.normalize(frame),tform);
+            imS = frame;
+%             YY = round(y_offset + size(mask,1)/2 - size(imS,2)/2); % changed from ize(imS,1)/2)
+%             XX = round(x_offset + size(mask,2)/2 - size(imS,1)/2); % changed from ize(imS,2)/2)
+            YY = round(-x_offset + size(mask,1)/2 - size(imS,2)/2)+1; % changed from ize(imS,1)/2)
+            XX = round(y_offset + size(mask,2)/2 - size(imS,1)/2)+1; % changed from ize(imS,2)/2)
             fmask = mask(XX:size(imS,1)+XX-1,YY:size(imS,2)+YY-1);
-            fmask = self.filterImage(self.normalize(fmask),tform,1)>0;
+%             fmask = self.filterImage(self.normalize(fmask),tform,1)>0;
             fmask = fmask(...
-                round(size(fmask,1)/2)-floor(sz(1)/2):round(size(fmask,1)/2)+floor(sz(1)/2)-1,...
-                round(size(fmask,2)/2)-floor(sz(2)/2):round(size(fmask,2)/2)+floor(sz(2)/2)-1);
+                round(size(fmask,1)/2)-floor(sz(1)/2)+1:round(size(fmask,1)/2)+floor(sz(1)/2),...
+                round(size(fmask,2)/2)-floor(sz(2)/2)+1:round(size(fmask,2)/2)+floor(sz(2)/2));
+            
+%             fmask = fmask(...
+%                 round(size(fmask,1)/2)-floor(sz(1)/2):round(size(fmask,1)/2)+floor(sz(1)/2)+1,...
+%                 round(size(fmask,2)/2)-floor(sz(2)/2):round(size(fmask,2)/2)+floor(sz(2)/2)+1);
         end
     end
     
@@ -211,6 +258,7 @@ classdef FieldCoordinates < dj.Imported
             scale = params.scale;
             x = params.x * params.resize;
             y = params.y * params.resize;
+            fine = 1;
             
             % assign images
             vessels = imresize(normalize(image1),params.resize);
@@ -236,40 +284,46 @@ classdef FieldCoordinates < dj.Imported
             function eval_input(~, event)
                 global temp
                 switch event.Key
+                    case 'shift'
+                        if fine==1
+                            fine=0.5;
+                        else
+                            fine = 1;
+                        end
                     case 'downarrow'
                         if x<size(im1,1)/2
-                            x = x+1;
+                            x = x+1*fine;
                             redraw
                         end
                     case 'uparrow'
                         if x>1
-                            x = x-1;
+                            x = x-1*fine;
                             redraw
                         end
                     case 'rightarrow'
                         if y<size(im1,2)/2
-                            y = y+1;
+                            y = y+1*fine;
                             redraw
                         end
                     case 'leftarrow'
                         if y>1
-                            y = y-1;
+                            y = y-1*fine;
                             redraw
                         end
                     case 'comma'
-                        rot = rot+0.5;
+                        rot = rot+0.5*fine;
                         redraw
                     case 'period'
-                        rot = rot-0.5;
+                        rot = rot-0.5*fine;
                         redraw
                     case 'equal'
                         if scale<1
-                            scale = scale+0.005;
+                            scale = scale+0.005*fine;
                             redraw
                         end
                     case 'hyphen'
                         if scale>0
-                            scale = scale-0.005;
+                            scale = scale-0.005*fine;
                             redraw
                         end
                     case 'return'

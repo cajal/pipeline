@@ -1,5 +1,5 @@
 %{
-map.AreaMask # Area mask for each scan
+# Area mask for each scan
 -> experiment.Scan
 -> anatomy.Area
 field                    : tinyint               # slice id
@@ -51,7 +51,7 @@ classdef AreaMask < dj.Imported
             for map_key = map_keys'
                 [mask, area] = fetch1(anatomy.AreaMask & map_key,'mask','area');
                 for tuple = fetch(anatomy.FieldCoordinates & keyI)'
-                    fmask = filterMask(map.FieldCoordinates & tuple,mask);
+                    fmask = filterMask(anatomy.FieldCoordinates & tuple,mask);
                     if ~all(~fmask(:))
                         tuple.area = area;
                         tuple.mask = fmask;
