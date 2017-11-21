@@ -9,7 +9,7 @@
 classdef AreaMembership <  dj.Computed
     
     properties
-        keySource = fuse.ScanDone & anatomy.AreaMask
+        keySource = fuse.ScanSetUnit & anatomy.AreaMask
     end
     
     methods(Access=protected)
@@ -25,14 +25,17 @@ classdef AreaMembership <  dj.Computed
             
             if strcmp(setup,'2P4')
                 [px_width, px_height, keys] = ...
-                    fetchn((meso.ScanSetUnitInfo & (fuse.ScanSetUnit & key)) * proj(meso.ScanInfoField,'px_height','px_width'),...
+                    fetchn((meso.ScanSetUnitInfo & (fuse.ScanSetUnit & key)) * ...
+                    proj(meso.ScanInfoField & fuse.ScanSet &  (fuse.ScanSetUnit & key),'px_height','px_width'),...
                     'px_x','px_y');
             else
                 [px_width, px_height, keys] = ...
-                    fetchn((reso.ScanSetUnitInfo & (fuse.ScanSetUnit & key)) * proj(reso.ScanInfo,'px_height','px_width'),...
+                    fetchn((reso.ScanSetUnitInfo & (fuse.ScanSetUnit & key)) * ...
+                    proj(reso.ScanInfo & fuse.ScanSet &  (fuse.ScanSetUnit & key),'px_height','px_width'),...
                     'px_x','px_y');
             end
-           
+            keys = rmfield(keys,'field');
+          
             for imask = 1:length(keys)
                 % get mask position
                 area_idx = area_mask(round(px_height(imask)),round(px_width(imask)));
