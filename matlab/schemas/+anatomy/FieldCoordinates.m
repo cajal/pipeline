@@ -5,7 +5,7 @@ field                   : tinyint         # field #
 ---
 x_offset                : double          # x center coordinate in pixels
 y_offset                : double          # y center coordinate in pixels
-depth                   : double          # depth of slice from surface in microns
+field_depth             : double          # depth of slice from surface in microns
 tform                   : mediumblob      # transformation matrix for rotation,scale,flip relative to vessel map
 pxpitch                 : double          # estimated pixel pitch of the reference map (px)
 ref_key                 : mediumblob      # key of the reference vessel map
@@ -115,7 +115,7 @@ classdef FieldCoordinates < dj.Imported
                     tuple.tform = self.createTform(tfp);
                     tuple.pxpitch = pxpitch/tfp.scale; % estimated pixel pitch of the vessel map;
                     tuple.ref_key = ref_key;
-                    tuple.depth = slice_pos(islice) - depth;
+                    tuple.field_depth = slice_pos(islice) - depth;
                     tuple.ref_table = ref_table;
                     tuple.ref_map = ref_map;
                     makeTuples(anatomy.FieldCoordinates,tuple)
