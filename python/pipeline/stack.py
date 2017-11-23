@@ -463,8 +463,8 @@ class Corrections(dj.Computed):
             corrected_roi = corrected_roi.mean(axis=-1) # frees original memory
 
             # Discard some fields at the top and bottom and some pixels to avoid artifacts
-            skip_rows = max(1, int(round(0.005 * corrected_roi.shape[1])))  # 0.5 %
-            skip_columns = max(1, int(round(0.005 * corrected_roi.shape[2])))  # 0.5 %
+            skip_rows = max(1, int(round(0.01 * corrected_roi.shape[1])))  # 1 %
+            skip_columns = max(1, int(round(0.01 * corrected_roi.shape[2])))  # 1 %
             skip_fields = int(round(min(num_slices) * 0.15)) # 15 %
             corrected_roi = corrected_roi[skip_fields: -skip_fields, skip_rows: -skip_rows,
                                           skip_columns: -skip_columns]
