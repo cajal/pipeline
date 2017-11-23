@@ -215,7 +215,7 @@ class Corrections(dj.Computed):
 
                 # Compute some parameters
                 fill_fraction = (StackInfo() & key).fetch1('fill_fraction')
-                skip_fields = max(1, int(round(num_fields * 0.10)))
+                skip_fields = max(1, int(round(num_fields * 0.15)))
                 taper = np.sqrt(np.outer(signal.tukey(image_height, 0.4),
                                          signal.tukey(image_width, 0.4)))
 
@@ -223,13 +223,13 @@ class Corrections(dj.Computed):
                 raster_phases = []
                 for slice_ in roi[skip_fields: -skip_fields]:
                     # Create template (average frame tapered to avoid edge artifacts)
-                    anscombed = 2 * np.sqrt(slice_ - slice_.min() + 3 / 8) # anscombe transform
+                    anscombed = 2 * np.sqrt(slice_ - slice_.min(axis=(0, 1)) + 3 / 8) # anscombe transform
                     template = np.mean(anscombed, axis=-1) * taper
 
                     # Compute raster correction
                     raster_phases.append(galvo_corrections.compute_raster_phase(template,
                                                                                 fill_fraction))
-                raster_phase = np.mean(raster_phases)
+                raster_phase = np.median(raster_phases)
                 raster_std = np.std(raster_phases)
             else:
                 raster_phase = 0
@@ -298,7 +298,7 @@ class Corrections(dj.Computed):
                 if num_frames > 1:
                     for j in range(2):
                         # Create template from previous
-                        anscombed = 2 * np.sqrt(corrected - corrected.min() + 3 / 8) # anscombe transform
+                        anscombed = 2 * np.sqrt(corrected - corrected.min(axis=(0, 1)) + 3 / 8) # anscombe transform
                         template = np.mean(anscombed, axis=-1)
                         template = ndimage.gaussian_filter(template, 0.6)
 
@@ -315,7 +315,7 @@ class Corrections(dj.Computed):
                         corrected = galvo_corrections.correct_motion(field, xy_shifts, in_place=False)
 
                 # Interslice alignment
-                corrected = np.mean(2 * np.sqrt(corrected - corrected.min() + 3 / 8), axis=-1)
+                corrected = np.mean(2 * np.sqrt(corrected - corrected.min(axis=(0, 1)) + 3 / 8), axis=-1)
                 if previous is not None:
                     # Align current slice to previous one
                     results = galvo_corrections.compute_motion_shifts(corrected, previous,
@@ -465,7 +465,7 @@ class Corrections(dj.Computed):
             # Discard some fields at the top and bottom and some pixels to avoid artifacts
             skip_rows = max(1, int(round(0.005 * corrected_roi.shape[1])))  # 0.5 %
             skip_columns = max(1, int(round(0.005 * corrected_roi.shape[2])))  # 0.5 %
-            skip_fields = int(round(min(num_slices) * 0.10)) # 10 %
+            skip_fields = int(round(min(num_slices) * 0.15)) # 15 %
             corrected_roi = corrected_roi[skip_fields: -skip_fields, skip_rows: -skip_rows,
                                           skip_columns: -skip_columns]
 
