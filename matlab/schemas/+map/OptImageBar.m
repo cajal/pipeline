@@ -20,21 +20,19 @@ classdef OptImageBar < dj.Relvar & dj.AutoPopulate
         function makeTuples( obj, key )
             
             % get scan info
-            [software, setup] = fetch1( experiment.Scan * experiment.Session & key ,...
-                'software','rig');
+            [name, path, software] = fetch1( experiment.Scan * experiment.Session & key ,...
+                'filename','scan_path','software');
             switch software
                 case 'imager'
                     % get Optical data
                     disp 'loading movie...'
-                    [Data, data_fs] = getOpticalData(key); % time in sec
+                    if isempty(strfind(name,'.h5')); name = [name '.h5'];end
+                    [Data, data_fs,photodiode_signal, photodiode_fs] = ...
+                        getOpticalData(getLocalPath(fullfile(path,name))); % time in sec
                     
-                    % get frame times
-                    if ~exist(stimulus.Sync & key)
-                        disp 'synchronizing...'
-                        populate(stimulus.Sync,key)
-                    end
+                    % calculate frame times
                     frame_times =fetch1(stimulus.Sync & key,'frame_times');
-
+                    
                     % get the vessel image
                     disp 'getting the vessels...'
                     k = [];
@@ -52,14 +50,14 @@ classdef OptImageBar < dj.Relvar & dj.AutoPopulate
                     
                 case 'scanimage'
                     
-                   % get Optical data
+                    % get Optical data
                     disp 'loading movie...'
                     if strcmp(setup,'2P4') % mesoscope
                         path = getLocalPath(fullfile(path, sprintf('%s*.tif', name)));
                         reader = ne7.scanreader.readscan(path,'int16',1);
                         Data = permute(squeeze(mean(reader(:,:,:,:,:))),[3 1 2]);
                         data_fs = reader.fps;
-                        nslices = length(reader.fieldDepths);
+                        nslices = reader.nScanningDepths;
                     else
                         reader = preprocess.getGalvoReader(key);
                         Data = squeeze(mean(reader(:,:,1,:,:),4));
@@ -73,8 +71,12 @@ classdef OptImageBar < dj.Relvar & dj.AutoPopulate
                     frame_times = frame_times(1:size(Data,1));
                     
                     % get the vessel image
-                    disp 'getting the vessels...'
-                    vessels = squeeze(mean(Data(:,:,:)));
+                    try
+                        disp 'getting the vessels...'
+                        vessels = squeeze(mean(Data(:,:,:)));
+                    catch
+                        vessels = [];
+                    end
             end
             
             % DF/F
