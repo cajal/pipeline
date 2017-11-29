@@ -1,8 +1,8 @@
 %{
 # scans that are fully processed (updated every time a field is added)
 -> meso.ScanInfo
--> `pipeline_shared`.`#segmentation_method`
--> `pipeline_shared`.`#spike_method`
+-> shared.SegmentationMethod
+-> shared.SpikeMethod
 %}
 
 
@@ -12,7 +12,7 @@ classdef ScanDone < dj.Computed
 
 		function makeTuples(self, key)
 		%!!! compute missing fields for key here
-			 %self.insert(key)
+% 			 self.insert(key)
 		end
 	end
 
