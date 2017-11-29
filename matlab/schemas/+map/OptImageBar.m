@@ -12,7 +12,7 @@ vessels=null                : mediumblob                    #
 classdef OptImageBar < dj.Imported
     
     properties (Constant)
-        keySource = (experiment.Scan & 'aim = "intrinsic" OR software="imager" AND aim="widefield"') - experiment.ScanIgnored
+        keySource = (experiment.Scan & 'aim = "intrinsic" AND software="imager" OR aim="widefield"') - experiment.ScanIgnored
     end
     
     methods(Access=protected)
