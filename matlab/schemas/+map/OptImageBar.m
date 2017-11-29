@@ -48,7 +48,6 @@ classdef OptImageBar < dj.Imported
                     end
                     
                 case 'scanimage'
-                    
                     % get Optical data
                     disp 'loading movie...'
                     if strcmp(setup,'2P4') % mesoscope
@@ -70,12 +69,8 @@ classdef OptImageBar < dj.Imported
                     frame_times = frame_times(1:size(Data,1));
                     
                     % get the vessel image
-                    try
-                        disp 'getting the vessels...'
-                        vessels = squeeze(mean(Data(:,:,:)));
-                    catch
-                        vessels = [];
-                    end
+                    vessels = squeeze(mean(Data(:,:,:)));
+
             end
             
             % DF/F
