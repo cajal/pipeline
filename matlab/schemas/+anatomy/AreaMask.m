@@ -2,7 +2,7 @@
 # Area mask for each scan
 -> experiment.Scan
 -> anatomy.Area
-field                    : tinyint               # slice id
+-> shared.Field
 ---
 mask                     : mediumblob            # mask of area
 %}
@@ -10,7 +10,7 @@ mask                     : mediumblob            # mask of area
 classdef AreaMask < dj.Imported
     methods(Access=protected)
         function makeTuples(obj,key) %create clips
-            insert( obj, key );
+%            insert( obj, key );
         end
     end
     
