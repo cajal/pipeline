@@ -261,13 +261,24 @@ class PupilTracker:
 
         return best_contour, best_ellipse
 
+    _running_avg = None
+
+    # TODO: Paul!
     def preprocess_image(self, frame, eye_roi):
         h = int(self._params['gaussian_blur'])
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         img_std = np.std(gray)
 
         small_gray = gray[slice(*eye_roi[0]), slice(*eye_roi[1])]
-        blur = cv2.GaussianBlur(small_gray, (h, h), 0)
+        # c = 0.05
+        # p = 7
+        # if self._running_avg is None:
+        #     self._running_avg = np.array(small_gray) ** p
+        # else:
+        #     self._running_avg = c * np.array(small_gray) ** p + (1 - c) * self._running_avg
+        #     small_gray += self._running_avg.astype(np.uint8) - small_gray # big hack
+        blur = cv2.GaussianBlur(small_gray, (2*h+1, 2*h+1), 0) # play with blur
+
         _, thres = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         return gray, small_gray, img_std, thres, blur
 
@@ -332,7 +343,8 @@ class PupilTracker:
             # --- detect contours
             ellipse, eye_center, contour = None, None, None
             _, contours, hierarchy1 = cv2.findContours(thres, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-            contour, ellipse = self.get_pupil_from_contours(contours, small_gray)
+            # contour, ellipse = self.get_pupil_from_contours(contours, small_gray)
+            contour, ellipse = self.get_pupil_from_contours(contours, blur)
             if display:
                 self.display(gray, blur, thres, eye_roi, fr_count, n_frames, ncontours=len(contours))
 
