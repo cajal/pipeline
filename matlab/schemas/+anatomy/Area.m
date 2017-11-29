@@ -1,13 +1,20 @@
 %{
-# LUT for Brain Areas
-brain_area      :  varchar('V1','P','POR','PM','AM','A','RL','AL','LI','LM')      # area name
----
+#Brain Area
+ brain_area : varchar(12)   # short brain area name
 %}
-
 classdef Area < dj.Lookup
-	methods
-		function self = Area(varargin)
-			self.restrict(varargin{:})
-		end
+    properties
+         contents = {
+            'V1'
+            'P'
+            'POR'
+            'PM'
+            'AM'
+            'A'
+            'RL'
+            'AL'
+            'LI'
+            'LM'
+        }
     end
 end
