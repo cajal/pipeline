@@ -26,9 +26,7 @@ classdef AreaMask < dj.Imported
                 area_map(masks{imasks}) = imasks;
             end
             
-            im(:,:,1) = normalize(area_map);
-            im(:,:,2) = area_map>0;
-            im(:,:,3) = normalize(vessels{1});
+            im = cat(3,normalize(area_map),area_map>0,normalize(vessels{1}));
             image(hsv2rgb(im));
             
             for iarea = 1:length(masks)
