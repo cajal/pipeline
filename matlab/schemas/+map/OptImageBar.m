@@ -53,7 +53,7 @@ classdef OptImageBar < dj.Imported
                     if strcmp(setup,'2P4') % mesoscope
                         path = getLocalPath(fullfile(path, sprintf('%s*.tif', name)));
                         reader = ne7.scanreader.readscan(path,'int16',1);
-                        Data = permute(squeeze(mean(reader(:,:,:,:,:))),[3 1 2]);
+                        Data = permute(squeeze(mean(reader(:,:,:,:,:),1)),[3 1 2]);
                         data_fs = reader.fps;
                         nslices = reader.nScanningDepths;
                     else
@@ -70,7 +70,6 @@ classdef OptImageBar < dj.Imported
                     
                     % get the vessel image
                     vessels = squeeze(mean(Data(:,:,:)));
-
             end
             
             % DF/F
