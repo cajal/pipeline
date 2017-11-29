@@ -1,9 +1,9 @@
 %{
 # defines the target of segmentation and the channel to use
 -> experiment.Scan
--> `pipeline_shared`.`#field`
--> `pipeline_shared`.`#channel`
--> `pipeline_shared`.`#segmentation_method`
+-> shared.Field
+-> shared.Channel
+-> shared.SegmentationMethod
 ---
 -> experiment.Compartment
 %}
