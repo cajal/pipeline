@@ -18,6 +18,13 @@ classdef OptImageBar < dj.Imported
     methods(Access=protected)
         
         function makeTuples( obj, key )
+
+            % get frame times
+            if ~exists(stimulus.Sync & key)
+                disp 'Syncing...'
+                populate(stimulus.Sync,key)
+            end
+            frame_times =fetch1(stimulus.Sync & key,'frame_times');
             
             % get scan info
             [name, path, software, setup] = fetch1( experiment.Scan * experiment.Session & key ,...
@@ -27,13 +34,6 @@ classdef OptImageBar < dj.Imported
                     % get Optical data
                     disp 'loading movie...'
                     [Data, data_fs] = getOpticalData(key); % time in sec
-                    
-                    % get frame times
-                    if ~exists(stimulus.Sync & key)
-                        disp 'Syncing...'
-                        populate(stimulus.Sync,key)
-                    end
-                    frame_times =fetch1(stimulus.Sync & key,'frame_times');
                     
                     % get the vessel image
                     disp 'getting the vessels...'
@@ -63,8 +63,7 @@ classdef OptImageBar < dj.Imported
                         [nslices, data_fs] = fetch1(preprocess.PrepareGalvo & key,'nslices','fps');
                     end
                     
-                    % calculate frame times
-                    frame_times = fetch1(stimulus.Sync & key,'frame_times');
+                    % fix frame times
                     frame_times = frame_times(1:nslices:end);
                     frame_times = frame_times(1:size(Data,1));
                     
