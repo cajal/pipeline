@@ -9,10 +9,10 @@ vessels=null                : mediumblob                    #
 %}
 
 
-classdef OptImageBar < dj.Relvar & dj.AutoPopulate
+classdef OptImageBar < dj.Imported
     
     properties (Constant)
-        popRel = (experiment.Scan & 'aim = "intrinsic" OR software="imager" AND aim="widefield"') - experiment.ScanIgnored
+        keySource = (experiment.Scan & 'aim = "intrinsic" OR software="imager" AND aim="widefield"') - experiment.ScanIgnored
     end
     
     methods(Access=protected)
@@ -20,17 +20,19 @@ classdef OptImageBar < dj.Relvar & dj.AutoPopulate
         function makeTuples( obj, key )
             
             % get scan info
-            [name, path, software] = fetch1( experiment.Scan * experiment.Session & key ,...
-                'filename','scan_path','software');
+            [name, path, software, setup] = fetch1( experiment.Scan * experiment.Session & key ,...
+                'filename','scan_path','software','rig');
             switch software
                 case 'imager'
                     % get Optical data
                     disp 'loading movie...'
-                    if isempty(strfind(name,'.h5')); name = [name '.h5'];end
-                    [Data, data_fs,photodiode_signal, photodiode_fs] = ...
-                        getOpticalData(getLocalPath(fullfile(path,name))); % time in sec
+                    [Data, data_fs] = getOpticalData(key); % time in sec
                     
-                    % calculate frame times
+                    % get frame times
+                    if ~exists(stimulus.Sync & key)
+                        disp 'Syncing...'
+                        populate(stimulus.Sync,key)
+                    end
                     frame_times =fetch1(stimulus.Sync & key,'frame_times');
                     
                     % get the vessel image
@@ -41,11 +43,8 @@ classdef OptImageBar < dj.Relvar & dj.AutoPopulate
                     k.site_number = fetch1(experiment.Scan & key,'site_number');
                     vesObj = experiment.Scan - experiment.ScanIgnored & k & 'software = "imager" and aim = "vessels"';
                     if ~isempty(vesObj)
-                        names = fetchn( vesObj ,'filename');
-                        name = names{end};
-                        if ~contains(name,'.h5'); name = [name '.h5'];end
-                        filename = getLocalPath(fullfile(path,name));
-                        vessels = squeeze(mean(getOpticalData(filename)));
+                        keys = fetch( vesObj);
+                        vessels = squeeze(mean(getOpticalData(keys(end))));
                     end
                     
                 case 'scanimage'
@@ -84,7 +83,7 @@ classdef OptImageBar < dj.Relvar & dj.AutoPopulate
             Data = bsxfun(@rdivide,bsxfun(@minus,Data,mData),mData);
             
             % loop through axis
-            [axis,cond_idices] = fetchn(vis.FancyBar * vis.ScanConditions & key,'axis','cond_idx');
+            [axis,cond_idices] = fetchn(stimulus.FancyBar * (stimulus.Condition & (stimulus.Trial & key)),'axis','condition_hash');
             uaxis = unique(axis);
             for iaxis = 1:length(uaxis)
                 
@@ -93,7 +92,7 @@ classdef OptImageBar < dj.Relvar & dj.AutoPopulate
                 icond.cond_idx = cond_idices(strcmp(axis,axis{iaxis}));
                 
                 % Get stim data
-                times  = fetchn(vis.Trial * vis.ScanConditions & key & icond,'flip_times');
+                times  = fetchn(stimulus.Trial * stimulus.Condition & key & icond,'flip_times');
                 
                 % find trace segments
                 dataCell = cell(1,length(times));
@@ -140,7 +139,7 @@ classdef OptImageBar < dj.Relvar & dj.AutoPopulate
         end
     end
     
-  methods
+    methods
         
         function  [iH, iS, iV] = plot(obj,varargin)
             
@@ -242,24 +241,14 @@ classdef OptImageBar < dj.Relvar & dj.AutoPopulate
                 
                 [h,s,v] = plot(obj & keys(ikey),params);
                 
+                % construct large image
                 im = ones(size(h,1)*2,size(h,2)*2,3);
+                im(1:size(h,1),1:size(h,2),:) = cat(3,zeros(size(v)),zeros(size(v)),v);
+                im(size(h,1)+1:end,1:size(h,2),:) = cat(3,zeros(size(v)),zeros(size(v)),v);
+                im(1:size(h,1),size(h,2)+1:end,:) = cat(3,h,s,v);
+                im(size(h,1)+1:end,size(h,2)+1:end,:) =  cat(3,h,ones(size(h)),ones(size(h)));
                 
-                im(1:size(h,1),1:size(h,2),1) = zeros(size(v));
-                im(1:size(h,1),1:size(h,2),2) = zeros(size(v));
-                im(1:size(h,1),1:size(h,2),3) = v;
-                
-                im(size(h,1)+1:end,1:size(h,2),1) = zeros(size(v));
-                im(size(h,1)+1:end,1:size(h,2),2) = zeros(size(v));
-                im(size(h,1)+1:end,1:size(h,2),3) = v;
-                
-                im(1:size(h,1),size(h,2)+1:end,1) = h;
-                im(1:size(h,1),size(h,2)+1:end,2) = s;
-                im(1:size(h,1),size(h,2)+1:end,3) = v;
-                
-                im(size(h,1)+1:end,size(h,2)+1:end,1) = h;
-                im(size(h,1)+1:end,size(h,2)+1:end,2) = ones(size(h));
-                im(size(h,1)+1:end,size(h,2)+1:end,3) = ones(size(h));
-                
+                % plot
                 figure
                 set(gcf,'NumberTitle','off','name',sprintf(...
                     'OptMap direction:%s animal:%d session:%d scan:%d',...
@@ -283,7 +272,7 @@ classdef OptImageBar < dj.Relvar & dj.AutoPopulate
             % find horizontal & verical map keys
             Hkeys = fetch(map.OptImageBar & (experiment.Session & obj) & 'axis="horizontal"');
             Vkeys = fetch(map.OptImageBar & (experiment.Session & obj) & 'axis="vertical"');
-                        
+            
             % fetch horizontal & vertical maps
             [Hor(:,:,1),Hor(:,:,2),Hor(:,:,3)] = plot(map.OptImageBar & Hkeys(end),'exp',params.exp);
             [Ver(:,:,1),Ver(:,:,2),Ver(:,:,3)] = plot(map.OptImageBar & Vkeys(end),'exp',params.exp);

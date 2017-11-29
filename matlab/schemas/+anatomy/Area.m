@@ -1,6 +1,6 @@
 %{
 # LUT for Brain Areas
-brain_area      :  enum('V1','P','POR','PM','AM','A','RL','AL','LI','LM')      # area name
+brain_area      :  varchar('V1','P','POR','PM','AM','A','RL','AL','LI','LM')      # area name
 ---
 %}
 
