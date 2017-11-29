@@ -56,7 +56,7 @@ def read_video_hdf5(hdf_path):
     :return: dictionary with the data
     """
     data = {}
-    with h5py.File(hdf_path, 'r+', driver='family', memb_size=0) as fid:
+    with h5py.File(hdf_path, 'r', driver='family', memb_size=0) as fid:
         data['version'] = fid.attrs['Version']
         if float(fid.attrs['Version']) == 2.:
             data['ball'] = np.asarray(fid['Wheel']).T
