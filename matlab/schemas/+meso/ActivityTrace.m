@@ -1,7 +1,7 @@
 %{
 # deconvolved calcium acitivity
 -> meso.ScanSetUnit
--> `pipeline_shared`.`#spike_method`
+-> shared.SpikeMethod
 ---
 -> meso.Activity
 trace                       : longblob                      # 
@@ -14,7 +14,7 @@ classdef ActivityTrace < dj.Computed
 
 		function makeTuples(self, key)
 		%!!! compute missing fields for key here
-			 %self.insert(key)
+% 			 self.insert(key)
 		end
 	end
 

@@ -1,9 +1,9 @@
 %{
 # channel to use for raster and motion correction
 -> experiment.Scan
--> `pipeline_shared`.`#field`
+-> shared.Field
 ---
--> `pipeline_shared`.`#channel`
+-> shared.Channel
 %}
 
 

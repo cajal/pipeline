@@ -1,8 +1,8 @@
 %{
 # mean intensity values across time
 -> reso.Quality
--> `pipeline_shared`.`#slice`
--> `pipeline_shared`.`#channel`
+-> shared.Field
+-> shared.Channel
 ---
 intensities                 : longblob                      # 
 %}
@@ -14,7 +14,7 @@ classdef QualityMeanIntensity < dj.Computed
 
 		function makeTuples(self, key)
 		%!!! compute missing fields for key here
-			 %self.insert(key)
+% 			 self.insert(key)
 		end
 	end
 

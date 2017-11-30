@@ -1,7 +1,7 @@
 %{
 # field-specific scan information
 -> meso.ScanInfo
--> `pipeline_shared`.`#field`
+-> shared.Field
 ---
 px_height                   : smallint                      # height in pixels
 px_width                    : smallint                      # width in pixels
@@ -21,7 +21,7 @@ classdef ScanInfoField < dj.Imported
 
 		function makeTuples(self, key)
 		%!!! compute missing fields for key here
-			 %self.insert(key)
+% 			 self.insert(key)
 		end
 	end
 
