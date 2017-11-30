@@ -1,8 +1,17 @@
 import datajoint as dj
 from datajoint.jobs import key_hash
 
-from .experiment import Person
+from . import experiment
 schema = dj.schema('pipeline_notification', locals())
+
+# Decorator for notification functions. Ignores exceptions.
+def ignore_exceptions(f):
+    def wrapper(*args, **kwargs):
+        try:
+            return f(*args, **kwargs)
+        except Exception as e:
+            print('Ignored exception:', e)
+    return wrapper
 
 @schema
 class SlackConnection(dj.Manual):
@@ -20,19 +29,20 @@ class SlackUser(dj.Manual):
     definition = """
     # information for user notification
 
-    -> Person
+    -> experiment.Person
     ---
     slack_user          : varchar(128) # user on slack
     -> SlackConnection
     """
 
-    def notify(self, message, file = None, file_title=None, file_comment=None):
+    def notify(self, message=None, file = None, file_title=None, file_comment=None):
         if self:
             from slacker import Slacker
             api_key, user = (self * SlackConnection()).fetch1('api_key','slack_user')
-            s = Slacker(api_key)
+            s = Slacker(api_key, timeout=60)
 
-            s.chat.post_message('@' + user, message, as_user=True)
+            if message: # None or ''
+                s.chat.post_message('@' + user, message, as_user=True)
             if file is not None:
                 s.files.upload(file_=file, channels='@' + user,
                                title=file_title, initial_comment=file_comment)

@@ -6,9 +6,8 @@ from distutils.version import StrictVersion
 import os
 from commons import lab
 
-assert StrictVersion(dj.__version__) >= StrictVersion('0.2.7')
 
-schema = dj.schema('pipeline_experiment', locals())
+schema = dj.schema('pipeline_experiment', locals(), create_tables=False)
 
 
 def erd():
@@ -18,8 +17,8 @@ def erd():
 
 @schema
 class Fluorophore(dj.Lookup):
-    definition = """
-    # calcium-sensitive indicators
+    definition = """  # calcium-sensitive indicators
+
     fluorophore     : char(10)   # fluorophore short name
     -----
     dye_description = ''  : varchar(2048)
@@ -36,9 +35,9 @@ class Fluorophore(dj.Lookup):
     ]
 
     class EmissionSpectrum(dj.Part):
-        definition = """
-        # spectra of fluorophores in Ca++ loaded and Ca++ free state
-        ->Fluorophore
+        definition = """  # spectra of fluorophores in Ca++ loaded and Ca++ free state
+
+        -> Fluorophore
         loaded          : bool      # whether the spectrum is for Ca++ loaded or free state
         ---
         wavelength      : longblob  # wavelength in nm
@@ -61,8 +60,7 @@ class Fluorophore(dj.Lookup):
 
 @schema
 class Lens(dj.Lookup):
-    definition = """
-    # objective lens list
+    definition = """  # objective lens list
     lens    : char(4) # objective lens
     ---
     """
@@ -115,8 +113,8 @@ class Anesthesia(dj.Lookup):
 
 @schema
 class Person(dj.Lookup):
-    definition = """
-    # person information
+    definition = """  # person information
+
     username      : char(12)   # lab member
     ---
     full_name     : varchar(255)
@@ -143,6 +141,7 @@ class Person(dj.Lookup):
 @schema
 class BrainArea(dj.Lookup):
     definition = """
+
     brain_area          : char(12)     # short name for cortical area
     ---
     area_description    : varchar(255)
@@ -167,6 +166,7 @@ class BrainArea(dj.Lookup):
 @schema
 class Layer(dj.Lookup):
     definition = """
+
     layer                : char(12)     # short name for cortical layer
     ---
     layer_description    : varchar(255)
@@ -189,8 +189,8 @@ class Layer(dj.Lookup):
 
 @schema
 class Software(dj.Lookup):
-    definition = """
-    # recording software information
+    definition = """ # recording software information
+
     software        : varchar(20) # name of the software
     version         : char(10)    # version
     ---
@@ -211,17 +211,18 @@ class Software(dj.Lookup):
 
 @schema
 class Compartment(dj.Lookup):
-    definition = """
-    # cell compartments that can be imaged
+    definition = """  # cell compartments that can be imaged
+
     compartment         : char(16)
     ---
     """
-    contents = [['axon'], ['soma']]
+    contents = [['axon'], ['soma'], ['bouton']]
 
 
 @schema
 class PMTFilterSet(dj.Lookup):
-    definition = """  #  microscope filter sets: dichroic and PMT Filters
+    definition = """  # microscope filter sets: dichroic and PMT Filters
+
     pmt_filter_set          : varchar(16)       # short name of microscope filter set
     ----
     primary_dichroic        :  varchar(255)     #  passes the laser  (excitation/emission separation)
@@ -233,7 +234,8 @@ class PMTFilterSet(dj.Lookup):
         ['2P3 blue-green A', '680 nm long-pass?', '506 nm long-pass', 'purchased with Thorlabs microscope']]
 
     class Channel(dj.Part):
-        definition = """  #  PMT description including dichroic and filter
+        definition = """  # PMT description including dichroic and filter
+
         -> PMTFilterSet
         pmt_channel : tinyint   #  pmt_channel
         ---
@@ -253,8 +255,8 @@ class PMTFilterSet(dj.Lookup):
 
 @schema
 class LaserCalibration(dj.Manual):
-    definition = """
-    # stores measured values from the laser power calibration
+    definition = """  # stores measured values from the laser power calibration
+
     -> Rig
     calibration_ts      : timestamp         # calibration timestamp -- automatic
     ---
@@ -301,7 +303,8 @@ class LaserCalibration(dj.Manual):
 
 @schema
 class Session(dj.Manual):
-    definition = """ # imaging session
+    definition = """  # imaging session
+
     -> mice.Mice
     session                       : smallint            # session index for the mouse
     ---
@@ -317,8 +320,8 @@ class Session(dj.Manual):
     """
 
     class Fluorophore(dj.Part):
-        definition = """
-        # Fluorophores expressed in prep for the imaging session
+        definition = """  # fluorophores expressed in prep for the imaging session
+
         -> Session
         -> Fluorophore
         ---
@@ -326,8 +329,8 @@ class Session(dj.Manual):
         """
 
     class TargetStructure(dj.Part):
-        definition = """
-        # specifies which neuronal structure was imaged
+        definition = """  # specifies which neuronal structure was imaged
+
         -> Session
         -> Fluorophore
         -> Compartment
@@ -335,7 +338,8 @@ class Session(dj.Manual):
         """
 
     class PMTFilterSet(dj.Part):
-        definition = """ # Fluorophores expressed in prep for the imaging session
+        definition = """
+
         -> Session
         ---
         -> PMTFilterSet
@@ -344,146 +348,112 @@ class Session(dj.Manual):
 
 @schema
 class Aim(dj.Lookup):
-    definition = """  # Declared purpose of the scan
+    definition = """  # declared purpose of the scan
+
     aim                  : varchar(36)                  # short name for the purpose of the scan
     ---
     aim_description      : varchar(255)
     """
 
 
-@schema
-class Scan(dj.Manual):
-    definition = """    # scanimage scan info
-    -> Session
-    scan_idx             : smallint                     # number of TIFF stack file
-    ---
-    -> Lens
-    -> BrainArea
-    -> Aim
-    filename             : varchar(255)                 # file base name
-    depth=0              : int                          # (um) manual depth measurement with respect to the surface of the cortex where fastZ = 0
-    scan_notes           : varchar(4095)                # free-notes
-    site_number=0        : tinyint                      # site number
-    -> Software
-    scan_ts              : timestamp                    # don't edit
-    """
-
-    class EyeVideo(dj.Part):
-        definition = """
-        # name of the eye tracking video
-
-        -> Scan
-        ---
-        filename        : varchar(50)                   # filename of the video
-        """
-
-    class BehaviorFile(dj.Part):
-        definition = """
-        # name of the running wheel file
-
-        -> Scan
-        ---
-        filename        : varchar(50)                   # filename of the video
-        """
-
-    class Laser(dj.Part):
-        definition = """  # Laser parameters for the scan
-        -> Scan
-        ---
-        wavelength: float  # (nm)
-        power: float  # (mW) to brain
-        gdd: float  # gdd setting
-        """
-
+class HasFilename:
+    """ Mixin to add local_filenames_as_wildcard property to Scan and Stack. """
     @property
     def local_filenames_as_wildcard(self):
         """Returns the local filename for all parts of this scan (ends in *.tif)."""
         scan_path = (Session() & self).fetch1('scan_path')
         local_path = lab.Paths().get_local_path(scan_path)
 
-        scan_name = (Scan() & self).fetch1('filename')
+        scan_name = (self.__class__() & self).fetch1('filename')
         local_filename = os.path.join(local_path, scan_name) + '*.tif'  # all parts
 
         return local_filename
 
 
 @schema
-class Stack(dj.Manual):
-    definition = """
-    # scanimage scan info
+class Scan(dj.Manual, HasFilename):
+    definition = """    # scanimage scan info
+
     -> Session
-    stack_idx            : smallint                     # number of TIFF stack file
+    scan_idx                : smallint              # number of TIFF stack file
     ---
-    bottom_z             : int                          # z location at bottom of the stack
-    surf_z               : int                          # z location of surface
-    laser_wavelength     : int                          # (nm)
-    laser_power          : int                          # (mW) to brain
-    stack_notes          : varchar(4095)                # free-notes
-    scan_ts=CURRENT_TIMESTAMP : timestamp               # don't edit
+    -> Lens
+    -> BrainArea
+    -> Aim
+    filename                : varchar(255)          # file base name
+    depth=0                 : int                   # (um) manual depth measurement with respect to the surface of the cortex where fastZ = 0
+    scan_notes              : varchar(4095)         # free-notes
+    site_number=0           : tinyint               # site number
+    -> Software
+    scan_ts                 : timestamp             # don't edit
     """
 
+    class EyeVideo(dj.Part):
+        definition = """  # name of the eye tracking video
+
+        -> Scan
+        ---
+        filename            : varchar(50)                   # filename of the video
+        """
+
+    class BehaviorFile(dj.Part):
+        definition = """  # name of the running wheel file
+
+        -> Scan
+        ---
+        filename            : varchar(50)                   # filename of the video
+        """
+
+    class Laser(dj.Part):
+        definition = """  # laser parameters for the scan
+
+        -> Scan
+        ---
+        wavelength          : float                         # (nm)
+        power               : float                         # (mW) to brain
+        gdd                 : float                         # gdd setting
+        """
+
+@schema
+class Stack(dj.Manual):
+    definition = """ # structural stack information
+    -> Session
+    stack_idx               : smallint              # id of the stack
+    ---
+    -> Lens
+    -> BrainArea
+    -> Aim
+    -> Software
+    top_depth               : smallint              # (um) depth at top of the stack
+    bottom_depth            : smallint              # (um) depth at bottom of stack
+    stack_notes             : varchar(4095)         # free notes
+    stack_ts=CURRENT_TIMESTAMP : timestamp          # don't edit
+    """
+
+    class Filename(dj.Part, HasFilename):
+        definition = """ # filenames that compose one stack (used in resonant and 3p scans)
+
+        -> Stack
+        filename_idx        : tinyint               # id of the file
+        ---
+        filename            : varchar(255)          # file base name
+        surf_depth=0        : float                 # ScanImage's z at cortex surface
+        """
+
+    class Laser(dj.Part):
+        definition = """  # laser parameters for the stack
+
+        -> Stack
+        ---
+        wavelength          : int                   # (nm)
+        max_power           : float                 # (mW) to brain
+        gdd                 : float                 # gdd setting
+        """
 
 @schema
 class ScanIgnored(dj.Manual):
     definition = """  # scans to ignore
     -> Scan
     """
-
-
-def migrate_galvo_pipeline():
-    """
-    migration from the old schema
-    :return:
-    """
-    from .legacy import common, rf, psy
-    # migrate FOV calibration
-    FOV().insert(rf.FOV().proj('width', 'height', rig="setup", fov_ts="fov_date").fetch(), skip_duplicates=True)
-
-    # migrate Session
-    sessions_to_migrate = rf.Session() * common.Animal() & 'session_date>"2016-02"' & 'animal_id>0'
-    w = sessions_to_migrate.proj(
-        'session_date',
-        'anesthesia',
-        'session_ts',
-        'scan_path',
-        rig='setup',
-        behavior_path='hd5_path',
-        username='lcase(owner)',
-        pmt_filter_set='"2P3 red-green A"',
-        session_notes="concat(session_notes,';;', animal_notes)")
-    Session().insert(w.fetch(), skip_duplicates=True)
-
-    # migrate fluorophore
-    Session.Fluorophore().insert(sessions_to_migrate.proj('fluorophore').fetch(), skip_duplicates=True)
-
-    assert len(Session()) == len(Session.Fluorophore())
-
-    # migrate scans
-
-    scans = (rf.Session().proj('lens', 'file_base') * rf.Scan()).proj(
-        'lens',
-        'laser_wavelength',
-        'laser_power',
-        'scan_notes',
-        'scan_ts',
-        'depth',
-        software="'scanimage'",
-        version="5.1",
-        site_number='site',
-        filename="concat(file_base, '_', LPAD(file_num, 5, '0'))",
-        brain_area='cortical_area',
-    ) & Session()
-
-    Scan().insert(scans.fetch(as_dict=True), skip_duplicates=True)
-
-    # migrate stacks
-    Stack().insert(rf.Stack().proj(*Stack().heading.names))
-
-    eye_videos = (rf.Session() * rf.Scan()).proj(filename="concat(file_base,file_num,'behavior.avi')")
-    Scan.EyeVideo().insert(eye_videos, skip_duplicates=True)
-
-    wheel_files = (rf.Session() * rf.Scan()).proj(filename="concat(file_base,file_num,'0.h5')")
-    Scan.BehaviorFile().insert(wheel_files, skip_duplicates=True)
-
 
 schema.spawn_missing_classes()
