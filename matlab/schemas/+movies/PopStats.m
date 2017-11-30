@@ -28,11 +28,8 @@ classdef PopStats < dj.Imported
             end
 
             % get traces
-            [Spikes, frame_times] = getAdjustedSpikes(fuse.ActivityTrace & key,'soma');
-            trace_keys = fetch(fuse.ActivityTrace & key);
-            [Traces, caTimes] = pipetools.getAdjustedSpikes(trace_keys);
-            xm = min([length(caTimes) length(Traces)]);
-            X = @(t) interp1(caTimes(1:xm)-caTimes(1), Traces(1:xm,:), t, 'linear', nan);  % traces indexed by time
+            [Traces, caTimes] = getAdjustedSpikes(fuse.ActivityTrace & key,'soma');
+            X = @(t) interp1(caTimes-caTimes(1), Traces, t, 'linear', nan);  % traces indexed by time
             
             % fetch stuff
             flip_times = fetchn(stimulus.Trial & key,'flip_times');
@@ -46,7 +43,6 @@ classdef PopStats < dj.Imported
             traces = convn(permute(X(flip_times - caTimes(1)),[2 3 1]),ones(d,1)/d,'same');
             traces = traces(1:d:end,:,:);
             traces = permute(X(flip_times - caTimes(1)),[2 3 1]);
-%             traces = trresize(traces,fps,bin,'linear');
             
             % split for unique stimuli
             for istim = 1:length(Stims)
