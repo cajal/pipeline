@@ -9,38 +9,31 @@ vessels=null                : mediumblob                    #
 %}
 
 
-classdef OptImageBar < dj.Relvar & dj.AutoPopulate
+classdef OptImageBar < dj.Imported
     
     properties (Constant)
-        popRel = (experiment.Scan & 'aim = "intrinsic" OR software="imager" AND aim="widefield"') - experiment.ScanIgnored
+        keySource = (experiment.Scan & 'aim = "intrinsic" AND software="imager" OR aim="widefield"') - experiment.ScanIgnored
     end
     
     methods(Access=protected)
         
         function makeTuples( obj, key )
+
+            % get frame times
+            if ~exists(stimulus.Sync & key)
+                disp 'Syncing...'
+                populate(stimulus.Sync,key)
+            end
+            frame_times =fetch1(stimulus.Sync & key,'frame_times');
             
             % get scan info
-            [name, path, software] = fetch1( experiment.Scan * experiment.Session & key ,...
-                'filename','scan_path','software');
+            [name, path, software, setup] = fetch1( experiment.Scan * experiment.Session & key ,...
+                'filename','scan_path','software','rig');
             switch software
                 case 'imager'
                     % get Optical data
                     disp 'loading movie...'
-                    if isempty(strfind(name,'.h5')); name = [name '.h5'];end
-                    [Data, data_fs,photodiode_signal, photodiode_fs] = ...
-                        getOpticalData(getLocalPath(fullfile(path,name))); % time in sec
-                    
-                    disp 'synchronizing...'
-                    % synchronize to stimulus
-                    tuple =  sync(key, photodiode_signal, photodiode_fs);
-                    
-                    % calculate frame times
-                    frame_times = tuple.signal_start_time + ...
-                        tuple.signal_duration*(1:size(Data,1))/size(Data,1);
-                    
-                    % import Sync table
-                    tuple.frame_times = frame_times;
-                    makeTuples(map.Sync,tuple)
+                    [Data, data_fs] = getOpticalData(key); % time in sec
                     
                     % get the vessel image
                     disp 'getting the vessels...'
@@ -48,41 +41,34 @@ classdef OptImageBar < dj.Relvar & dj.AutoPopulate
                     k.session = key.session;
                     k.animal_id = key.animal_id;
                     k.site_number = fetch1(experiment.Scan & key,'site_number');
-                    vesObj = experiment.Scan & k & 'software = "imager" and aim = "vessels"';
+                    vesObj = experiment.Scan - experiment.ScanIgnored & k & 'software = "imager" and aim = "vessels"';
                     if ~isempty(vesObj)
-                        name = fetch1( vesObj ,'filename');
-                        if isempty(strfind(name,'.h5')); name = [name '.h5'];end
-                        filename = getLocalPath(fullfile(path,name));
-                        vessels = squeeze(mean(getOpticalData(filename)));
+                        keys = fetch( vesObj);
+                        vessels = squeeze(mean(getOpticalData(keys(end))));
                     end
                     
                 case 'scanimage'
-                    
                     % get Optical data
                     disp 'loading movie...'
-                    reader = preprocess.getGalvoReader(key);
-                    Data = squeeze(mean(reader(:,:,1,:,:),4));
-                    Data = permute(Data,[3 1 2]);
-                    [nslices, data_fs] = fetch1(preprocess.PrepareGalvo & key,'nslices','fps');
+                    if strcmp(setup,'2P4') % mesoscope
+                        path = getLocalPath(fullfile(path, sprintf('%s*.tif', name)));
+                        reader = ne7.scanreader.readscan(path,'int16',1);
+                        Data = permute(squeeze(mean(reader(:,:,:,:,:),1)),[3 1 2]);
+                        data_fs = reader.fps;
+                        nslices = reader.nScanningDepths;
+                    else
+                        reader = preprocess.getGalvoReader(key);
+                        Data = squeeze(mean(reader(:,:,1,:,:),4));
+                        Data = permute(Data,[3 1 2]);
+                        [nslices, data_fs] = fetch1(preprocess.PrepareGalvo & key,'nslices','fps');
+                    end
                     
-                    % calculate frame times
-                    frame_times = fetch1(preprocess.Sync & key,'frame_times');
+                    % fix frame times
                     frame_times = frame_times(1:nslices:end);
+                    frame_times = frame_times(1:size(Data,1));
                     
                     % get the vessel image
-                    try
-                        disp 'getting the vessels...'
-                        k = [];
-                        k.session = key.session;
-                        k.animal_id = key.animal_id;
-                        k.site_number = fetch1(experiment.Scan & key,'site_number');
-                        ves_key = fetch(experiment.Scan & k & 'aim = "vessels"');
-                        reader = preprocess.getGalvoReader(ves_key);
-                        vessels = reader(:,:,:,:,:);
-                        vessels = mean(vessels(:,:,:),3);
-                    catch
-                        vessels = [];
-                    end
+                    vessels = squeeze(mean(Data(:,:,:)));
             end
             
             % DF/F
@@ -90,7 +76,7 @@ classdef OptImageBar < dj.Relvar & dj.AutoPopulate
             Data = bsxfun(@rdivide,bsxfun(@minus,Data,mData),mData);
             
             % loop through axis
-            [axis,cond_idices] = fetchn(vis.FancyBar * vis.ScanConditions & key,'axis','cond_idx');
+            [axis,cond_idices] = fetchn(stimulus.FancyBar * (stimulus.Condition & (stimulus.Trial & key)),'axis','condition_hash');
             uaxis = unique(axis);
             for iaxis = 1:length(uaxis)
                 
@@ -99,7 +85,7 @@ classdef OptImageBar < dj.Relvar & dj.AutoPopulate
                 icond.cond_idx = cond_idices(strcmp(axis,axis{iaxis}));
                 
                 % Get stim data
-                times  = fetchn(vis.Trial * vis.ScanConditions & key & icond,'flip_times');
+                times  = fetchn(stimulus.Trial * stimulus.Condition & key & icond,'flip_times');
                 
                 % find trace segments
                 dataCell = cell(1,length(times));
@@ -157,9 +143,11 @@ classdef OptImageBar < dj.Relvar & dj.AutoPopulate
             % MF 2012, MF 2016
             
             params.sigma = 2; %sigma of the gaussian filter
-            params.saturation = 1; % saturation scaling 
-            params.exp = []; % exponent factor of rescaling, 1-2 works 
+            params.saturation = 1; % saturation scaling
+            params.exp = []; % exponent factor of rescaling, 1-2 works
             params.shift = 0; % angular shift for improving map presentation
+            params.subplot = true;
+            params.vcontrast = 1;
             params.figure = [];
             
             params = getParams(params,varargin);
@@ -172,7 +160,7 @@ classdef OptImageBar < dj.Relvar & dj.AutoPopulate
             if isempty(keys); disp('Nothing found!'); return; end
             
             for ikey = 1:length(keys)
-             
+                
                 % get data
                 [imP, vessels, imA] = fetch1(obj & keys(ikey),'ang','vessels','amp');
                 
@@ -197,10 +185,10 @@ classdef OptImageBar < dj.Relvar & dj.AutoPopulate
                 imA(imA>prctile(imA(:),99)) = prctile(imA(:),99);
                 
                 % create the hsv map
-                h = imgaussian(normalize(imP),params.sigma);
-                s = imgaussian(normalize(imA),params.sigma)*params.saturation;
+                h = imgaussfilt(normalize(imP),params.sigma);
+                s = imgaussfilt(normalize(imA),params.sigma)*params.saturation;
                 v = ones(size(imA));
-                if ~isempty(vessels); v = normalize(vessels);end
+                if ~isempty(vessels); v = normalize(abs(normalize(vessels).^params.vcontrast));end
                 
                 if nargout>0
                     iH{ikey} = h;
@@ -219,7 +207,11 @@ classdef OptImageBar < dj.Relvar & dj.AutoPopulate
                     % plot
                     angle_map = hsv2rgb(cat(3,h,cat(3,ones(size(s)),ones(size(v)))));
                     combined_map = hsv2rgb(cat(3,h,cat(3,s,v)));
-                    imshowpair(angle_map,combined_map,'montage')
+                    if params.subplot
+                        imshowpair(angle_map,combined_map,'montage')
+                    else
+                        imshow(angle_map)
+                    end
                 end
             end
             
@@ -239,33 +231,81 @@ classdef OptImageBar < dj.Relvar & dj.AutoPopulate
             if isempty(keys); disp('Nothing found!'); return; end
             
             for ikey = 1:length(keys)
-            
+                
                 [h,s,v] = plot(obj & keys(ikey),params);
-
+                
+                % construct large image
                 im = ones(size(h,1)*2,size(h,2)*2,3);
-
-                im(1:size(h,1),1:size(h,2),1) = h;
-                im(1:size(h,1),1:size(h,2),2) = s;
-                im(1:size(h,1),1:size(h,2),3) = v;
-
-                im(size(h,1)+1:end,1:size(h,2),1) = zeros(size(v));
-                im(size(h,1)+1:end,1:size(h,2),2) = zeros(size(v));
-                im(size(h,1)+1:end,1:size(h,2),3) = v;
-
-                im(1:size(h,1),size(h,2)+1:end,1) = h;
-                im(1:size(h,1),size(h,2)+1:end,2) = ones(size(h));
-                im(1:size(h,1),size(h,2)+1:end,3) = ones(size(h));
-
-                im(size(h,1)+1:end,size(h,2)+1:end,1) = zeros(size(v));
-                im(size(h,1)+1:end,size(h,2)+1:end,2) = zeros(size(v));
-                im(size(h,1)+1:end,size(h,2)+1:end,3) = ones(size(h));
-
+                im(1:size(h,1),1:size(h,2),:) = cat(3,zeros(size(v)),zeros(size(v)),v);
+                im(size(h,1)+1:end,1:size(h,2),:) = cat(3,zeros(size(v)),zeros(size(v)),v);
+                im(1:size(h,1),size(h,2)+1:end,:) = cat(3,h,s,v);
+                im(size(h,1)+1:end,size(h,2)+1:end,:) =  cat(3,h,ones(size(h)),ones(size(h)));
+                
+                % plot
                 figure
                 set(gcf,'NumberTitle','off','name',sprintf(...
-                        'OptMap direction:%s animal:%d session:%d scan:%d',...
-                        keys(ikey).axis,keys(ikey).animal_id,keys(ikey).session,keys(ikey).scan_idx))
+                    'OptMap direction:%s animal:%d session:%d scan:%d',...
+                    keys(ikey).axis,keys(ikey).animal_id,keys(ikey).session,keys(ikey).scan_idx))
                 imshow(hsv2rgb(im))
+                
+                % contour
+                hold on
+                contour(h,'showtext','on','linewidth',1,'levellist',0:0.05:1)
             end
+        end
+        
+        function locateRF(obj,varargin)
+            
+            params.grad_gauss = 1;
+            params.scale = 5;
+            params.exp = 1;
+            
+            params = getParams(params,varargin);
+            
+            % find horizontal & verical map keys
+            Hkeys = fetch(map.OptImageBar & (experiment.Session & obj) & 'axis="horizontal"');
+            Vkeys = fetch(map.OptImageBar & (experiment.Session & obj) & 'axis="vertical"');
+            
+            % fetch horizontal & vertical maps
+            [Hor(:,:,1),Hor(:,:,2),Hor(:,:,3)] = plot(map.OptImageBar & Hkeys(end),'exp',params.exp);
+            [Ver(:,:,1),Ver(:,:,2),Ver(:,:,3)] = plot(map.OptImageBar & Vkeys(end),'exp',params.exp);
+            
+            % get vessels
+            vessels = normalize(Hor(:,:,3));
+            
+            % filter gradients
+            H = roundall(normalize(imgaussfilt(Hor(:,:,1),params.grad_gauss))*params.scale,0.1);
+            V = roundall(normalize(imgaussfilt(Ver(:,:,1),params.grad_gauss))*params.scale,0.1);
+            
+            % plot maps
+            figure
+            subplot(2,3,6)
+            image(hsv2rgb(Ver)); axis image; axis off; title('Vertical Retinotopy')
+            subplot(2,3,3)
+            image(hsv2rgb(Hor)); axis image; axis off; title('Horizontal Retinotopy')
+            hold on
+            subplot(2,3,[1 2 4 5])
+            hold on
+            image(repmat(vessels,1,1,3)); axis image
+            set(gca,'ydir','reverse')
+            
+            set (gcf, 'WindowButtonMotionFcn', {@mouseMove,H,V});
+            
+            function mouseMove (object, eventdata,H,V)
+                global handles
+                try
+                    delete(handles)
+                    
+                    C = get (gca, 'CurrentPoint');
+                    title(gca, ['(X,Y) = (', num2str(C(1,1)), ', ',num2str(C(1,2)), ')']);
+                    Hv = H(round(C(1,2)),round(C(1,1)));
+                    Vv = V(round(C(1,2)),round(C(1,1)));
+                    I = find(H'==Hv & V'==Vv);
+                    [x,y] = ind2sub(size(H),I);
+                    handles = plot(x,y,'.r');
+                end
+            end
+            
         end
     end
     
