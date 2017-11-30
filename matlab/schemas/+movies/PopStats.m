@@ -2,30 +2,54 @@
 # Population analyis for each clip
 -> fuse.ScanDone
 -> stimulus.Clip
+-> movies.PopStatsOpt
 ---
-act_mean             : float      #  mean activity
+mean             : float      #  mean activity
+reliability      : float      #  variance explained
+mi               : float      #  mutual information - pairwize
+rmi              : float      #  randomized mutual information
+ntrials          : tinyint    #  number of trials
 %}
 
 classdef PopStats < dj.Imported
     
-    methods
-        keySource = aggr(fuse.ScanDone * stimulus.Clip & (stimulus.Movie & 'movie_class="cinema"'), stimulus.Trial, 'count(*)->n') & 'n>=2'
+    properties
+        keySource = aggr( movies.PopStatsOpt * fuse.ScanDone * stimulus.Clip & ...
+            (stimulus.Movie & 'movie_class="cinema"'), stimulus.Trial, 'count(*)->n') & 'n>=2'
     end
     
     methods(Access=protected)
-        function makeTuples(obj,key) %create clips
+        function makeTuples(self,key) %create clips
             
+            % get data
+            Data = getData(movies.PopStats,key);
             
+            tuple = key;
+            tuple.ntrials = size(Data,3);
             
+            % randomize Data
+            rData = Data(:,:);
+            ridx = randperm(size(rData,2));
+            for i  = 1:1000;ridx = ridx(randperm(size(rData,2)));end
+            rData = reshape(rData(:,ridx),size(Data));
+            
+            % mutual information
+            tuple.mi = nnclassRawSV(Data);
+            tuple.rmi = nnclassRawSV(rData);
+            
+            % reliability
+            tuple.reliability  = reliability(Data);
+            
+            % mean
+            tuple.mean = mean(Data(:));
+            
+            % insert
+            self.insert(tuple)
         end
     end
     
     methods
-        function Data = getData(self,key,bin)
-            
-            if nargin<3
-                bin = fetch1(obj.PopStatOpt & key, 'binsize');
-            end
+        function Data = getData(~,key)
 
             % get traces
             [Traces, caTimes] = getAdjustedSpikes(fuse.ActivityTrace & key,'soma');
@@ -39,10 +63,9 @@ classdef PopStats < dj.Imported
             
             % subsample traces
             fps = 1/median(diff(flip_times(1,:)));
-            d = max(1,round(bin/1000*fps));
+            d = max(1,round(key.bin/1000*fps));
             Data = convn(permute(X(flip_times - caTimes(1)),[2 3 1]),ones(d,1)/d,'same');
-            Data = Data(1:d:end,:,:);            
+            Data = permute(Data(1:d:end,:,:),[2 1 3]);
         end
     end
-    
 end
