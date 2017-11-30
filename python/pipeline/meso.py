@@ -1088,6 +1088,13 @@ class MaskClassification(dj.Computed):
         """
 
     def _make_tuples(self, key):
+        # Skip axonal scans
+        target = (SegmentationTask() & key).fetch1('compartment')
+        if key['classification_method'] == 2 and target != 'soma':
+            print('Warning: Skipping {}. Automatic classification works only with somatic '
+                  'scans'.format(key))
+            return
+
         # Get masks
         image_height, image_width = (ScanInfo.Field() & key).fetch1('px_height', 'px_width')
         mask_ids, pixels, weights = (Segmentation.Mask() & key).fetch('mask_id', 'pixels', 'weights')

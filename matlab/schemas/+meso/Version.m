@@ -1,11 +1,11 @@
 %{
 # versions for the meso pipeline
-meso_version                : smallint                      # 
+-> shared.PipelineVersion
 ---
 description                 : varchar(256)                  # any notes on this version
 date=CURRENT_TIMESTAMP      : timestamp                     # automatic
 %}
 
 
-classdef Version < dj.Lookup
+classdef Version < dj.Manual
 end

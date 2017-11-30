@@ -1,8 +1,8 @@
 %{
 # difference between 99 and 1 percentile across time
 -> reso.Quality
--> `pipeline_shared`.`#slice`
--> `pipeline_shared`.`#channel`
+-> shared.Field
+-> shared.Channel
 ---
 contrasts                   : longblob                      # 
 %}
@@ -14,7 +14,7 @@ classdef QualityContrast < dj.Computed
 
 		function makeTuples(self, key)
 		%!!! compute missing fields for key here
-			 %self.insert(key)
+% 			 self.insert(key)
 		end
 	end
 
