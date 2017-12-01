@@ -2,6 +2,7 @@
 from scipy import interpolate  as interp
 from scipy import signal
 import numpy as np
+import scipy.ndimage as ndi
 
 import scipy.ndimage as ndi
 
@@ -117,7 +118,7 @@ def compute_motion_shifts(scan, template, in_place=True, num_threads=8,
 
         # Get best shift
         shifts = np.unravel_index(np.argmax(shifted_cross_power), shifted_cross_power.shape)
-        shifts = utils._interpolate(shifted_cross_power, shifts)
+        shifts = utils._interpolate(shifted_cross_power, shifts, rad=3)
 
         # Map back to deviations from center
         y_shifts[i] = shifts[0] - image_height // 2
@@ -262,8 +263,7 @@ def correct_motion(scan, xy_shifts, in_place=True):
     yx_shifts[np.logical_or(np.isnan(yx_shifts[:, 0]), np.isnan(yx_shifts[:, 1]))] = 0
     for i, yx_shift in enumerate(yx_shifts):
         image = reshaped_scan[:, :, i].copy()
-        ndi.interpolation.shift(image, -yx_shift, output=reshaped_scan[:, :, i], cval=0,
-                                order=1)
+        ndi.interpolation.shift(image, -yx_shift, output=reshaped_scan[:, :, i], order=1)
 
     scan = np.reshape(reshaped_scan, original_shape)
     return scan
