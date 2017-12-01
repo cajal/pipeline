@@ -708,7 +708,7 @@ class CorrectedStack(dj.Computed):
         :returns The stack: a (num_slices, image_height, image_width) array.
         :rtype: np.array (float32)
         """
-        slice_rel = (CorrectedStack.Slice() & self.proj() & {'channel': channel})
+        slice_rel = (CorrectedStack.Slice() & self & {'channel': channel})
         slices = slice_rel.fetch('slice', order_by='islice')
         return np.stack(slices)
 
