@@ -8,7 +8,8 @@ def map_frames(f, scan, field_id, y, x, channel, kwargs={}, chunk_size_in_GB=1,
     """ Apply function f to chunks of the scan (divided in the temporal axis).
 
     :param function f: Function that receives two positional arguments:
-        chunks: A queue with (slices, scan_chunk) tuples.
+        chunks: A queue with (frames, scan_chunk) tuples. frames is a slice object,
+            scan_chunks is a [height, width, num_frames] object
         results: A list to accumulate new results.
     :param Scan scan: An scan object as returned by scanreader.
     :param int field_id: Which field to use: 0-indexed.
@@ -16,8 +17,8 @@ def map_frames(f, scan, field_id, y, x, channel, kwargs={}, chunk_size_in_GB=1,
     :param slice x: How to slice the scan in x.
     :param int channel: Which channel to read.
     :param dict kwargs: Dictionary with optional kwargs passed to f.
-    :param int num_processes: Number of processes to use for mapping.
     :param int chunk_size_in_GB: Desired size of each chunk.
+    :param int num_processes: Number of processes to use for mapping.
     :param int queue_size: Maximum size of the queue used to store chunks.
 
     :returns list results: List with results per chunk of scan. Order is not guaranteed.
@@ -232,6 +233,161 @@ def parallel_quality_metrics(chunks, results):
 
         # Save results
         results.append((mean_intensity, contrast, mean_frame))
+
+
+
+
+
+def map_fields(f, scan, field_ids, channel, y=slice(None), x=slice(None),
+               frames=slice(None), kwargs={}, num_processes=8, queue_size=8):
+    """ Apply function f to each field in scan
+
+    :param function f: Function that receives two positional arguments:
+        fields: A queue with (field_idx, chunk) tuples. field_idx is an integer, chunk is
+            a [height, width, frames] array.
+        results: A list to accumulate new results.
+    :param Scan scan: An scan object as returned by scanreader.
+    :param field_ids: List of fields where f will be applied.
+    :param slice y: How to slice the scan in y.
+    :param slice x: How to slice the scan in x.
+    :param int channel: Which channel to read.
+    :param slice frames: Frames to pass to f.
+    :param dict kwargs: Dictionary with optional kwargs passed to f.
+    :param int num_processes: Number of processes to use for mapping.
+    :param int queue_size: Maximum size of the queue used to store chunks.
+
+    :returns list results: List with results per field. Order is not guaranteed.
+    """
+    import multiprocessing as mp
+
+    # Basic checks
+    num_processes = min(num_processes, mp.cpu_count() - 1)
+    print('Using', num_processes, 'processes')
+
+    # Create a Queue to put in new chunks and a list for results
+    manager = mp.Manager()
+    chunks = manager.Queue(maxsize=queue_size)
+    results = manager.list()
+
+    # Start workers (will lock until data appears in chunks)
+    pool = []
+    for i in range(num_processes):
+        p = mp.Process(target=f, args=(chunks, results), kwargs=kwargs)
+        p.start()
+        pool.append(p)
+
+    # Produce data
+    for i, field_id in enumerate(field_ids):
+        chunks.put((i, scan[field_id, y, x, channel, frames])) # field_idx, field tuples
+
+    # Queue STOP signal
+    for i in range(num_processes):
+        chunks.put((None, None))
+
+    # Wait for processes to finish
+    for p in pool:
+        p.join()
+
+    return list(results)
+
+
+def parallel_motion_stack(chunks, results, raster_phase, fill_fraction, window_size,
+                          apply_anscombe=True):
+    """ Compute motion correction shifts to field in scan.
+
+    Function to run in each process. Consumes input from chunks and writes results to
+    results. Stops when stop signal is received in chunks.
+
+    :param queue fields: Queue with inputs to consume.
+    :param list results: Where to put results.
+    :param float raster_phase: Raster phase used for raster correction.
+    :param float fill_fraction: Fill fraction used for raster correction.
+    :param window_size int: Size of the window used to smooth shifts.
+    :param bool apply_anscombe: Whether to apply anscombe transofrm to the input.
+
+    :returns: (field_id, y_shifts, x_shifts) tuples.
+    """
+    from scipy import ndimage
+
+    while True:
+        # Read next chunk (process locks until something can be read)
+        field_idx, field = chunks.get()
+        if field is None:  # stop signal when all chunks have been processed
+            return
+
+        print(time.ctime(), 'Processing field:', field_idx)
+
+        # Apply anscombe transform
+        field = field.astype(np.float32, copy=False)
+        if apply_anscombe:
+            field = 2 * np.sqrt(field - np.min(field, axis=(0, 1)) + 3 / 8)
+
+        # Correct raster
+        if abs(raster_phase) > 1e-7:
+            field = galvo_corrections.correct_raster(field, raster_phase, fill_fraction)
+
+        # Compute shifts
+        corrected = field
+        for j in range(3):
+            # Create template from previously corrected
+            template = ndimage.gaussian_filter(np.mean(corrected, axis=-1), 0.6)
+
+            # Compute motion correction shifts
+            res = galvo_corrections.compute_motion_shifts(field, template, in_place=False,
+                fix_outliers=False, num_threads=1, smoothing_window_size=window_size)
+
+            # Center motions around zero
+            y_shifts = res[0] - res[0].mean()
+            x_shifts = res[1] - res[1].mean()
+
+            # Apply shifts
+            xy_shifts = np.stack([x_shifts, y_shifts])
+            corrected = galvo_corrections.correct_motion(field, xy_shifts, in_place=False)
+
+        # Add to results
+        results.append((field_idx, y_shifts, x_shifts))
+
+
+def parallel_correct_stack(chunks, results, raster_phase, fill_fraction, y_shifts,
+                           x_shifts, apply_anscombe=False):
+    """ Apply corrections in parallel and return mean of corrected field over time.
+
+    :param queue fields: Queue with inputs to consume.
+    :param list results: Where to put results.
+    :param float raster_phase: Raster phase used for raster correction.
+    :param float fill_fraction: Fill fraction used for raster correction.
+    :param np.array y_shifts: Array with shifts in y for all fields.
+    :param np.array x_shifts: Array with shifts in x for all fields
+    :param bool apply_anscombe: Whether to apply anscombe transofrm to the input.
+
+    :returns: (field_id, corrected_field) tuples.
+    """
+    while True:
+        # Read next chunk (process locks until something can be read)
+        field_idx, field = chunks.get()
+        if field is None:  # stop signal when all chunks have been processed
+            return
+
+        print(time.ctime(), 'Processing field:', field_idx)
+
+        # Apply anscombe transform
+        field = field.astype(np.float32, copy=False)
+        if apply_anscombe:
+            field = 2 * np.sqrt(field - np.min(field, axis=(0, 1)) + 3 / 8)
+
+        # Correct raster
+        if abs(raster_phase) > 1e-7:
+            field = galvo_corrections.correct_raster(field, raster_phase, fill_fraction)
+
+        # Correct motion
+        xy_shifts = np.stack([x_shifts[field_idx], y_shifts[field_idx]])
+        corrected = galvo_corrections.correct_motion(field, xy_shifts)
+        averaged = np.mean(corrected, axis=-1) if corrected.ndim > 2 else corrected
+
+        # Add to results
+        results.append((field_idx, averaged))
+
+
 
 
 
