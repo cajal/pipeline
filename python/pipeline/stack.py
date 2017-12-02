@@ -218,13 +218,13 @@ class RasterCorrection(dj.Computed):
             roi = scanreader.read_scan(roi_filename)
 
             # Compute some parameters
-            skip_fields = max(1, int(round(len(field_ids) * 0.15)))
+            skip_fields = max(1, int(round(len(field_ids) * 0.10)))
             taper = np.sqrt(np.outer(signal.tukey(image_height, 0.4),
                                      signal.tukey(image_width, 0.4)))
 
             # Compute raster phase for each slice and take the median
             raster_phases = []
-            for field_id in field_ids[skip_fields: -skip_fields]:
+            for field_id in field_ids[skip_fields: -2*skip_fields]:
                 # Create template (average frame tapered to avoid edge artifacts)
                 slice_ = roi[field_id, :, :, correction_channel, :].astype(np.float32, copy=False)
                 anscombed = 2 * np.sqrt(slice_ - slice_.min(axis=(0, 1)) + 3 / 8) # anscombe transform
