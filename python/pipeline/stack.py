@@ -436,62 +436,44 @@ class Stitching(dj.Computed):
             rois.append(stitching.StitchedROI(corrected_roi, x=px_x, y=px_y,
                                               z=roi_tuple['roi_z'], id_=roi_tuple['roi_id']))
 
+        def join_rows(rois_):
+            """ Iteratively join all rois that overlap in the same row."""
+            sorted_rois = sorted(rois_, key=lambda roi: (roi.x, roi.y))
+
+            prev_num_rois = float('inf')
+            while len(sorted_rois) < prev_num_rois:
+                prev_num_rois = len(sorted_rois)
+
+                for left, right in itertools.combinations(sorted_rois, 2):
+                    if left.is_aside_to(right):
+                        left_xs = []
+                        left_ys = []
+                        for l, r in zip(left.slices, right.slices):
+                            expected_delta_x = r.x - l.x
+                            expected_delta_y = r.y - l.y
+                            delta_x, delta_y = stitching.linear_stitch(l.slice, r.slice,
+                                                                       expected_delta_x,
+                                                                       expected_delta_y)
+                            left_xs.append(r.x - delta_x)
+                            left_ys.append(r.y - delta_y)
+                        right.join_with(left, left_xs, left_ys)
+                        sorted_rois.remove(left)
+                        break # restart joining
+
+            return sorted_rois
+
         # Stitch overlapping rois recursively
         print('Computing stitching parameters...')
-        two_rois_joined = True
-        while two_rois_joined:
-            two_rois_joined = False
+        prev_num_rois = float('Inf') # to enter the loop at least once
+        while len(rois) < prev_num_rois:
+            prev_num_rois = len(rois)
 
             # Join rows
-            for roi1, roi2 in itertools.combinations(rois, 2):
-                if roi1.is_aside_to(roi2):
-                    if roi1.left_or_right(roi2) == stitching.Position.LEFT: # 2|1
-                        left, right = roi2, roi1
-                    else: # 1|2
-                        left, right = roi1, roi2
-
-                    # Compute stitching params, join them and update roi list
-                    right_xs = []
-                    right_ys = []
-                    for left_slice, right_slice in zip(left.slices, right.slices):
-                        expected_overlap = ((left_slice.x + left_slice.width / 2) -
-                                            (right_slice.x - right_slice.width / 2))
-                        delta_x, delta_y = stitching.linear_stitch(left_slice.slice,
-                                                                   right_slice.slice,
-                                                                   expected_overlap)
-                        right_xs.append(left_slice.x + delta_x)
-                        right_ys.append(left_slice.y + delta_y)
-                    left.join_with(right, right_xs, right_ys)
-                    rois.remove(right)
-
-                    two_rois_joined=True
-                    break # restart joining
+            rois = join_rows(rois)
 
             # Join columns
             [roi.rot90() for roi in rois]
-            for roi1, roi2 in itertools.combinations(rois, 2):
-                if roi1.is_aside_to(roi2):
-                    if roi1.left_or_right(roi2) == stitching.Position.LEFT: # 2|1
-                        left, right = roi2, roi1
-                    else: # 1|2
-                        left, right = roi1, roi2
-
-                    # Compute stitching params, join them and update roi list
-                    right_xs = []
-                    right_ys = []
-                    for left_slice, right_slice in zip(left.slices, right.slices):
-                        expected_overlap = ((left_slice.x + left_slice.width / 2) -
-                                            (right_slice.x - right_slice.width / 2))
-                        delta_x, delta_y = stitching.linear_stitch(left_slice.slice,
-                                                                   right_slice.slice,
-                                                                   expected_overlap)
-                        right_xs.append(left_slice.x + delta_x)
-                        right_ys.append(left_slice.y + delta_y)
-                    left.join_with(right, right_xs, right_ys)
-                    rois.remove(right)
-
-                    two_rois_joined=True
-                    break # restart joining
+            rois = join_rows(rois)
             [roi.rot270() for roi in rois]
 
         # Compute slice-to slice alignment
@@ -624,46 +606,41 @@ class CorrectedStack(dj.Computed):
                 rois.append(stitching.StitchedROI(corrected_roi, x=xs, y=ys, z=roi_tuple['stitch_z'],
                                                   id_=roi_tuple['roi_id']))
 
-            # Stitch all rois together (this is convoluted because smooth blending in
-            # join_with assumes the second argument is to the right of the first)
-            two_rois_joined = True
-            while two_rois_joined:
-                two_rois_joined = False
+            def join_rows(rois_):
+                """ Iteratively join all rois that overlap in the same row."""
+                sorted_rois = sorted(rois_, key=lambda roi: (roi.x, roi.y))
+
+                prev_num_rois = float('inf')
+                while len(sorted_rois) < prev_num_rois:
+                    prev_num_rois = len(sorted_rois)
+
+                    for left, right in itertools.combinations(sorted_rois, 2):
+                        if left.is_aside_to(right):
+                            left_xs = [s.x for s in left.slices]
+                            left_ys = [s.y for s in left.slices]
+                            right.join_with(left, left_xs, left_ys)
+                            sorted_rois.remove(left)
+                            break # restart joining
+
+                return sorted_rois
+
+            # Stitch all rois together. This is convoluted because smooth blending in
+            # join_with assumes rois are next to (not below or atop of) each other
+            print('Computing stitching parameters...')
+            prev_num_rois = float('Inf') # to enter the loop at least once
+            while len(rois) < prev_num_rois:
+                prev_num_rois = len(rois)
 
                 # Join rows
-                for roi1, roi2 in itertools.combinations(rois, 2):
-                    if roi1.is_aside_to(roi2):
-                        if roi1.left_or_right(roi2) == stitching.Position.LEFT: # 2|1
-                            left, right = roi2, roi1
-                        else: # 1|2
-                            left, right = roi1, roi2
-
-                        right_xs, right_ys = [s.x for s in right.slices], [s.y for s in right.slices]
-                        left.join_with(right, right_xs, right_ys)
-                        rois.remove(right)
-
-                        two_rois_joined=True
-                        break # restart joining
+                rois = join_rows(rois)
 
                 # Join columns
                 [roi.rot90() for roi in rois]
-                for roi1, roi2 in itertools.combinations(rois, 2):
-                    if roi1.is_aside_to(roi2):
-                        if roi1.left_or_right(roi2) == stitching.Position.LEFT: # 2|1
-                            left, right = roi2, roi1
-                        else: # 1|2
-                            left, right = roi1, roi2
-
-                        right_xs, right_ys = [s.x for s in right.slices], [s.y for s in right.slices]
-                        left.join_with(right, right_xs, right_ys)
-                        rois.remove(right)
-
-                        two_rois_joined=True
-                        break # restart joining
+                rois = join_rows(rois)
                 [roi.rot270() for roi in rois]
 
             # Check stitching went alright
-            if len(rois) != 1:
+            if len(rois) > 1:
                 msg = 'ROIs for volume {} could not be stitched properly'.format(key)
                 raise PipelineException(msg)
             stitched = rois[0]

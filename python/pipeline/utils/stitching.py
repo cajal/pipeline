@@ -39,7 +39,7 @@ class StitchedSlice():
         :param StitchedSlice other: The other slice.
         :param float xs, ys: Coordinates of the other slices.
         :param bool smooth_blend: Whether to taper edges for a smoother blending. It
-            assumes other is to the right of self, i.e., |self|other|.
+            assumes other is aside self (not above or below).
         """
         # Compute size of the joint ROI
         x_min = min(self.x - self.width / 2, x - other.width / 2)
@@ -52,14 +52,17 @@ class StitchedSlice():
 
         # Taper sides for smoother blending
         if smooth_blend:
-            taper_size = int(round((self.x + self.width / 2) - (x - other.width / 2))) # overlap
-            if taper_size < 1:
-                raise ValueError('Smooth blending expects input ROI to be to the right '
-                                 'of self: left.join_with(right)')
-            taper = signal.hann(2 * taper_size)[:taper_size]
+            overlap = int(round((self.width + other.width) -
+                                (max(self.x + self.width / 2, x + other.width / 2) -
+                                 min(self.x - self.width / 2, x - other.width / 2))))
+            taper = signal.hann(2 * overlap)[:overlap]
 
-            self.mask[..., -taper_size:] *= (1 - taper)
-            other.mask[..., :taper_size] *= taper
+            if self.left_or_right(other) == Position.LEFT: # other | self
+                self.mask[..., :overlap] *= taper
+                other.mask[..., -overlap:] *= (1 - taper)
+            else:
+                other.mask[..., :overlap] *= taper
+                self.mask[..., -overlap:] *= (1 - taper)
 
         # Initialize empty (big) slices
         mask1 = np.zeros([output_height, output_width], dtype=np.float32)
@@ -160,11 +163,14 @@ class StitchedROI():
 
         return volume
 
-    def left_or_right(self, other, rel_tol=0.1):
+    def left_or_right(self, other, rel_tol=0.1, minimum_overlap=25):
         """ Whether the other ROI is to the right, left or noncontiguous to self.
 
         To be contiguous, ROIs need to start at the same z (up to some tolerance), overlap
         in one of the two sides and have equal depth and height (up to some tolerance).
+
+        :param rel_tol: Percentage of depth/height that z/y could be off.
+        :param minimum_overlap: Minimum required amount of overlap in pixels.
 
         :returns: Position.RIGHT/Position.LEFT if roi is to the right/left of the volume.
             Position.NONCONTIGUOUS, otherwise
@@ -175,8 +181,8 @@ class StitchedROI():
         same_height = (abs(self.height - other.height) < rel_tol * self.height and
                       abs(self.y - other.y) < rel_tol * self.height)
         overlap = (max(self.x + self.width / 2, other.x + other.width / 2) -
-                   min(self.x - self.width / 2, other.x - other.width / 2) <
-                   self.width + other.width - 1e-7) # epsilon to avoid contiguous nonoverlapping rois
+                   min(self.x - self.width / 2, other.x - other.width / 2) +
+                   minimum_overlap < self.width + other.width)
         if same_depth and same_height and overlap:
             if (self.x + self.width / 2) > (other.x - other.width / 2):
                 position = Position.RIGHT
@@ -223,7 +229,7 @@ class StitchedROI():
 
 
 
-def linear_stitch(left, right, expected_overlap):
+def linear_stitch(left, right, expected_delta_x, expected_delta_y):
     """ Compute offsets to stitch two side-by-side volumes via cross-correlation.
 
     Subpixel shifts are calculated per depth and the median is returned.
@@ -231,14 +237,16 @@ def linear_stitch(left, right, expected_overlap):
     Arguments:
     :param left: Slice (height x width) to be stitched in the left.
     :param right: Slice (height x width) to be stitched in the right.
-    :param float expected_overlap: Number of pixels of expected overlap.
+    :param float expected_delta_x: Expected distance between center of left to right.
+    :param float expected_delta_y: Expected distance between center of left to right.
 
     :returns: (delta_x, delta_y). Distance between center of right ROI and left ROI after
         stitching (right_center - left_center)
     """
-    # Get original dimensions
+    # Get some params
     right_height, right_width = right.shape
     left_height, left_width = left.shape
+    expected_overlap = left_width / 2 + right_width / 2 - expected_delta_x
 
     # Drop some rows, columns to avoid artifacts
     skip_columns = int(round(0.1 * expected_overlap)) # 10% of expected overlap
@@ -250,6 +258,8 @@ def linear_stitch(left, right, expected_overlap):
     # Get minimum height and width
     min_height = min(left.shape[0], right.shape[0])
     min_width = min(left.shape[1], right.shape[1])
+
+    # TODO:Create a mask to send to galvo_corrections
 
     # Cut strips of expected overlap plus some slack
     overlap = int(round(expected_overlap + 0.05 * min_width))
