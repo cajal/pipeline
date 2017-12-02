@@ -56,7 +56,6 @@ class ScanSet(Resolver, dj.Computed):
     """
     @property
     def key_source(self):
-        assert StrictVersion(dj.__version__) >= StrictVersion('0.9.0'), "Please upgrade datajoint to version 0.9.0+"
         return reso.ScanSet().proj() + meso.ScanSet().proj()
 
     @property
@@ -106,7 +105,6 @@ class Activity(Resolver, dj.Computed):
     """
     @property
     def key_source(self):
-        assert StrictVersion(dj.__version__) >= StrictVersion('0.9.0'), "Please upgrade datajoint to version 0.9.0+"
         return reso.Activity().proj() + meso.Activity().proj()
 
     @property
@@ -151,7 +149,6 @@ class ScanDone(Resolver, dj.Computed):
     """
     @property
     def key_source(self):
-        assert StrictVersion(dj.__version__) >= StrictVersion('0.9.0'), "Please upgrade datajoint to version 0.9.0+"
         return reso.ScanDone().proj() + meso.ScanDone().proj()
 
     @property
