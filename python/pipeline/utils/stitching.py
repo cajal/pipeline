@@ -170,12 +170,17 @@ class StitchedROI():
             Position.NONCONTIGUOUS, otherwise
         """
         position = Position.NONCONTIGUOUS
-        if (self.depth == other.depth and abs(self.z - other.z) < rel_tol * self.depth
-            and abs(self.y - other.y) < rel_tol * self.height and
-            abs(self.height - other.height) < rel_tol * self.height):
-            if (other.x - other.width / 2) < (self.x + self.width / 2):
+        same_depth = (self.depth == other.depth and
+                      abs(self.z - other.z) < rel_tol * self.depth)
+        same_height = (abs(self.height - other.height) < rel_tol * self.height and
+                      abs(self.y - other.y) < rel_tol * self.height)
+        overlap = (max(self.x + self.width / 2, other.x + other.width / 2) -
+                   min(self.x - self.width / 2, other.x - other.width / 2) <
+                   self.width + other.width - 1e-7) # epsilon to avoid contiguous nonoverlapping rois
+        if same_depth and same_height and overlap:
+            if (self.x + self.width / 2) > (other.x - other.width / 2):
                 position = Position.RIGHT
-            elif (other.x + other.width / 2) > (self.x - self.width / 2):
+            else:
                 position = Position.LEFT
 
         return position
