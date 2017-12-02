@@ -307,6 +307,168 @@ classdef OptImageBar < dj.Imported
             end
             
         end
+        
+                function [area_map, grad_diff, vessels] = extractAreas(obj,varargin)
+            %%
+            params.init_gauss = 10;
+            params.grad_gauss = 0.1; % initial map gauss filter in sd parameter
+            params.diff_gauss =10; % gradient diff map gauss filter in sd parameter
+            params.diff_open = 10; % gradient diff imopen param
+            params.sign_thr = 1; % threshold as standard deviations of signmap
+            params.step = .01; % mask expand step parameter
+            params.min_area_size = 1000;  % min area size in pixels
+            params.final_erode = 10;
+            params.final_dilate = 10;
+            params.exp = 2;
+            
+            params = getParams(params,varargin);
+            
+            % find horizontal & verical map keys
+            Hkeys = fetch(map.OptImageBar & (experiment.Session & obj) & 'axis="horizontal"');
+            Vkeys = fetch(map.OptImageBar & (experiment.Session & obj) & 'axis="vertical"');
+            
+            % get vessels
+            vessels = normalize(fetch1(map.OptImageBar & Hkeys(end),'vessels'));
+            
+            % fetch horizontal & vertical maps
+            [H, A1] = fetch1(map.OptImageBar & Hkeys(end),'ang','amp');
+            [Hor(:,:,1),Hor(:,:,2),Hor(:,:,3)] = plot(map.OptImageBar & Hkeys(end),'exp',params.exp,'sigma',params.init_gauss);
+            [V,A2] = fetch1(map.OptImageBar & Vkeys(end),'ang','amp');
+            [Ver(:,:,1),Ver(:,:,2),Ver(:,:,3)] = plot(map.OptImageBar & Vkeys(end),'exp',params.exp,'sigma',params.init_gauss);
+            A = (A1+A2)/2;
+            
+            % calculate gradients
+            %             [~,dH] = imgradient(H);
+            %             [~,dV] = imgradient(V);
+            [~,dH] = imgradient(Hor(:,:,1));
+            [~,dV] = imgradient(Ver(:,:,1));
+            
+            % filter gradients
+            dH = imgaussfilt(dH,params.grad_gauss);
+            dV = imgaussfilt(dV,params.grad_gauss);
+            grad_diff = imopen(imgaussfilt(sind(dH  - dV),params.diff_gauss),strel('disk',params.diff_open));
+            
+            % plot maps
+            clf;%figure
+            subplot(2,2,1)
+            imagesc(hsv2rgb(Hor)); axis image; axis off; title('Horizontal Retinotopy')
+            subplot(2,2,2)
+            imagesc(hsv2rgb(Ver)); axis image; axis off; title('Vertical Retinotopy')
+            subplot(2,2,3)
+            imagesc(grad_diff); axis image; axis off; title('Visual Field Sign Map'); colormap jet
+            
+            %% filter & expand masks
+            filtered_grad_diff = zeros(size(grad_diff));
+            imStd = std(grad_diff(:));
+            filtered_grad_diff(grad_diff>imStd*params.sign_thr)= 1;
+            filtered_grad_diff(grad_diff<-imStd*params.sign_thr)= -1;
+            SE = strel('arbitrary',[0 1 0;1 1 1;0 1 0]); %%% parameter
+            SEMAX = strel('arbitrary',[0 0 1 0 0;0 1 1 1 0;1 1 1 1 1;0 1 1 1 0;0 0 1 0 0]); %%% parameter
+            [all_areas, n] = bwlabel(filtered_grad_diff);
+            for iThr = 1:-params.step:0.05
+                n = max(all_areas(:));
+                thr = imStd*iThr;
+                for iArea = 1:n
+                    one_area = imfill(imdilate(all_areas==iArea,SE),'holes');
+                    all_areas(one_area & all_areas==0 & abs(grad_diff)>thr) = iArea;
+                end
+                lmax = imdilate(imbinarize(all_areas),SEMAX);
+                one_area = bwlabel(abs(grad_diff)>thr & lmax == 0);
+                stats = regionprops(one_area,'area');
+                un = unique(one_area(:));
+                for i = un(un>0)'
+                    if stats(i).Area<params.min_area_size
+                        one_area(one_area==i) = 0;
+                    end
+                end
+                one_area = bwlabel(one_area);
+                if any(one_area(:))
+                    all_areas(logical(one_area)) = one_area(logical(one_area))+n;
+                end
+            end
+            
+            % select areas that have at least half their area with amplitude more than the threshold
+            area_map = zeros(size(all_areas));
+            idx = 0;
+            thr = mean(A(:));% max(A(:)) - 2 * std(A(:)); %%% parameter
+            for iarea = 1:n
+                if ~(sum(all_areas(:)==iarea)/sum(all_areas(:)==iarea & A(:)>thr)>2)
+                    idx = idx+1;
+                    mask = imdilate(imerode(all_areas==iarea,strel('disk',params.final_erode)),strel('disk',params.final_dilate));
+                    area_map(mask) = idx;
+                end
+            end
+            
+            % plot unique areas
+            im(:,:,1) = normalize(area_map);
+            im(:,:,2) = area_map>0;
+            im(:,:,3) = vessels;
+            subplot(2,2,4)
+            image(hsv2rgb(im)); axis image; axis off; title('Areas')
+            
+            %% add numbers to areas
+            stats = struct([]);
+            for iarea = 1:max(area_map(:))
+                s = regionprops(area_map==iarea,'area','Centroid');
+                if iarea==1
+                    stats = s;
+                else
+                    stats(iarea).Area = s.Area;
+                    stats(iarea).Centroid = s.Centroid;
+                end
+                stats(iarea).sign = mean(grad_diff(area_map==iarea))>0;
+                text(stats(iarea).Centroid(1),stats(iarea).Centroid(2),num2str(iarea))
+            end
+        end
+        
+        function area_map = editMask(self, masks, background)
+            if nargin<3
+                images = fetchn(self, 'vessels');
+                background = images{1};
+            end
+            area_map = ne7.ui.paintMasks(background,masks);
+            
+            % add numbers to areas
+            stats = struct([]);idx = 0;
+            areas = unique(area_map(:));
+            for iarea = areas(2:end)'
+                idx = idx+1;
+                s = regionprops(area_map==iarea,'area','Centroid');
+                if isempty(stats)
+                    stats = s;
+                else
+                    stats(idx).Area = s.Area;
+                    stats(idx).Centroid = s.Centroid;
+                end
+                stats(idx).sign = mean(area_map(area_map==iarea))>0;
+                text(stats(idx).Centroid(1),stats(idx).Centroid(2),num2str(idx))
+            end
+        end
+        
+        function insertAreas(obj,area_map,varargin)
+            c = get(gca,'Children');
+            istxt = find(arrayfun(@(x) strcmp(x.Type,'text'),c));
+            p = []; t =[];
+            for itxt = istxt'
+                p(itxt,:) = c(itxt).Position;
+                t{itxt}= c(itxt).String;
+            end
+            
+            areas = fetchn(map.Area,'area');
+            for iarea = 1:max(area_map(:))
+                im = area_map==iarea;
+                idx = im(sub2ind(size(area_map),round(p(:,2)),round(p(:,1))));
+                if all(idx==0);continue;end
+                midx = strcmp(areas,t{idx});
+                if all(midx==0);continue;end
+                key = fetch(experiment.Scan & obj);
+                key.area = areas{midx};
+                key.mask = im;
+                key.slice = 1;
+                insert(map.AreaMask,key)
+            end
+        end
+        
     end
     
 end
