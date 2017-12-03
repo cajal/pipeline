@@ -82,7 +82,7 @@ classdef OptImageBar < dj.Imported
                 
                 key.axis = axis{iaxis};
                 icond = [];
-                icond.cond_idx = cond_idices(strcmp(axis,axis{iaxis}));
+                icond.condition_hash = cond_idices{strcmp(axis,axis{iaxis})};
                 
                 % Get stim data
                 times  = fetchn(stimulus.Trial * stimulus.Condition & key & icond,'flip_times');
