@@ -387,8 +387,8 @@ def parallel_motion_stack(chunks, results, raster_phase, fill_fraction, window_s
                 num_threads=1, smoothing_window_size=window_size)
 
             # Center motions around zero
-            y_shifts = res[0] - res[0].median()
-            x_shifts = res[1] - res[1].median()
+            y_shifts = res[0] - np.median(res[0])
+            x_shifts = res[1] - np.median(res[1])
 
             # Apply shifts
             xy_shifts = np.stack([x_shifts, y_shifts])
