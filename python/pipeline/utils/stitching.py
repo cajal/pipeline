@@ -57,7 +57,7 @@ class StitchedSlice():
                                  min(self.x - self.width / 2, x - other.width / 2))))
             taper = signal.hann(2 * overlap)[:overlap]
 
-            if self.left_or_right(other) == Position.LEFT: # other | self
+            if self.x + self.width / 2 > x + other.width / 2:  # other | self
                 self.mask[..., :overlap] *= taper
                 other.mask[..., -overlap:] *= (1 - taper)
             else:
@@ -184,10 +184,10 @@ class StitchedROI():
                    min(self.x - self.width / 2, other.x - other.width / 2) +
                    minimum_overlap < self.width + other.width)
         if same_depth and same_height and overlap:
-            if (self.x + self.width / 2) > (other.x - other.width / 2):
-                position = Position.RIGHT
-            else:
+            if self.x + self.width / 2 > other.x + other.width / 2:
                 position = Position.LEFT
+            else:
+                position = Position.RIGHT
 
         return position
 
@@ -259,7 +259,9 @@ def linear_stitch(left, right, expected_delta_x, expected_delta_y):
     min_height = min(left.shape[0], right.shape[0])
     min_width = min(left.shape[1], right.shape[1])
 
-    # TODO:Create a mask to send to galvo_corrections
+    # TODO:Create a mask to send to galvo_corrections. mask has to have dimensions as strip?, maybe use 10% in min_height, min_width and then  move it to
+    # the right position
+# Maybe use the delta_y to select a good patch in y (maybe cut that patch and add whatever was left of it  in right_y_center below or in left_height / 2)
 
     # Cut strips of expected overlap plus some slack
     overlap = int(round(expected_overlap + 0.05 * min_width))
