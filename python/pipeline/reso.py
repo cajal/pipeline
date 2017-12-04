@@ -1230,7 +1230,7 @@ class ScanSet(dj.Computed):
         ms_delay = 0        : smallint      # (ms) delay from start of frame to recording of this unit
         """
 
-    def job_key(self, key):
+    def _job_key(self, key):
         # Force reservation key to be per scan so diff fields are not run in parallel
         return {k: v for k, v in key.items() if k not in ['field', 'channel']}
 
