@@ -384,11 +384,11 @@ def parallel_motion_stack(chunks, results, raster_phase, fill_fraction, window_s
 
             # Compute motion correction shifts
             res = galvo_corrections.compute_motion_shifts(field, template, in_place=False,
-                fix_outliers=False, num_threads=1, smoothing_window_size=window_size)
+                num_threads=1, smoothing_window_size=window_size)
 
             # Center motions around zero
-            y_shifts = res[0] - res[0].mean()
-            x_shifts = res[1] - res[1].mean()
+            y_shifts = res[0] - res[0].median()
+            x_shifts = res[1] - res[1].median()
 
             # Apply shifts
             xy_shifts = np.stack([x_shifts, y_shifts])
