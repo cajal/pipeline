@@ -263,20 +263,24 @@ class PupilTracker:
 
     _running_avg = None
 
-    # TODO: Paul!
     def preprocess_image(self, frame, eye_roi):
         h = int(self._params['gaussian_blur'])
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
         img_std = np.std(gray)
 
         small_gray = gray[slice(*eye_roi[0]), slice(*eye_roi[1])]
-        # c = 0.05
-        # p = 7
-        # if self._running_avg is None:
-        #     self._running_avg = np.array(small_gray) ** p
-        # else:
-        #     self._running_avg = c * np.array(small_gray) ** p + (1 - c) * self._running_avg
-        #     small_gray += self._running_avg.astype(np.uint8) - small_gray # big hack
+
+        # Manual meso settins
+        if 'extreme_meso' in self._params and self._params['extreme_meso']:
+            c = 0.3
+            p = 7
+            if self._running_avg is None:
+                self._running_avg = np.array(small_gray) ** p
+            else:
+                self._running_avg = c * np.array(small_gray) ** p + (1 - c) * self._running_avg
+                small_gray += self._running_avg.astype(np.uint8) - small_gray # big hack
+        #--- mesosetting end
+
         blur = cv2.GaussianBlur(small_gray, (2*h+1, 2*h+1), 0) # play with blur
 
         _, thres = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)

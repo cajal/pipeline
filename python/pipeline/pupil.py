@@ -31,7 +31,8 @@ DEFAULT_PARAMETERS = dict(relative_area_threshold=0.01,
                           contrast_threshold=5,
                           speed_threshold=0.1,
                           dr_threshold=0.1,
-                          gaussian_blur=5)
+                          gaussian_blur=5,
+                          extreme_meso=0)
 
 
 
@@ -53,13 +54,6 @@ class Eye(dj.Imported):
     def key_source(self):
         return (experiment.Scan() & experiment.Scan.EyeVideo().proj()) - experiment.ScanIgnored()
 
-    @staticmethod
-    def _get_modified_parameters():
-        new_param = dict(DEFAULT_PARAMETERS)
-        for k, v in new_param.items():
-            nv = input("{} (default: {}): ".format(k, v))
-            new_param[k] = float(nv) if nv else v
-        return json.dumps(new_param)
 
     def grab_timestamps_and_frames(self, key, n_sample_frames=16):
 
@@ -118,15 +112,6 @@ class Eye(dj.Imported):
     def _make_tuples(self, key):
         key['eye_time'], key['preview_frames'], key['total_frames'] = self.grab_timestamps_and_frames(key)
 
-        # try:
-        #     import cv2
-        #     print('Drag window and print q when done')
-        #     rg = CVROIGrabber(frames.mean(axis=2))
-        #     rg.grab()
-        # except ImportError:
-        #     rg = ROIGrabber(frames.mean(axis=2))
-        #
-        # key['eye_roi'] = rg.roi
         self.insert1(key)
         del key['eye_time']
         frames =  key.pop('preview_frames')
@@ -174,6 +159,15 @@ class TrackingTask(dj.Manual):
         ---
         """
 
+    @staticmethod
+    def _get_modified_parameters():
+        new_param = dict(DEFAULT_PARAMETERS)
+        for k, v in new_param.items():
+            nv = input("{} (default: {}): ".format(k, v))
+            new_param[k] = float(nv) if nv else v
+        return json.dumps(new_param)
+
+
     def enter_roi(self, key):
         key = (Eye() & key).fetch1(dj.key) # complete key
         frames = (Eye() & key).fetch1('preview_frames')
@@ -186,16 +180,17 @@ class TrackingTask(dj.Manual):
             rg = ROIGrabber(frames.mean(axis=2))
 
         key['eye_roi'] = rg.roi
-        self.insert1(key)
-        trackable = input('Is the quality good enough to be tracked? [Y/n]')
-        if trackable.lower() == 'n':
+        with self.connection.transaction:
             self.insert1(key)
-            self.Ignore().insert1(key, ignore_extra_field=True)
-        else:
-            extra_parameters = input('Do you want to use modified tracking parameters? [N/y]')
-            if extra_parameters.lower() == 'y':
-                self.ManualParameters().insert1(dict(key, tracking_parameters=self._get_modified_parameters()),
-                                                ignore_extra_fields=True)
+            trackable = input('Is the quality good enough to be tracked? [Y/n]')
+            if trackable.lower() == 'n':
+                self.insert1(key)
+                self.Ignore().insert1(key, ignore_extra_field=True)
+            else:
+                extra_parameters = input('Do you want to use modified tracking parameters? [N/y]')
+                if extra_parameters.lower() == 'y':
+                    self.ManualParameters().insert1(dict(key, tracking_parameters=self._get_modified_parameters()),
+                                                    ignore_extra_fields=True)
 
 
 @schema
