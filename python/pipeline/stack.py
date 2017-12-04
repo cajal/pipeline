@@ -494,6 +494,10 @@ class Stitching(dj.Computed):
                 y_align, x_align, _, _ = galvo_corrections.compute_motion_shifts(big_volume[i],
                     big_volume[i-1], in_place=False, fix_outliers=False, smooth_shifts=False)
 
+                # Reject alignment shifts higher than 2.5% image height/width
+                y_align = y_align if abs(y_align) < image_height * 0.025 else 0
+                x_align = x_align if abs(x_align) < image_width * 0.025 else 0
+
                 # Update shifts (shift of i -1 plus the shift to align i to i-1)
                 y_aligns[i] = y_aligns[i - 1] + y_align
                 x_aligns[i] = x_aligns[i - 1] + x_align
@@ -626,7 +630,6 @@ class CorrectedStack(dj.Computed):
 
             # Stitch all rois together. This is convoluted because smooth blending in
             # join_with assumes rois are next to (not below or atop of) each other
-            print('Computing stitching parameters...')
             prev_num_rois = float('Inf') # to enter the loop at least once
             while len(rois) < prev_num_rois:
                 prev_num_rois = len(rois)
