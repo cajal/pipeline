@@ -272,7 +272,7 @@ class PupilTracker:
 
         # Manual meso settins
         if 'extreme_meso' in self._params and self._params['extreme_meso']:
-            c = 0.3
+            c = 0.1
             p = 7
             if self._running_avg is None:
                 self._running_avg = np.array(small_gray) ** p
