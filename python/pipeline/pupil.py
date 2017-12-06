@@ -1,3 +1,5 @@
+from pprint import pprint
+
 from scipy.misc import imresize
 
 import datajoint as dj
@@ -23,7 +25,7 @@ from . import config
 
 schema = dj.schema('pipeline_eye', locals())
 
-DEFAULT_PARAMETERS = dict(relative_area_threshold=0.01,
+DEFAULT_PARAMETERS = dict(relative_area_threshold=0.005,
                           ratio_threshold=1.5,
                           error_threshold=0.1,
                           min_contour_len=5,
@@ -33,7 +35,6 @@ DEFAULT_PARAMETERS = dict(relative_area_threshold=0.01,
                           dr_threshold=0.1,
                           gaussian_blur=5,
                           extreme_meso=0)
-
 
 
 @schema
@@ -49,17 +50,16 @@ class Eye(dj.Imported):
     eye_ts=CURRENT_TIMESTAMP    : timestamp # automatic
     """
 
-
     @property
     def key_source(self):
         return (experiment.Scan() & experiment.Scan.EyeVideo().proj()) - experiment.ScanIgnored()
-
 
     def grab_timestamps_and_frames(self, key, n_sample_frames=16):
 
         import cv2
 
-        rel = experiment.Session() * experiment.Scan.EyeVideo() * experiment.Scan.BehaviorFile().proj(hdf_file='filename')
+        rel = experiment.Session() * experiment.Scan.EyeVideo() * experiment.Scan.BehaviorFile().proj(
+            hdf_file='filename')
 
         info = (rel & key).fetch1()
 
@@ -114,16 +114,14 @@ class Eye(dj.Imported):
 
         self.insert1(key)
         del key['eye_time']
-        frames =  key.pop('preview_frames')
+        frames = key.pop('preview_frames')
         self.notify(key, frames)
-
-
 
     def notify(self, key, frames):
         import imageio
         msg = 'Eye for `{}` has been populated. You can add a tracking task now. '.format(key)
         img_filename = '/tmp/' + key_hash(key) + '.gif'
-        frames = frames.transpose([2,0,1])
+        frames = frames.transpose([2, 0, 1])
         frames = [imresize(img, 0.25) for img in frames]
         imageio.mimsave(img_filename, frames, duration=0.5)
         (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
@@ -142,7 +140,6 @@ class TrackingTask(dj.Manual):
     ---
     eye_roi                     : tinyblob  # manual roi containing eye in full-size movie
     """
-
 
     class ManualParameters(dj.Part):
         definition = """
@@ -167,9 +164,8 @@ class TrackingTask(dj.Manual):
             new_param[k] = float(nv) if nv else v
         return json.dumps(new_param)
 
-
-    def enter_roi(self, key):
-        key = (Eye() & key).fetch1(dj.key) # complete key
+    def enter_roi(self, key, **kwargs):
+        key = (Eye() & key).fetch1(dj.key)  # complete key
         frames = (Eye() & key).fetch1('preview_frames')
         try:
             import cv2
@@ -187,10 +183,15 @@ class TrackingTask(dj.Manual):
                 self.insert1(key)
                 self.Ignore().insert1(key, ignore_extra_field=True)
             else:
-                extra_parameters = input('Do you want to use modified tracking parameters? [N/y]')
+                new_param = dict(DEFAULT_PARAMETERS, **kwargs)
+                print('Those are the tracking parameters')
+                pprint(new_param)
+                new_param = json.dumps(new_param)
+                extra_parameters = input('Do you want to change them? [N/y]')
                 if extra_parameters.lower() == 'y':
-                    self.ManualParameters().insert1(dict(key, tracking_parameters=self._get_modified_parameters()),
-                                                    ignore_extra_fields=True)
+                    new_param = self._get_modified_parameters()
+                self.ManualParameters().insert1(dict(key, tracking_parameters=new_param),
+                                                ignore_extra_fields=True)
 
 
 @schema
@@ -258,7 +259,7 @@ class TrackedVideo(dj.Computed):
                 fig, ax = plt.subplots(3, 1, figsize=(10, 6), sharex=True)
 
             r, center, contrast = (TrackedVideo.Frame() & key).fetch('major_r', 'center',
-                                                 'frame_intensity', order_by='frame_id')
+                                                                     'frame_intensity', order_by='frame_id')
             ax[0].plot(r)
             ax[0].set_title('Major Radius')
             c = np.vstack([cc if cc is not None else np.NaN * np.ones(2) for cc in center])
