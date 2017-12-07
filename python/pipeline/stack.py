@@ -635,26 +635,28 @@ class Stitching(dj.Computed):
                     big_volume[i-1], in_place=False, fix_outliers=False, smooth_shifts=False)
 
                 # Reject alignment shifts higher than 2.5% image height/width
-                y_align = y_align if abs(y_align) < image_height * 0.025 else 0
-                x_align = x_align if abs(x_align) < image_width * 0.025 else 0
+                if abs(x_align) > 0.025 * image_width or abs(y_align) > 0.025 * image_height:
+                    y_align = 0
+                    x_align = 0
 
                 # Update shifts (shift of i -1 plus the shift to align i to i-1)
                 y_aligns[i] = y_aligns[i - 1] + y_align
                 x_aligns[i] = x_aligns[i - 1] + x_align
 
             # Detrend to discard influence of vessels going through the slices
-            # filter_size = int(round(50 / (StackInfo() & key).fetch1('z_step'))) # 50 microns in z
-            # smoothing_filter = signal.hann(filter_size + 1 if filter_size % 2 == 0 else 0)
-            # y_aligns -= mirrconv(y_aligns, smoothing_filter / sum(smoothing_filter))
-            # x_aligns -= mirrconv(x_aligns, smoothing_filter/ sum(smoothing_filter))
+            filter_size = int(round(50 / (StackInfo() & key).fetch1('z_step'))) # 50 microns in z
+            if len(y_aligns) > filter_size:
+                smoothing_filter = signal.hann(filter_size + 1 if filter_size % 2 == 0 else 0)
+                y_aligns -= mirrconv(y_aligns, smoothing_filter / sum(smoothing_filter))
+                x_aligns -= mirrconv(x_aligns, smoothing_filter/ sum(smoothing_filter))
 
             # Apply alignment shifts in roi
-            for slice_, x_delta, y_delta in zip(roi.slices, x_aligns, y_aligns):
-                slice_.x -= x_delta
-                slice_.y += y_delta
+            for slice_, x_align, y_align in zip(roi.slices, x_aligns, y_aligns):
+                slice_.x -= x_align
+                slice_.y += y_align
             for roi_coord in roi.roi_coordinates:
-                roi_coord.xs = [prev_x - delta_x for prev_x, delta_x in zip(roi_coord.xs, x_aligns)]
-                roi_coord.ys = [prev_y + delta_y for prev_y, delta_y in zip(roi_coord.ys, y_aligns)]
+                roi_coord.xs = [prev_x - x_align for prev_x, x_align in zip(roi_coord.xs, x_aligns)]
+                roi_coord.ys = [prev_y + y_align for prev_y, y_align in zip(roi_coord.ys, y_aligns)]
 
         # Insert in Stitching
         print('Inserting...')
