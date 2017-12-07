@@ -644,7 +644,7 @@ class Stitching(dj.Computed):
                 x_aligns[i] = x_aligns[i - 1] + x_align
 
             # Detrend to discard influence of vessels going through the slices
-            filter_size = int(round(50 / (StackInfo() & key).fetch1('z_step'))) # 50 microns in z
+            filter_size = int(round(60 / (StackInfo() & key).fetch1('z_step'))) # 60 microns in z
             if len(y_aligns) > filter_size:
                 smoothing_filter = signal.hann(filter_size + 1 if filter_size % 2 == 0 else 0)
                 y_aligns -= mirrconv(y_aligns, smoothing_filter / sum(smoothing_filter))
