@@ -249,24 +249,16 @@ def linear_stitch(left, right, expected_delta_x, expected_delta_y):
     expected_overlap = left_width / 2 + right_width / 2 - expected_delta_x
 
     # Drop some rows, columns to avoid artifacts
-    skip_columns = int(round(0.1 * expected_overlap)) # 10% of expected overlap
-    skip_rows = int(round(0.05 * left_height)) # 5% of top and bottom rows
+    skip_columns = int(round(0.05 * expected_overlap)) # 5% of expected overlap
+    skip_rows = int(round(0.05 * min(right_height, left_height))) # 5% of top and bottom rows
     left = left[skip_rows: -skip_rows, :-skip_columns]
-    skip_rows = int(round(0.05 * right_height))
     right = right[skip_rows: -skip_rows, skip_columns:]
+    expected_overlap = int(round(expected_overlap - 2 * skip_columns))
 
-    # Get minimum height and width
+    # Cut strips of expected overlap
     min_height = min(left.shape[0], right.shape[0])
-    min_width = min(left.shape[1], right.shape[1])
-
-    # TODO:Create a mask to send to galvo_corrections. mask has to have dimensions as strip?, maybe use 10% in min_height, min_width and then  move it to
-    # the right position
-# Maybe use the delta_y to select a good patch in y (maybe cut that patch and add whatever was left of it  in right_y_center below or in left_height / 2)
-
-    # Cut strips of expected overlap plus some slack
-    overlap = int(round(expected_overlap + 0.05 * min_width))
-    left_strip = left[:min_height, -overlap:]
-    right_strip = right[:min_height, :overlap]
+    left_strip = left[:min_height, -expected_overlap:]
+    right_strip = right[:min_height, :expected_overlap]
 
     # Compute best match
     y_shifts, x_shifts, _, _ = galvo_corrections.compute_motion_shifts(right_strip, left_strip,
@@ -275,8 +267,14 @@ def linear_stitch(left, right, expected_delta_x, expected_delta_y):
 
     # Compute right_center minus left_center
     right_ycenter = right_height / 2 - y_shift # original + offset
-    right_xcenter = right_width / 2 + (left_width - overlap - 2*skip_columns) - x_shift # original + repositioning + offset
+    right_xcenter = right_width / 2 + (left_width - expected_overlap - 2*skip_columns) - x_shift # original + repositioning + offset
     delta_y = -(right_ycenter - left_height / 2) # negative to change direction of y axis
     delta_x = right_xcenter - left_width / 2
+
+    # Check for outliers
+    if (abs(delta_y - expected_delta_y) > 0.1 * min_height or
+        abs(delta_x - expected_delta_x) > 0.75 * expected_overlap):
+        delta_x = expected_delta_x
+        delta_y = expected_delta_y
 
     return delta_x, delta_y
