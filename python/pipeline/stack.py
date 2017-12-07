@@ -172,6 +172,113 @@ class StackInfo(dj.Imported):
 
 
 @schema
+class Quality(dj.Computed):
+    definition = """ # different quality metrics for a scan (before corrections)
+
+    -> StackInfo
+    """
+    @property
+    def key_source(self):
+        return StackInfo() & {'pipe_version': CURRENT_VERSION}
+
+    class MeanIntensity(dj.Part):
+        definition = """ # mean intensity per frame and slice
+
+        -> Quality
+        -> StackInfo.ROI
+        -> shared.Channel
+        ---
+        intensities                 : longblob      # num_slices x num_frames
+        """
+
+    class SummaryFrames(dj.Part):
+        definition = """ # mean slice at 8 different depths
+
+        -> Quality
+        -> StackInfo.ROI
+        -> shared.Channel
+        ---
+        summary                     : longblob      # h x w x 8
+        """
+
+    class Contrast(dj.Part):
+        definition = """ # difference between 99 and 1 percentile per frame and slice
+
+        -> Quality
+        -> StackInfo.ROI
+        -> shared.Channel
+        ---
+        contrasts                   : longblob      # num_slices x num_frames
+        """
+
+    def _make_tuples(self, key):
+        print('Computing quality metrics for stack', key)
+
+        # Insert in Quality
+        self.insert1(key)
+
+        for roi_tuple in (StackInfo.ROI() & key).fetch():
+            # Load ROI
+            roi_filename = (experiment.Stack.Filename() & roi_tuple).local_filenames_as_wildcard
+            roi = scanreader.read_scan(roi_filename)
+
+            for channel in range((StackInfo() & key).fetch1('nchannels')):
+                # Map: Compute quality metrics in each field
+                f = performance.parallel_quality_stack # function to map
+                field_ids = roi_tuple['field_ids']
+                results = performance.map_fields(f, roi, field_ids=field_ids, channel=channel)
+
+                # Reduce: Collect results
+                mean_intensities = np.empty((roi_tuple['roi_px_depth'], roi_tuple['nframes']))
+                contrasts = np.empty((roi_tuple['roi_px_depth'], roi_tuple['nframes']))
+                for field_idx, field_mis, field_contrasts, _ in results:
+                    mean_intensities[field_idx] = field_mis
+                    contrasts[field_idx] = field_contrasts
+                frames = [res[3] for res in sorted(results, key=lambda res: res[0])]
+                frames = np.stack(frames[:: int(len(frames) / 8)], axis=-1) # frames at 8 diff depths
+
+                # Insert
+                roi_key = {**key, 'roi_id': roi_tuple['roi_id'], 'channel': channel + 1}
+                self.MeanIntensity().insert1({**roi_key, 'intensities': mean_intensities})
+                self.Contrast().insert1({**roi_key, 'contrasts': contrasts})
+                self.SummaryFrames().insert1({**roi_key, 'summary': frames})
+
+                self.notify(roi_key, frames, mean_intensities, contrasts)
+
+    @notify.ignore_exceptions
+    def notify(self, key, summary_frames, mean_intensities, contrasts):
+        """ Sends slack notification for a single slice + channel combination. """
+        # Send summary frames
+        import imageio
+        video_filename = '/tmp/' + key_hash(key) + '.gif'
+        percentile_99th = np.percentile(summary_frames, 99.5)
+        summary_frames = np.clip(summary_frames, None, percentile_99th)
+        summary_frames = float2uint8(summary_frames).transpose([2, 0, 1])
+        imageio.mimsave(video_filename, summary_frames, duration=0.4)
+
+        msg = 'Quality for `{}` has been populated.'.format(key)
+        (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=video_filename,
+                                                                   file_title='summary frames')
+
+        # Send intensity and contrasts
+        figsize = (min(4, contrasts.shape[1] / 10 + 1),  contrasts.shape[0] / 30 + 1) # set heuristically
+        fig, axes = plt.subplots(1, 2, figsize=figsize, sharex=True, sharey=True)
+        fig.tight_layout()
+        axes[0].set_title('Mean intensity', size='small')
+        axes[0].imshow(mean_intensities)
+        axes[0].set_ylabel('Slices')
+        axes[0].set_xlabel('Frames')
+        axes[1].set_title('Contrast (99 - 1 percentile)', size='small')
+        axes[1].imshow(contrasts)
+        axes[1].set_xlabel('Frames')
+        img_filename = '/tmp/' + key_hash(key) + '.png'
+        fig.savefig(img_filename, bbox_inches='tight')
+        plt.close(fig)
+
+        (notify.SlackUser() & (experiment.Session() & key)).notify(file=img_filename, file_title='quality images')
+
+
+@schema
 class CorrectionChannel(dj.Manual):
     definition = """ # channel to use for raster and motion correction
 
@@ -353,6 +460,40 @@ class MotionCorrection(dj.Computed):
         (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
                                             file_title='motion shifts')
 
+    def save_as_tiff(self, filename='roi.tif', channel=1):
+        """ Correct roi and save as a tiff file.
+
+        :param int channel: What channel to use. Starts at 1
+        """
+        from tifffile import imsave
+
+        # Get some params
+        res = (StackInfo.ROI() & self).fetch1('field_ids', 'roi_px_depth',
+                                              'roi_px_height', 'roi_px_width')
+        field_ids, px_depth, px_height, px_width = res
+
+        # Load ROI
+        roi_filename = (experiment.Stack.Filename() & self).local_filenames_as_wildcard
+        roi = scanreader.read_scan(roi_filename)
+
+        # Map: Apply corrections to each field in parallel
+        f = performance.parallel_correct_stack # function to map
+        raster_phase = (RasterCorrection() & self).fetch1('raster_phase')
+        fill_fraction = (StackInfo() & self).fetch1('fill_fraction')
+        y_shifts, x_shifts = self.fetch1('y_shifts', 'x_shifts')
+        results = performance.map_fields(f, roi, field_ids=field_ids, channel=channel,
+                                         kwargs={'raster_phase': raster_phase,
+                                                 'fill_fraction': fill_fraction,
+                                                 'y_shifts': y_shifts, 'x_shifts': x_shifts})
+
+        # Reduce: Collect results
+        corrected_roi = np.empty((px_depth, px_height, px_width), dtype=np.float32)
+        for field_idx, corrected_field in results:
+            corrected_roi[field_idx] = corrected_field
+
+        print('Saving file at:', filename)
+        imsave(filename, corrected_roi)
+
 
 @schema
 class Stitching(dj.Computed):
@@ -446,8 +587,7 @@ class Stitching(dj.Computed):
 
                 for left, right in itertools.combinations(sorted_rois, 2):
                     if left.is_aside_to(right):
-                        left_xs = []
-                        left_ys = []
+                        left_xs, left_ys = [], []
                         for l, r in zip(left.slices, right.slices):
                             expected_delta_x = r.x - l.x
                             expected_delta_y = r.y - l.y
@@ -672,7 +812,7 @@ class CorrectedStack(dj.Computed):
         import imageio
 
         volume = (self & key).get_stack()
-        volume = volume[:: int(volume.shape[0] / 5)] # volume at 5 diff depths
+        volume = volume[:: int(volume.shape[0] / 8)] # volume at 8 diff depths
         video_filename = '/tmp/' + key_hash(key) + '.gif'
         imageio.mimsave(video_filename, float2uint8(volume), duration=1)
 

@@ -71,6 +71,37 @@ def map_frames(f, scan, field_id, y, x, channel, kwargs={}, chunk_size_in_GB=1,
     return list(results)
 
 
+def parallel_quality_metrics(chunks, results):
+    """ Compute mean intensity per frame, contrast per frame and mean frame.
+
+    :param queue chunks: Queue with inputs to consume.
+    :param list results: Where to put results.
+
+    :returns: Mean intensity per frame, contrast (99 -1 percentile) per frame, and mean
+        frame (average over time in this chunk).
+    """
+    while True:
+        # Read next chunk (process locks until something can be read)
+        frames, chunk = chunks.get()
+        if chunk is None:  # stop signal when all chunks have been processed
+            return
+
+        print(time.ctime(), 'Processing frames:', frames)
+
+        # Mean intensity
+        mean_intensity = np.mean(chunk, axis=(0, 1), dtype=float)
+
+        # Contrast
+        percentiles = np.percentile(chunk, q=(1, 99), axis=(0, 1))
+        contrast = (percentiles[1] - percentiles[0]).astype(float)
+
+        # Mean frame
+        mean_frame = np.mean(chunk, axis=-1, dtype=float)
+
+        # Save results
+        results.append((frames, mean_intensity, contrast, mean_frame))
+
+
 def parallel_motion_shifts(chunks, results, raster_phase, fill_fraction, template):
     """ Compute motion correction shifts to chunks of scan.
 
@@ -254,39 +285,8 @@ def parallel_fluorescence(chunks, results, raster_phase, fill_fraction, y_shifts
         results.append((frames, traces))
 
 
-def parallel_quality_metrics(chunks, results):
-    """ Compute mean intensity per frame, contrast per frame, mean
 
-    :param queue chunks: Queue with inputs to consume.
-    :param list results: Where to put results.
-
-    :returns: Mean intensity per frame, contrast (99 -1 percentile) per frame, and mean
-        frame (average over time in this chunk).
-    """
-    while True:
-        # Read next chunk (process locks until something can be read)
-        frames, chunk = chunks.get()
-        if chunk is None:  # stop signal when all chunks have been processed
-            return
-
-        print(time.ctime(), 'Processing frames:', frames)
-
-        # Mean intensity
-        mean_intensity = np.mean(chunk, axis=(0, 1), dtype=float)
-
-        # Contrast
-        percentiles = np.percentile(chunk, q=(1, 99), axis=(0, 1))
-        contrast = (percentiles[1] - percentiles[0]).astype(float)
-
-        # Mean frame
-        mean_frame = np.mean(chunk, axis=-1, dtype=float)
-
-        # Save results
-        results.append((frames, mean_intensity, contrast, mean_frame))
-
-
-
-
+################################## Stacks ##############################################
 
 def map_fields(f, scan, field_ids, channel, y=slice(None), x=slice(None),
                frames=slice(None), kwargs={}, num_processes=8, queue_size=8):
@@ -341,6 +341,37 @@ def map_fields(f, scan, field_ids, channel, y=slice(None), x=slice(None),
     return list(results)
 
 
+def parallel_quality_stack(chunks, results):
+    """ Compute mean intensity per frame, contrast per frame, mean
+
+    :param queue chunks: Queue with inputs to consume.
+    :param list results: Where to put results.
+
+    :returns: (field_id, mean intensity per frame, contrast (99 -1 percentile) per frame
+               and mean frame (average over time in this field) tuple.
+    """
+    while True:
+        # Read next chunk (process locks until something can be read)
+        field_idx, field = chunks.get()
+        if field is None:  # stop signal when all chunks have been processed
+            return
+
+        print(time.ctime(), 'Processing field:', field_idx)
+
+        # Mean intensity
+        mean_intensity = np.mean(field, axis=(0, 1), dtype=float)
+
+        # Contrast
+        percentiles = np.percentile(field, q=(1, 99), axis=(0, 1))
+        contrast = (percentiles[1] - percentiles[0]).astype(float)
+
+        # Mean frame
+        mean_frame = np.mean(field, axis=-1, dtype=float)
+
+        # Save results
+        results.append((field_idx, mean_intensity, contrast, mean_frame))
+
+
 def parallel_motion_stack(chunks, results, raster_phase, fill_fraction, window_size,
                           apply_anscombe=True):
     """ Compute motion correction shifts to field in scan.
@@ -348,7 +379,7 @@ def parallel_motion_stack(chunks, results, raster_phase, fill_fraction, window_s
     Function to run in each process. Consumes input from chunks and writes results to
     results. Stops when stop signal is received in chunks.
 
-    :param queue fields: Queue with inputs to consume.
+    :param queue chunks: Queue with inputs to consume.
     :param list results: Where to put results.
     :param float raster_phase: Raster phase used for raster correction.
     :param float fill_fraction: Fill fraction used for raster correction.
@@ -402,7 +433,7 @@ def parallel_correct_stack(chunks, results, raster_phase, fill_fraction, y_shift
                            x_shifts, apply_anscombe=False):
     """ Apply corrections in parallel and return mean of corrected field over time.
 
-    :param queue fields: Queue with inputs to consume.
+    :param queue chunks: Queue with inputs to consume.
     :param list results: Where to put results.
     :param float raster_phase: Raster phase used for raster correction.
     :param float fill_fraction: Fill fraction used for raster correction.
