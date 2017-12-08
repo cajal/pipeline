@@ -156,6 +156,15 @@ class TrackingTask(dj.Manual):
         ---
         """
 
+    class Mask(dj.Part):
+        definition = """
+        # mask for tracking
+        -> master
+        ---
+        mask        : longblob 
+        """
+
+
     @staticmethod
     def _get_modified_parameters():
         new_param = dict(DEFAULT_PARAMETERS)
@@ -176,6 +185,7 @@ class TrackingTask(dj.Manual):
             rg = ROIGrabber(frames.mean(axis=2))
 
         key['eye_roi'] = rg.roi
+        mask = np.asarray(rg.mask, dtype=np.uint8)
         with self.connection.transaction:
             self.insert1(key)
             trackable = input('Is the quality good enough to be tracked? [Y/n]')
@@ -192,6 +202,10 @@ class TrackingTask(dj.Manual):
                     new_param = self._get_modified_parameters()
                 self.ManualParameters().insert1(dict(key, tracking_parameters=new_param),
                                                 ignore_extra_fields=True)
+            if np.any(mask == 0):
+                print('Inserting mask')
+                key['mask'] = mask
+                self.Mask().insert1(key, ignore_extra_fields=True)
 
 
 @schema
@@ -230,7 +244,12 @@ class TrackedVideo(dj.Computed):
         avi_path = (Eye() & key).get_video_path()
         print(avi_path)
 
-        tr = PupilTracker(param)
+        if TrackingTask.Mask() & key:
+            mask = (TrackingTask.Mask() & key).fetch1('mask')
+        else:
+            mask = None
+
+        tr = PupilTracker(param, mask=mask)
         traces = tr.track(avi_path, roi - 1, display=config['display.tracking'])  # -1 because of matlab indices
 
         key['tracking_parameters'] = json.dumps(param)

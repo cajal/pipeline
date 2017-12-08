@@ -1,0 +1,33 @@
+#FROM datajoint/datajoint:latest
+FROM ninai/pipeline:base
+LABEL maintainer="Edgar Y. Walker, Fabian Sinz, Erick Cobos"
+
+WORKDIR /data
+
+# --- install scanreader
+RUN \
+  git clone https://github.com/atlab/scanreader.git && \
+  pip3 install -e scanreader
+
+## --- install pipeline
+COPY . /data/pipeline
+RUN \
+  pip3 install -e pipeline/python/
+
+RUN mkdir /root/.ssh/
+ADD id_rsa /root/.ssh/id_rsa
+ADD known_hosts /root/.ssh/known_hosts
+
+RUN git clone git@github.com:cajal/stimulus-pipeline.git && \
+    pip3 install -e stimulus-pipeline/python
+
+RUN git clone git@github.com:cajal/stimuli.git && \
+    pip3 install -e stimuli/python
+
+RUN git clone https://github.com/atlab/commons.git && \
+    pip3 install -e commons/python
+
+WORKDIR /notebooks
+
+ENTRYPOINT ["/bin/sh", "-c"]
+CMD ["jupyter notebook"]
