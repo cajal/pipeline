@@ -4,8 +4,6 @@ from scipy import signal
 import numpy as np
 import scipy.ndimage as ndi
 
-import scipy.ndimage as ndi
-
 from ..exceptions import PipelineException
 from ..utils.signal import mirrconv
 
