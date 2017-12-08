@@ -136,6 +136,147 @@ class ScanInfo(dj.Imported):
 
 
 @schema
+class Quality(dj.Computed):
+    definition = """ # different quality metrics for a scan (before corrections)
+
+    -> ScanInfo
+    """
+
+    @property
+    def key_source(self):
+        return ScanInfo() & {'pipe_version': CURRENT_VERSION}
+
+    class MeanIntensity(dj.Part):
+        definition = """ # mean intensity values across time
+
+        -> Quality
+        -> shared.Field
+        -> shared.Channel
+        ---
+        intensities                 : longblob
+        """
+
+    class SummaryFrames(dj.Part):
+        definition = """ # 16-part summary of the scan (mean of 16 blocks)
+
+        -> Quality
+        -> shared.Field
+        -> shared.Channel
+        ---
+        summary                     : longblob      # h x w x 16
+        """
+
+    class Contrast(dj.Part):
+        definition = """ # difference between 99 and 1 percentile across time
+
+        -> Quality
+        -> shared.Field
+        -> shared.Channel
+        ---
+        contrasts                   : longblob
+        """
+
+    class QuantalSize(dj.Part):
+        definition = """ # quantal size in images
+
+        -> Quality
+        -> shared.Field
+        -> shared.Channel
+        ---
+        min_intensity               : int           # min value in movie
+        max_intensity               : int           # max value in movie
+        quantal_size                : float         # variance slope, corresponds to quantal size
+        zero_level                  : int           # level corresponding to zero (computed from variance dependence)
+        quantal_frame               : longblob      # average frame expressed in quanta
+        """
+
+    def _make_tuples(self, key):
+        # Read the scan
+        scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
+        scan = scanreader.read_scan(scan_filename)
+
+        # Insert in Quality
+        self.insert1(key)
+
+        for field_id in range(scan.num_fields):
+            print('Computing quality metrics for field', field_id + 1)
+            for channel in range(scan.num_channels):
+                # Map: Compute quality metrics in parallel
+                results = performance.map_frames(performance.parallel_quality_metrics,
+                                                 scan, field_id=field_id, y=slice(None),
+                                                 x=slice(None), channel=channel,
+                                                 chunk_size_in_GB=0.5)
+
+
+                # Reduce
+                mean_intensities = np.zeros(scan.num_frames)
+                contrasts = np.zeros(scan.num_frames)
+                for frames, chunk_mis, chunk_contrasts, _ in results:
+                    mean_intensities[frames] = chunk_mis
+                    contrasts[frames] = chunk_contrasts
+                sorted_results = sorted(results, key=lambda res: res[0])
+                mean_groups = np.array_split([r[3] for r in sorted_results], 16) # 16 groups
+                frames = np.stack([np.mean(g, axis=0) for g in mean_groups if g.any()], axis=-1)
+
+                # Compute quantal size
+                middle_frame = int(np.floor(scan.num_frames / 2))
+                mini_scan = scan[field_id, :, :, channel, max(middle_frame - 2000, 0): middle_frame + 2000]
+                mini_scan = mini_scan.astype(np.float32)
+                results = quality.compute_quantal_size(mini_scan)
+                min_intensity, max_intensity, _, _, quantal_size, zero_level = results
+                quantal_frame = (np.mean(mini_scan, axis=-1) - zero_level) / quantal_size
+
+                # Insert
+                field_key = {**key, 'field': field_id + 1, 'channel': channel + 1}
+                self.MeanIntensity().insert1({**field_key, 'intensities': mean_intensities})
+                self.Contrast().insert1({**field_key, 'contrasts': contrasts})
+                self.SummaryFrames().insert1({**field_key, 'summary': frames})
+                self.QuantalSize().insert1({**field_key, 'min_intensity': min_intensity,
+                                            'max_intensity': max_intensity,
+                                            'quantal_size': quantal_size,
+                                            'zero_level': zero_level,
+                                            'quantal_frame': quantal_frame})
+
+                self.notify(field_key, frames, mean_intensities, contrasts)
+
+    @notify.ignore_exceptions
+    def notify(self, key, summary_frames, mean_intensities, contrasts):
+        """ Sends slack notification for a single slice + channel combination. """
+        # Send summary frames
+        import imageio
+        video_filename = '/tmp/' + key_hash(key) + '.gif'
+        percentile_99th = np.percentile(summary_frames, 99.5)
+        summary_frames = np.clip(summary_frames, None, percentile_99th)
+        summary_frames = signal.float2uint8(summary_frames).transpose([2, 0, 1])
+        imageio.mimsave(video_filename, summary_frames, duration=0.4)
+
+        msg = 'Quality for `{}` has been populated.'.format(key)
+        (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=video_filename,
+                                                                   file_title='summary frames')
+
+        # Send intensity and contrasts
+        import seaborn as sns
+        with sns.axes_style('white'):
+            fig, axes = plt.subplots(2, 1, figsize=(15, 8), sharex=True)
+
+        fig.suptitle('Field {}, channel {}'.format(key['field'], key['channel']))
+        axes[0].set_title('Mean intensity', size='small')
+        axes[0].plot(mean_intensities)
+        axes[0].set_ylabel('Pixel intensities')
+        axes[1].set_title('Contrast (99 - 1 percentile)', size='small')
+        axes[1].plot(contrasts)
+        axes[1].set_xlabel('Frames')
+        axes[1].set_ylabel('Pixel intensities')
+        img_filename = '/tmp/' + key_hash(key) + '.png'
+        fig.savefig(img_filename, bbox_inches='tight')
+        plt.close(fig)
+        sns.reset_orig()
+
+        (notify.SlackUser() & (experiment.Session() & key)).notify(file=img_filename,
+                                                                   file_title='quality traces')
+
+
+@schema
 class CorrectionChannel(dj.Manual):
     definition = """ # channel to use for raster and motion correction
 
@@ -149,6 +290,7 @@ class CorrectionChannel(dj.Manual):
         for field_key in (ScanInfo.Field() & key).fetch(dj.key):
             self.insert1({**field_key, 'channel': channel}, ignore_extra_fields=True,
                          skip_duplicates=True)
+
 
 @schema
 class RasterCorrection(dj.Computed):
@@ -354,7 +496,7 @@ class MotionCorrection(dj.Computed):
             axes[i].legend()
         fig.tight_layout()
         img_filename = '/tmp/' + key_hash(key) + '.png'
-        fig.savefig(img_filename)
+        fig.savefig(img_filename, bbox_inches='tight')
         plt.close(fig)
         sns.reset_orig()
 
@@ -526,8 +668,8 @@ class SummaryImages(dj.Computed):
         fig, axes = plt.subplots(num_channels, 2, squeeze=False, figsize=(12, 5 * num_channels))
 
         fig.suptitle('Field {}'.format(key['field']))
-        axes[0, 0].set_title('Average')
-        axes[0, 1].set_title('Correlation')
+        axes[0, 0].set_title('Average', size='small')
+        axes[0, 1].set_title('Correlation', size='small')
         for ax in axes.ravel():
             ax.get_xaxis().set_ticks([])
             ax.get_yaxis().set_ticks([])
@@ -542,7 +684,7 @@ class SummaryImages(dj.Computed):
 
         fig.tight_layout()
         img_filename = '/tmp/' + key_hash(key) + '.png'
-        fig.savefig(img_filename)
+        fig.savefig(img_filename, bbox_inches='tight')
         plt.close(fig)
 
         msg = 'SummaryImages for `{}` has been populated.'.format(key)
@@ -915,7 +1057,7 @@ class Segmentation(dj.Computed):
     def notify(self, key):
         fig = (Segmentation() & key).plot_masks()
         img_filename = '/tmp/' + key_hash(key) + '.png'
-        fig.savefig(img_filename)
+        fig.savefig(img_filename, bbox_inches='tight')
         plt.close(fig)
 
         msg = 'Segmentation for `{}` has been populated.'.format(key)
@@ -1050,7 +1192,7 @@ class Fluorescence(dj.Computed):
         fig = plt.figure(figsize=(15, 4))
         plt.plot((Fluorescence() & key).get_all_traces().T)
         img_filename = '/tmp/' + key_hash(key) + '.png'
-        fig.savefig(img_filename)
+        fig.savefig(img_filename, bbox_inches='tight')
         plt.close(fig)
 
         msg = 'Fluorescence.Trace for `{}` has been populated.'.format(key)
@@ -1134,7 +1276,7 @@ class MaskClassification(dj.Computed):
 
         fig = (MaskClassification() & key).plot_masks()
         img_filename = '/tmp/' + key_hash(key) + '.png'
-        fig.savefig(img_filename)
+        fig.savefig(img_filename, bbox_inches='tight')
         plt.close(fig)
 
         msg = 'MaskClassification for `{}` has been populated.\n'.format(key)
@@ -1223,7 +1365,7 @@ class ScanSet(dj.Computed):
         ms_delay            : smallint      # (ms) delay from start of frame to recording of this unit
         """
 
-    def job_key(self, key):
+    def _job_key(self, key):
         # Force reservation key to be per scan so diff fields are not run in parallel
         return {k: v for k, v in key.items() if k not in ['field', 'channel']}
 
@@ -1271,7 +1413,7 @@ class ScanSet(dj.Computed):
     def notify(self, key):
         fig = (ScanSet() & key).plot_centroids()
         img_filename = '/tmp/' + key_hash(key) + '.png'
-        fig.savefig(img_filename)
+        fig.savefig(img_filename, bbox_inches='tight')
         plt.close(fig)
 
         msg = 'ScanSet for `{}` has been populated.'.format(key)
@@ -1432,7 +1574,7 @@ class Activity(dj.Computed):
         fig = plt.figure(figsize=(15, 4))
         plt.plot((Activity() & key).get_all_spikes().T)
         img_filename = '/tmp/' + key_hash(key) + '.png'
-        fig.savefig(img_filename)
+        fig.savefig(img_filename, bbox_inches='tight')
         plt.close(fig)
 
         msg = 'Activity.Trace for `{}` has been populated.'.format(key)
@@ -1525,146 +1667,3 @@ class ScanDone(dj.Computed):
     def notify(self, key):
         msg = 'ScanDone for `{}` has been populated.'.format(key)
         (notify.SlackUser() & (experiment.Session() & key)).notify(msg)
-
-
-
-
-@schema
-class Quality(dj.Computed):
-    definition = """ # different quality metrics for a scan (before corrections)
-
-    -> ScanInfo
-    """
-
-    @property
-    def key_source(self):
-        return ScanInfo() & {'pipe_version': CURRENT_VERSION}
-
-    class MeanIntensity(dj.Part):
-        definition = """ # mean intensity values across time
-
-        -> Quality
-        -> shared.Field
-        -> shared.Channel
-        ---
-        intensities                 : longblob
-        """
-
-    class SummaryFrames(dj.Part):
-        definition = """ # 16-part summary of the scan (mean of 16 blocks)
-
-        -> Quality
-        -> shared.Field
-        -> shared.Channel
-        ---
-        summary                     : longblob      # h x w x 16
-        """
-
-    class Contrast(dj.Part):
-        definition = """ # difference between 99 and 1 percentile across time
-
-        -> Quality
-        -> shared.Field
-        -> shared.Channel
-        ---
-        contrasts                   : longblob
-        """
-
-    class QuantalSize(dj.Part):
-        definition = """ # quantal size in images
-
-        -> Quality
-        -> shared.Field
-        -> shared.Channel
-        ---
-        min_intensity               : int           # min value in movie
-        max_intensity               : int           # max value in movie
-        quantal_size                : float         # variance slope, corresponds to quantal size
-        zero_level                  : int           # level corresponding to zero (computed from variance dependence)
-        quantal_frame               : longblob      # average frame expressed in quanta
-        """
-
-    def _make_tuples(self, key):
-        # Read the scan
-        scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
-        scan = scanreader.read_scan(scan_filename)
-
-        # Insert in Quality
-        self.insert1(key)
-
-        for field_id in range(scan.num_fields):
-            print('Computing quality metrics for field', field_id + 1)
-            for channel in range(scan.num_channels):
-                # Map: Compute quality metrics in parallel
-                results = performance.map_frames(performance.parallel_quality_metrics,
-                                                 scan, field_id=field_id, y=slice(None),
-                                                 x=slice(None), channel=channel,
-                                                 chunk_size_in_GB=0.5)
-
-
-                # Reduce
-                mean_intensities = np.zeros(scan.num_frames)
-                contrasts = np.zeros(scan.num_frames)
-                for frames, chunk_mis, chunk_contrasts, _ in results:
-                    mean_intensities[frames] = chunk_mis
-                    contrasts[frames] = chunk_contrasts
-                sorted_results = sorted(results, key=lambda res: res[0])
-                mean_groups = np.array_split([r[3] for r in sorted_results], 16) # 16 groups
-                frames = np.stack([np.mean(g, axis=0) for g in mean_groups if g.any()], axis=-1)
-
-                # Compute quantal size
-                middle_frame = int(np.floor(scan.num_frames / 2))
-                mini_scan = scan[field_id, :, :, channel, max(middle_frame - 2000, 0): middle_frame + 2000]
-                mini_scan = mini_scan.astype(np.float32)
-                results = quality.compute_quantal_size(mini_scan)
-                min_intensity, max_intensity, _, _, quantal_size, zero_level = results
-                quantal_frame = (np.mean(mini_scan, axis=-1) - zero_level) / quantal_size
-
-                # Insert
-                field_key = {**key, 'field': field_id + 1, 'channel': channel + 1}
-                self.MeanIntensity().insert1({**field_key, 'intensities': mean_intensities})
-                self.Contrast().insert1({**field_key, 'contrasts': contrasts})
-                self.SummaryFrames().insert1({**field_key, 'summary': frames})
-                self.QuantalSize().insert1({**field_key, 'min_intensity': min_intensity,
-                                            'max_intensity': max_intensity,
-                                            'quantal_size': quantal_size,
-                                            'zero_level': zero_level,
-                                            'quantal_frame': quantal_frame})
-
-                self.notify(field_key, frames, mean_intensities, contrasts)
-
-    @notify.ignore_exceptions
-    def notify(self, key, summary_frames, mean_intensities, contrasts):
-        """ Sends slack notification for a single slice + channel combination. """
-        # Send summary frames
-        import imageio
-        video_filename = '/tmp/' + key_hash(key) + '.gif'
-        percentile_99th = np.percentile(summary_frames, 99.5)
-        summary_frames = np.clip(summary_frames, None, percentile_99th)
-        summary_frames = signal.float2uint8(summary_frames).transpose([2, 0, 1])
-        imageio.mimsave(video_filename, summary_frames, duration=0.4)
-
-        msg = 'Quality for `{}` has been populated.'.format(key)
-        (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=video_filename,
-                                                                   file_title='summary frames')
-
-        # Send intensity and contrasts
-        import seaborn as sns
-        with sns.axes_style('white'):
-            fig, axes = plt.subplots(2, 1, figsize=(15, 8), sharex=True)
-
-        fig.suptitle('Field {}, channel {}'.format(key['field'], key['channel']))
-        axes[0].set_title('Mean intensity')
-        axes[0].plot(mean_intensities)
-        axes[0].set_ylabel('Pixel intensities')
-        axes[1].set_title('Contrast (99 - 1 percentile)')
-        axes[1].plot(contrasts)
-        axes[1].set_xlabel('Frames')
-        axes[1].set_ylabel('Pixel intensities')
-        img_filename = '/tmp/' + key_hash(key) + '.png'
-        fig.savefig(img_filename)
-        plt.close(fig)
-        sns.reset_orig()
-
-        (notify.SlackUser() & (experiment.Session() & key)).notify(file=img_filename,
-                                                                   file_title='quality traces')
