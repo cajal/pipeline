@@ -271,10 +271,4 @@ def linear_stitch(left, right, expected_delta_x, expected_delta_y):
     delta_y = -(right_ycenter - left_height / 2) # negative to change direction of y axis
     delta_x = right_xcenter - left_width / 2
 
-    # Check for outliers
-    if (abs(delta_y - expected_delta_y) > 0.1 * min_height or
-        abs(delta_x - expected_delta_x) > 0.75 * expected_overlap):
-        delta_x = expected_delta_x
-        delta_y = expected_delta_y
-
     return delta_x, delta_y
