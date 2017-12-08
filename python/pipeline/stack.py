@@ -620,10 +620,10 @@ class Stitching(dj.Computed):
             y_smooth = mirrconv(y_shifts, np.ones(window_size) / window_size)
             x_smooth = mirrconv(x_shifts, np.ones(window_size) / window_size)
 
-            # Compute ~stddev from the first half of the traces (better SNR)
-            half_point = int(round(num_slices / 2))
-            y_rmse = np.sqrt(np.mean((y_shifts - y_smooth)[:half_point] ** 2))
-            x_rmse = np.sqrt(np.mean((x_shifts - x_smooth)[:half_point] ** 2))
+            # Compute ~stddev from the middle of the stack (better SNR)
+            one_fourth = int(round(num_slices / 4))
+            y_rmse = np.sqrt(np.mean((y_shifts - y_smooth)[one_fourth: -one_fourth] ** 2))
+            x_rmse = np.sqrt(np.mean((x_shifts - x_smooth)[one_fourth: -one_fourth] ** 2))
 
             # Get outliers
             outliers = np.logical_or(abs(y_shifts - y_smooth) > thresh * y_rmse,
