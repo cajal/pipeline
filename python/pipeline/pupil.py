@@ -25,7 +25,7 @@ from . import config
 
 schema = dj.schema('pipeline_eye', locals())
 
-DEFAULT_PARAMETERS = dict(relative_area_threshold=0.005,
+DEFAULT_PARAMETERS = dict(relative_area_threshold=0.002,
                           ratio_threshold=1.5,
                           error_threshold=0.1,
                           min_contour_len=5,
