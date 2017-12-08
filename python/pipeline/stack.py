@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scanreader
 from scipy import signal
+from scipy import interpolate  as interp
 import itertools
 
 from . import experiment, notify, shared
@@ -589,18 +590,54 @@ class Stitching(dj.Computed):
                     if left.is_aside_to(right):
                         left_xs, left_ys = [], []
                         for l, r in zip(left.slices, right.slices):
-                            expected_delta_x = r.x - l.x
-                            expected_delta_y = r.y - l.y
                             delta_x, delta_y = stitching.linear_stitch(l.slice, r.slice,
-                                                                       expected_delta_x,
-                                                                       expected_delta_y)
+                                                                       r.x - l.x, r.y - l.y)
                             left_xs.append(r.x - delta_x)
                             left_ys.append(r.y - delta_y)
+                        left_xs, left_ys = fix_stack_outliers(np.array(left_xs),
+                                                              np.array(left_ys))
                         right.join_with(left, left_xs, left_ys)
                         sorted_rois.remove(left)
                         break # restart joining
 
             return sorted_rois
+
+        def fix_stack_outliers(y_shifts, x_shifts, thresh=5):
+            """ Fix outliers in stitching/alignment shifts for stacks.
+
+            Use the first half of the traces to compute a standard deviation and reject
+            any timepoint whose y or x shift is higher than thresh stddevs from the
+            expected mean. Outliers filled in by interpolating original traces (minus any
+            outliers).
+
+            ..note:: Changes done in place
+            """
+            num_slices = len(y_shifts)
+
+            # Get smooth traces
+            window_size = min(101, num_slices)
+            window_size -= 1 if window_size % 2 ==0 else 0
+            y_smooth = mirrconv(y_shifts, np.ones(window_size) / window_size)
+            x_smooth = mirrconv(x_shifts, np.ones(window_size) / window_size)
+
+            # Compute ~stddev from the first half of the traces (better SNR)
+            half_point = int(round(num_slices / 2))
+            y_rmse = np.sqrt(np.mean((y_shifts - y_smooth)[:half_point] ** 2))
+            x_rmse = np.sqrt(np.mean((x_shifts - x_smooth)[:half_point] ** 2))
+
+            # Get outliers
+            outliers = np.logical_or(abs(y_shifts - y_smooth) > thresh * y_rmse,
+                                     abs(x_shifts - x_smooth) > thresh * x_rmse)
+
+            # Interpolate outliers
+            y_interp = interp.interp1d(np.where(~outliers)[0], y_shifts[~outliers],
+                                       bounds_error=False, fill_value=(y_smooth[0], y_smooth[-1]))
+            x_interp = interp.interp1d(np.where(~outliers)[0], x_shifts[~outliers],
+                                       bounds_error=False, fill_value=(x_smooth[0], x_smooth[-1]))
+            y_shifts[outliers] = y_interp(np.where(outliers)[0])
+            x_shifts[outliers] = x_interp(np.where(outliers)[0])
+
+            return y_shifts, x_shifts
 
         # Stitch overlapping rois recursively
         print('Computing stitching parameters...')
@@ -631,17 +668,12 @@ class Stitching(dj.Computed):
             x_aligns = np.zeros(num_slices)
             for i in range(1, num_slices):
                 # Align current slice to previous one
-                y_align, x_align, _, _ = galvo_corrections.compute_motion_shifts(big_volume[i],
+                y_aligns[i], x_aligns[i], _, _ = galvo_corrections.compute_motion_shifts(big_volume[i],
                     big_volume[i-1], in_place=False, fix_outliers=False, smooth_shifts=False)
 
-                # Reject alignment shifts higher than 2.5% image height/width
-                if abs(x_align) > 0.025 * image_width or abs(y_align) > 0.025 * image_height:
-                    y_align = 0
-                    x_align = 0
-
-                # Update shifts (shift of i -1 plus the shift to align i to i-1)
-                y_aligns[i] = y_aligns[i - 1] + y_align
-                x_aligns[i] = x_aligns[i - 1] + x_align
+            # Fix outliers and accumulate shifts so shift i is shift in i -1 plus shift to align i to i-1
+            y_aligns, x_aligns = fix_stack_outliers(y_aligns, x_aligns)
+            y_aligns, x_aligns = np.cumsum(y_aligns), np.cumsum(x_aligns)
 
             # Detrend to discard influence of vessels going through the slices
             filter_size = int(round(60 / (StackInfo() & key).fetch1('z_step'))) # 60 microns in z
@@ -876,7 +908,9 @@ class CorrectedStack(dj.Computed):
         return fig
 
 
-
+#@schema
+#class FieldRegistration(dj.Computed):
+#    pass
 
 # TODO: Add this in shared
 #class SegmentationMethod(dj.Lookup):
