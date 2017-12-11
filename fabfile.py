@@ -1,9 +1,7 @@
-import os
 from distutils.util import strtobool
 
-from fabric.api import local, abort, run, sudo
-from fabric.context_managers import cd, settings, hide, shell_env
-from fabric.contrib.console import confirm
+from fabric.api import local, run, sudo
+from fabric.context_managers import cd, settings
 from getpass import getpass
 from fabric.utils import puts
 
@@ -15,7 +13,7 @@ def on(which):
 
 def ps():
     sudo('docker ps|grep pipeline')
-    
+
 def ssh():
     for host in env.hosts:
         local('ssh-copy-id {}'.format(host))
@@ -70,7 +68,6 @@ def build_latest(nocache=False, pull=True, repo='cajal'):
 
 def pull_latest():
     sudo('docker pull ninai/pipeline:latest')
-        
+
 def push_latest():
     sudo('docker push ninai/pipeline:latest')
-

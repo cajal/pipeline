@@ -5,18 +5,19 @@ roi_id                      : tinyint                       # same as ScanImage'
 ---
 -> experiment.StackFilename
 field_ids                   : blob                          # list of field_ids (0-index) sorted from shallower to deeper
-x                           : float                         # (um) center of ROI in the motor coordinate system
-y                           : float                         # (um) center of ROI in the motor coordinate system
-z                           : float                         # (um) initial depth in the motor coordinate system
-px_height                   : smallint                      # lines per frame
-px_width                    : smallint                      # pixels per line
-px_depth                    : smallint                      # number of slices
-um_height                   : float                         # height in microns
-um_width                    : float                         # width in microns
-um_depth                    : float                         # depth in microns
+roi_x                       : float                         # (um) center of ROI in the motor coordinate system
+roi_y                       : float                         # (um) center of ROI in the motor coordinate system
+roi_z                       : float                         # (um) initial depth in the motor coordinate system
+roi_px_height               : smallint                      # lines per frame
+roi_px_width                : smallint                      # pixels per line
+roi_px_depth                : smallint                      # number of slices
+roi_um_height               : float                         # height in microns
+roi_um_width                : float                         # width in microns
+roi_um_depth                : float                         # depth in microns
 nframes                     : smallint                      # number of recorded frames per plane
 fps                         : float                         # (Hz) volumes per second
 bidirectional               : tinyint                       # true = bidirectional scanning
+is_slow                     : tinyint                       # whether all frames in one depth were recorded before moving to the next
 %}
 
 
