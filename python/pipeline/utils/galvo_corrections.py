@@ -57,8 +57,7 @@ def compute_raster_phase(image, temporal_fill_fraction):
 
 
 def compute_motion_shifts(scan, template, in_place=True, num_threads=8,
-                          fix_outliers=True, outlier_threshold=0.05, smooth_shifts=True,
-                          smoothing_window_size=5):
+                          fix_outliers=True, outlier_threshold=5):
     """ Compute shifts in x and y for rigid subpixel motion correction.
 
     Returns the number of pixels that each image in the scan was to the right (x_shift)
@@ -71,14 +70,10 @@ def compute_motion_shifts(scan, template, in_place=True, num_threads=8,
     :param int num_threads: Number of threads used for the ffts.
     :param bool fix_outliers: If True, look for spikes in motion shifts and sets them to
         the mean around them.
-    :param float outlier_threshold: Threshold (as a fraction of dimension length) for
-        outlier detection.
-    :param bool smooth_shifts: If True, smooth the timeseries of shifts.
-    :param int smoothing_window_size: Size of the Hann window (pixels) for smoothing.
+    :param float outlier_threshold: Threshold for outlier detection (number of stddevs).
 
     :returns: (y_shifts, x_shifts) Two arrays (num_frames) with the y, x motion shifts
-    :returns: (y_outliers, x_outliers) Two boolean arrays (num_frames) with True for y, x
-        outliers
+    :returns: (outliers) A boolean array (num_frames) with True for outlier frames.
 
     ..note:: Based in imreg_dft.translation().
     """
@@ -123,34 +118,53 @@ def compute_motion_shifts(scan, template, in_place=True, num_threads=8,
         x_shifts[i] = shifts[1] - image_width // 2
 
     # Detect outliers and set their value to the mean around them.
-    y_outliers = None
-    x_outliers = None
-    if fix_outliers:
-        max_y_shift = round(image_height * outlier_threshold)
-        max_x_shift = round(image_width * outlier_threshold)
-        y_shifts, y_outliers = _fix_outliers(y_shifts, max_y_shift)
-        x_shifts, x_outliers = _fix_outliers(x_shifts, max_x_shift)
+    y_shifts, x_shifts, outliers = _fix_outliers(y_shifts, x_shifts, outlier_threshold)
 
-    # Smooth the shifts temporally
-    if smooth_shifts:
-        smoothing_window_size += 1 if smoothing_window_size % 2 == 0 else 0  # make odd
-        smoothing_window = signal.hann(smoothing_window_size) + 0.05 # 0.05 raises it so edges are not zero.
-        y_shifts = mirrconv(y_shifts, smoothing_window / sum(smoothing_window))
-        x_shifts = mirrconv(x_shifts, smoothing_window / sum(smoothing_window))
+    return y_shifts, x_shifts, outliers
 
-    return y_shifts, x_shifts, y_outliers, x_outliers
 
-def _fix_outliers(shifts, max_shift):
-    """ Sets shifts whose deviation from the moving average is greater than max_shift to
-    the moving average value at that position.
+def _fix_outliers(y_shifts, x_shifts, thresh=5):
+    """ Fix outliers in motion shifts.
 
-    ..note:: Changes done in place.
+    Use middle half of the traces to compute a standard deviation and reject any shift
+    whose y or x shift is higher than thresh stddevs from the moving average. Outliers
+    filled in by interpolating original traces (skiping all outliers).
+
+    :param np.array y_shifts: Shifts in y.
+    :param np.array x_shifts: Shifts in x.
+    :param float thresh: Number of standard deviations used as threshold to classify a
+        point as an outlier.
+
+    ..note:: Changes done in place
     """
-    window_size = min(100, len(shifts))
-    moving_average = np.convolve(shifts, np.ones(window_size) / window_size, 'same')
-    extreme_shifts = abs(shifts - moving_average) > max_shift
-    shifts[extreme_shifts] = moving_average[extreme_shifts]
-    return shifts, extreme_shifts
+    num_frames = len(y_shifts)
+    if num_frames < 5:
+        return y_shifts, x_shifts, np.zeros(num_frames, dtype=bool)
+
+    # Get smooth traces
+    window_size = min(101, num_frames)
+    window_size -= 1 if window_size % 2 == 0 else 0
+    y_smooth = mirrconv(y_shifts, np.ones(window_size) / window_size)
+    x_smooth = mirrconv(x_shifts, np.ones(window_size) / window_size)
+
+    # Compute ~stddev from the middle of the scan (better SNR)
+    one_fourth = int(round(num_frames / 4))
+    y_rmse = np.sqrt(np.mean((y_shifts - y_smooth)[one_fourth: -one_fourth] ** 2))
+    x_rmse = np.sqrt(np.mean((x_shifts - x_smooth)[one_fourth: -one_fourth] ** 2))
+
+    # Get outliers
+    outliers = np.logical_or(abs(y_shifts - y_smooth) > thresh * y_rmse,
+                             abs(x_shifts - x_smooth) > thresh * x_rmse)
+
+    # Interpolate outliers
+    y_interp = interp.interp1d(np.where(~outliers)[0], y_shifts[~outliers],
+                               bounds_error=False, fill_value=(y_smooth[0], y_smooth[-1]))
+    x_interp = interp.interp1d(np.where(~outliers)[0], x_shifts[~outliers],
+                               bounds_error=False, fill_value=(x_smooth[0], x_smooth[-1]))
+    y_shifts[outliers] = y_interp(np.where(outliers)[0])
+    x_shifts[outliers] = x_interp(np.where(outliers)[0])
+
+    return y_shifts, x_shifts, outliers
 
 
 def correct_raster(scan, raster_phase, temporal_fill_fraction, in_place=True):

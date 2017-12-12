@@ -130,8 +130,8 @@ def parallel_motion_shifts(chunks, results, raster_phase, fill_fraction, templat
             chunk = galvo_corrections.correct_raster(chunk, raster_phase, fill_fraction)
 
         # Compute shifts
-        y_shifts, x_shifts, _, _ = galvo_corrections.compute_motion_shifts(chunk, template,
-                                num_threads=1, fix_outliers=False, smooth_shifts=False)
+        y_shifts, x_shifts, _ = galvo_corrections.compute_motion_shifts(chunk, template,
+                                num_threads=1, fix_outliers=False)
 
         # Add to results
         results.append((frames, y_shifts, x_shifts))
@@ -372,7 +372,7 @@ def parallel_quality_stack(chunks, results):
         results.append((field_idx, mean_intensity, contrast, mean_frame))
 
 
-def parallel_motion_stack(chunks, results, raster_phase, fill_fraction, window_size,
+def parallel_motion_stack(chunks, results, raster_phase, fill_fraction,
                           apply_anscombe=True):
     """ Compute motion correction shifts to field in scan.
 
@@ -383,7 +383,6 @@ def parallel_motion_stack(chunks, results, raster_phase, fill_fraction, window_s
     :param list results: Where to put results.
     :param float raster_phase: Raster phase used for raster correction.
     :param float fill_fraction: Fill fraction used for raster correction.
-    :param window_size int: Size of the window used to smooth shifts.
     :param bool apply_anscombe: Whether to apply anscombe transofrm to the input.
 
     :returns: (field_id, y_shifts, x_shifts) tuples.
@@ -414,8 +413,8 @@ def parallel_motion_stack(chunks, results, raster_phase, fill_fraction, window_s
             template = ndimage.gaussian_filter(np.mean(corrected, axis=-1), 0.6)
 
             # Compute motion correction shifts
-            res = galvo_corrections.compute_motion_shifts(field, template, in_place=False,
-                num_threads=1, smoothing_window_size=window_size)
+            res = galvo_corrections.compute_motion_shifts(field, template, num_threads=1,
+                                                          in_place=False)
 
             # Center motions around zero
             y_shifts = res[0] - np.median(res[0])

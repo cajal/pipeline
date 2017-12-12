@@ -293,7 +293,7 @@ class RasterCorrection(dj.Computed):
     -> ScanInfo                         # animal_id, session, scan_idx, version
     -> CorrectionChannel                # animal_id, session, scan_idx, field
     ---
-    template            : longblob      # average frame from the middle of the movie
+    raster_template     : longblob      # average frame from the middle of the movie
     raster_phase        : float         # difference between expected and recorded scan angle
     """
 
@@ -331,7 +331,7 @@ class RasterCorrection(dj.Computed):
                                      tukey(scan.image_width, 0.4)))
             anscombed = 2 * np.sqrt(mini_scan - mini_scan.min() + 3 / 8) # anscombe transform
             template = np.mean(anscombed, axis=-1) * taper
-            tuple_['template'] = template
+            tuple_['raster_template'] = template
 
             # Compute raster correction parameters
             if scan.is_bidirectional:
@@ -369,13 +369,12 @@ class MotionCorrection(dj.Computed):
 
     -> RasterCorrection
     ---
-    template                        : longblob      # image used as alignment template
+    motion_template                 : longblob      # image used as alignment template
     y_shifts                        : longblob      # (pixels) y motion correction shifts
     x_shifts                        : longblob      # (pixels) x motion correction shifts
     y_std                           : float         # (pixels) standard deviation of y shifts
     x_std                           : float         # (pixels) standard deviation of x shifts
-    y_outlier_frames                : longblob      # mask with true for frames with high y shifts (already corrected)
-    x_outlier_frames                : longblob      # mask with true for frames with high x shifts (already corrected)
+    outlier_frames                  : longblob      # mask with true for frames with outlier shifts (already corrected)
     align_time=CURRENT_TIMESTAMP    : timestamp     # automatic
     """
 
@@ -387,7 +386,6 @@ class MotionCorrection(dj.Computed):
     def _make_tuples(self, key):
         """Computes the motion shifts per frame needed to correct the scan."""
         from scipy import ndimage
-        from scipy.signal import hann
 
         # Read the scan
         scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
@@ -442,15 +440,7 @@ class MotionCorrection(dj.Computed):
                 x_shifts[frames] = chunk_x_shifts
 
             # Detect outliers
-            y_shifts, y_outliers = galvo_corrections._fix_outliers(y_shifts, px_height * 0.05)
-            x_shifts, x_outliers = galvo_corrections._fix_outliers(x_shifts, px_width * 0.05)
-
-            # Smooth shifts
-            window_size = int(round(scan.fps * 0.3))  # 300 milliseconds in frames
-            window_size += 1 if window_size % 2 == 0 else 0  # make odd
-            smoothing_window = hann(window_size) + 0.05 # 0.05 raises it so edges are not zero.
-            y_shifts = signal.mirrconv(y_shifts, smoothing_window / sum(smoothing_window))
-            x_shifts = signal.mirrconv(x_shifts, smoothing_window / sum(smoothing_window))
+            y_shifts, x_shifts, outliers = galvo_corrections._fix_outliers(y_shifts, x_shifts)
 
             # Center shifts around zero
             y_shifts -= np.median(y_shifts)
@@ -459,11 +449,10 @@ class MotionCorrection(dj.Computed):
             # Create results tuple
             tuple_ = key.copy()
             tuple_['field'] = field_id + 1
-            tuple_['template'] = template
+            tuple_['motion_template'] = template
             tuple_['y_shifts'] = y_shifts
             tuple_['x_shifts'] = x_shifts
-            tuple_['y_outlier_frames'] = y_outliers
-            tuple_['x_outlier_frames'] = x_outliers
+            tuple_['outlier_frames'] = outliers
             tuple_['y_std'] = np.std(y_shifts)
             tuple_['x_std'] = np.std(x_shifts)
 
@@ -526,7 +515,7 @@ class MotionCorrection(dj.Computed):
         original_scan = scan_.copy()
 
         # Correct the scan
-        correct_raster = (RasterCorrection() & self.proj()).get_correct_raster()
+        correct_raster = (RasterCorrection() & self).get_correct_raster()
         correct_motion = self.get_correct_motion()
         corrected_scan = correct_motion(correct_raster(scan_), slice(start_index, stop_index))
 
