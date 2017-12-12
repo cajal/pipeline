@@ -611,7 +611,6 @@ class Stitching(dj.Computed):
             [roi.rot90() for roi in rois]
             rois = join_rows(rois)
             [roi.rot270() for roi in rois]
-        import pickle; rois = [pickle.load(open('/data/pipeline/roi.pkl', 'rb'))]
 
         # Compute slice-to slice alignment
         print('Computing slice-to-slice alignment...')
@@ -866,6 +865,35 @@ class CorrectedStack(dj.Computed):
         video.save(filename, dpi=dpi)
 
         return fig
+
+#
+#@schema
+#class FieldRegistration(dj.Computed):
+#    definition = """ # align a 2-d scan field to a stack
+#    -> CorrectedStack
+#    -> experiment.Scan
+#    -> shared.Field
+#    ---
+#    reg_x       : float         # center of scan in stack coordinates
+#    reg_y       : float         # center of scan in stack coordinates
+#    reg_z       : float         # depth of scan in stack coordinates
+#    score       : float         # cross-correlation score (-1 to 1)
+#    """
+#    #TODO: Rename attributes so sessions do not interfere
+#    @property
+#    def key_source(self):
+#        all_fields = reso.SummaryImages() + meso.SummaryImages() # project away field and channel, rename session
+#        return all_fields * StackInfo() & {'pipe_version': CURRENT_VERSION}
+#
+#    def _make_tuples(self, key):
+#        pass
+#
+#    @notify.ignore_exceptions
+#    def notify(self, key):
+#        reg_x, reg_y, reg_z = (FieldRegistration() &  key).fetch('reg_x', 'reg_y', 'reg_z')
+#        msg = 'FieldRegistration for {} has been populated.'.format(key)
+#        msg += ' Field found in {}, {}, {} (x, y, z)'.format(reg_x, reg_y, reg_z)
+#        (notify.SlackUser() & (experiment.Session() & key)).notify(msg)
 
 
 # TODO: Add this in shared
