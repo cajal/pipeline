@@ -73,7 +73,8 @@ def compute_motion_shifts(scan, template, in_place=True, num_threads=8,
     :param float outlier_threshold: Threshold for outlier detection (number of stddevs).
 
     :returns: (y_shifts, x_shifts) Two arrays (num_frames) with the y, x motion shifts
-    :returns: (outliers) A boolean array (num_frames) with True for outlier frames.
+    :returns: (outliers) A boolean array (num_frames) with True for outlier frames. Or
+        None if fix_outliers is False.
 
     ..note:: Based in imreg_dft.translation().
     """
@@ -118,7 +119,9 @@ def compute_motion_shifts(scan, template, in_place=True, num_threads=8,
         x_shifts[i] = shifts[1] - image_width // 2
 
     # Detect outliers and set their value to the mean around them.
-    y_shifts, x_shifts, outliers = _fix_outliers(y_shifts, x_shifts, outlier_threshold)
+    outliers = None
+    if fix_outliers:
+        y_shifts, x_shifts, outliers = _fix_outliers(y_shifts, x_shifts, outlier_threshold)
 
     return y_shifts, x_shifts, outliers
 
