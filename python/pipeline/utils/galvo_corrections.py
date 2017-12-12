@@ -57,7 +57,7 @@ def compute_raster_phase(image, temporal_fill_fraction):
 
 
 def compute_motion_shifts(scan, template, in_place=True, num_threads=8,
-                          fix_outliers=True, outlier_threshold=5):
+                          fix_outliers=True, outlier_threshold=7):
     """ Compute shifts in x and y for rigid subpixel motion correction.
 
     Returns the number of pixels that each image in the scan was to the right (x_shift)
@@ -126,7 +126,7 @@ def compute_motion_shifts(scan, template, in_place=True, num_threads=8,
     return y_shifts, x_shifts, outliers
 
 
-def _fix_outliers(y_shifts, x_shifts, thresh=5):
+def _fix_outliers(y_shifts, x_shifts, thresh=7):
     """ Fix outliers in motion shifts.
 
     Use middle half of the traces to compute a standard deviation and reject any shift
