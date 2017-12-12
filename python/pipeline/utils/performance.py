@@ -406,12 +406,18 @@ def parallel_motion_stack(chunks, results, raster_phase, fill_fraction,
         if abs(raster_phase) > 1e-7:
             field = galvo_corrections.correct_raster(field, raster_phase, fill_fraction)
 
-        # Compute shifts
-        corrected = field
-        for j in range(3):
-            # Create template from previously corrected
-            template = ndimage.gaussian_filter(np.mean(corrected, axis=-1), 0.6)
+        # Compute initial template by averaging 10 frames that correlate highly with middle one
+        num_frames = field.shape[-1]
+        frames = field.reshape((-1, num_frames)) # num_pixels x num_frames
+        residuals = frames - frames.mean(axis=0)
+        frames_std = frames.std(axis=0)
+        covs = np.mean(residuals.T * residuals[:, int(num_frames / 2)], axis=-1)
+        corrs = covs / (frames_std * frames_std[int(num_frames / 2)])
+        selected = np.argsort(corrs)[-10:]
+        template = ndimage.gaussian_filter(np.mean(field[:, :, selected], axis=-1), 0.6)
 
+        # Compute shifts
+        for j in range(3):
             # Compute motion correction shifts
             res = galvo_corrections.compute_motion_shifts(field, template, num_threads=1,
                                                           in_place=False)
@@ -420,9 +426,10 @@ def parallel_motion_stack(chunks, results, raster_phase, fill_fraction,
             y_shifts = res[0] - np.median(res[0])
             x_shifts = res[1] - np.median(res[1])
 
-            # Apply shifts
+            # Create template from corrected scan (for next iteration)
             xy_shifts = np.stack([x_shifts, y_shifts])
             corrected = galvo_corrections.correct_motion(field, xy_shifts, in_place=False)
+            template = ndimage.gaussian_filter(np.mean(corrected, axis=-1), 0.6)
 
         # Add to results
         results.append((field_idx, y_shifts, x_shifts))
