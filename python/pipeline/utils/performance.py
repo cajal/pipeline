@@ -130,8 +130,8 @@ def parallel_motion_shifts(chunks, results, raster_phase, fill_fraction, templat
             chunk = galvo_corrections.correct_raster(chunk, raster_phase, fill_fraction)
 
         # Compute shifts
-        y_shifts, x_shifts, _ = galvo_corrections.compute_motion_shifts(chunk, template,
-                                num_threads=1, fix_outliers=False)
+        y_shifts, x_shifts = galvo_corrections.compute_motion_shifts(chunk, template,
+                                                                     num_threads=1)
 
         # Add to results
         results.append((frames, y_shifts, x_shifts))
@@ -372,8 +372,8 @@ def parallel_quality_stack(chunks, results):
         results.append((field_idx, mean_intensity, contrast, mean_frame))
 
 
-def parallel_motion_stack(chunks, results, raster_phase, fill_fraction,
-                          apply_anscombe=True):
+def parallel_motion_stack(chunks, results, raster_phase, fill_fraction, max_y_shift,
+                          max_x_shift):
     """ Compute motion correction shifts to field in scan.
 
     Function to run in each process. Consumes input from chunks and writes results to
@@ -383,7 +383,7 @@ def parallel_motion_stack(chunks, results, raster_phase, fill_fraction,
     :param list results: Where to put results.
     :param float raster_phase: Raster phase used for raster correction.
     :param float fill_fraction: Fill fraction used for raster correction.
-    :param bool apply_anscombe: Whether to apply anscombe transofrm to the input.
+    :param float max_y_shift/max_x_shift: Maximum shifts allowed in outlier detection.
 
     :returns: (field_id, y_shifts, x_shifts) tuples.
     """
@@ -399,8 +399,7 @@ def parallel_motion_stack(chunks, results, raster_phase, fill_fraction,
 
         # Apply anscombe transform
         field = field.astype(np.float32, copy=False)
-        if apply_anscombe:
-            field = 2 * np.sqrt(field - np.min(field, axis=(0, 1)) + 3 / 8)
+        field = 2 * np.sqrt(field - np.min(field, axis=(0, 1)) + 3 / 8)
 
         # Correct raster
         if abs(raster_phase) > 1e-7:
@@ -419,12 +418,16 @@ def parallel_motion_stack(chunks, results, raster_phase, fill_fraction,
         # Compute shifts
         for j in range(3):
             # Compute motion correction shifts
-            res = galvo_corrections.compute_motion_shifts(field, template, num_threads=1,
-                                                          in_place=False)
+            y_shifts, x_shifts = galvo_corrections.compute_motion_shifts(field, template,
+                                                           num_threads=1, in_place=False)
+
+            # Fix outliers
+            y_shifts, x_shifts, _ = galvo_corrections.fix_outliers(y_shifts, x_shifts,
+                                                                   max_y_shift, max_x_shift)
 
             # Center motions around zero
-            y_shifts = res[0] - np.median(res[0])
-            x_shifts = res[1] - np.median(res[1])
+            y_shifts = y_shifts - np.median(y_shifts)
+            x_shifts = x_shifts - np.median(x_shifts)
 
             # Create template from corrected scan (for next iteration)
             xy_shifts = np.stack([x_shifts, y_shifts])
