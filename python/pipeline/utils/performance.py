@@ -130,8 +130,8 @@ def parallel_motion_shifts(chunks, results, raster_phase, fill_fraction, templat
             chunk = galvo_corrections.correct_raster(chunk, raster_phase, fill_fraction)
 
         # Compute shifts
-        y_shifts, x_shifts, _, _ = galvo_corrections.compute_motion_shifts(chunk, template,
-                                num_threads=1, fix_outliers=False, smooth_shifts=False)
+        y_shifts, x_shifts = galvo_corrections.compute_motion_shifts(chunk, template,
+                                                                     num_threads=1)
 
         # Add to results
         results.append((frames, y_shifts, x_shifts))
@@ -372,8 +372,8 @@ def parallel_quality_stack(chunks, results):
         results.append((field_idx, mean_intensity, contrast, mean_frame))
 
 
-def parallel_motion_stack(chunks, results, raster_phase, fill_fraction, window_size,
-                          apply_anscombe=True):
+def parallel_motion_stack(chunks, results, raster_phase, fill_fraction, max_y_shift,
+                          max_x_shift):
     """ Compute motion correction shifts to field in scan.
 
     Function to run in each process. Consumes input from chunks and writes results to
@@ -383,8 +383,7 @@ def parallel_motion_stack(chunks, results, raster_phase, fill_fraction, window_s
     :param list results: Where to put results.
     :param float raster_phase: Raster phase used for raster correction.
     :param float fill_fraction: Fill fraction used for raster correction.
-    :param window_size int: Size of the window used to smooth shifts.
-    :param bool apply_anscombe: Whether to apply anscombe transofrm to the input.
+    :param float max_y_shift/max_x_shift: Maximum shifts allowed in outlier detection.
 
     :returns: (field_id, y_shifts, x_shifts) tuples.
     """
@@ -400,30 +399,40 @@ def parallel_motion_stack(chunks, results, raster_phase, fill_fraction, window_s
 
         # Apply anscombe transform
         field = field.astype(np.float32, copy=False)
-        if apply_anscombe:
-            field = 2 * np.sqrt(field - np.min(field, axis=(0, 1)) + 3 / 8)
+        field = 2 * np.sqrt(field - np.min(field, axis=(0, 1)) + 3 / 8)
 
         # Correct raster
         if abs(raster_phase) > 1e-7:
             field = galvo_corrections.correct_raster(field, raster_phase, fill_fraction)
 
-        # Compute shifts
-        corrected = field
-        for j in range(3):
-            # Create template from previously corrected
-            template = ndimage.gaussian_filter(np.mean(corrected, axis=-1), 0.6)
+        # Compute initial template by averaging 10 frames that correlate highly with middle one
+        num_frames = field.shape[-1]
+        frames = field.reshape((-1, num_frames)) # num_pixels x num_frames
+        residuals = frames - frames.mean(axis=0)
+        frames_std = frames.std(axis=0)
+        covs = np.mean(residuals.T * residuals[:, int(num_frames / 2)], axis=-1)
+        corrs = covs / (frames_std * frames_std[int(num_frames / 2)])
+        selected = np.argsort(corrs)[-10:]
+        template = ndimage.gaussian_filter(np.mean(field[:, :, selected], axis=-1), 0.6)
 
+        # Compute shifts
+        for j in range(3):
             # Compute motion correction shifts
-            res = galvo_corrections.compute_motion_shifts(field, template, in_place=False,
-                num_threads=1, smoothing_window_size=window_size)
+            y_shifts, x_shifts = galvo_corrections.compute_motion_shifts(field, template,
+                                                           num_threads=1, in_place=False)
+
+            # Fix outliers
+            y_shifts, x_shifts, _ = galvo_corrections.fix_outliers(y_shifts, x_shifts,
+                                                                   max_y_shift, max_x_shift)
 
             # Center motions around zero
-            y_shifts = res[0] - np.median(res[0])
-            x_shifts = res[1] - np.median(res[1])
+            y_shifts = y_shifts - np.median(y_shifts)
+            x_shifts = x_shifts - np.median(x_shifts)
 
-            # Apply shifts
+            # Create template from corrected scan (for next iteration)
             xy_shifts = np.stack([x_shifts, y_shifts])
             corrected = galvo_corrections.correct_motion(field, xy_shifts, in_place=False)
+            template = ndimage.gaussian_filter(np.mean(corrected, axis=-1), 0.6)
 
         # Add to results
         results.append((field_idx, y_shifts, x_shifts))
