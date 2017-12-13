@@ -261,8 +261,8 @@ def linear_stitch(left, right, expected_delta_x, expected_delta_y):
     right_strip = right[:min_height, :expected_overlap]
 
     # Compute best match
-    y_shifts, x_shifts, _ = galvo_corrections.compute_motion_shifts(right_strip, left_strip,
-                                                         in_place=False, fix_outliers=False)
+    y_shifts, x_shifts = galvo_corrections.compute_motion_shifts(right_strip, left_strip,
+                                                                 in_place=False)
     y_shift, x_shift = y_shifts[0], x_shifts[0]
 
     # Compute right_center minus left_center

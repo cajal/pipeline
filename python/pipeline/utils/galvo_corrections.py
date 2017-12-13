@@ -56,9 +56,8 @@ def compute_raster_phase(image, temporal_fill_fraction):
     return angle_shift
 
 
-def compute_motion_shifts(scan, template, in_place=True, num_threads=8,
-                          fix_outliers=True, outlier_threshold=7):
-    """ Compute shifts in x and y for rigid subpixel motion correction.
+def compute_motion_shifts(scan, template, in_place=True, num_threads=8):
+    """ Compute shifts in y and x for rigid subpixel motion correction.
 
     Returns the number of pixels that each image in the scan was to the right (x_shift)
     or below (y_shift) the template. Negative shifts mean the image was to the left or
@@ -68,13 +67,8 @@ def compute_motion_shifts(scan, template, in_place=True, num_threads=8,
     :param np.array template: 2-d template image. Each frame in scan is aligned to this.
     :param bool in_place: Whether the scan can be overwritten.
     :param int num_threads: Number of threads used for the ffts.
-    :param bool fix_outliers: If True, look for spikes in motion shifts and sets them to
-        the mean around them.
-    :param float outlier_threshold: Threshold for outlier detection (number of stddevs).
 
-    :returns: (y_shifts, x_shifts) Two arrays (num_frames) with the y, x motion shifts
-    :returns: (outliers) A boolean array (num_frames) with True for outlier frames. Or
-        None if fix_outliers is False.
+    :returns: (y_shifts, x_shifts) Two arrays (num_frames) with the y, x motion shifts.
 
     ..note:: Based in imreg_dft.translation().
     """
@@ -118,31 +112,29 @@ def compute_motion_shifts(scan, template, in_place=True, num_threads=8,
         y_shifts[i] = shifts[0] - image_height // 2
         x_shifts[i] = shifts[1] - image_width // 2
 
-    # Detect outliers and set their value to the mean around them.
-    outliers = None
-    if fix_outliers:
-        y_shifts, x_shifts, outliers = _fix_outliers(y_shifts, x_shifts, outlier_threshold)
-
-    return y_shifts, x_shifts, outliers
+    return y_shifts, x_shifts
 
 
-def _fix_outliers(y_shifts, x_shifts, thresh=7):
-    """ Fix outliers in motion shifts.
+def fix_outliers(y_shifts, x_shifts, max_y_shift=15, max_x_shift=15, in_place=True):
+    """ Look for spikes in motion shifts and set them to a sensible value.
 
-    Use middle half of the traces to compute a standard deviation and reject any shift
-    whose y or x shift is higher than thresh stddevs from the moving average. Outliers
-    filled in by interpolating original traces (skiping all outliers).
+    Reject any shift whose y or x shift is higher than max_y_shift/max_x_shift pixels
+    from the moving average. Outliers filled by interpolating original traces (after
+    skipping all outliers).
 
-    :param np.array y_shifts: Shifts in y.
-    :param np.array x_shifts: Shifts in x.
-    :param float thresh: Number of standard deviations used as threshold to classify a
-        point as an outlier.
+    :param np.array y_shifts/x_shifts: Shifts in y, x.
+    :param float max_y_shift/max_x_shifts: Number of pixels used as threshold to classify
+        a point as an outlier in y, x.
 
-    ..note:: Changes done in place
+    :returns: (y_shifts, x_shifts) Two arrays (num_frames) with the fixed motion shifts.
+    :returns: (outliers) A boolean array (num_frames) with True for outlier frames.
     """
+    # Basic checks
     num_frames = len(y_shifts)
     if num_frames < 5:
         return y_shifts, x_shifts, np.zeros(num_frames, dtype=bool)
+    if not in_place:
+        y_shifts, x_shifts = y_shifts.copy(), x_shifts.copy()
 
     # Get smooth traces
     window_size = min(101, num_frames)
@@ -150,14 +142,9 @@ def _fix_outliers(y_shifts, x_shifts, thresh=7):
     y_smooth = mirrconv(y_shifts, np.ones(window_size) / window_size)
     x_smooth = mirrconv(x_shifts, np.ones(window_size) / window_size)
 
-    # Compute ~stddev from the middle of the scan (better SNR)
-    one_fourth = int(round(num_frames / 4))
-    y_rmse = np.sqrt(np.mean((y_shifts - y_smooth)[one_fourth: -one_fourth] ** 2))
-    x_rmse = np.sqrt(np.mean((x_shifts - x_smooth)[one_fourth: -one_fourth] ** 2))
-
     # Get outliers
-    outliers = np.logical_or(abs(y_shifts - y_smooth) > thresh * y_rmse,
-                             abs(x_shifts - x_smooth) > thresh * x_rmse)
+    outliers = np.logical_or(abs(y_shifts - y_smooth) > max_y_shift,
+                             abs(x_shifts - x_smooth) > max_x_shift)
 
     # Interpolate outliers
     y_interp = interp.interp1d(np.where(~outliers)[0], y_shifts[~outliers],

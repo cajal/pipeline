@@ -413,10 +413,11 @@ class MotionCorrection(dj.Computed):
             f = performance.parallel_motion_stack # function to map
             raster_phase = (RasterCorrection() & key).fetch1('raster_phase')
             fill_fraction = (StackInfo() & key).fetch1('fill_fraction')
+            max_y_shift, max_x_shift = 15 / (StackInfo.ROI() & key).microns_per_pixel
             results = performance.map_fields(f, roi, field_ids=field_ids, y=slice(skip_rows, -skip_rows),
                                              x=slice(skip_cols, -skip_cols), channel=correction_channel,
-                                             kwargs={'raster_phase': raster_phase,
-                                             'fill_fraction': fill_fraction})
+                                             kwargs={'raster_phase': raster_phase, 'fill_fraction': fill_fraction,
+                                             'max_y_shift': max_y_shift, 'max_x_shift': max_x_shift})
 
             # Reduce: Collect results
             for field_idx, y_shift, x_shift in results:
@@ -590,8 +591,8 @@ class Stitching(dj.Computed):
                                                                        r.x - l.x, r.y - l.y)
                             left_xs.append(r.x - delta_x)
                             left_ys.append(r.y - delta_y)
-                        left_xs, left_ys, _ = galvo_corrections._fix_outliers(np.array(left_xs),
-                                                                              np.array(left_ys))
+                        left_xs, left_ys, _ = galvo_corrections.fix_outliers(np.array(left_xs),
+                                                                             np.array(left_ys))
                         right.join_with(left, left_xs, left_ys)
                         sorted_rois.remove(left)
                         break # restart joining
@@ -627,11 +628,11 @@ class Stitching(dj.Computed):
             x_aligns = np.zeros(num_slices)
             for i in range(1, num_slices):
                 # Align current slice to previous one
-                y_aligns[i], x_aligns[i], _ = galvo_corrections.compute_motion_shifts(big_volume[i],
-                    big_volume[i-1], in_place=False, fix_outliers=False)
+                y_aligns[i], x_aligns[i] = galvo_corrections.compute_motion_shifts(big_volume[i],
+                                                                 big_volume[i-1], in_place=False)
 
             # Fix outliers and accumulate shifts so shift i is shift in i -1 plus shift to align i to i-1
-            y_aligns, x_aligns, _ = galvo_corrections._fix_outliers(y_aligns, x_aligns)
+            y_aligns, x_aligns, _ = galvo_corrections.fix_outliers(y_aligns, x_aligns)
             y_aligns, x_aligns = np.cumsum(y_aligns), np.cumsum(x_aligns)
 
             # Detrend to discard influence of vessels going through the slices
