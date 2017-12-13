@@ -592,7 +592,8 @@ class Stitching(dj.Computed):
                             left_xs.append(r.x - delta_x)
                             left_ys.append(r.y - delta_y)
                         left_xs, left_ys, _ = galvo_corrections.fix_outliers(np.array(left_xs),
-                                                                             np.array(left_ys))
+                                                                             np.array(left_ys),
+                                                                             method='trend')
                         right.join_with(left, left_xs, left_ys)
                         sorted_rois.remove(left)
                         break # restart joining
@@ -632,7 +633,8 @@ class Stitching(dj.Computed):
                                                                  big_volume[i-1], in_place=False)
 
             # Fix outliers and accumulate shifts so shift i is shift in i -1 plus shift to align i to i-1
-            y_aligns, x_aligns, _ = galvo_corrections.fix_outliers(y_aligns, x_aligns)
+            y_aligns, x_aligns, _ = galvo_corrections.fix_outliers(y_aligns, x_aligns,
+                                                                   method='trend')
             y_aligns, x_aligns = np.cumsum(y_aligns), np.cumsum(x_aligns)
 
             # Detrend to discard influence of vessels going through the slices
