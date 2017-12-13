@@ -8,7 +8,7 @@ from scipy import signal
 from scipy import interpolate  as interp
 import itertools
 
-from . import experiment, notify, shared
+from . import experiment, notify, shared, reso, meso
 from .utils import galvo_corrections, stitching, performance
 from .utils.signal import mirrconv, float2uint8
 from .exceptions import PipelineException
@@ -408,19 +408,16 @@ class MotionCorrection(dj.Computed):
             # Compute some params
             skip_rows = int(round(image_height * 0.10))
             skip_cols = int(round(image_width * 0.10))
-            if roi.is_slow_stack:
-                window_size = int(round(roi.fps * roi.num_scanning_depths * 0.3)) # 300 milliseconds in frames
-            else:
-                window_size = int(round(roi.fps * 0.3))
 
             # Map: Compute shifts in parallel
             f = performance.parallel_motion_stack # function to map
             raster_phase = (RasterCorrection() & key).fetch1('raster_phase')
             fill_fraction = (StackInfo() & key).fetch1('fill_fraction')
+            max_y_shift, max_x_shift = 15 / (StackInfo.ROI() & key).microns_per_pixel
             results = performance.map_fields(f, roi, field_ids=field_ids, y=slice(skip_rows, -skip_rows),
                                              x=slice(skip_cols, -skip_cols), channel=correction_channel,
-                                             kwargs={'raster_phase': raster_phase,
-                                             'fill_fraction': fill_fraction, 'window_size': window_size})
+                                             kwargs={'raster_phase': raster_phase, 'fill_fraction': fill_fraction,
+                                             'max_y_shift': max_y_shift, 'max_x_shift': max_x_shift})
 
             # Reduce: Collect results
             for field_idx, y_shift, x_shift in results:
@@ -594,50 +591,13 @@ class Stitching(dj.Computed):
                                                                        r.x - l.x, r.y - l.y)
                             left_xs.append(r.x - delta_x)
                             left_ys.append(r.y - delta_y)
-                        left_xs, left_ys = fix_stack_outliers(np.array(left_xs),
-                                                              np.array(left_ys))
+                        left_xs, left_ys, _ = galvo_corrections.fix_outliers(np.array(left_xs),
+                                                                             np.array(left_ys))
                         right.join_with(left, left_xs, left_ys)
                         sorted_rois.remove(left)
                         break # restart joining
 
             return sorted_rois
-
-        def fix_stack_outliers(y_shifts, x_shifts, thresh=5):
-            """ Fix outliers in stitching/alignment shifts for stacks.
-
-            Use the first half of the traces to compute a standard deviation and reject
-            any timepoint whose y or x shift is higher than thresh stddevs from the
-            expected mean. Outliers filled in by interpolating original traces (minus any
-            outliers).
-
-            ..note:: Changes done in place
-            """
-            num_slices = len(y_shifts)
-
-            # Get smooth traces
-            window_size = min(101, num_slices)
-            window_size -= 1 if window_size % 2 ==0 else 0
-            y_smooth = mirrconv(y_shifts, np.ones(window_size) / window_size)
-            x_smooth = mirrconv(x_shifts, np.ones(window_size) / window_size)
-
-            # Compute ~stddev from the middle of the stack (better SNR)
-            one_fourth = int(round(num_slices / 4))
-            y_rmse = np.sqrt(np.mean((y_shifts - y_smooth)[one_fourth: -one_fourth] ** 2))
-            x_rmse = np.sqrt(np.mean((x_shifts - x_smooth)[one_fourth: -one_fourth] ** 2))
-
-            # Get outliers
-            outliers = np.logical_or(abs(y_shifts - y_smooth) > thresh * y_rmse,
-                                     abs(x_shifts - x_smooth) > thresh * x_rmse)
-
-            # Interpolate outliers
-            y_interp = interp.interp1d(np.where(~outliers)[0], y_shifts[~outliers],
-                                       bounds_error=False, fill_value=(y_smooth[0], y_smooth[-1]))
-            x_interp = interp.interp1d(np.where(~outliers)[0], x_shifts[~outliers],
-                                       bounds_error=False, fill_value=(x_smooth[0], x_smooth[-1]))
-            y_shifts[outliers] = y_interp(np.where(outliers)[0])
-            x_shifts[outliers] = x_interp(np.where(outliers)[0])
-
-            return y_shifts, x_shifts
 
         # Stitch overlapping rois recursively
         print('Computing stitching parameters...')
@@ -668,11 +628,11 @@ class Stitching(dj.Computed):
             x_aligns = np.zeros(num_slices)
             for i in range(1, num_slices):
                 # Align current slice to previous one
-                y_aligns[i], x_aligns[i], _, _ = galvo_corrections.compute_motion_shifts(big_volume[i],
-                    big_volume[i-1], in_place=False, fix_outliers=False, smooth_shifts=False)
+                y_aligns[i], x_aligns[i] = galvo_corrections.compute_motion_shifts(big_volume[i],
+                                                                 big_volume[i-1], in_place=False)
 
             # Fix outliers and accumulate shifts so shift i is shift in i -1 plus shift to align i to i-1
-            y_aligns, x_aligns = fix_stack_outliers(y_aligns, x_aligns)
+            y_aligns, x_aligns, _ = galvo_corrections.fix_outliers(y_aligns, x_aligns)
             y_aligns, x_aligns = np.cumsum(y_aligns), np.cumsum(x_aligns)
 
             # Detrend to discard influence of vessels going through the slices
@@ -683,12 +643,12 @@ class Stitching(dj.Computed):
                 x_aligns -= mirrconv(x_aligns, smoothing_filter/ sum(smoothing_filter))
 
             # Apply alignment shifts in roi
-            for slice_, x_align, y_align in zip(roi.slices, x_aligns, y_aligns):
-                slice_.x -= x_align
+            for slice_, y_align, x_align in zip(roi.slices, y_aligns, x_aligns):
                 slice_.y += y_align
+                slice_.x -= x_align
             for roi_coord in roi.roi_coordinates:
-                roi_coord.xs = [prev_x - x_align for prev_x, x_align in zip(roi_coord.xs, x_aligns)]
                 roi_coord.ys = [prev_y + y_align for prev_y, y_align in zip(roi_coord.ys, y_aligns)]
+                roi_coord.xs = [prev_x - x_align for prev_x, x_align in zip(roi_coord.xs, x_aligns)]
 
         # Insert in Stitching
         print('Inserting...')
@@ -907,10 +867,35 @@ class CorrectedStack(dj.Computed):
 
         return fig
 
-
+#
 #@schema
 #class FieldRegistration(dj.Computed):
-#    pass
+#    definition = """ # align a 2-d scan field to a stack
+#    -> CorrectedStack
+#    -> experiment.Scan
+#    -> shared.Field
+#    ---
+#    reg_x       : float         # center of scan in stack coordinates
+#    reg_y       : float         # center of scan in stack coordinates
+#    reg_z       : float         # depth of scan in stack coordinates
+#    score       : float         # cross-correlation score (-1 to 1)
+#    """
+#    #TODO: Rename attributes so sessions do not interfere
+#    @property
+#    def key_source(self):
+#        all_fields = reso.SummaryImages() + meso.SummaryImages() # project away field and channel, rename session
+#        return all_fields * StackInfo() & {'pipe_version': CURRENT_VERSION}
+#
+#    def _make_tuples(self, key):
+#        pass
+#
+#    @notify.ignore_exceptions
+#    def notify(self, key):
+#        reg_x, reg_y, reg_z = (FieldRegistration() &  key).fetch('reg_x', 'reg_y', 'reg_z')
+#        msg = 'FieldRegistration for {} has been populated.'.format(key)
+#        msg += ' Field found in {}, {}, {} (x, y, z)'.format(reg_x, reg_y, reg_z)
+#        (notify.SlackUser() & (experiment.Session() & key)).notify(msg)
+
 
 # TODO: Add this in shared
 #class SegmentationMethod(dj.Lookup):
