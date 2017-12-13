@@ -585,15 +585,21 @@ class Stitching(dj.Computed):
 
                 for left, right in itertools.combinations(sorted_rois, 2):
                     if left.is_aside_to(right):
-                        left_xs, left_ys = [], []
+                        # Compute stitching shifts
+                        left_ys, left_xs = [], []
                         for l, r in zip(left.slices, right.slices):
-                            delta_x, delta_y = stitching.linear_stitch(l.slice, r.slice,
-                                                                       r.x - l.x, r.y - l.y)
-                            left_xs.append(r.x - delta_x)
+                            delta_y, delta_x = stitching.linear_stitch(l.slice, r.slice,
+                                                                       r.y - l.y, r.x - l.x)
                             left_ys.append(r.y - delta_y)
-                        left_xs, left_ys, _ = galvo_corrections.fix_outliers(np.array(left_xs),
-                                                                             np.array(left_ys),
-                                                                             method='trend')
+                            left_xs.append(r.x - delta_x)
+
+                        # Fix outliers
+                        roi_key = {**key, 'roi_id': left.roi_coordinates[0].id}
+                        max_y_shift, max_x_shift = 10 / (StackInfo.ROI() & roi_key).microns_per_pixel
+                        left_ys, left_xs, _ = galvo_corrections.fix_outliers(np.array(left_ys),
+                                np.array(left_xs), max_y_shift, max_x_shift, method='trend')
+
+                        # Stitch together
                         right.join_with(left, left_xs, left_ys)
                         sorted_rois.remove(left)
                         break # restart joining
@@ -632,9 +638,13 @@ class Stitching(dj.Computed):
                 y_aligns[i], x_aligns[i] = galvo_corrections.compute_motion_shifts(big_volume[i],
                                                                  big_volume[i-1], in_place=False)
 
-            # Fix outliers and accumulate shifts so shift i is shift in i -1 plus shift to align i to i-1
+            # Fix outliers
+            roi_key = {**key, 'roi_id': roi.roi_coordinates[0].id}
+            max_y_shift, max_x_shift = 15 / (StackInfo.ROI() & roi_key).microns_per_pixel
             y_aligns, x_aligns, _ = galvo_corrections.fix_outliers(y_aligns, x_aligns,
-                                                                   method='trend')
+                                              max_y_shift, max_x_shift, method='trend')
+
+            # Accumulate shifts so shift i is shift in i -1 plus shift to align i to i-1
             y_aligns, x_aligns = np.cumsum(y_aligns), np.cumsum(x_aligns)
 
             # Detrend to discard influence of vessels going through the slices
