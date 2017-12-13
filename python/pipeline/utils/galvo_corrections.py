@@ -147,12 +147,18 @@ def fix_outliers(y_shifts, x_shifts, max_y_shift=15, max_x_shift=15, in_place=Tr
                              abs(x_shifts - x_smooth) > max_x_shift)
 
     # Interpolate outliers
-    y_interp = interp.interp1d(np.where(~outliers)[0], y_shifts[~outliers],
-                               bounds_error=False, fill_value=(y_smooth[0], y_smooth[-1]))
-    x_interp = interp.interp1d(np.where(~outliers)[0], x_shifts[~outliers],
-                               bounds_error=False, fill_value=(x_smooth[0], x_smooth[-1]))
-    y_shifts[outliers] = y_interp(np.where(outliers)[0])
-    x_shifts[outliers] = x_interp(np.where(outliers)[0])
+    num_outliers = np.sum(outliers)
+    if num_outliers < num_frames - 1: # at least two good points needed for interpolation
+        y_interp = interp.interp1d(np.where(~outliers)[0], y_shifts[~outliers],
+                                   bounds_error=False, fill_value=(y_smooth[0], y_smooth[-1]))
+        x_interp = interp.interp1d(np.where(~outliers)[0], x_shifts[~outliers],
+                                   bounds_error=False, fill_value=(x_smooth[0], x_smooth[-1]))
+        y_shifts[outliers] = y_interp(np.where(outliers)[0])
+        x_shifts[outliers] = x_interp(np.where(outliers)[0])
+    else:
+        print('Warning: {} out of {} frames were outliers.'.format(num_outliers, num_frames))
+        y_shifts[:] = y_smooth
+        x_shifts[:] = x_smooth
 
     return y_shifts, x_shifts, outliers
 
