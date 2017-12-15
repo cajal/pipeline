@@ -85,7 +85,7 @@ def extract_masks(scan, mmap_scan, num_components=200, num_background_components
     image_height, image_width, num_frames = scan.shape
 
     # Start processes
-    log('Starting {} processes'.format(num_processes))
+    log('Starting {} processes...'.format(num_processes))
     pool = mp.Pool(processes=num_processes)
 
     # Initialize components
