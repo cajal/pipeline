@@ -8,7 +8,8 @@ def map_frames(f, scan, field_id, y, x, channel, kwargs={}, chunk_size_in_GB=1,
     """ Apply function f to chunks of the scan (divided in the temporal axis).
 
     :param function f: Function that receives two positional arguments:
-        chunks: A queue with (slices, scan_chunk) tuples.
+        chunks: A queue with (frames, scan_chunk) tuples. frames is a slice object,
+            scan_chunks is a [height, width, num_frames] object
         results: A list to accumulate new results.
     :param Scan scan: An scan object as returned by scanreader.
     :param int field_id: Which field to use: 0-indexed.
@@ -16,8 +17,8 @@ def map_frames(f, scan, field_id, y, x, channel, kwargs={}, chunk_size_in_GB=1,
     :param slice x: How to slice the scan in x.
     :param int channel: Which channel to read.
     :param dict kwargs: Dictionary with optional kwargs passed to f.
-    :param int num_processes: Number of processes to use for mapping.
     :param int chunk_size_in_GB: Desired size of each chunk.
+    :param int num_processes: Number of processes to use for mapping.
     :param int queue_size: Maximum size of the queue used to store chunks.
 
     :returns list results: List with results per chunk of scan. Order is not guaranteed.
@@ -70,6 +71,37 @@ def map_frames(f, scan, field_id, y, x, channel, kwargs={}, chunk_size_in_GB=1,
     return list(results)
 
 
+def parallel_quality_metrics(chunks, results):
+    """ Compute mean intensity per frame, contrast per frame and mean frame.
+
+    :param queue chunks: Queue with inputs to consume.
+    :param list results: Where to put results.
+
+    :returns: Mean intensity per frame, contrast (99 -1 percentile) per frame, and mean
+        frame (average over time in this chunk).
+    """
+    while True:
+        # Read next chunk (process locks until something can be read)
+        frames, chunk = chunks.get()
+        if chunk is None:  # stop signal when all chunks have been processed
+            return
+
+        print(time.ctime(), 'Processing frames:', frames)
+
+        # Mean intensity
+        mean_intensity = np.mean(chunk, axis=(0, 1), dtype=float)
+
+        # Contrast
+        percentiles = np.percentile(chunk, q=(1, 99), axis=(0, 1))
+        contrast = (percentiles[1] - percentiles[0]).astype(float)
+
+        # Mean frame
+        mean_frame = np.mean(chunk, axis=-1, dtype=float)
+
+        # Save results
+        results.append((frames, mean_intensity, contrast, mean_frame))
+
+
 def parallel_motion_shifts(chunks, results, raster_phase, fill_fraction, template):
     """ Compute motion correction shifts to chunks of scan.
 
@@ -98,8 +130,8 @@ def parallel_motion_shifts(chunks, results, raster_phase, fill_fraction, templat
             chunk = galvo_corrections.correct_raster(chunk, raster_phase, fill_fraction)
 
         # Compute shifts
-        y_shifts, x_shifts, _, _ = galvo_corrections.compute_motion_shifts(chunk, template,
-                                num_threads=1, fix_outliers=False, smooth_shifts=False)
+        y_shifts, x_shifts = galvo_corrections.compute_motion_shifts(chunk, template,
+                                                                     num_threads=1)
 
         # Add to results
         results.append((frames, y_shifts, x_shifts))
@@ -253,71 +285,194 @@ def parallel_fluorescence(chunks, results, raster_phase, fill_fraction, y_shifts
         results.append((frames, traces))
 
 
-def parallel_quality_metrics(chunks, results):
+
+################################## Stacks ##############################################
+
+def map_fields(f, scan, field_ids, channel, y=slice(None), x=slice(None),
+               frames=slice(None), kwargs={}, num_processes=8, queue_size=8):
+    """ Apply function f to each field in scan
+
+    :param function f: Function that receives two positional arguments:
+        fields: A queue with (field_idx, chunk) tuples. field_idx is an integer, chunk is
+            a [height, width, frames] array.
+        results: A list to accumulate new results.
+    :param Scan scan: An scan object as returned by scanreader.
+    :param field_ids: List of fields where f will be applied.
+    :param slice y: How to slice the scan in y.
+    :param slice x: How to slice the scan in x.
+    :param int channel: Which channel to read.
+    :param slice frames: Frames to pass to f.
+    :param dict kwargs: Dictionary with optional kwargs passed to f.
+    :param int num_processes: Number of processes to use for mapping.
+    :param int queue_size: Maximum size of the queue used to store chunks.
+
+    :returns list results: List with results per field. Order is not guaranteed.
+    """
+    import multiprocessing as mp
+
+    # Basic checks
+    num_processes = min(num_processes, mp.cpu_count() - 1)
+    print('Using', num_processes, 'processes')
+
+    # Create a Queue to put in new chunks and a list for results
+    manager = mp.Manager()
+    chunks = manager.Queue(maxsize=queue_size)
+    results = manager.list()
+
+    # Start workers (will lock until data appears in chunks)
+    pool = []
+    for i in range(num_processes):
+        p = mp.Process(target=f, args=(chunks, results), kwargs=kwargs)
+        p.start()
+        pool.append(p)
+
+    # Produce data
+    for i, field_id in enumerate(field_ids):
+        chunks.put((i, scan[field_id, y, x, channel, frames])) # field_idx, field tuples
+
+    # Queue STOP signal
+    for i in range(num_processes):
+        chunks.put((None, None))
+
+    # Wait for processes to finish
+    for p in pool:
+        p.join()
+
+    return list(results)
+
+
+def parallel_quality_stack(chunks, results):
     """ Compute mean intensity per frame, contrast per frame, mean
 
     :param queue chunks: Queue with inputs to consume.
     :param list results: Where to put results.
 
-    :returns: Mean intensity per frame, contrast (99 -1 percentile) per frame, and mean
-        frame (average over time in this chunk).
+    :returns: (field_id, mean intensity per frame, contrast (99 -1 percentile) per frame
+               and mean frame (average over time in this field) tuple.
     """
     while True:
         # Read next chunk (process locks until something can be read)
-        frames, chunk = chunks.get()
-        if chunk is None:  # stop signal when all chunks have been processed
+        field_idx, field = chunks.get()
+        if field is None:  # stop signal when all chunks have been processed
             return
 
-        print(time.ctime(), 'Processing frames:', frames)
+        print(time.ctime(), 'Processing field:', field_idx)
 
         # Mean intensity
-        mean_intensity = np.mean(chunk, axis=(0, 1), dtype=float)
+        mean_intensity = np.mean(field, axis=(0, 1), dtype=float)
 
         # Contrast
-        percentiles = np.percentile(chunk, q=(1, 99), axis=(0, 1))
+        percentiles = np.percentile(field, q=(1, 99), axis=(0, 1))
         contrast = (percentiles[1] - percentiles[0]).astype(float)
 
         # Mean frame
-        mean_frame = np.mean(chunk, axis=-1, dtype=float)
+        mean_frame = np.mean(field, axis=-1, dtype=float)
 
         # Save results
-        results.append((frames, mean_intensity, contrast, mean_frame))
+        results.append((field_idx, mean_intensity, contrast, mean_frame))
 
 
+def parallel_motion_stack(chunks, results, raster_phase, fill_fraction, max_y_shift,
+                          max_x_shift):
+    """ Compute motion correction shifts to field in scan.
+
+    Function to run in each process. Consumes input from chunks and writes results to
+    results. Stops when stop signal is received in chunks.
+
+    :param queue chunks: Queue with inputs to consume.
+    :param list results: Where to put results.
+    :param float raster_phase: Raster phase used for raster correction.
+    :param float fill_fraction: Fill fraction used for raster correction.
+    :param float max_y_shift/max_x_shift: Maximum shifts allowed in outlier detection.
+
+    :returns: (field_id, y_shifts, x_shifts) tuples.
+    """
+    from scipy import ndimage
+
+    while True:
+        # Read next chunk (process locks until something can be read)
+        field_idx, field = chunks.get()
+        if field is None:  # stop signal when all chunks have been processed
+            return
+
+        print(time.ctime(), 'Processing field:', field_idx)
+
+        # Apply anscombe transform
+        field = field.astype(np.float32, copy=False)
+        field = 2 * np.sqrt(field - np.min(field, axis=(0, 1)) + 3 / 8)
+
+        # Correct raster
+        if abs(raster_phase) > 1e-7:
+            field = galvo_corrections.correct_raster(field, raster_phase, fill_fraction)
+
+        # Compute initial template by averaging 10 frames that correlate highly with middle one
+        num_frames = field.shape[-1]
+        frames = field.reshape((-1, num_frames)) # num_pixels x num_frames
+        residuals = frames - frames.mean(axis=0)
+        frames_std = frames.std(axis=0)
+        covs = np.mean(residuals.T * residuals[:, int(num_frames / 2)], axis=-1)
+        corrs = covs / (frames_std * frames_std[int(num_frames / 2)])
+        selected = np.argsort(corrs)[-10:]
+        template = ndimage.gaussian_filter(np.mean(field[:, :, selected], axis=-1), 0.6)
+
+        # Compute shifts
+        for j in range(3):
+            # Compute motion correction shifts
+            y_shifts, x_shifts = galvo_corrections.compute_motion_shifts(field, template,
+                                                           num_threads=1, in_place=False)
+
+            # Fix outliers
+            y_shifts, x_shifts, _ = galvo_corrections.fix_outliers(y_shifts, x_shifts,
+                                                                   max_y_shift, max_x_shift)
+
+            # Center motions around zero
+            y_shifts = y_shifts - np.median(y_shifts)
+            x_shifts = x_shifts - np.median(x_shifts)
+
+            # Create template from corrected scan (for next iteration)
+            xy_shifts = np.stack([x_shifts, y_shifts])
+            corrected = galvo_corrections.correct_motion(field, xy_shifts, in_place=False)
+            template = ndimage.gaussian_filter(np.mean(corrected, axis=-1), 0.6)
+
+        # Add to results
+        results.append((field_idx, y_shifts, x_shifts))
 
 
-#def map_pixels(f, scan, field_id, channel=0, frames=slice(None), chunk_size_in_GB=10):
-#    """ Apply function f to chunks of the scan (divided in the y, x axis).
-#
-#    :param function f: Function that receives a 3-d scan (image_height, image_width, num_frames).
-#    :param Scan scan: An scan object as returned by scanreader.
-#    :param int field_id: Which field to use: 0-indexed.
-#    :param int channel: Which channel to read.
-#    :param slice frames: How to slice the frames of the scan.
-#    :param int chunk_size_in_GB: Desired size of each chunk.
-#    """
-#
-#
-#    #TODO: skimage.util.apply_parallel(func
-#
-#    # Get some dimensions
-#    if scan.is_multiroi:
-#        image_height = scan.field_heights[field_id]
-#        image_width = scan.field_widths[field_id]
-#    else:
-#        _, image_height, image_width, _, _ = scan.shape
-#    num_frames = scan.num_frames
-#
-#    # Calculate the number of frames per chunk
-#    bytes_per_pixel = num_frames * 4 # 4 bytes per pixel
-#    chunk_size_y = int(round((chunk_size_in_GB * 2**30) / bytes_per_pixel))
-#    chunk_size_x= int(round((chunk_size_in_GB * 2**30) / bytes_per_pixel))
-#
-#    # Apply function over chunks
-#    for initial_y in range(0, image_height, chunk_size_y):
-#        for initial_x in range(0, image_width, chunk_size_x):
-#            yslice = slice(initial_y, initial_y + chunk_size_y)
-#            xslice = slice(initial_x, initial_x + chunk_size_x)
-#
-#            scan_ = scan[field_id, yslice, xslice, channel, frames]
-#            yield yslice, xslice, f(scan_)
+def parallel_correct_stack(chunks, results, raster_phase, fill_fraction, y_shifts,
+                           x_shifts, apply_anscombe=False):
+    """ Apply corrections in parallel and return mean of corrected field over time.
+
+    :param queue chunks: Queue with inputs to consume.
+    :param list results: Where to put results.
+    :param float raster_phase: Raster phase used for raster correction.
+    :param float fill_fraction: Fill fraction used for raster correction.
+    :param np.array y_shifts: Array with shifts in y for all fields.
+    :param np.array x_shifts: Array with shifts in x for all fields
+    :param bool apply_anscombe: Whether to apply anscombe transofrm to the input.
+
+    :returns: (field_id, corrected_field) tuples.
+    """
+    while True:
+        # Read next chunk (process locks until something can be read)
+        field_idx, field = chunks.get()
+        if field is None:  # stop signal when all chunks have been processed
+            return
+
+        print(time.ctime(), 'Processing field:', field_idx)
+
+        # Apply anscombe transform
+        field = field.astype(np.float32, copy=False)
+        if apply_anscombe:
+            field = 2 * np.sqrt(field - np.min(field, axis=(0, 1)) + 3 / 8)
+
+        # Correct raster
+        if abs(raster_phase) > 1e-7:
+            field = galvo_corrections.correct_raster(field, raster_phase, fill_fraction)
+
+        # Correct motion
+        xy_shifts = np.stack([x_shifts[field_idx], y_shifts[field_idx]])
+        corrected = galvo_corrections.correct_motion(field, xy_shifts)
+        averaged = np.mean(corrected, axis=-1) if corrected.ndim > 2 else corrected
+
+        # Add to results
+        results.append((field_idx, averaged))
