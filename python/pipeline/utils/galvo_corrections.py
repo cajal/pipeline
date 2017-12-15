@@ -2,7 +2,6 @@
 from scipy import interpolate  as interp
 from scipy import signal
 import numpy as np
-
 import scipy.ndimage as ndi
 
 from ..exceptions import PipelineException
@@ -57,10 +56,8 @@ def compute_raster_phase(image, temporal_fill_fraction):
     return angle_shift
 
 
-def compute_motion_shifts(scan, template, in_place=True, num_threads=8,
-                          fix_outliers=True, outlier_threshold=0.05, smooth_shifts=True,
-                          smoothing_window_size=5):
-    """ Compute shifts in x and y for rigid subpixel motion correction.
+def compute_motion_shifts(scan, template, in_place=True, num_threads=8):
+    """ Compute shifts in y and x for rigid subpixel motion correction.
 
     Returns the number of pixels that each image in the scan was to the right (x_shift)
     or below (y_shift) the template. Negative shifts mean the image was to the left or
@@ -70,16 +67,8 @@ def compute_motion_shifts(scan, template, in_place=True, num_threads=8,
     :param np.array template: 2-d template image. Each frame in scan is aligned to this.
     :param bool in_place: Whether the scan can be overwritten.
     :param int num_threads: Number of threads used for the ffts.
-    :param bool fix_outliers: If True, look for spikes in motion shifts and sets them to
-        the mean around them.
-    :param float outlier_threshold: Threshold (as a fraction of dimension length) for
-        outlier detection.
-    :param bool smooth_shifts: If True, smooth the timeseries of shifts.
-    :param int smoothing_window_size: Size of the Hann window (pixels) for smoothing.
 
-    :returns: (y_shifts, x_shifts) Two arrays (num_frames) with the y, x motion shifts
-    :returns: (y_outliers, x_outliers) Two boolean arrays (num_frames) with True for y, x
-        outliers
+    :returns: (y_shifts, x_shifts) Two arrays (num_frames) with the y, x motion shifts.
 
     ..note:: Based in imreg_dft.translation().
     """
@@ -117,41 +106,55 @@ def compute_motion_shifts(scan, template, in_place=True, num_threads=8,
 
         # Get best shift
         shifts = np.unravel_index(np.argmax(shifted_cross_power), shifted_cross_power.shape)
-        shifts = utils._interpolate(shifted_cross_power, shifts)
+        shifts = utils._interpolate(shifted_cross_power, shifts, rad=3)
 
         # Map back to deviations from center
         y_shifts[i] = shifts[0] - image_height // 2
         x_shifts[i] = shifts[1] - image_width // 2
 
-    # Detect outliers and set their value to the mean around them.
-    y_outliers = None
-    x_outliers = None
-    if fix_outliers:
-        max_y_shift = round(image_height * outlier_threshold)
-        max_x_shift = round(image_width * outlier_threshold)
-        y_shifts, y_outliers = _fix_outliers(y_shifts, max_y_shift)
-        x_shifts, x_outliers = _fix_outliers(x_shifts, max_x_shift)
+    return y_shifts, x_shifts
 
-    # Smooth the shifts temporally
-    if smooth_shifts:
-        smoothing_window_size += 1 if smoothing_window_size % 2 == 0 else 0  # make odd
-        smoothing_window = signal.hann(smoothing_window_size) + 0.05 # 0.05 raises it so edges are not zero.
-        y_shifts = mirrconv(y_shifts, smoothing_window / sum(smoothing_window))
-        x_shifts = mirrconv(x_shifts, smoothing_window / sum(smoothing_window))
 
-    return y_shifts, x_shifts, y_outliers, x_outliers
+def fix_outliers(y_shifts, x_shifts, max_y_shift=15, max_x_shift=15, in_place=True):
+    """ Look for spikes in motion shifts and set them to a sensible value.
 
-def _fix_outliers(shifts, max_shift):
-    """ Sets shifts whose deviation from the moving average is greater than max_shift to
-    the moving average value at that position.
+    Reject any shift whose y or x shift is higher than max_y_shift/max_x_shift pixels
+    from the moving average. Outliers filled by interpolating original traces (after
+    skipping all outliers).
 
-    ..note:: Changes done in place.
+    :param np.array y_shifts/x_shifts: Shifts in y, x.
+    :param float max_y_shift/max_x_shifts: Number of pixels used as threshold to classify
+        a point as an outlier in y, x.
+
+    :returns: (y_shifts, x_shifts) Two arrays (num_frames) with the fixed motion shifts.
+    :returns: (outliers) A boolean array (num_frames) with True for outlier frames.
     """
-    window_size = min(100, len(shifts))
-    moving_average = np.convolve(shifts, np.ones(window_size) / window_size, 'same')
-    extreme_shifts = abs(shifts - moving_average) > max_shift
-    shifts[extreme_shifts] = moving_average[extreme_shifts]
-    return shifts, extreme_shifts
+    # Basic checks
+    num_frames = len(y_shifts)
+    if num_frames < 5:
+        return y_shifts, x_shifts, np.zeros(num_frames, dtype=bool)
+    if not in_place:
+        y_shifts, x_shifts = y_shifts.copy(), x_shifts.copy()
+
+    # Get smooth traces
+    window_size = min(101, num_frames)
+    window_size -= 1 if window_size % 2 == 0 else 0
+    y_smooth = mirrconv(y_shifts, np.ones(window_size) / window_size)
+    x_smooth = mirrconv(x_shifts, np.ones(window_size) / window_size)
+
+    # Get outliers
+    outliers = np.logical_or(abs(y_shifts - y_smooth) > max_y_shift,
+                             abs(x_shifts - x_smooth) > max_x_shift)
+
+    # Interpolate outliers
+    y_interp = interp.interp1d(np.where(~outliers)[0], y_shifts[~outliers],
+                               bounds_error=False, fill_value=(y_smooth[0], y_smooth[-1]))
+    x_interp = interp.interp1d(np.where(~outliers)[0], x_shifts[~outliers],
+                               bounds_error=False, fill_value=(x_smooth[0], x_smooth[-1]))
+    y_shifts[outliers] = y_interp(np.where(outliers)[0])
+    x_shifts[outliers] = x_interp(np.where(outliers)[0])
+
+    return y_shifts, x_shifts, outliers
 
 
 def correct_raster(scan, raster_phase, temporal_fill_fraction, in_place=True):
@@ -262,8 +265,7 @@ def correct_motion(scan, xy_shifts, in_place=True):
     yx_shifts[np.logical_or(np.isnan(yx_shifts[:, 0]), np.isnan(yx_shifts[:, 1]))] = 0
     for i, yx_shift in enumerate(yx_shifts):
         image = reshaped_scan[:, :, i].copy()
-        ndi.interpolation.shift(image, -yx_shift, output=reshaped_scan[:, :, i], cval=0,
-                                order=1)
+        ndi.interpolation.shift(image, -yx_shift, output=reshaped_scan[:, :, i], order=1)
 
     scan = np.reshape(reshaped_scan, original_shape)
     return scan
