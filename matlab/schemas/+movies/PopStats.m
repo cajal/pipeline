@@ -60,7 +60,7 @@ classdef PopStats < dj.Imported
             ft_sz = cellfun(@(x) size(x,2),flip_times);
             tidx = ft_sz>=prctile(ft_sz,99);
             flip_times = cell2mat(flip_times(tidx));
-            
+             
             % subsample traces
             fps = 1/median(diff(flip_times(1,:)));
             d = max(1,round(key.bin/1000*fps));
