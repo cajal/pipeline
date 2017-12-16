@@ -400,13 +400,14 @@ class MotionCorrection(dj.Computed):
 
         for field_id in range(scan.num_fields):
             print('Correcting motion in field', field_id + 1)
+            field_key = {**key, 'field': field_id + 1}
 
             # Get some params
-            field = (ScanInfo.Field() & key & {'field': field_id + 1})
+            field = (ScanInfo.Field() & field_key)
             px_height, px_width = field.fetch1('px_height', 'px_width')
 
             # Select channel
-            correction_channel = (CorrectionChannel() & key & {'field': field_id + 1})
+            correction_channel = (CorrectionChannel() & field_key)
             channel = correction_channel.fetch1('channel') - 1
 
             # Load some frames from middle of scan to compute template
@@ -418,7 +419,7 @@ class MotionCorrection(dj.Computed):
             mini_scan = mini_scan.astype(np.float32, copy=False)
 
             # Correct mini scan
-            correct_raster = (RasterCorrection() & key & {'field': field_id + 1}).get_correct_raster()
+            correct_raster = (RasterCorrection() & field_key).get_correct_raster()
             mini_scan = correct_raster(mini_scan)
 
             # Create template
@@ -430,7 +431,7 @@ class MotionCorrection(dj.Computed):
 
             # Map: compute motion shifts in parallel
             f = performance.parallel_motion_shifts # function to map
-            raster_phase = (RasterCorrection() & key & {'field': field_id + 1}).fetch1('raster_phase')
+            raster_phase = (RasterCorrection() & field_key).fetch1('raster_phase')
             fill_fraction = (ScanInfo() & key).fetch1('fill_fraction')
             kwargs = {'raster_phase': raster_phase, 'fill_fraction': fill_fraction, 'template': template}
             results = performance.map_frames(f, scan, field_id=field_id, y=slice(skip_rows, -skip_rows),
@@ -444,7 +445,7 @@ class MotionCorrection(dj.Computed):
                 x_shifts[frames] = chunk_x_shifts
 
             # Detect outliers
-            max_y_shift, max_x_shift = 15 / (ScanInfo.Field() & key).microns_per_pixel
+            max_y_shift, max_x_shift = 15 / (ScanInfo.Field() & field_key).microns_per_pixel
             y_shifts, x_shifts, outliers = galvo_corrections.fix_outliers(y_shifts, x_shifts,
                                                                           max_y_shift, max_x_shift)
 
