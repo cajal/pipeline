@@ -396,14 +396,11 @@ class MotionCorrection(dj.Computed):
 
         for field_id in range(scan.num_fields):
             print('Correcting motion in field', field_id + 1)
+            field_key = {**key, 'field': field_id + 1}
 
             # Select channel
-            correction_channel = (CorrectionChannel() & key & {'field': field_id + 1})
+            correction_channel = (CorrectionChannel() & field_key)
             channel = correction_channel.fetch1('channel') - 1
-
-            # Create results tuple
-            tuple_ = key.copy()
-            tuple_['field'] = field_id + 1
 
             # Load some frames from middle of scan to compute template
             skip_rows = int(round(px_height * 0.10)) # we discard some rows/cols to avoid edge artifacts
@@ -414,7 +411,7 @@ class MotionCorrection(dj.Computed):
             mini_scan = mini_scan.astype(np.float32, copy=False)
 
             # Correct mini scan
-            correct_raster = (RasterCorrection() & key & {'field': field_id + 1}).get_correct_raster()
+            correct_raster = (RasterCorrection() & field_key).get_correct_raster()
             mini_scan = correct_raster(mini_scan)
 
             # Create template
@@ -426,7 +423,7 @@ class MotionCorrection(dj.Computed):
 
             # Map: compute motion shifts in parallel
             f = performance.parallel_motion_shifts # function to map
-            raster_phase = (RasterCorrection() & key & {'field': field_id + 1}).fetch1('raster_phase')
+            raster_phase = (RasterCorrection() & field_key).fetch1('raster_phase')
             fill_fraction = (ScanInfo() & key).fetch1('fill_fraction')
             kwargs = {'raster_phase': raster_phase, 'fill_fraction': fill_fraction, 'template': template}
             results = performance.map_frames(f, scan, field_id=field_id, y=slice(skip_rows, -skip_rows),
