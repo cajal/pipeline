@@ -817,7 +817,7 @@ class CorrectedStack(dj.Computed):
     def notify(self, key):
         import imageio
 
-        volume = (self & key).get_stack()
+        volume = (self & key).get_stack(channel=key['channel'])
         volume = volume[:: int(volume.shape[0] / 8)] # volume at 8 diff depths
         video_filename = '/tmp/' + key_hash(key) + '.gif'
         imageio.mimsave(video_filename, float2uint8(volume), duration=1)
