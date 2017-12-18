@@ -445,7 +445,7 @@ class MotionCorrection(dj.Computed):
                 x_shifts[frames] = chunk_x_shifts
 
             # Detect outliers
-            max_y_shift, max_x_shift = 15 / (ScanInfo.Field() & field_key).microns_per_pixel
+            max_y_shift, max_x_shift = 20 / (ScanInfo.Field() & field_key).microns_per_pixel
             y_shifts, x_shifts, outliers = galvo_corrections.fix_outliers(y_shifts, x_shifts,
                                                                           max_y_shift, max_x_shift)
 

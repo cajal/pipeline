@@ -115,7 +115,7 @@ def compute_motion_shifts(scan, template, in_place=True, num_threads=8):
     return y_shifts, x_shifts
 
 
-def fix_outliers(y_shifts, x_shifts, max_y_shift=15, max_x_shift=15, method='median'):
+def fix_outliers(y_shifts, x_shifts, max_y_shift=20, max_x_shift=20, method='median'):
     """ Look for spikes in motion shifts and set them to a sensible value.
 
     Reject any shift whose y or x shift is higher than max_y_shift/max_x_shift pixels
