@@ -399,7 +399,7 @@ def parallel_motion_stack(chunks, results, raster_phase, fill_fraction, max_y_sh
 
         # Apply anscombe transform
         field = field.astype(np.float32, copy=False)
-        field = 2 * np.sqrt(field - np.min(field, axis=(0, 1)) + 3 / 8)
+        field = 2 * np.sqrt(field - field.min() + 3 / 8)
 
         # Correct raster
         if abs(raster_phase) > 1e-7:
@@ -463,7 +463,7 @@ def parallel_correct_stack(chunks, results, raster_phase, fill_fraction, y_shift
         # Apply anscombe transform
         field = field.astype(np.float32, copy=False)
         if apply_anscombe:
-            field = 2 * np.sqrt(field - np.min(field, axis=(0, 1)) + 3 / 8)
+            field = 2 * np.sqrt(field - field.min() + 3 / 8)
 
         # Correct raster
         if abs(raster_phase) > 1e-7:
