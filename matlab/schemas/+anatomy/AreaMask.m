@@ -26,10 +26,14 @@ classdef AreaMask < dj.Imported
             opt_key = fetch(map.OptImageBar & (map.RetMapScan & key) & 'axis="horizontal"');
             [Hor(:,:,1),Hor(:,:,2),Hor(:,:,3)] = plot(map.OptImageBar & (map.RetMapScan & key) & 'axis="horizontal"','exp',params.exp,'sigma',params.sigma);
             [Ver(:,:,1),Ver(:,:,2),Ver(:,:,3)] = plot(map.OptImageBar & (map.RetMapScan & key) & 'axis="vertical"','exp',params.exp,'sigma',params.sigma);
-            sign_map = fetch1(map.SignMap & key,'sign_map');
+            background = cat(4,hsv2rgb(Hor),hsv2rgb(Ver));
+            if exists(map.SignMap & key)
+                sign_map = fetch1(map.SignMap & key,'sign_map');
+                background = cat(4,background,sign_map);
+            end
             
             % create masks
-            area_map = ne7.ui.paintMasks(abs(cat(4,hsv2rgb(Hor),hsv2rgb(Ver),hsv2rgb(sign_map))));
+            area_map = ne7.ui.paintMasks(abs(background));
             
             if ~isempty(area_map)
                 % image
