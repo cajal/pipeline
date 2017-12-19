@@ -413,11 +413,11 @@ class MotionCorrection(dj.Computed):
             f = performance.parallel_motion_stack # function to map
             raster_phase = (RasterCorrection() & key).fetch1('raster_phase')
             fill_fraction = (StackInfo() & key).fetch1('fill_fraction')
-            max_y_shift, max_x_shift = 15 / (StackInfo.ROI() & key).microns_per_pixel
-            results = performance.map_fields(f, roi, field_ids=field_ids, y=slice(skip_rows, -skip_rows),
-                                             x=slice(skip_cols, -skip_cols), channel=correction_channel,
+            max_y_shift, max_x_shift = 20 / (StackInfo.ROI() & key).microns_per_pixel
+            results = performance.map_fields(f, roi, field_ids=field_ids, channel=correction_channel,
                                              kwargs={'raster_phase': raster_phase, 'fill_fraction': fill_fraction,
-                                             'max_y_shift': max_y_shift, 'max_x_shift': max_x_shift})
+                                                     'skip_rows': skip_rows, 'skip_cols': skip_cols,
+                                                     'max_y_shift': max_y_shift, 'max_x_shift': max_x_shift})
 
             # Reduce: Collect results
             for field_idx, y_shift, x_shift in results:
@@ -585,14 +585,21 @@ class Stitching(dj.Computed):
 
                 for left, right in itertools.combinations(sorted_rois, 2):
                     if left.is_aside_to(right):
-                        left_xs, left_ys = [], []
+                        # Compute stitching shifts
+                        left_ys, left_xs = [], []
                         for l, r in zip(left.slices, right.slices):
-                            delta_x, delta_y = stitching.linear_stitch(l.slice, r.slice,
-                                                                       r.x - l.x, r.y - l.y)
-                            left_xs.append(r.x - delta_x)
+                            delta_y, delta_x = stitching.linear_stitch(l.slice, r.slice,
+                                                                       r.y - l.y, r.x - l.x)
                             left_ys.append(r.y - delta_y)
-                        left_xs, left_ys, _ = galvo_corrections.fix_outliers(np.array(left_xs),
-                                                                             np.array(left_ys))
+                            left_xs.append(r.x - delta_x)
+
+                        # Fix outliers
+                        roi_key = {**key, 'roi_id': left.roi_coordinates[0].id}
+                        max_y_shift, max_x_shift = 15 / (StackInfo.ROI() & roi_key).microns_per_pixel
+                        left_ys, left_xs, _ = galvo_corrections.fix_outliers(np.array(left_ys),
+                                np.array(left_xs), max_y_shift, max_x_shift, method='trend')
+
+                        # Stitch together
                         right.join_with(left, left_xs, left_ys)
                         sorted_rois.remove(left)
                         break # restart joining
@@ -631,24 +638,29 @@ class Stitching(dj.Computed):
                 y_aligns[i], x_aligns[i] = galvo_corrections.compute_motion_shifts(big_volume[i],
                                                                  big_volume[i-1], in_place=False)
 
-            # Fix outliers and accumulate shifts so shift i is shift in i -1 plus shift to align i to i-1
-            y_aligns, x_aligns, _ = galvo_corrections.fix_outliers(y_aligns, x_aligns)
-            y_aligns, x_aligns = np.cumsum(y_aligns), np.cumsum(x_aligns)
+            # Fix outliers
+            roi_key = {**key, 'roi_id': roi.roi_coordinates[0].id}
+            max_y_shift, max_x_shift = 20 / (StackInfo.ROI() & roi_key).microns_per_pixel
+            y_fixed, x_fixed, _ = galvo_corrections.fix_outliers(y_aligns, x_aligns,
+                                              max_y_shift, max_x_shift, method='trend')
+
+            # Accumulate shifts so shift i is shift in i -1 plus shift to align i to i-1
+            y_cumsum, x_cumsum = np.cumsum(y_fixed), np.cumsum(x_fixed)
 
             # Detrend to discard influence of vessels going through the slices
             filter_size = int(round(60 / (StackInfo() & key).fetch1('z_step'))) # 60 microns in z
-            if len(y_aligns) > filter_size:
+            if len(y_cumsum) > filter_size:
                 smoothing_filter = signal.hann(filter_size + 1 if filter_size % 2 == 0 else 0)
-                y_aligns -= mirrconv(y_aligns, smoothing_filter / sum(smoothing_filter))
-                x_aligns -= mirrconv(x_aligns, smoothing_filter/ sum(smoothing_filter))
+                y_detrend = y_cumsum - mirrconv(y_cumsum, smoothing_filter / sum(smoothing_filter))
+                x_detrend = x_cumsum - mirrconv(x_cumsum, smoothing_filter / sum(smoothing_filter))
 
             # Apply alignment shifts in roi
-            for slice_, y_align, x_align in zip(roi.slices, y_aligns, x_aligns):
+            for slice_, y_align, x_align in zip(roi.slices, y_detrend, x_detrend):
                 slice_.y += y_align
                 slice_.x -= x_align
             for roi_coord in roi.roi_coordinates:
-                roi_coord.ys = [prev_y + y_align for prev_y, y_align in zip(roi_coord.ys, y_aligns)]
-                roi_coord.xs = [prev_x - x_align for prev_x, x_align in zip(roi_coord.xs, x_aligns)]
+                roi_coord.ys = [prev_y + y_align for prev_y, y_align in zip(roi_coord.ys, y_detrend)]
+                roi_coord.xs = [prev_x - x_align for prev_x, x_align in zip(roi_coord.xs, x_detrend)]
 
         # Insert in Stitching
         print('Inserting...')
@@ -805,7 +817,7 @@ class CorrectedStack(dj.Computed):
     def notify(self, key):
         import imageio
 
-        volume = (self & key).get_stack()
+        volume = (self & key).get_stack(channel=key['channel'])
         volume = volume[:: int(volume.shape[0] / 8)] # volume at 8 diff depths
         video_filename = '/tmp/' + key_hash(key) + '.gif'
         imageio.mimsave(video_filename, float2uint8(volume), duration=1)
