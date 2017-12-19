@@ -10,11 +10,70 @@ mask                     : mediumblob            # mask of area
 classdef AreaMask < dj.Imported
     methods(Access=protected)
         function makeTuples(obj,key) %create clips
-%            insert( obj, key );
+            %             insert( obj, key );
         end
     end
     
     methods
+        function createMasks(self,key,varargin)
+            params.exp = 1.5;
+            params.sigma = 2;
+            
+            params = ne7.mat.getParams(params,varargin);
+            
+            % get maps
+            Hor = [];Ver = [];
+            opt_key = fetch(map.OptImageBar & (map.RetMapScan & key) & 'axis="horizontal"');
+            [Hor(:,:,1),Hor(:,:,2),Hor(:,:,3)] = plot(map.OptImageBar & (map.RetMapScan & key) & 'axis="horizontal"','exp',params.exp,'sigma',params.sigma);
+            [Ver(:,:,1),Ver(:,:,2),Ver(:,:,3)] = plot(map.OptImageBar & (map.RetMapScan & key) & 'axis="vertical"','exp',params.exp,'sigma',params.sigma);
+            sign_map = fetch1(map.SignMap & key,'sign_map');
+            
+            % create masks
+            area_map = ne7.ui.paintMasks(abs(cat(4,hsv2rgb(Hor),hsv2rgb(Ver),hsv2rgb(sign_map))));
+            
+            if ~isempty(area_map)
+                % image
+                masks = normalize(area_map);
+                masks(:,:,2) = 0.2*(area_map>0);
+                masks(:,:,3) = Hor(:,:,3);
+                ih = image(hsv2rgb(masks));
+                axis image
+                axis off
+
+                % loop through all areas get area name and insert
+                areas = unique(area_map(:));
+                for iarea = areas(2:end)'
+
+                    % fix saturation for selected area
+                    colors =  0.2*(area_map>0);
+                    colors(area_map==iarea) = 1;
+                    masks(:,:,2) = colors;
+                    ih.CData = hsv2rgb(masks);
+                    shg
+                    s = regionprops(area_map==iarea,'area','Centroid');
+                    th = text(s.Centroid(1),s.Centroid(2),'?');
+
+                    tuple = rmfield(opt_key,'axis');
+
+                    % get area name
+                    areas = fetchn(anatomy.Area,'brain_area');
+                    area_idx = listdlg('PromptString','Which area is this?',...
+                    'SelectionMode','single','ListString',areas);
+                    tuple.brain_area = areas{area_idx};
+                    if ~isfield(tuple,'field')
+                        tuple.field = 1;
+                    end
+                    tuple.mask = area_map==iarea;
+                    th.delete;
+                    insert(self,tuple)
+
+                    % set correct area label
+                    text(s.Centroid(1),s.Centroid(2),tuple.brain_area)
+
+                end
+            end
+            
+        end
         
         function plot(obj)
             
@@ -38,6 +97,8 @@ classdef AreaMask < dj.Imported
     end
     
     methods(Static)
+        
+        
         function extractMask(keyI,keyV)
             
             if nargin<2
