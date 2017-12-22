@@ -407,14 +407,17 @@ def parallel_motion_stack(chunks, results, raster_phase, fill_fraction, skip_row
         # Apply anscombe transform
         field = 2 * np.sqrt(field - field.min() + 3 / 8)
 
-        # Compute initial template by averaging 10 frames that correlate highly with middle one
-        num_frames = field.shape[-1]
-        frames = np.reshape(field[skip_rows:-skip_rows, skip_cols:-skip_cols], (-1, num_frames)) # num_pixels x num_frames
+        # Compute correlation matrix between frames (ignoring edges)
+        frames = np.reshape(field[skip_rows:-skip_rows, skip_cols:-skip_cols],
+                            [-1, field.shape[-1]]) # num_pixels x num_frames
         residuals = frames - frames.mean(axis=0)
         frames_std = frames.std(axis=0)
-        covs = np.mean(residuals.T * residuals[:, int(num_frames / 2)], axis=-1)
-        corrs = covs / (frames_std * frames_std[int(num_frames / 2)])
-        selected = np.argsort(corrs)[-10:]
+        covs = np.dot(residuals.T, residuals)
+        corrs = covs / (frames.shape[0] * np.outer(frames_std, frames_std))
+
+        # Compute initial template as the average of 10 highly correlated frames
+        good_frame = corrs.mean(axis=0).argmax() # frame that correlates highly with others
+        selected = np.argsort(corrs[good_frame])[-10:]
         template = ndimage.gaussian_filter(np.mean(field[:, :, selected], axis=-1), 0.6)
 
         # Compute shifts
