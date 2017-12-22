@@ -1,3 +1,5 @@
+from pprint import pprint
+
 from scipy.misc import imresize
 
 import datajoint as dj
@@ -23,7 +25,7 @@ from . import config
 
 schema = dj.schema('pipeline_eye', locals())
 
-DEFAULT_PARAMETERS = dict(relative_area_threshold=0.01,
+DEFAULT_PARAMETERS = dict(relative_area_threshold=0.002,
                           ratio_threshold=1.5,
                           error_threshold=0.1,
                           min_contour_len=5,
@@ -31,8 +33,8 @@ DEFAULT_PARAMETERS = dict(relative_area_threshold=0.01,
                           contrast_threshold=5,
                           speed_threshold=0.1,
                           dr_threshold=0.1,
-                          gaussian_blur=5)
-
+                          gaussian_blur=5,
+                          extreme_meso=0)
 
 
 @schema
@@ -48,24 +50,16 @@ class Eye(dj.Imported):
     eye_ts=CURRENT_TIMESTAMP    : timestamp # automatic
     """
 
-
     @property
     def key_source(self):
         return (experiment.Scan() & experiment.Scan.EyeVideo().proj()) - experiment.ScanIgnored()
-
-    @staticmethod
-    def _get_modified_parameters():
-        new_param = dict(DEFAULT_PARAMETERS)
-        for k, v in new_param.items():
-            nv = input("{} (default: {}): ".format(k, v))
-            new_param[k] = float(nv) if nv else v
-        return json.dumps(new_param)
 
     def grab_timestamps_and_frames(self, key, n_sample_frames=16):
 
         import cv2
 
-        rel = experiment.Session() * experiment.Scan.EyeVideo() * experiment.Scan.BehaviorFile().proj(hdf_file='filename')
+        rel = experiment.Session() * experiment.Scan.EyeVideo() * experiment.Scan.BehaviorFile().proj(
+            hdf_file='filename')
 
         info = (rel & key).fetch1()
 
@@ -118,27 +112,16 @@ class Eye(dj.Imported):
     def _make_tuples(self, key):
         key['eye_time'], key['preview_frames'], key['total_frames'] = self.grab_timestamps_and_frames(key)
 
-        # try:
-        #     import cv2
-        #     print('Drag window and print q when done')
-        #     rg = CVROIGrabber(frames.mean(axis=2))
-        #     rg.grab()
-        # except ImportError:
-        #     rg = ROIGrabber(frames.mean(axis=2))
-        #
-        # key['eye_roi'] = rg.roi
         self.insert1(key)
         del key['eye_time']
-        frames =  key.pop('preview_frames')
+        frames = key.pop('preview_frames')
         self.notify(key, frames)
-
-
 
     def notify(self, key, frames):
         import imageio
         msg = 'Eye for `{}` has been populated. You can add a tracking task now. '.format(key)
         img_filename = '/tmp/' + key_hash(key) + '.gif'
-        frames = frames.transpose([2,0,1])
+        frames = frames.transpose([2, 0, 1])
         frames = [imresize(img, 0.25) for img in frames]
         imageio.mimsave(img_filename, frames, duration=0.5)
         (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
@@ -158,7 +141,6 @@ class TrackingTask(dj.Manual):
     eye_roi                     : tinyblob  # manual roi containing eye in full-size movie
     """
 
-
     class ManualParameters(dj.Part):
         definition = """
         # manual tracking parameters overwriting the default settings
@@ -174,8 +156,25 @@ class TrackingTask(dj.Manual):
         ---
         """
 
-    def enter_roi(self, key):
-        key = (Eye() & key).fetch1(dj.key) # complete key
+    class Mask(dj.Part):
+        definition = """
+        # mask for tracking
+        -> master
+        ---
+        mask        : longblob 
+        """
+
+
+    @staticmethod
+    def _get_modified_parameters():
+        new_param = dict(DEFAULT_PARAMETERS)
+        for k, v in new_param.items():
+            nv = input("{} (default: {}): ".format(k, v))
+            new_param[k] = float(nv) if nv else v
+        return json.dumps(new_param)
+
+    def enter_roi(self, key, **kwargs):
+        key = (Eye() & key).fetch1(dj.key)  # complete key
         frames = (Eye() & key).fetch1('preview_frames')
         try:
             import cv2
@@ -186,16 +185,27 @@ class TrackingTask(dj.Manual):
             rg = ROIGrabber(frames.mean(axis=2))
 
         key['eye_roi'] = rg.roi
-        self.insert1(key)
-        trackable = input('Is the quality good enough to be tracked? [Y/n]')
-        if trackable.lower() == 'n':
+        mask = np.asarray(rg.mask, dtype=np.uint8)
+        with self.connection.transaction:
             self.insert1(key)
-            self.Ignore().insert1(key, ignore_extra_field=True)
-        else:
-            extra_parameters = input('Do you want to use modified tracking parameters? [N/y]')
-            if extra_parameters.lower() == 'y':
-                self.ManualParameters().insert1(dict(key, tracking_parameters=self._get_modified_parameters()),
+            trackable = input('Is the quality good enough to be tracked? [Y/n]')
+            if trackable.lower() == 'n':
+                self.insert1(key)
+                self.Ignore().insert1(key, ignore_extra_field=True)
+            else:
+                new_param = dict(DEFAULT_PARAMETERS, **kwargs)
+                print('Those are the tracking parameters')
+                pprint(new_param)
+                new_param = json.dumps(new_param)
+                extra_parameters = input('Do you want to change them? [N/y]')
+                if extra_parameters.lower() == 'y':
+                    new_param = self._get_modified_parameters()
+                self.ManualParameters().insert1(dict(key, tracking_parameters=new_param),
                                                 ignore_extra_fields=True)
+            if np.any(mask == 0):
+                print('Inserting mask')
+                key['mask'] = mask
+                self.Mask().insert1(key, ignore_extra_fields=True)
 
 
 @schema
@@ -234,7 +244,12 @@ class TrackedVideo(dj.Computed):
         avi_path = (Eye() & key).get_video_path()
         print(avi_path)
 
-        tr = PupilTracker(param)
+        if TrackingTask.Mask() & key:
+            mask = (TrackingTask.Mask() & key).fetch1('mask')
+        else:
+            mask = None
+
+        tr = PupilTracker(param, mask=mask)
         traces = tr.track(avi_path, roi - 1, display=config['display.tracking'])  # -1 because of matlab indices
 
         key['tracking_parameters'] = json.dumps(param)
@@ -263,7 +278,7 @@ class TrackedVideo(dj.Computed):
                 fig, ax = plt.subplots(3, 1, figsize=(10, 6), sharex=True)
 
             r, center, contrast = (TrackedVideo.Frame() & key).fetch('major_r', 'center',
-                                                 'frame_intensity', order_by='frame_id')
+                                                                     'frame_intensity', order_by='frame_id')
             ax[0].plot(r)
             ax[0].set_title('Major Radius')
             c = np.vstack([cc if cc is not None else np.NaN * np.ones(2) for cc in center])

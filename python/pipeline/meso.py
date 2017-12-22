@@ -1482,6 +1482,14 @@ class ScanSet(dj.Computed):
             centroids = np.stack([xs, ys], axis=1)
         return centroids
 
+@schema
+class ManualDepth(dj.Manual):
+    definition = """
+    # manually entered depth of a 
+    -> ScanSet
+    ---
+    um_z        : smallint # um from the surface
+    """
 
 @schema
 class Activity(dj.Computed):
