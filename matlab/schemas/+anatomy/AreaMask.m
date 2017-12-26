@@ -24,9 +24,10 @@ classdef AreaMask < dj.Imported
             % get maps
             Hor = [];Ver = [];
             opt_key = fetch(map.OptImageBar & (map.RetMapScan & key) & 'axis="horizontal"');
+            vessels = fetch1(map.OptImageBar & opt_key,'vessels');
             [Hor(:,:,1),Hor(:,:,2),Hor(:,:,3)] = plot(map.OptImageBar & (map.RetMapScan & key) & 'axis="horizontal"','exp',params.exp,'sigma',params.sigma);
             [Ver(:,:,1),Ver(:,:,2),Ver(:,:,3)] = plot(map.OptImageBar & (map.RetMapScan & key) & 'axis="vertical"','exp',params.exp,'sigma',params.sigma);
-            background = cat(4,hsv2rgb(Hor),hsv2rgb(Ver));
+            background = cat(4,repmat(vessels,1,1,3),hsv2rgb(Hor),hsv2rgb(Ver));
             if exists(map.SignMap & key)
                 sign_map = fetch1(map.SignMap & key,'sign_map');
                 background = cat(4,background,sign_map);
@@ -73,7 +74,6 @@ classdef AreaMask < dj.Imported
 
                     % set correct area label
                     text(s.Centroid(1),s.Centroid(2),tuple.brain_area)
-
                 end
             end
             
