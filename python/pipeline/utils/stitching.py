@@ -121,14 +121,14 @@ class StitchedROI():
     def height(self):
         y_min = min([slice_.y - slice_.height / 2 for slice_ in self.slices])
         y_max = max([slice_.y + slice_.height / 2 for slice_ in self.slices])
-        y_max -= (y_max - y_min) % 1 # Make sure they add up to an integer value
+        y_max = y_max - (y_max - y_min) % 1 + 1 # Round up to an integer value
         return int(round(y_max - y_min))
 
     @property
     def width(self):
         x_min = min([slice_.x - slice_.width / 2 for slice_ in self.slices])
         x_max = max([slice_.x + slice_.width / 2 for slice_ in self.slices])
-        x_max -= (x_max - x_min) % 1 # Make sure they add up to an integer value
+        x_max = x_max - (x_max - x_min) % 1 + 1 # Round up to an integer value
         return int(round(x_max - x_min))
 
     @property
