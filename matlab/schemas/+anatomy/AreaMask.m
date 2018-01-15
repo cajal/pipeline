@@ -21,9 +21,9 @@ classdef AreaMask < dj.Imported
             
             params = ne7.mat.getParams(params,varargin);
             
-            % populate if doesn't exist
+            % populate if retinotopy map doesn't exist
             if ~exists(map.RetMap & key)
-                createRet(map.RetMap,fetch(map.OptImageBar & k),1)
+                createRet(map.RetMap,fetch(mice.Mice & keys))
             end
             
             % get maps

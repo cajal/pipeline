@@ -17,6 +17,25 @@ classdef RetMap < dj.Imported
             
             tuple = fetch(mice.Mice & keys);
             
+            % find opt maps if not provided
+            if ~isfield(keys(1),'scan_idx')
+                keys = [];
+                for axis = {'horizontal','vertical'}
+                    key.axis = axis{1};
+                    hkeys = fetch(map.OptImageBar & tuple & key);
+                    if ~isempty(hkeys)
+                        [~,mxidx] = max([hkeys.scan_idx]);
+                        keys{end+1} = hkeys(mxidx);
+                    end
+                end
+                if ~isempty(keys)
+                    keys = map.OptImageBar &  cell2mat(keys);
+                else
+                    disp 'No maps found please specify...'
+                    return
+                end
+            end
+            
             % set reference index
             if nargin<3 && ~exists(self & (map.RetMapScan & keys))
                 ret_idx = max([0;fetchn(self & (mice.Mice & keys),'ret_idx')])+1;
