@@ -14,7 +14,7 @@ classdef SignMap < dj.Imported
     end
     
     methods
-        function extractSign(self, key)
+        function extractSign(self, key, passive)
             
             % load data
             normalize = @(x) (x - min(x(:)))./(max(x(:)) - min(x(:)));
@@ -26,8 +26,8 @@ classdef SignMap < dj.Imported
             % set/get parameters
             if ~exists(self & key)
                 params.init_gauss = [0.1 0.1 200];
-                params.grad_gauss = [2 0.1 20]; % initial map gauss filter in sd parameter
-                params.diff_gauss = [0.1 0.1 20]; % gradient diff map gauss filter in sd parameter
+                params.grad_gauss = [1 0.1 20]; % initial map gauss filter in sd parameter
+                params.diff_gauss = [1 0.1 20]; % gradient diff map gauss filter in sd parameter
                 params.diff_open = [1 0 20]; % gradient diff imopen param
                 MAP = [];
             else
