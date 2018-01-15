@@ -27,6 +27,7 @@ classdef FieldCoordinates < dj.Imported
             params.scan_rotation = 0;
             params.x_offset = [];
             params.y_offset = [];
+            params.scale = [];
             
             params = ne7.mat.getParams(params,varargin);
             
@@ -60,8 +61,9 @@ classdef FieldCoordinates < dj.Imported
             else
                 tfp.fliplr = 1;
                 [fieldWidths, fieldHeights, fieldWidthsInMicrons, frames, slice_pos, field_num] = ...
-                    fetchn(reso.ScanInfo * reso.SummaryImagesAverage & keyI & 'channel = 1',...
+                    fetchn(reso.ScanInfo * reso.SummaryImagesAverage * reso.ScanInfoField & keyI & 'channel = 1',...
                     'px_width','px_height','um_width','average_image','z','field');
+                depth = 0; % because this is included in slice_pos of the reso
                 x_pos = zeros(size(fieldWidths));y_pos = x_pos;
             end
             
@@ -85,10 +87,14 @@ classdef FieldCoordinates < dj.Imported
                 y_pos = 0;
             end
             
+            if isempty(params.scale)
+                params.scale = pxpitch/ref_pxpitch;
+            end
+            
             % Align scans
             [x_offset, y_offset, rotation, tfp.scale, go] = ...
                 self.alignImages(self.normalize(ref_map),self.normalize(im),...
-                'scale',pxpitch/ref_pxpitch,'rotation',params.global_rotation,'x',params.x_offset,'y',params.y_offset);
+                'scale',params.scale,'rotation',params.global_rotation,'x',params.x_offset,'y',params.y_offset);
             tfp.rotation = tfp.rotation + rotation;
             
             % Insert overlaping masks
@@ -351,7 +357,7 @@ classdef FieldCoordinates < dj.Imported
                 im3(:,:,1) = im1;
                 im3(round((x+1)/scale):size(im2,1)+round((x+1)/scale) - 1,...
                     round((y+1)/scale):size(im2,2)+round((y+1)/scale) - 1,2) = im2;
-                set(gcf,'name',['X:' num2str(x) ' Y:' num2str(y) 'rot:' num2str(rot) ' scale:' num2str(scale)])
+                set(gcf,'name',['X:' num2str(x/params.resize) ' Y:' num2str(y/params.resize) 'rot:' num2str(rot) ' scale:' num2str(scale)])
                 imh.CData = (im3);
             end
         end

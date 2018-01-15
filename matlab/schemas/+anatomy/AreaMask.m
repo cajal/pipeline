@@ -15,11 +15,16 @@ classdef AreaMask < dj.Imported
     end
     
     methods
-        function createMasks(self,key,varargin)
+         function createMasks(self,key,varargin)
             params.exp = 1.5;
             params.sigma = 2;
             
             params = ne7.mat.getParams(params,varargin);
+            
+            % populate if doesn't exist
+            if ~exists(map.RetMap & key)
+                createRet(map.RetMap,fetch(map.OptImageBar & k),1)
+            end
             
             % get maps
             Hor = [];Ver = [];
