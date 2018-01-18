@@ -28,12 +28,16 @@ classdef FieldCoordinates < dj.Imported
             params.x_offset = [];
             params.y_offset = [];
             params.scale = [];
-            
+            params.figure = [];
+
             params = ne7.mat.getParams(params,varargin);
             
             % get reference map information
-            [ref_map, ref_pxpitch, software] = fetch1(...
-                (anatomy.RefMap & rmfield(keyI,{'session','scan_idx'}))*experiment.Scan,...
+            ref_key = fetch(proj(anatomy.RefMap) & keyI);
+            if ~exists(anatomy.RefMap & ref_key)
+                ref_key = createRef(anatomy.RefMap,fetch(mice.Mice & keyI));
+            end
+            [ref_map, ref_pxpitch, software] = fetch1(anatomy.RefMap * experiment.Scan  & ref_key,...
                 'ref_map','pxpitch','software');
             switch software
                 case 'imager'
@@ -60,6 +64,7 @@ classdef FieldCoordinates < dj.Imported
                     'x','y','z','px_width','px_height','um_width','average_image','field');
             else
                 tfp.fliplr = 1;
+                tfp.flipud = 1;
                 [fieldWidths, fieldHeights, fieldWidthsInMicrons, frames, slice_pos, field_num] = ...
                     fetchn(reso.ScanInfo * reso.SummaryImagesAverage * reso.ScanInfoField & keyI & 'channel = 1',...
                     'px_width','px_height','um_width','average_image','z','field');
@@ -76,7 +81,7 @@ classdef FieldCoordinates < dj.Imported
                 y_pos = (y_pos - min(y_pos))/pxpitch;
                 im = zeros(ceil(max(y_pos+fieldHeights)),ceil(max(x_pos+fieldWidths)));
                 for islice =length(frames):-1:1
-                    frame = self.filterImage(self.normalize(frames{islice}),self.createTform(tfp));
+                    frame = self.filterImage(normalize(frames{islice}),self.createTform(tfp));
                     im(ceil(y_pos(islice)+1):ceil(y_pos(islice))+size(frame,1), ...
                         ceil(x_pos(islice)+1):ceil(x_pos(islice))+size(frame,2)) = ...
                         self.processImage(frame,'exp',params.contrast);
@@ -93,8 +98,8 @@ classdef FieldCoordinates < dj.Imported
             
             % Align scans
             [x_offset, y_offset, rotation, tfp.scale, go] = ...
-                self.alignImages(self.normalize(ref_map),self.normalize(im),...
-                'scale',params.scale,'rotation',params.global_rotation,'x',params.x_offset,'y',params.y_offset);
+                self.alignImages(normalize(ref_map),normalize(im),...
+                'scale',params.scale,'rotation',params.global_rotation,'x',params.x_offset,'y',params.y_offset,'figure',params.figure);
             tfp.rotation = tfp.rotation + rotation;
             
             % Insert overlaping masks
@@ -128,18 +133,21 @@ classdef FieldCoordinates < dj.Imported
         
         function plot(self,varargin)
             
-            params.exp = 0.5;
+            params.exp = 1;
             params.inv = 0;
             
             params = ne7.mat.getParams(params,varargin);
             
+            assert(exists(self),'No fields found!')
+
             % get the ref_map
             ref_map = fetchn(proj(anatomy.RefMap,'ref_map') & self,'ref_map');
             ref_map = ref_map{1};
             
             % get the setup
-            setup = fetch1(experiment.Session & self, 'rig');
-            
+            setups = fetchn(experiment.Session & self, 'rig');
+            setup = setups{1};
+ 
             % fetch images
             if strcmp(setup,'2P4')
                 [frames,x,y,tforms] = fetchn(meso.SummaryImagesAverage * self & 'channel = 1',...
@@ -151,13 +159,13 @@ classdef FieldCoordinates < dj.Imported
             
             % plot
             figure
-            ref_map = self.normalize(ref_map.^params.exp);
+            ref_map = normalize(ref_map.^params.exp);
             if params.inv; ref_map = 1-ref_map;end
             idxX = [];idxY = []; frame = [];
             for islice = 1:length(frames)
                 x_offset = x(islice);
                 y_offset = y(islice);
-                imS = self.filterImage(self.normalize(frames{islice}),tforms{islice});
+                imS = self.filterImage(normalize(frames{islice}),tforms{islice});
                 YY = round(y_offset + size(ref_map,1)/2 - size(imS,1)/2)+1;
                 XX = round(x_offset + size(ref_map,2)/2 - size(imS,2)/2)+1;
                 idxX{islice} = XX:size(imS,2)+XX-1;
@@ -170,9 +178,9 @@ classdef FieldCoordinates < dj.Imported
             im(1:size(ref_map,1),1:size(ref_map,2),1) = ref_map;
             for islice = 1:length(frame)
                 im(idxY{islice},idxX{islice},2) = ...
-                    im(idxY{islice},idxX{islice},2) + frame{islice};
+                    (im(idxY{islice},idxX{islice},2) + frame{islice});
             end
-            
+            im(:,:,2) = normalize(im(:,:,2));
             image(im)
             axis image
             axis off
@@ -197,11 +205,11 @@ classdef FieldCoordinates < dj.Imported
             
             % plot
             figure
-            ref_map = self.normalize(ref_map{1}*2.^2)*0.5;
+            ref_map = normalize(ref_map{1}*2.^2)*0.5;
             ref_map = ref_map*50;
             self.image3D(0,0,0,ref_map, abs(ref_map-max(ref_map(:)))*2,pxpitch(1));
             for islice = 1:length(frames)
-                imS = self.filterImage(self.normalize(frames{islice}),tforms{islice});
+                imS = self.filterImage(normalize(frames{islice}),tforms{islice});
                 imS = self.processImage(imS,'exp',0.7);
                 imS2 = imS*50+50;
                 self.image3D(x(islice),y(islice),-depth(islice)/pxpitch(islice),imS2,imS*100,pxpitch(islice));
@@ -225,11 +233,11 @@ classdef FieldCoordinates < dj.Imported
             end
             
             sz = size(frame);
-            imS = self.filterImage(self.normalize(frame),tform);
+            imS = self.filterImage(normalize(frame),tform);
             YY = round(y_offset + size(mask,1)/2 - size(imS,1)/2);
             XX = round(x_offset + size(mask,2)/2 - size(imS,2)/2);
             fmask = mask(XX:size(imS,1)+XX-1,YY:size(imS,2)+YY-1);
-            fmask = self.filterImage(self.normalize(fmask),tform,1)>0;
+            fmask = self.filterImage(normalize(fmask),tform,1)>0;
             fmask = fmask(...
                 round(size(fmask,1)/2)-floor(sz(1)/2):round(size(fmask,1)/2)+floor(sz(1)/2)+1,...
                 round(size(fmask,2)/2)-floor(sz(2)/2):round(size(fmask,2)/2)+floor(sz(2)/2)+1);
@@ -244,7 +252,8 @@ classdef FieldCoordinates < dj.Imported
             params.scale = 1;
             params.x = [];
             params.y = [];
-            params.resize = 1;
+            params.resize = .5;
+            params.figure = [];
             
             params = ne7.mat.getParams(params,varargin);
             
@@ -263,17 +272,24 @@ classdef FieldCoordinates < dj.Imported
             vessels = imresize(normalize(image1),params.resize);
             im1 = vessels;
             im2 = imresize(normalize(image2),params.resize);
-            hf = figure('NumberTitle','off','Menubar','none','Name','Align Images','KeyPressFcn',@eval_input);
+            if isempty(params.figure); hf = figure; else hf = params.figure;end
+            set(hf,'NumberTitle','off','Menubar','none','Name','Align Images','KeyPressFcn',@eval_input);
             f_pos = get(hf,'outerposition');
             imh = image(im2); axis image; axis off
             redraw
             disp 'Align the images'
             
             % wait until done
-            go = false;
-            while ~go
+            go = false;esc = false;
+            while ~go && ~esc
                 try if ~ishandle(hf);break;end;catch;break;end
                 pause(0.2);
+            end
+
+            if isempty(params.figure)
+                close(hf)
+            else
+                clf(hf,'reset')
             end
             
             % adjust x,y
@@ -284,7 +300,7 @@ classdef FieldCoordinates < dj.Imported
                 global temp
                 switch event.Key
                     case 'shift'
-                        if fine==1
+                        if fine==4
                             fine=0.5;
                         else
                             fine = 4;
@@ -327,9 +343,8 @@ classdef FieldCoordinates < dj.Imported
                         end
                     case 'return'
                         go = true;
-                        close(gcf)
                     case 'escape'
-                        close(gcf)
+                         esc = true;
                     case 'space'
                         if all(im2(:)==0)
                             im2 = temp;

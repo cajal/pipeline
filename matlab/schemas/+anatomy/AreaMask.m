@@ -4,6 +4,7 @@
 -> anatomy.Area
 -> shared.Field
 ---
+-> map.RetMap
 mask                     : mediumblob            # mask of area
 %}
 
@@ -22,22 +23,24 @@ classdef AreaMask < dj.Imported
             params = ne7.mat.getParams(params,varargin);
             
             % populate if retinotopy map doesn't exist
-            if ~exists(map.RetMap & key)
-                createRet(map.RetMap,fetch(mice.Mice & keys))
+            ret_key = fetch(map.RetMap & key);
+            if ~exists(map.RetMap & ret_key)
+                ret_key = createRetRef(map.RetMap,fetch(mice.Mice & key));
             end
             
             % get maps
             Hor = [];Ver = [];
-            opt_key = fetch(map.OptImageBar & (map.RetMapScan & key) & 'axis="horizontal"');
+            opt_key = fetch(map.OptImageBar & (map.RetMapScan & ret_key) & 'axis="horizontal"');
             vessels = fetch1(map.OptImageBar & opt_key,'vessels');
-            [Hor(:,:,1),Hor(:,:,2),Hor(:,:,3)] = plot(map.OptImageBar & (map.RetMapScan & key) & 'axis="horizontal"','exp',params.exp,'sigma',params.sigma);
-            [Ver(:,:,1),Ver(:,:,2),Ver(:,:,3)] = plot(map.OptImageBar & (map.RetMapScan & key) & 'axis="vertical"','exp',params.exp,'sigma',params.sigma);
+            [Hor(:,:,1),Hor(:,:,2),Hor(:,:,3)] = plot(map.OptImageBar & (map.RetMapScan & ret_key) & 'axis="horizontal"','exp',params.exp,'sigma',params.sigma);
+            [Ver(:,:,1),Ver(:,:,2),Ver(:,:,3)] = plot(map.OptImageBar & (map.RetMapScan & ret_key) & 'axis="vertical"','exp',params.exp,'sigma',params.sigma);
             background = cat(4,repmat(vessels,1,1,3),hsv2rgb(Hor),hsv2rgb(Ver));
-            if exists(map.SignMap & key)
-                sign_map = fetch1(map.SignMap & key,'sign_map');
-                background = cat(4,background,sign_map);
+            if ~exists(map.SignMap & ret_key)
+                extractSign(map.SignMap,ret_key,'manual',0);
             end
-            
+            sign_map = fetch1(map.SignMap & ret_key,'sign_map');
+            background = cat(4,background,hsv2rgb(sign_map));
+
             % create masks
             area_map = ne7.ui.paintMasks(abs(background));
             
@@ -65,6 +68,9 @@ classdef AreaMask < dj.Imported
 
                     tuple = rmfield(opt_key,'axis');
 
+                    % insert retinotopy index
+                    tuple.ret_idx = ret_key.ret_idx;
+
                     % get area name
                     areas = fetchn(anatomy.Area,'brain_area');
                     area_idx = listdlg('PromptString','Which area is this?',...
@@ -86,7 +92,7 @@ classdef AreaMask < dj.Imported
         
         function plot(obj)
             
-            [masks,areas] = fetchn(obj,'mask','area');
+            [masks,areas] = fetchn(obj,'mask','brain_area');
             vessels = fetchn(map.OptImageBar & obj,'vessels');
             
             area_map = zeros(size(masks{1}));
@@ -117,7 +123,7 @@ classdef AreaMask < dj.Imported
             % Insert overlaping masks
             map_keys = fetch(anatomy.AreaMask & keyV);
             for map_key = map_keys'
-                [mask, area] = fetch1(anatomy.AreaMask & map_key,'mask','area');
+                [mask, area] = fetch1(anatomy.AreaMask & map_key,'mask','brain_area');
                 for tuple = fetch(anatomy.FieldCoordinates & keyI)'
                     fmask = filterMask(anatomy.FieldCoordinates & tuple,mask);
                     if ~all(~fmask(:))
