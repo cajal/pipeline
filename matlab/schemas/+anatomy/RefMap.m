@@ -9,13 +9,7 @@ ref_table               : varchar(256)    # reference table
 ref_map                 : mediumblob      # reference map
 %}
 
-classdef RefMap < dj.Imported
-    methods(Access=protected)
-        function makeTuples(obj,key) %create ref map
-            insert( obj, key );
-        end
-    end
-    
+classdef RefMap < dj.Manual
     methods
         function exit_tuple = createRef(obj,REF,pxpitch)
             
@@ -63,7 +57,7 @@ classdef RefMap < dj.Imported
             assert(~isempty(tuple.ref_map),'No maps found!');
             
             % insert
-            makeTuples(obj,tuple)
+            insert(obj,tuple)
         end
     end
 end

@@ -11,14 +11,7 @@ tform                   : mediumblob      # transformation matrix for rotation,s
 pxpitch                 : double          # estimated pixel pitch of the reference map (microns per pixel)
 %}
 
-classdef FieldCoordinates < dj.Imported
-    
-    methods(Access=protected)
-        function makeTuples(obj,key) %create clips
-            insert( obj, key );
-        end
-    end
-    
+classdef FieldCoordinates < dj.Manual
     methods
         function alignScan(self,keyI, varargin)
             
@@ -60,13 +53,13 @@ classdef FieldCoordinates < dj.Imported
             % get information from the scans depending on the setup
             if strcmp(setup,'2P4')
                 [x_pos, y_pos, slice_pos, fieldWidths, fieldHeights, fieldWidthsInMicrons, frames, field_num] = ...
-                    fetchn(meso.ScanInfoField * meso.SummaryImagesAverage & keyI & 'channel = 1',...
+                    fetchn(meso.ScanInfoField * meso.SummaryImagesAverage & keyI & fuse.ScanSet,...
                     'x','y','z','px_width','px_height','um_width','average_image','field');
             else
                 tfp.fliplr = 1;
                 tfp.flipud = 1;
                 [fieldWidths, fieldHeights, fieldWidthsInMicrons, frames, slice_pos, field_num] = ...
-                    fetchn(reso.ScanInfo * reso.SummaryImagesAverage * reso.ScanInfoField & keyI & 'channel = 1',...
+                    fetchn(reso.ScanInfo * reso.SummaryImagesAverage * reso.ScanInfoField & keyI & fuse.ScanSet,...
                     'px_width','px_height','um_width','average_image','z','field');
                 depth = 0; % because this is included in slice_pos of the reso
                 x_pos = zeros(size(fieldWidths));y_pos = x_pos;
@@ -124,14 +117,14 @@ classdef FieldCoordinates < dj.Imported
                     tuple.tform = self.createTform(tfp);
                     tuple.pxpitch = pxpitch/tfp.scale; % estimated pixel pitch of the vessel map;
                     tuple.field_depth = slice_pos(islice) - depth;
-                    makeTuples(anatomy.FieldCoordinates,tuple)
+                    insert(self,tuple)
                 end
             else
                 disp 'Exiting...'
             end
         end
         
-        function plot(self,varargin)
+        function out_im = plot(self,varargin)
             
             params.exp = 1;
             params.inv = 0;
@@ -150,15 +143,14 @@ classdef FieldCoordinates < dj.Imported
  
             % fetch images
             if strcmp(setup,'2P4')
-                [frames,x,y,tforms] = fetchn(meso.SummaryImagesAverage * self & 'channel = 1',...
+                [frames,x,y,tforms] = fetchn(meso.SummaryImagesAverage * self & fuse.ScanSet,...
                     'average_image','x_offset','y_offset','tform');
             else
-                [frames,x,y,tforms] = fetchn(reso.SummaryImagesAverage * self & 'channel = 1',...
+                [frames,x,y,tforms] = fetchn(reso.SummaryImagesAverage * self & fuse.ScanSet,...
                     'average_image','x_offset','y_offset','tform');
             end
             
-            % plot
-            figure
+            %  construct image
             ref_map = normalize(ref_map.^params.exp);
             if params.inv; ref_map = 1-ref_map;end
             idxX = [];idxY = []; frame = [];
@@ -181,9 +173,16 @@ classdef FieldCoordinates < dj.Imported
                     (im(idxY{islice},idxX{islice},2) + frame{islice});
             end
             im(:,:,2) = normalize(im(:,:,2));
-            image(im)
-            axis image
-            axis off
+            
+            % plot
+            if ~nargout
+                figure
+                image((im))
+                axis image
+                axis off
+            else
+                out_im = im;
+            end
         end
         
         function plot3D(self)
@@ -191,15 +190,13 @@ classdef FieldCoordinates < dj.Imported
             % get the ref_map
             ref_map = fetchn(proj(anatomy.RefMap,'ref_map') & self,'ref_map');
             
-            % get the setup
-            setup = fetch1(experiment.Session & self, 'rig');
-            
             % fetch images
-            if strcmp(setup,'2P4')
-                [frames,x,y,tforms,pxpitch,depth] = fetchn(meso.SummaryImagesAverage * self & 'channel = 1',...
+            setup = fetchn(experiment.Session & self, 'rig');
+            if strcmp(setup{1},'2P4')
+                [frames,x,y,tforms,pxpitch,depth] = fetchn(meso.SummaryImagesAverage * self & fuse.ScanSet,...
                     'average_image','x_offset','y_offset','tform','pxpitch','field_depth');
             else
-                [frames,x,y,tforms,pxpitch,depth] = fetchn(reso.SummaryImagesAverage * self & 'channel = 1',...
+                [frames,x,y,tforms,pxpitch,depth] = fetchn(reso.SummaryImagesAverage * self & fuse.ScanSet,...
                     'average_image','x_offset','y_offset','tform','pxpitch','field_depth');
             end
             
@@ -220,23 +217,23 @@ classdef FieldCoordinates < dj.Imported
             colormap([cmap;cmap2])
         end
         
-        function fmask = filterMask(self,mask)
+        function fmask = filterMask(self, ref_mask)
             
             % fetch images
             setup = fetch1(experiment.Session & self, 'rig');
             if strcmp(setup,'2P4')
-                [frame,x_offset,y_offset,tform] = fetch1(meso.SummaryImagesAverage * self ,...
+                [frame,x_offset,y_offset,tform] = fetch1(meso.SummaryImagesAverage * self & fuse.ScanSet,...
                     'average_image','x_offset','y_offset','tform');
             else
-                [frame,x_offset,y_offset,tform] = fetch1(reso.SummaryImagesAverage * self ,...
+                [frame,x_offset,y_offset,tform] = fetch1(reso.SummaryImagesAverage * self & fuse.ScanSet,...
                     'average_image','x_offset','y_offset','tform');
             end
             
             sz = size(frame);
             imS = self.filterImage(normalize(frame),tform);
-            YY = round(y_offset + size(mask,1)/2 - size(imS,1)/2);
-            XX = round(x_offset + size(mask,2)/2 - size(imS,2)/2);
-            fmask = mask(XX:size(imS,1)+XX-1,YY:size(imS,2)+YY-1);
+            YY = round(y_offset + size(ref_mask,1)/2 - size(imS,1)/2);
+            XX = round(x_offset + size(ref_mask,2)/2 - size(imS,2)/2);
+            fmask = ref_mask(XX:size(imS,1)+XX-1,YY:size(imS,2)+YY-1);
             fmask = self.filterImage(normalize(fmask),tform,1)>0;
             fmask = fmask(...
                 round(size(fmask,1)/2)-floor(sz(1)/2):round(size(fmask,1)/2)+floor(sz(1)/2)+1,...

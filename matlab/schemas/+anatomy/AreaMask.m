@@ -8,132 +8,120 @@
 mask                     : mediumblob            # mask of area
 %}
 
-classdef AreaMask < dj.Imported
-    methods(Access=protected)
-        function makeTuples(obj,key) %create clips
-            %             insert( obj, key );
-        end
-    end
-    
+classdef AreaMask < dj.Manual
     methods
-         function createMasks(self,key,varargin)
+        function createMasks(obj, key, varargin)
+            
             params.exp = 1.5;
             params.sigma = 2;
             
             params = ne7.mat.getParams(params,varargin);
             
             % populate if retinotopy map doesn't exist
-            ret_key = fetch(map.RetMap & key);
-            if ~exists(map.RetMap & ret_key)
-                ret_key = createRetRef(map.RetMap,fetch(mice.Mice & key));
+            ret_key = getRetKey(map.RetMap, key);
+          
+            % get maps
+            background = getBackground(map.RetMap & ret_key, params);
+             
+            % if FieldCoordinates exists add it to the background
+            if exists(anatomy.FieldCoordinates & key)
+               background = cat(4,background,plot(anatomy.FieldCoordinates & key));
             end
             
-            % get maps
-            Hor = [];Ver = [];
-            opt_key = fetch(map.OptImageBar & (map.RetMapScan & ret_key) & 'axis="horizontal"');
-            vessels = fetch1(map.OptImageBar & opt_key,'vessels');
-            [Hor(:,:,1),Hor(:,:,2),Hor(:,:,3)] = plot(map.OptImageBar & (map.RetMapScan & ret_key) & 'axis="horizontal"','exp',params.exp,'sigma',params.sigma);
-            [Ver(:,:,1),Ver(:,:,2),Ver(:,:,3)] = plot(map.OptImageBar & (map.RetMapScan & ret_key) & 'axis="vertical"','exp',params.exp,'sigma',params.sigma);
-            background = cat(4,repmat(vessels,1,1,3),hsv2rgb(Hor),hsv2rgb(Ver));
-            if ~exists(map.SignMap & ret_key)
-                extractSign(map.SignMap,ret_key,'manual',0);
-            end
-            sign_map = fetch1(map.SignMap & ret_key,'sign_map');
-            background = cat(4,background,hsv2rgb(sign_map));
-
             % create masks
             area_map = ne7.ui.paintMasks(abs(background));
+            if isempty(area_map); disp 'No masks created!'; return; end
             
-            if ~isempty(area_map)
-                % image
-                masks = normalize(area_map);
-                masks(:,:,2) = 0.2*(area_map>0);
-                masks(:,:,3) = Hor(:,:,3);
-                ih = image(hsv2rgb(masks));
-                axis image
-                axis off
-
-                % loop through all areas get area name and insert
-                areas = unique(area_map(:));
-                for iarea = areas(2:end)'
-
-                    % fix saturation for selected area
-                    colors =  0.2*(area_map>0);
-                    colors(area_map==iarea) = 1;
-                    masks(:,:,2) = colors;
-                    ih.CData = hsv2rgb(masks);
-                    shg
-                    s = regionprops(area_map==iarea,'area','Centroid');
-                    th = text(s.Centroid(1),s.Centroid(2),'?');
-
-                    tuple = rmfield(opt_key,'axis');
-
-                    % insert retinotopy index
-                    tuple.ret_idx = ret_key.ret_idx;
-
-                    % get area name
-                    areas = fetchn(anatomy.Area,'brain_area');
-                    area_idx = listdlg('PromptString','Which area is this?',...
+            % image
+            masks = normalize(area_map);
+            masks(:,:,2) = 0.2*(area_map>0);
+            masks(:,:,3) = background(:,:,1,1);
+            ih = image(hsv2rgb(masks));
+            axis image
+            axis off
+            
+            % loop through all areas get area name and insert
+            areas = unique(area_map(:));
+            for iarea = areas(2:end)'
+                
+                % fix saturation for selected area
+                colors =  0.2*(area_map>0);
+                colors(area_map==iarea) = 1;
+                masks(:,:,2) = colors;
+                ih.CData = hsv2rgb(masks);
+                shg
+                s = regionprops(area_map==iarea,'area','Centroid');
+                th = text(s.Centroid(1),s.Centroid(2),'?');
+                
+                % get base key
+                tuple = ret_key;
+                
+                % get area name
+                areas = fetchn(anatomy.Area,'brain_area');
+                area_idx = listdlg('PromptString','Which area is this?',...
                     'SelectionMode','single','ListString',areas);
-                    tuple.brain_area = areas{area_idx};
-                    if ~isfield(tuple,'field')
-                        tuple.field = 1;
+                tuple.brain_area = areas{area_idx};
+                if ~isfield(tuple,'field')
+                    tuple.field = 1;
+                end
+                tuple.mask = area_map==iarea;
+                th.delete;
+                insert(obj,tuple)
+                
+                % set correct area label
+                text(s.Centroid(1),s.Centroid(2),tuple.brain_area)
+            end
+        end
+        
+        function extractMasks(obj, keyI)
+                       
+            % fetch all area masks 
+            map_keys = fetch(anatomy.AreaMask & (anatomy.RefMap & (proj(anatomy.RefMap) & (anatomy.FieldCoordinates & keyI))));
+            
+            % loop through all masks
+            for map_key = map_keys'
+                [mask, area, ret_idx] = fetch1(anatomy.AreaMask & map_key, 'mask', 'brain_area', 'ret_idx');
+                
+                % loop through all fields 
+                for tuple = fetch(anatomy.FieldCoordinates & keyI)'
+                    
+                    % find corresponding mask area
+                    fmask = filterMask(anatomy.FieldCoordinates & tuple, mask);
+                    
+                    % insert if overlap exists
+                    if ~all(~fmask(:))
+                        tuple.area = area;
+                        tuple.mask = fmask;
+                        tuple.ret_idx = ret_idx;
+                        inser(obj,tuple)
                     end
-                    tuple.mask = area_map==iarea;
-                    th.delete;
-                    insert(self,tuple)
-
-                    % set correct area label
-                    text(s.Centroid(1),s.Centroid(2),tuple.brain_area)
                 end
             end
-            
         end
         
         function plot(obj)
             
-            [masks,areas] = fetchn(obj,'mask','brain_area');
-            vessels = fetchn(map.OptImageBar & obj,'vessels');
+            % get mask info
+            [masks, areas] = fetchn(obj,'mask','brain_area');
             
+            % get maps
+            background = getBackground(map.RetMap & obj);
+            
+            % identify mask areas
             area_map = zeros(size(masks{1}));
             for imasks = 1:length(masks)
                 area_map(masks{imasks}) = imasks;
             end
             
-            im = cat(3,normalize(area_map),area_map>0,normalize(vessels{1}));
+            % merge masks with background
+            im = cat(3,normalize(area_map),area_map>0,normalize(background(:,:,1,1)));
             image(hsv2rgb(im));
             
+            % place area labels
             for iarea = 1:length(masks)
                 s = regionprops(masks{iarea},'Centroid');
                 text(s(1).Centroid(1),s(1).Centroid(2),areas{iarea})
             end
-        end
-        
-    end
-    
-    methods(Static)
-        
-        
-        function extractMask(keyI,keyV)
-            
-            if nargin<2
-                keyV = fetch(map.OptImageBar & anatomy.AreaMask & sprintf('animal_id=%d',keyI.animal_id));
-            end
-            
-            % Insert overlaping masks
-            map_keys = fetch(anatomy.AreaMask & keyV);
-            for map_key = map_keys'
-                [mask, area] = fetch1(anatomy.AreaMask & map_key,'mask','brain_area');
-                for tuple = fetch(anatomy.FieldCoordinates & keyI)'
-                    fmask = filterMask(anatomy.FieldCoordinates & tuple,mask);
-                    if ~all(~fmask(:))
-                        tuple.area = area;
-                        tuple.mask = fmask;
-                        makeTuples(anatomy.AreaMask,tuple)
-                    end
-                end
-            end
-        end
-        
+        end 
     end
 end
