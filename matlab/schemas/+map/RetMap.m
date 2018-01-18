@@ -13,25 +13,41 @@ classdef RetMap < dj.Imported
     end
     
     methods
-        function createRet(self,keys,ret_idx)
+        function tuple = createRetRef(self,keys,ret_idx)
             
+            % select animal_id
             tuple = fetch(mice.Mice & keys);
+            assert(length(tuple)==1,'Specify one animal_id!')
             
             % find opt maps if not provided
             if ~isfield(keys(1),'scan_idx')
                 keys = [];
                 for axis = {'horizontal','vertical'}
                     key.axis = axis{1};
-                    hkeys = fetch(map.OptImageBar & tuple & key);
+                    hkeys = fetch(map.OptImageBar & tuple & key,'ORDER BY session, scan_idx');
                     if ~isempty(hkeys)
-                        [~,mxidx] = max([hkeys.scan_idx]);
-                        keys{end+1} = hkeys(mxidx);
+                        if length(hkeys)>1
+                            f = clf;
+                            for ikey = 1:length(hkeys)
+                                subplot(ceil(sqrt(length(hkeys))),ceil(sqrt(length(hkeys))),ikey)
+                                plot(map.OptImageBar & hkeys(ikey),'figure',f,'subplot',true,'exp',2,'sigma',2)
+                                title(num2str(ikey))
+                            end
+                            
+                            fprintf('\n Multiple maps found for animal %d \n',hkeys(1).animal_id);
+                            ikey = input('Select key:');
+                        else
+                            ikey = 1;
+                        end
+                        keys{end+1} = hkeys(ikey);
+                    else
+                        fprintf('No %s map found!',axis{1})
                     end
                 end
                 if ~isempty(keys)
-                    keys = map.OptImageBar &  cell2mat(keys);
+                    keys = cell2mat(keys);
                 else
-                    disp 'No maps found please specify...'
+                    disp 'No maps found, please specify...'
                     return
                 end
             end
@@ -43,8 +59,9 @@ classdef RetMap < dj.Imported
                 ret_idx = fetch1(self & (map.RetMapScan & keys),'ret_idx');
             end
             tuple.ret_idx = ret_idx;
-
-            if ~exists(self & tuple) 
+            
+            % insert if not found
+            if ~exists(self & tuple)
                 makeTuples(self, tuple)
             end
             

@@ -2,7 +2,7 @@
 # brain area membership of cells
 -> fuse.ScanSetUnit
 ---
--> experiment.BrainArea
+-> anatomy.Area
 %}
 
 

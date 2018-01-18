@@ -17,8 +17,15 @@ classdef RefMap < dj.Imported
     end
     
     methods
-        function createRef(obj,REF,pxpitch)
+        function exit_tuple = createRef(obj,REF,pxpitch)
             
+            % by default use OptImageBar as reference map if not supplied
+            if isstruct(REF)
+                ret_keys = fetch(map.RetMapScan & REF,'ORDER BY ret_idx ASC, axis DESC');
+                assert(~isempty(ret_keys),'Create a retinotopic map or specify a reference map explicitly!')
+                REF = map.OptImageBar & ret_keys(1);
+            end
+                   
             % get primary key
             tuple = fetch(experiment.Scan & REF);
             ref_indexes = fetchn(obj & (mice.Mice & tuple),'ref_idx');
@@ -27,6 +34,7 @@ classdef RefMap < dj.Imported
             else
                 tuple.ref_idx = 1;
             end
+            exit_tuple = tuple;
             
             % get map info
             if ismatrix(REF) && numel(REF)>4 % handle image ref_map
