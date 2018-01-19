@@ -9,7 +9,7 @@
 classdef AreaMembership <  dj.Computed
     
     properties
-        keySource = experiment.Scan * shared.SegmentationMethod * shared.PipelineVersion & fuse.ScanDone & anatomy.AreaMask
+        keySource = proj(experiment.Scan) * shared.SegmentationMethod * shared.PipelineVersion & fuse.ScanDone & anatomy.AreaMask
     end
     
     methods(Access=protected)
@@ -23,7 +23,7 @@ classdef AreaMembership <  dj.Computed
             for field_key = field_keys'
                 
                 % build image with area masks
-                [area_masks, areas] = fetchn(anatomy.AreaMask & field_key,'mask','area');
+                [area_masks, areas] = fetchn(anatomy.AreaMask & field_key,'mask','brain_area');
                 area_mask = zeros(size(area_masks{1}));
                 for iarea=1:length(area_masks)
                     area_mask(area_masks{iarea}>0) = iarea;
@@ -41,9 +41,6 @@ classdef AreaMembership <  dj.Computed
                         proj(reso.ScanInfo,'px_height','px_width'),...
                         'px_x','px_y');
                 end
-                
-                % remove redundant field
-                keys = rmfield(keys,'field');
 
                 % insert each cell
                 for imask = 1:length(keys)
