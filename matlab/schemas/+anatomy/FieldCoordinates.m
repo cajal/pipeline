@@ -181,7 +181,8 @@ classdef FieldCoordinates < dj.Manual
                 axis image
                 axis off
             else
-                out_im = im;
+                im(:,:,3) = (im(:,:,2)>0)*0.33;
+                out_im = hsv2rgb(im(:,:,[3 2 1]));
             end
         end
         

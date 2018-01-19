@@ -90,22 +90,28 @@ classdef AreaMask < dj.Manual
                     
                     % insert if overlap exists
                     if ~all(~fmask(:))
-                        tuple.area = area;
+                        tuple = rmfield(tuple,'ref_idx');
+                        tuple.brain_area = area;
                         tuple.mask = fmask;
                         tuple.ret_idx = ret_idx;
-                        inser(obj,tuple)
+                        insert(obj,tuple)
                     end
                 end
             end
         end
         
-        function plot(obj)
-            
+        function plot(obj, back_idx)
+             
             % get mask info
             [masks, areas] = fetchn(obj,'mask','brain_area');
             
             % get maps
             background = getBackground(map.RetMap & obj);
+            
+            % if FieldCoordinates exists add it to the background
+            if exists(anatomy.FieldCoordinates & (mice.Mice & obj))
+               background = cat(4,background,plot(anatomy.FieldCoordinates & (mice.Mice & obj)));
+            end
             
             % identify mask areas
             area_map = zeros(size(masks{1}));
@@ -114,8 +120,12 @@ classdef AreaMask < dj.Manual
             end
             
             % merge masks with background
-            im = cat(3,normalize(area_map),area_map>0,normalize(background(:,:,1,1)));
-            image(hsv2rgb(im));
+            im = hsv2rgb(cat(3,normalize(area_map),area_map>0,normalize(background(:,:,1,1))));
+            if nargin<2 || isempty(back_idx) || back_idx > size(background,4)
+                image((im));
+            else
+                imshowpair(im,background(:,:,:,back_idx),'blend')
+            end
             
             % place area labels
             for iarea = 1:length(masks)
