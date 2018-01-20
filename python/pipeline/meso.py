@@ -66,6 +66,7 @@ class ScanInfo(dj.Imported):
         z                   : float         # (um) absolute depth with respect to the surface of the cortex
         delay_image         : longblob      # (ms) delay between the start of the scan and pixels in this field
         roi                 : tinyint       # ROI to which this field belongs
+        valid_depth=false   : boolean       # whether depth has been manually check
         """
 
         def _make_tuples(self, key, scan, field_id):
@@ -75,14 +76,14 @@ class ScanInfo(dj.Imported):
 
             # Get attributes
             x_zero, y_zero, _ = scan.motor_position_at_zero  # motor x, y at ScanImage's 0
-            z_zero = (experiment.Scan() & key).fetch1('depth')  # true z at ScanImage's 0
+            surf_z = (experiment.Scan() & key).fetch1('depth')  # surface depth in fastZ coordinates
             tuple_['px_height'] = scan.field_heights[field_id]
             tuple_['px_width'] = scan.field_widths[field_id]
             tuple_['um_height'] = scan.field_heights_in_microns[field_id]
             tuple_['um_width'] = scan.field_widths_in_microns[field_id]
             tuple_['x'] = x_zero + scan._degrees_to_microns(scan.fields[field_id].x)
             tuple_['y'] = y_zero + scan._degrees_to_microns(scan.fields[field_id].y)
-            tuple_['z'] = z_zero + scan.field_depths[field_id]
+            tuple_['z'] = scan.field_depths[field_id] - surf_z
             tuple_['delay_image'] = scan.field_offsets[field_id]
             tuple_['roi'] = scan.field_rois[field_id][0]
 
@@ -116,6 +117,7 @@ class ScanInfo(dj.Imported):
         tuple_['usecs_per_line'] = scan.seconds_per_line * 1e6
         tuple_['fill_fraction'] = scan.temporal_fill_fraction
         tuple_['nrois'] = scan.num_rois
+        tuple_['valid_depth'] = True
 
         # Insert in ScanInfo
         self.insert1(tuple_)
@@ -1485,7 +1487,7 @@ class ScanSet(dj.Computed):
 @schema
 class ManualDepth(dj.Manual):
     definition = """
-    # manually entered depth of a 
+    # manually entered depth of a
     -> ScanSet
     ---
     um_z        : smallint # um from the surface
