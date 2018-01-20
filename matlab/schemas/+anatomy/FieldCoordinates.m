@@ -146,7 +146,7 @@ classdef FieldCoordinates < dj.Manual
                 [frames,x,y,tforms] = fetchn(meso.SummaryImagesAverage * self & fuse.ScanSet,...
                     'average_image','x_offset','y_offset','tform');
             else
-                [frames,x,y,tforms] = fetchn(reso.SummaryImagesAverage * self & fuse.ScanSet,...
+                [frames,x,y,tforms,keys] = fetchn(reso.SummaryImagesAverage * self & fuse.ScanSet,...
                     'average_image','x_offset','y_offset','tform');
             end
             
@@ -231,14 +231,14 @@ classdef FieldCoordinates < dj.Manual
             end
             
             sz = size(frame);
-            imS = self.filterImage(normalize(frame),tform);
-            YY = round(y_offset + size(ref_mask,1)/2 - size(imS,1)/2);
-            XX = round(x_offset + size(ref_mask,2)/2 - size(imS,2)/2);
-            fmask = ref_mask(XX:size(imS,1)+XX-1,YY:size(imS,2)+YY-1);
+            imS = self.filterImage(normalize(frame),tform);            % apply rotation/flips 
+            YY = round(y_offset + size(ref_mask,1)/2 - size(imS,1)/2); % convert center coordinates to 0,0 coordinates
+            XX = round(x_offset + size(ref_mask,2)/2 - size(imS,2)/2); % convert center coordinates to 0,0 coordinates
+            fmask = ref_mask(YY:size(imS,1)+YY-1,XX:size(imS,2)+XX-1);
             fmask = self.filterImage(normalize(fmask),tform,1)>0;
             fmask = fmask(...
-                round(size(fmask,1)/2)-floor(sz(1)/2):round(size(fmask,1)/2)+floor(sz(1)/2)+1,...
-                round(size(fmask,2)/2)-floor(sz(2)/2):round(size(fmask,2)/2)+floor(sz(2)/2)+1);
+                round(size(fmask,1)/2)-floor(sz(1)/2):round(size(fmask,1)/2)+floor(sz(1)/2)-1,...
+                round(size(fmask,2)/2)-floor(sz(2)/2):round(size(fmask,2)/2)+floor(sz(2)/2)-1);
         end
     end
     
