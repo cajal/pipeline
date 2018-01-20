@@ -25,7 +25,7 @@ classdef RetMap < dj.Manual
                             for ikey = 1:length(hkeys)
                                 subplot(ceil(sqrt(length(hkeys))),ceil(sqrt(length(hkeys))),ikey)
                                 plot(map.OptImageBar & hkeys(ikey),'figure',f,'subplot',true,'exp',2,'sigma',2)
-                                title(num2str(ikey))
+                                title(sprintf('%d: session:%d scan_idx:%d',ikey,hkeys(ikey).session,hkeys(ikey).scan_idx))
                             end
                             
                             fprintf('\n Multiple maps found for animal %d \n',hkeys(1).animal_id);
