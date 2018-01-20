@@ -19,13 +19,13 @@ classdef AreaMask < dj.Manual
             
             % populate if retinotopy map doesn't exist
             ret_key = getRetKey(map.RetMap, key);
-          
+            
             % get maps
             background = getBackground(map.RetMap & ret_key, params);
-             
+            
             % if FieldCoordinates exists add it to the background
             if exists(anatomy.FieldCoordinates & key)
-               background = cat(4,background,plot(anatomy.FieldCoordinates & key));
+                background = cat(4,background,plot(anatomy.FieldCoordinates & key));
             end
             
             % create masks
@@ -64,7 +64,7 @@ classdef AreaMask < dj.Manual
                 if ~isfield(tuple,'field')
                     tuple.field = 1;
                 end
-                tuple.mask = area_map==iarea;
+                tuple.mask = area_map == iarea;
                 th.delete;
                 insert(obj,tuple)
                 
@@ -74,23 +74,23 @@ classdef AreaMask < dj.Manual
         end
         
         function extractMasks(obj, keyI)
-                       
-            % fetch all area masks 
+            
+            % fetch all area masks
             map_keys = fetch(anatomy.AreaMask & (anatomy.RefMap & (proj(anatomy.RefMap) & (anatomy.FieldCoordinates & keyI))));
             
             % loop through all masks
             for map_key = map_keys'
                 [mask, area, ret_idx] = fetch1(anatomy.AreaMask & map_key, 'mask', 'brain_area', 'ret_idx');
-                
-                % loop through all fields 
-                for tuple = fetch(anatomy.FieldCoordinates & keyI)'
-                    
+         
+                % loop through all fields
+                for field_key = fetch(anatomy.FieldCoordinates & keyI)'
+ 
                     % find corresponding mask area
-                    fmask = filterMask(anatomy.FieldCoordinates & tuple, mask);
-                    
+                    fmask = filterMask(anatomy.FieldCoordinates & field_key, mask);
+
                     % insert if overlap exists
                     if ~all(~fmask(:))
-                        tuple = rmfield(tuple,'ref_idx');
+                        tuple = rmfield(field_key,'ref_idx');
                         tuple.brain_area = area;
                         tuple.mask = fmask;
                         tuple.ret_idx = ret_idx;
@@ -101,22 +101,35 @@ classdef AreaMask < dj.Manual
         end
         
         function plot(obj, back_idx)
-             
+            
             % get mask info
             [masks, areas] = fetchn(obj,'mask','brain_area');
-            
-            % get maps
-            background = getBackground(map.RetMap & obj);
-            
-            % if FieldCoordinates exists add it to the background
-            if exists(anatomy.FieldCoordinates & (mice.Mice & obj))
-               background = cat(4,background,plot(anatomy.FieldCoordinates & (mice.Mice & obj)));
-            end
             
             % identify mask areas
             area_map = zeros(size(masks{1}));
             for imasks = 1:length(masks)
                 area_map(masks{imasks}) = imasks;
+            end
+            
+            if exists(fuse.ScanDone & obj)
+                % fetch 2p avg image
+                if strcmp(fetch1(experiment.Session & obj, 'rig'),'2P4')
+                    background = fetch1(meso.SummaryImagesAverage & (fuse.ScanSet & obj),...
+                        'average_image');
+                else
+                    background = fetch1(reso.SummaryImagesAverage & (fuse.ScanSet & obj),...
+                        'average_image');
+                end
+                background = abs((background).^0.4);
+                
+            else
+                % get maps
+                background = getBackground(map.RetMap & (map.RetMapScan &  obj));
+                
+                % if FieldCoordinates exists add it to the background
+                if exists(anatomy.FieldCoordinates & (mice.Mice & obj))
+                    background = cat(4,background,plot(anatomy.FieldCoordinates & (mice.Mice & obj)));
+                end
             end
             
             % merge masks with background
@@ -132,6 +145,6 @@ classdef AreaMask < dj.Manual
                 s = regionprops(masks{iarea},'Centroid');
                 text(s(1).Centroid(1),s(1).Centroid(2),areas{iarea})
             end
-        end 
+        end
     end
 end
