@@ -72,33 +72,32 @@ class StackInfo(dj.Imported):
             # Create results tuple
             tuple_ = key.copy()
 
-            # Get field_ids in this ROI ordered from shallower to deeper
+            # Get field_ids ordered from shallower to deeper field in this ROI
+            x_zero, y_zero, z_zero = stack.motor_position_at_zero  # motor x, y, z at ScanImage's 0
             if stack.is_multiROI:
-                field_ids = [i for i, field_rois in enumerate(stack.field_rois) if id_in_file in field_rois]
-                field_depths = [stack.field_depths[i] for i in field_ids]
-                field_ids = [i for _, i in sorted(zip(field_depths, field_ids))]
-            else: # for reso lower values mean deeper
+                field_ids = [i for i, field_roi in enumerate(stack.field_rois) if id_in_file in field_roi]
+                field_depths = [stack.field_depths[i] - z_zero for i in field_ids]
+            else:
                 field_ids = range(stack.num_scanning_depths)
-                field_depths = stack.field_depths
-                field_ids = [idx for _, idx in sorted(zip(field_depths, field_ids), reverse=True)]
+                if stack.is_slow_stack and not stack.is_slow_stack_with_fastZ: # using motor
+                    initial_fastZ = stack.initial_secondary_z or 0
+                    field_depths = [2 * initial_fastZ - stack.field_depths[i] - z_zero for i in field_ids]
+                else: # using fastZ
+                    field_depths = [stack.field_depths[i] - z_zero for i in field_ids]
+            field_depths, field_ids = zip(*sorted(zip(field_depths, field_ids)))
             tuple_['field_ids'] = field_ids
 
             # Get reso/meso specific coordinates
-            x_zero, y_zero, z_zero = stack.motor_position_at_zero  # motor x, y, z at ScanImage's 0
             if stack.is_multiROI:
                 tuple_['roi_x'] = x_zero + stack._degrees_to_microns(stack.fields[field_ids[0]].x)
                 tuple_['roi_y'] = y_zero + stack._degrees_to_microns(stack.fields[field_ids[0]].y)
-                tuple_['roi_z'] = z_zero + stack.field_depths[field_ids[0]]
                 tuple_['roi_px_height'] = stack.field_heights[field_ids[0]]
                 tuple_['roi_px_width'] = stack.field_widths[field_ids[0]]
                 tuple_['roi_um_height'] = stack.field_heights_in_microns[field_ids[0]]
                 tuple_['roi_um_width'] = stack.field_widths_in_microns[field_ids[0]]
-                tuple_['roi_um_depth'] = (stack.field_depths[field_ids[-1]] -
-                                          stack.field_depths[field_ids[0]] + 1)
             else:
                 tuple_['roi_x'] = x_zero
                 tuple_['roi_y'] = y_zero
-                tuple_['roi_z'] = -(z_zero + stack.field_depths[field_ids[0]]) # minus so deeper is more positive
                 tuple_['roi_px_height'] = stack.image_height
                 tuple_['roi_px_width'] = stack.image_width
 
@@ -111,11 +110,11 @@ class StackInfo(dj.Imported):
                 um_height, um_width = [float(um) * (closest_zoom / stack.zoom) for um in dims]
                 tuple_['roi_um_height'] = um_height * stack._y_angle_scale_factor
                 tuple_['roi_um_width'] = um_width * stack._x_angle_scale_factor
-                tuple_['roi_um_depth'] = (stack.field_depths[field_ids[0]] -
-                                          stack.field_depths[field_ids[-1]] + 1)
 
             # Get common parameters
+            tuple_['roi_z'] = field_depths[0]
             tuple_['roi_px_depth'] = len(field_ids)
+            tuple_['roi_um_depth'] = field_depths[-1] - field_depths[0] + 1
             tuple_['nframes'] = stack.num_frames
             tuple_['fps'] = stack.fps
             tuple_['bidirectional'] = stack.is_bidirectional
@@ -155,9 +154,9 @@ class StackInfo(dj.Imported):
         # Insert ROIs
         roi_id = 1
         for filename_key, num_rois, stack in zip(filename_keys, num_rois_per_file, stacks):
-            for id_in_file in range(num_rois):
+            for roi_id_in_file in range(num_rois):
                 roi_key = {**key, **filename_key, 'roi_id': roi_id}
-                StackInfo.ROI()._make_tuples(roi_key, stack, id_in_file)
+                StackInfo.ROI()._make_tuples(roi_key, stack, roi_id_in_file)
                 roi_id += 1
 
         # Fill in CorrectionChannel if only one channel
