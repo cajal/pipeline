@@ -46,6 +46,7 @@ class ScanInfo(dj.Imported):
     bidirectional           : boolean           # true = bidirectional scanning
     usecs_per_line          : float             # microseconds per scan line
     fill_fraction           : float             # raster scan temporal fill fraction (see scanimage)
+    valid_depth=false       : boolean           # whether depth has been manually check
     """
 
     @property
@@ -89,6 +90,7 @@ class ScanInfo(dj.Imported):
         tuple_['bidirectional'] = scan.is_bidirectional
         tuple_['usecs_per_line'] = scan.seconds_per_line * 1e6
         tuple_['fill_fraction'] = scan.temporal_fill_fraction
+        tuple_['valid_depth'] = True
 
         # Estimate height and width in microns using measured FOVs for similar setups
         fov_rel = (experiment.FOV() * experiment.Session() * experiment.Scan() & key
@@ -104,11 +106,20 @@ class ScanInfo(dj.Imported):
         # Insert in ScanInfo
         self.insert1(tuple_)
 
+        # Compute field depths with respect to surface
+        surf_z = (experiment.Scan() & key).fetch1('depth')  # surface depth in motor coordinates
+        motor_zero = surf_z - scan.motor_position_at_zero[2]
+        if scan.is_slow_stack and not scan.is_slow_stack_with_fastZ: # using motor
+            # Correct for motor and fastZ pointing in different directions
+            initial_fastZ = scan.initial_secondary_z or 0
+            rel_field_depths = 2 * initial_fastZ - np.array(scan.field_depths)
+        else: # using fastZ
+            rel_field_depths = np.array(scan.field_depths)
+        field_depths = motor_zero + rel_field_depths
+
         # Insert field information
-        z_zero = (experiment.Scan() & key).fetch1('depth')  # true depth at ScanImage's 0
-        for field_id, (field_z, field_offsets) in enumerate(zip(scan.field_depths,
-                                                                scan.field_offsets)):
-            ScanInfo.Field().insert1({**key, 'field': field_id + 1, 'z': z_zero - field_z,
+        for field_id, (field_z, field_offsets) in enumerate(zip(field_depths, scan.field_offsets)):
+            ScanInfo.Field().insert1({**key, 'field': field_id + 1, 'z': field_z,
                                       'delay_image': field_offsets})
 
         # Fill in CorrectionChannel if only one channel
