@@ -1644,6 +1644,10 @@ class ScanDone(dj.Computed):
     def target(self):
         return ScanDone.Partial()  # trigger make_tuples for fields in Activity that aren't in ScanDone.Partial
 
+    def _job_key(self, key):
+        # Force reservation key to be per scan so diff fields are not run in parallel
+        return {k: v for k, v in key.items() if k not in ['field', 'channel']}
+
     class Partial(dj.Part):
         definition = """ # fields that have been processed in the current scan
 
