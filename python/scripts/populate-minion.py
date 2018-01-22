@@ -17,6 +17,8 @@ while True:
             pipe.MaskClassification().populate(next_scans, {'classification_method': 2}, reserve_jobs=True, suppress_errors=True)
             pipe.ScanSet().populate(next_scans, reserve_jobs=True, suppress_errors=True)
             pipe.Activity().populate(next_scans, {'spike_method': 5}, reserve_jobs=True, suppress_errors=True)
+            full_scans = (pipe.ScanInfo() & pipe.Activity()) - (pipe.ScanInfo.Field() - pipe.Activity())
+            pipe.ScanDone().populate(next_scans & full_scans, reserve_jobs=True, suppress_errors=True)
 
     # Stacks
     stack.StackInfo().populate(stack.CorrectionChannel(), reserve_jobs=True, suppress_errors=True) #TODO: stackAutoProcessing
