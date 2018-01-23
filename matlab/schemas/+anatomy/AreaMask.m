@@ -28,9 +28,23 @@ classdef AreaMask < dj.Manual
                 background = cat(4,background,plot(anatomy.FieldCoordinates & key));
             end
             
+            % get masks already extracted
+            if exists(obj & key)
+                [masks, keys] = fetchn(obj & key,'mask');
+                area_map = zeros(size(masks{1}));
+                for imasks = 1:length(masks)
+                    area_map(masks{imasks}) = imasks;
+                end
+            end
+            
             % create masks
-            area_map = ne7.ui.paintMasks(abs(background));
+            area_map = ne7.ui.paintMasks(abs(background),area_map);
             if isempty(area_map); disp 'No masks created!'; return; end
+            
+            % delete previous keys if existed 
+            if exists(obj & key)
+                del(anatomy.AreaMask & keys)
+            end
             
             % image
             masks = normalize(area_map);
