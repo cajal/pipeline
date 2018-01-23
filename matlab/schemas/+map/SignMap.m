@@ -14,27 +14,30 @@ classdef SignMap < dj.Imported
     end
     
     methods
-        function extractSign(self, key)
+        function extractSign(self, key, varargin)
             
-            % load data
-            normalize = @(x) (x - min(x(:)))./(max(x(:)) - min(x(:)));
+            params.manual = 1;
+            params.pexp = 1.5;
+            
+            params = ne7.mat.getParams(params,varargin);
+            
+            % define functions & colors
+            normalize = @(x) (x - nanmin(x(:)))./(nanmax(x(:)) - nanmin(x(:)));
             cm = rgb2hsv(parula(100));
             cm = cm(:,1);
             
-            pexp = 1.5;
-            
             % set/get parameters
             if ~exists(self & key)
-                params.init_gauss = [0.1 0.1 200];
-                params.grad_gauss = [2 0.1 20]; % initial map gauss filter in sd parameter
-                params.diff_gauss = [0.1 0.1 20]; % gradient diff map gauss filter in sd parameter
-                params.diff_open = [1 0 20]; % gradient diff imopen param
+                sign_params.init_gauss = [0.1 0.1 200];
+                sign_params.grad_gauss = [.1 0.1 20]; % initial map gauss filter in sd parameter
+                sign_params.diff_gauss = [12 0.1 20]; % gradient diff map gauss filter in sd parameter
+                sign_params.diff_open = [0 0 20]; % gradient diff imopen param
                 MAP = [];
             else
-                [MAP, params] = fetch1(self & key,'sign_map', 'parameters');
+                [MAP, sign_params] = fetch1(self & key,'sign_map', 'parameters');
             end
             
-            % init
+            % initialize
             MAP = [];
             running = true;
             control = [];
@@ -42,51 +45,58 @@ classdef SignMap < dj.Imported
             current_field = [];
             
             % fetch horizontal & vertical maps
+            if ~exists(map.OptImageBar & (map.RetMapScan & key) & 'axis="horizontal"'); return;end
             [H, A1, Ves] = fetch1(map.OptImageBar & (map.RetMapScan & key) & 'axis="horizontal"','ang','amp','vessels');
-            [Hor(:,:,1),Hor(:,:,2),Hor(:,:,3)] = plot(map.OptImageBar & (map.RetMapScan & key) & 'axis="horizontal"','exp',pexp,'sigma',params.init_gauss(1));
+            [Hor(:,:,1),Hor(:,:,2),Hor(:,:,3)] = plot(map.OptImageBar & (map.RetMapScan & key) & 'axis="horizontal"','exp',params.pexp,'sigma',sign_params.init_gauss(1));
+            if ~exists(map.OptImageBar & (map.RetMapScan & key) & 'axis="vertical"'); return;end
             [V, A2] = fetch1(map.OptImageBar & (map.RetMapScan & key) & 'axis="vertical"','ang','amp');
-            [Ver(:,:,1),Ver(:,:,2),Ver(:,:,3)] = plot(map.OptImageBar & (map.RetMapScan & key) & 'axis="vertical"','exp',pexp,'sigma',params.init_gauss(1));
-            Amp = normalize(A1+A2);
-            Ves = normalize(Ves);
+            [Ver(:,:,1),Ver(:,:,2),Ver(:,:,3)] = plot(map.OptImageBar & (map.RetMapScan & key) & 'axis="vertical"','exp',params.pexp,'sigma',sign_params.init_gauss(1));
+            Amp = normalize(self.replaceNaNs(A1+A2));
+            Ves = normalize(self.replaceNaNs(Ves));
+            H = self.replaceNaNs(H);
+            V = self.replaceNaNs(V);
+            createMAP
             
-            % plot
-            f = figure;
-            screensize = get( groot, 'Screensize' );
-            set(f,'KeyPressFcn',@EvalEvent,'position',[0.3*screensize(3) 0.3*screensize(4) 0.7*screensize(4) 0.7*screensize(4)],...
-                'windowscrollWheelFcn',@scroll,'WindowButtonMotionFcn', @mouseMove)
-            subplot(2,2,1)
-            imagesc(hsv2rgb(Hor)); axis image; axis off; title('Horizontal Retinotopy')
-            subplot(2,2,2)
-            imagesc(hsv2rgb(Ver)); axis image; axis off; title('Vertical Retinotopy')
-            makeplot
-            
-            % Add the slider and slider label text to the figure
-            fields = fieldnames(params);
-            positions = repmat([0.6,nan,0.3,0.05],length(fields),1);
-            positions(:,2) = linspace(0.4,0.1,length(fields));
-            for ifield = 1:length(fields)
-                uicontrol('Parent',f,'Style','text','Units', 'normal','Position',positions(ifield,:)+[0 0.05 0 0],...
-                    'String',fields{ifield});
-                control(ifield)=uicontrol('Parent',f,'Style','slider','Units', 'normal','Position',positions(ifield,:),...
-                    'value',params.(fields{ifield})(1), ...
-                    'min',params.(fields{ifield})(2), 'max',params.(fields{ifield})(3),...
-                    'callback',@update_val,'KeyPressFcn',@EvalEvent, 'TooltipString',fields{ifield});
-            end
-            
-            % wait until done
-            while running
-                try if ~ishandle(f);MAP = [];break;end;catch;break;end
-                pause(0.1);
+            if params.manual
+                % plot
+                f = figure;
+                screensize = get( groot, 'Screensize' );
+                set(f,'KeyPressFcn',@EvalEvent,'position',[0.3*screensize(3) 0.3*screensize(4) 0.7*screensize(4) 0.7*screensize(4)],...
+                    'windowscrollWheelFcn',@scroll,'WindowButtonMotionFcn', @mouseMove)
+                subplot(2,2,1)
+                imagesc(hsv2rgb(Hor)); axis image; axis off; title('Horizontal Retinotopy')
+                subplot(2,2,2)
+                imagesc(hsv2rgb(Ver)); axis image; axis off; title('Vertical Retinotopy')
+                plotMAP
+
+                % Add the slider and slider label text to the figure
+                fields = fieldnames(sign_params);
+                positions = repmat([0.6,nan,0.3,0.05],length(fields),1);
+                positions(:,2) = linspace(0.4,0.1,length(fields));
+                for ifield = 1:length(fields)
+                    uicontrol('Parent',f,'Style','text','Units', 'normal','Position',positions(ifield,:)+[0 0.05 0 0],...
+                        'String',fields{ifield});
+                    control(ifield)=uicontrol('Parent',f,'Style','slider','Units', 'normal','Position',positions(ifield,:),...
+                        'value',sign_params.(fields{ifield})(1), ...
+                        'min',sign_params.(fields{ifield})(2), 'max',sign_params.(fields{ifield})(3),...
+                        'callback',@update_val,'KeyPressFcn',@EvalEvent, 'TooltipString',fields{ifield});
+                end
+
+                % wait until done
+                while running
+                    try if ~ishandle(f);MAP = [];break;end;catch;break;end
+                    pause(0.1);
+                end
             end
             
             % insert/update tuple
             if ~isempty(MAP)
                 if exists(self & key)
                     update(self & key,'sign_map',MAP)
-                    update(self & key,'parameters',params)
+                    update(self & key,'parameters',sign_params)
                 else
                     key.sign_map = MAP;
-                    key.parameters = params;
+                    key.parameters = sign_params;
                     makeTuples(self,key)
                 end
             end
@@ -94,10 +104,10 @@ classdef SignMap < dj.Imported
             function scroll(~,event)
                 new_value = (-event.VerticalScrollCount)*0.1 + get(control(current_field),'Value');
                 if ~isempty(current_param)
-                    if new_value>params.(current_param)(2) && new_value<params.(current_param)(3)
-                        params.(current_param)(1) = new_value;
+                    if new_value>sign_params.(current_param)(2) && new_value<sign_params.(current_param)(3)
+                        sign_params.(current_param)(1) = new_value;
                         set(control(current_field),'Value',new_value)
-                        makeplot
+                        plotMAP
                     end
                 end
             end
@@ -139,43 +149,47 @@ classdef SignMap < dj.Imported
             function update_val(source,~)
                 val = source.Value;
                 if strcmp(source.TooltipString,'diff_open'); val = round(val);end
-                params.(source.TooltipString)(1) = val;
-                makeplot
+                sign_params.(source.TooltipString)(1) = val;
+                plotMAP
             end
             
-            function makeplot
+            function createMAP
                 % calculate gradients
-                [~,dH] = imgradient(imgaussfilt((H),params.init_gauss(1)));
-                [~,dV] = imgradient(imgaussfilt((V),params.init_gauss(1)));
+                [~,dH] = imgradient(imgaussfilt((H),sign_params.init_gauss(1)));
+                [~,dV] = imgradient(imgaussfilt((V),sign_params.init_gauss(1)));
                 
                 % filter gradients
-                dH = imgaussfilt(dH,params.grad_gauss(1));
-                dV = imgaussfilt(dV,params.grad_gauss(1));
-                grad_diff = imopen(imgaussfilt(sind(dH  - dV),params.diff_gauss(1)),...
-                    strel('disk',round(params.diff_open(1))));
+                dH = imgaussfilt(dH,sign_params.grad_gauss(1));
+                dV = imgaussfilt(dV,sign_params.grad_gauss(1));
+                grad_diff = imopen(imgaussfilt(sind(dH  - dV),sign_params.diff_gauss(1)),...
+                    strel('disk',round(sign_params.diff_open(1))));
                 
-                % plot maps
-                subplot(2,2,3)
-                cla
+                % calculate maps
                 MAP = round(normalize(grad_diff)*length(cm));
                 MAP(MAP>length(cm))= length(cm);
                 MAP(MAP<1)= 1;
                 MAP = cm(MAP);
                 MAP(:,:,2) = Amp;
                 MAP(:,:,3) = Ves;
+            end
+            
+            function plotMAP
+                createMAP
+                subplot(2,2,3)
+                cla
                 imagesc(hsv2rgb(MAP)); axis image; axis off; title('Visual Field Sign Map'); colormap jet
             end
         end
         
         function masks = extractMasks(self, varargin)
             
-            params.sign_thr = 1; % threshold as standard deviations of signmap
-            params.step = .01; % mask expand step parameter
-            params.min_area_size = 250;  % min area size in microns^2
-            params.final_erode = 10;
-            params.final_dilate = 10;
+            sign_params.sign_thr = 1; % threshold as standard deviations of signmap
+            sign_params.step = .01; % mask expand step parameter
+            sign_params.min_area_size = 250;  % min area size in microns^2
+            sign_params.final_erode = 10;
+            sign_params.final_dilate = 10;
             
-            params = ne7.mat.getParams(params,varargin);
+            sign_params = ne7.mat.getParams(sign_params,varargin);
             
             % get signmap 
             sign_map = fetch1(self,'sign_map');
@@ -183,18 +197,18 @@ classdef SignMap < dj.Imported
             A = sign_map(:,:,2);
             
             % convert size threshold to pixels^2
-            params.min_area_size = (params.min_area_size/...
+            sign_params.min_area_size = (sign_params.min_area_size/...
                 mean(fetchn(map.OptImageBar & (map.RetMapScan & self),'pxpitch')))^2;
  
             % filter & expand masks
             filtered_grad_diff = zeros(size(grad_diff));
             imStd = std(grad_diff(:));
-            filtered_grad_diff(grad_diff>imStd*params.sign_thr)= 1;
-            filtered_grad_diff(grad_diff<-imStd*params.sign_thr)= -1;
+            filtered_grad_diff(grad_diff>imStd*sign_params.sign_thr)= 1;
+            filtered_grad_diff(grad_diff<-imStd*sign_params.sign_thr)= -1;
             SE = strel('arbitrary',[0 1 0;1 1 1;0 1 0]); %%% parameter
             SEMAX = strel('arbitrary',[0 0 1 0 0;0 1 1 1 0;1 1 1 1 1;0 1 1 1 0;0 0 1 0 0]); %%% parameter
             [all_areas, n] = bwlabel(filtered_grad_diff);
-            for iThr = 1:-params.step:0.05
+            for iThr = 1:-sign_params.step:0.05
                 n = max(all_areas(:));
                 thr = imStd*iThr;
                 for iArea = 1:n
@@ -206,7 +220,7 @@ classdef SignMap < dj.Imported
                 stats = regionprops(one_area,'area');
                 un = unique(one_area(:));
                 for i = un(un>0)'
-                    if stats(i).Area<params.min_area_size
+                    if stats(i).Area<sign_params.min_area_size
                         one_area(one_area==i) = 0;
                     end
                 end
@@ -223,7 +237,7 @@ classdef SignMap < dj.Imported
             for iarea = 1:n
                 if ~(sum(all_areas(:)==iarea)/sum(all_areas(:)==iarea & A(:)>thr)>2)
                     idx = idx+1;
-                    mask = imdilate(imerode(all_areas==iarea,strel('disk',params.final_erode)),strel('disk',params.final_dilate));
+                    mask = imdilate(imerode(all_areas==iarea,strel('disk',sign_params.final_erode)),strel('disk',sign_params.final_dilate));
                     area_map(mask) = idx;
                 end
             end
@@ -238,12 +252,16 @@ classdef SignMap < dj.Imported
                 masks = area_map;
             end
         end
-    end
-    
-    methods (Static)
-        function x = normalize(x)
-            x = (x - nanmin(x(:)))./(nanmax(x(:)) - nanmin(x(:)));
+        
+        function im = replaceNaNs(~,im)
+            idx = find(isnan(im));
+            while ~isempty(idx)
+                [x,y] = ind2sub(size(im),idx);
+                im(idx) = interp2(im,x,y,'spline',0);
+                idx = find(isnan(im));
+            end
         end
     end
+    
 end
 

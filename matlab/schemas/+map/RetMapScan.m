@@ -5,11 +5,6 @@
 ---
 %}
 
-classdef RetMapScan < dj.Imported
-    methods(Access=protected)
-        function makeTuples(obj,key) %create ref map
-             insert( obj, key );
-        end
-    end
+classdef RetMapScan < dj.Manual
 end
 
