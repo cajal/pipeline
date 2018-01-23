@@ -1485,15 +1485,6 @@ class ScanSet(dj.Computed):
         return centroids
 
 @schema
-class ManualDepth(dj.Manual):
-    definition = """
-    # manually entered depth of a
-    -> ScanSet
-    ---
-    um_z        : smallint # um from the surface
-    """
-
-@schema
 class Activity(dj.Computed):
     definition = """ # activity inferred from fluorescence traces
 
