@@ -364,7 +364,7 @@ class HasFilename:
         scan_path = (Session() & self).fetch1('scan_path')
         local_path = lab.Paths().get_local_path(scan_path)
 
-        scan_name = (self.__class__() & self).fetch1('filename')
+        scan_name = (self.__class__() & self.proj()).fetch1('filename')
         local_filename = os.path.join(local_path, scan_name) + '*.tif'  # all parts
 
         return local_filename
