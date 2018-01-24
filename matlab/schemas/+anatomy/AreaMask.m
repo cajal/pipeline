@@ -28,17 +28,35 @@ classdef AreaMask < dj.Manual
                 background = cat(4,background,plot(anatomy.FieldCoordinates & key));
             end
             
+            % get masks already extracted
+            if exists(obj & key)
+                [masks, keys] = fetchn(obj & key,'mask');
+                area_map = zeros(size(masks{1}));
+                for imasks = 1:length(masks)
+                    area_map(masks{imasks}) = imasks;
+                end
+            else 
+                area_map = zeros(size(background,1),size(background,2));
+            end
+            
             % create masks
-            area_map = ne7.ui.paintMasks(abs(background));
+            area_map = ne7.ui.paintMasks(abs(background),area_map);
             if isempty(area_map); disp 'No masks created!'; return; end
             
+            % delete previous keys if existed 
+            if exists(obj & key)
+                del(anatomy.AreaMask & keys)
+            end
+            
             % image
-            masks = normalize(area_map);
+            figure;
+            masks = ne7.mat.normalize(area_map);
             masks(:,:,2) = 0.2*(area_map>0);
             masks(:,:,3) = background(:,:,1,1);
             ih = image(hsv2rgb(masks));
             axis image
             axis off
+            shg
             
             % loop through all areas get area name and insert
             areas = unique(area_map(:));
@@ -133,7 +151,7 @@ classdef AreaMask < dj.Manual
             end
             
             % merge masks with background
-            im = hsv2rgb(cat(3,normalize(area_map),area_map>0,normalize(background(:,:,1,1))));
+            im = hsv2rgb(cat(3,ne7.mat.normalize(area_map),area_map>0,ne7.mat.normalize(background(:,:,1,1))));
             if nargin<2 || isempty(back_idx) || back_idx > size(background,4)
                 image((im));
             else
