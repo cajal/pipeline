@@ -74,13 +74,13 @@ classdef FieldCoordinates < dj.Manual
                 y_pos = (y_pos - min(y_pos))/pxpitch;
                 im = zeros(ceil(max(y_pos+fieldHeights)),ceil(max(x_pos+fieldWidths)));
                 for islice =length(frames):-1:1
-                    frame = self.filterImage(normalize(frames{islice}),self.createTform(tfp));
+                    frame = self.filterImage(ne7.mat.normalize(frames{islice}),self.createTform(tfp));
                     im(ceil(y_pos(islice)+1):ceil(y_pos(islice))+size(frame,1), ...
                         ceil(x_pos(islice)+1):ceil(x_pos(islice))+size(frame,2)) = ...
                         self.processImage(frame,'exp',params.contrast);
                 end
             else
-                im = normalize(frames{1}.^params.contrast);
+                im = ne7.mat.normalize(frames{1}.^params.contrast);
                 x_pos = 0;
                 y_pos = 0;
             end
@@ -91,7 +91,7 @@ classdef FieldCoordinates < dj.Manual
             
             % Align scans
             [x_offset, y_offset, rotation, tfp.scale, go] = ...
-                self.alignImages(normalize(ref_map),normalize(im),...
+                self.alignImages(ne7.mat.normalize(ref_map),ne7.mat.normalize(im),...
                 'scale',params.scale,'rotation',params.global_rotation,'x',params.x_offset,'y',params.y_offset,'figure',params.figure);
             tfp.rotation = tfp.rotation + rotation;
             
@@ -151,13 +151,13 @@ classdef FieldCoordinates < dj.Manual
             end
             
             %  construct image
-            ref_map = normalize(ref_map.^params.exp);
+            ref_map = ne7.mat.normalize(ref_map.^params.exp);
             if params.inv; ref_map = 1-ref_map;end
             idxX = [];idxY = []; frame = [];
             for islice = 1:length(frames)
                 x_offset = x(islice);
                 y_offset = y(islice);
-                imS = self.filterImage(normalize(frames{islice}),tforms{islice});
+                imS = self.filterImage(ne7.mat.normalize(frames{islice}),tforms{islice});
                 YY = round(y_offset + size(ref_map,1)/2 - size(imS,1)/2)+1;
                 XX = round(x_offset + size(ref_map,2)/2 - size(imS,2)/2)+1;
                 idxX{islice} = XX:size(imS,2)+XX-1;
@@ -172,7 +172,7 @@ classdef FieldCoordinates < dj.Manual
                 im(idxY{islice},idxX{islice},2) = ...
                     (im(idxY{islice},idxX{islice},2) + frame{islice});
             end
-            im(:,:,2) = normalize(im(:,:,2));
+            im(:,:,2) = ne7.mat.normalize(im(:,:,2));
             
             % plot
             if ~nargout
@@ -203,11 +203,11 @@ classdef FieldCoordinates < dj.Manual
             
             % plot
             figure
-            ref_map = normalize(ref_map{1}*2.^2)*0.5;
+            ref_map = ne7.mat.normalize(ref_map{1}*2.^2)*0.5;
             ref_map = ref_map*50;
             self.image3D(0,0,0,ref_map, abs(ref_map-max(ref_map(:)))*2,pxpitch(1));
             for islice = 1:length(frames)
-                imS = self.filterImage(normalize(frames{islice}),tforms{islice});
+                imS = self.filterImage(ne7.mat.normalize(frames{islice}),tforms{islice});
                 imS = self.processImage(imS,'exp',0.7);
                 imS2 = imS*50+50;
                 self.image3D(x(islice),y(islice),-depth(islice)/pxpitch(islice),imS2,imS*100,pxpitch(islice));
@@ -231,11 +231,11 @@ classdef FieldCoordinates < dj.Manual
             end
             
             sz = size(frame);
-            imS = self.filterImage(normalize(frame),tform);            % apply rotation/flips 
+            imS = self.filterImage(ne7.mat.normalize(frame),tform);            % apply rotation/flips 
             YY = round(y_offset + size(ref_mask,1)/2 - size(imS,1)/2); % convert center coordinates to 0,0 coordinates
             XX = round(x_offset + size(ref_mask,2)/2 - size(imS,2)/2); % convert center coordinates to 0,0 coordinates
             fmask = ref_mask(YY:size(imS,1)+YY-1,XX:size(imS,2)+XX-1);
-            fmask = self.filterImage(normalize(fmask),tform,1)>0;
+            fmask = self.filterImage(ne7.mat.normalize(fmask),tform,1)>0;
             fmask = fmask(...
                 round(size(fmask,1)/2)-floor(sz(1)/2):round(size(fmask,1)/2)+floor(sz(1)/2)-1,...
                 round(size(fmask,2)/2)-floor(sz(2)/2):round(size(fmask,2)/2)+floor(sz(2)/2)-1);
@@ -267,9 +267,9 @@ classdef FieldCoordinates < dj.Manual
             fine = 1;
             
             % assign images
-            vessels = imresize(normalize(image1),params.resize);
+            vessels = imresize(ne7.mat.normalize(image1),params.resize);
             im1 = vessels;
-            im2 = imresize(normalize(image2),params.resize);
+            im2 = imresize(ne7.mat.normalize(image2),params.resize);
             if isempty(params.figure); hf = figure; else hf = params.figure;end
             set(hf,'NumberTitle','off','Menubar','none','Name','Align Images','KeyPressFcn',@eval_input);
             f_pos = get(hf,'outerposition');
@@ -404,19 +404,13 @@ classdef FieldCoordinates < dj.Manual
             im(im>prctile(im(:),params.prctile)) = prctile(im(:),params.prctile);
             
             if params.exp
-                im = normalize(im).^params.exp;
+                im = ne7.mat.normalize(im).^params.exp;
             end
             
             if params.normalize
-                im = normalize(im);
+                im = ne7.mat.normalize(im);
             end
             
-        end
-        
-        function x = normalize(x)
-            if length(unique(x(:)))>1
-                x = (x - nanmin(x(:)))/(nanmax(x(:)) - nanmin(x(:)));
-            end
         end
         
         function h = image3D(x,y,z,I,IA,scale)
