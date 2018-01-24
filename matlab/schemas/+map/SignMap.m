@@ -22,14 +22,13 @@ classdef SignMap < dj.Imported
             params = ne7.mat.getParams(params,varargin);
             
             % define functions & colors
-            normalize = @(x) (x - nanmin(x(:)))./(nanmax(x(:)) - nanmin(x(:)));
             cm = rgb2hsv(parula(100));
             cm = cm(:,1);
             
             % set/get parameters
             if ~exists(self & key)
                 sign_params.init_gauss = [0.1 0.1 200];
-                sign_params.grad_gauss = [.1 0.1 20]; % initial map gauss filter in sd parameter
+                sign_params.grad_gauss = [0.1 0.1 20]; % initial map gauss filter in sd parameter
                 sign_params.diff_gauss = [12 0.1 20]; % gradient diff map gauss filter in sd parameter
                 sign_params.diff_open = [0 0 20]; % gradient diff imopen param
                 MAP = [];
@@ -51,8 +50,8 @@ classdef SignMap < dj.Imported
             if ~exists(map.OptImageBar & (map.RetMapScan & key) & 'axis="vertical"'); return;end
             [V, A2] = fetch1(map.OptImageBar & (map.RetMapScan & key) & 'axis="vertical"','ang','amp');
             [Ver(:,:,1),Ver(:,:,2),Ver(:,:,3)] = plot(map.OptImageBar & (map.RetMapScan & key) & 'axis="vertical"','exp',params.pexp,'sigma',sign_params.init_gauss(1));
-            Amp = normalize(self.replaceNaNs(A1+A2));
-            Ves = normalize(self.replaceNaNs(Ves));
+            Amp = ne7.mat.normalize(self.replaceNaNs(A1+A2));
+            Ves = ne7.mat.normalize(self.replaceNaNs(Ves));
             H = self.replaceNaNs(H);
             V = self.replaceNaNs(V);
             createMAP
@@ -165,7 +164,7 @@ classdef SignMap < dj.Imported
                     strel('disk',round(sign_params.diff_open(1))));
                 
                 % calculate maps
-                MAP = round(normalize(grad_diff)*length(cm));
+                MAP = round(ne7.mat.normalize(grad_diff)*length(cm));
                 MAP(MAP>length(cm))= length(cm);
                 MAP(MAP<1)= 1;
                 MAP = cm(MAP);
@@ -244,7 +243,7 @@ classdef SignMap < dj.Imported
             
             if ~nargout
                 % plot unique areas
-                im(:,:,1) = normalize(area_map);
+                im(:,:,1) = ne7.mat.normalize(area_map);
                 im(:,:,2) = area_map>0;
                 im(:,:,3) = sign_map(:,:,3);
                 image(hsv2rgb(im)); axis image; axis off; title('Areas')

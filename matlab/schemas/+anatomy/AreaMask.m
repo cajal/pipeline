@@ -49,7 +49,7 @@ classdef AreaMask < dj.Manual
             end
             
             % image
-            masks = normalize(area_map);
+            masks = ne7.mat.normalize(area_map);
             masks(:,:,2) = 0.2*(area_map>0);
             masks(:,:,3) = background(:,:,1,1);
             ih = image(hsv2rgb(masks));
@@ -149,7 +149,7 @@ classdef AreaMask < dj.Manual
             end
             
             % merge masks with background
-            im = hsv2rgb(cat(3,normalize(area_map),area_map>0,normalize(background(:,:,1,1))));
+            im = hsv2rgb(cat(3,ne7.mat.normalize(area_map),area_map>0,ne7.mat.normalize(background(:,:,1,1))));
             if nargin<2 || isempty(back_idx) || back_idx > size(background,4)
                 image((im));
             else
