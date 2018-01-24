@@ -49,12 +49,14 @@ classdef AreaMask < dj.Manual
             end
             
             % image
+            figure;
             masks = ne7.mat.normalize(area_map);
             masks(:,:,2) = 0.2*(area_map>0);
             masks(:,:,3) = background(:,:,1,1);
             ih = image(hsv2rgb(masks));
             axis image
             axis off
+            shg
             
             % loop through all areas get area name and insert
             areas = unique(area_map(:));
