@@ -35,6 +35,8 @@ classdef AreaMask < dj.Manual
                 for imasks = 1:length(masks)
                     area_map(masks{imasks}) = imasks;
                 end
+            else 
+                area_map = zeros(size(background,1),size(background,2));
             end
             
             % create masks
