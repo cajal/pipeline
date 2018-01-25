@@ -83,7 +83,7 @@ class ScanInfo(dj.Imported):
             tuple_['um_width'] = scan.field_widths_in_microns[field_id]
             tuple_['x'] = x_zero + scan._degrees_to_microns(scan.fields[field_id].x)
             tuple_['y'] = y_zero + scan._degrees_to_microns(scan.fields[field_id].y)
-            tuple_['z'] = scan.field_depths[field_id] - surf_z
+            tuple_['z'] = scan.field_depths[field_id] - surf_z # fastZ only
             tuple_['delay_image'] = scan.field_offsets[field_id]
             tuple_['roi'] = scan.field_rois[field_id][0]
 

@@ -381,7 +381,7 @@ class Scan(dj.Manual, HasFilename):
     -> BrainArea
     -> Aim
     filename                : varchar(255)          # file base name
-    depth=0                 : int                   # (um) manual depth measurement with respect to the surface of the cortex where fastZ = 0
+    depth=0                 : int                   # (um) manual depth measurement of the cortex surface
     scan_notes              : varchar(4095)         # free-notes
     site_number=0           : tinyint               # site number
     -> Software
@@ -424,6 +424,7 @@ class Stack(dj.Manual):
     -> BrainArea
     -> Aim
     -> Software
+    surf_depth=0            : smallint              # (um) depth of the surface of the cortex
     top_depth               : smallint              # (um) depth at top of the stack
     bottom_depth            : smallint              # (um) depth at bottom of stack
     stack_notes             : varchar(4095)         # free notes
