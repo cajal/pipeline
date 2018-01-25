@@ -14,7 +14,7 @@ from .utils.signal import mirrconv, float2uint8
 from .exceptions import PipelineException
 
 
-schema = dj.schema('pipeline_stack', locals())
+schema = dj.schema('pipeline_stack', locals(), create_tables=True)
 CURRENT_VERSION = 1
 
 
@@ -73,21 +73,23 @@ class StackInfo(dj.Imported):
             tuple_ = key.copy()
 
             # Get field_ids ordered from shallower to deeper field in this ROI
-            x_zero, y_zero, z_zero = stack.motor_position_at_zero  # motor x, y, z at ScanImage's 0
+            surf_z = (experiment.Stack() & key).fetch1('surf_depth')  # surface depth in fastZ coordinates (meso) or motor coordinates (reso)
             if stack.is_multiROI:
                 field_ids = [i for i, field_roi in enumerate(stack.field_rois) if id_in_file in field_roi]
-                field_depths = [stack.field_depths[i] - z_zero for i in field_ids]
+                field_depths = [stack.field_depths[i] - surf_z for i in field_ids]
             else:
                 field_ids = range(stack.num_scanning_depths)
+                motor_zero = surf_z - stack.motor_position_at_zero[2]
                 if stack.is_slow_stack and not stack.is_slow_stack_with_fastZ: # using motor
                     initial_fastZ = stack.initial_secondary_z or 0
-                    field_depths = [2 * initial_fastZ - stack.field_depths[i] - z_zero for i in field_ids]
+                    field_depths = [motor_zero - stack.field_depths[i] + 2 * initial_fastZ for i in field_ids]
                 else: # using fastZ
-                    field_depths = [stack.field_depths[i] - z_zero for i in field_ids]
+                    field_depths = [motor_zero + stack.field_depths[i] for i in field_ids]
             field_depths, field_ids = zip(*sorted(zip(field_depths, field_ids)))
             tuple_['field_ids'] = field_ids
 
             # Get reso/meso specific coordinates
+            x_zero, y_zero, _ = stack.motor_position_at_zero  # motor x, y at ScanImage's 0
             if stack.is_multiROI:
                 tuple_['roi_x'] = x_zero + stack._degrees_to_microns(stack.fields[field_ids[0]].x)
                 tuple_['roi_y'] = y_zero + stack._degrees_to_microns(stack.fields[field_ids[0]].y)
@@ -112,7 +114,7 @@ class StackInfo(dj.Imported):
                 tuple_['roi_um_width'] = um_width * stack._x_angle_scale_factor
 
             # Get common parameters
-            tuple_['roi_z'] = field_depths[0]
+            tuple_['roi_z'] = field_depths[0] #TODO: Add surf_depth
             tuple_['roi_px_depth'] = len(field_ids)
             tuple_['roi_um_depth'] = field_depths[-1] - field_depths[0] + 1
             tuple_['nframes'] = stack.num_frames
@@ -878,27 +880,79 @@ class CorrectedStack(dj.Computed):
 
         return fig
 
-#
+
+@schema
+class RegistrationTask(dj.Manual):
+    definition = """ # declare scan fields to register to a stack as well as channels and method used
+    (stack_session) -> CorrectedStack(session)  # animal_id, stack_session, stack_idx, pipe_version, volume_id
+    (scan_session) -> experiment.Scan(session)  # animal_id, scan_session, scan_idx
+    -> shared.Field
+    (stack_channel) -> shared.Channel(channel)
+    (scan_channel) -> shared.Channel(channel)
+    -> shared.RegistrationMethod
+    """
+    def fill_in(self, stack_key, scan_key, stack_channel=1, scan_channel=1, method=1):
+        # Add stack attributes
+        stack_rel = CorrectedStack() & stack_key
+        if len(stack_rel) > 1:
+            raise PipelineException('More than one stack match stack_key {}'.format(stack_key))
+        tuple_ = stack_rel.proj(stack_session='session').fetch1()
+
+        # Add common attributes
+        tuple_['stack_channel'] = stack_channel
+        tuple_['scan_channel'] = scan_channel
+        tuple_['registration_method'] = method
+
+        # Add scan attributes
+        fields_rel = reso.ScanInfo.Field().proj() + meso.ScanInfo.Field().proj() & scan_key
+        scan_animal_ids = np.unique(fields_rel.fetch('animal_id'))
+        if len(scan_animal_ids) > 1 or scan_animal_ids[0] != tuple_['animal_id']:
+            raise PipelineException('animal_id of stack and scan do not match.')
+        for field in fields_rel.fetch():
+            RegistrationTask().insert1({**tuple_, 'scan_session': field['session'],
+                                        'scan_idx': field['scan_idx'],
+                                        'field': field['field']}, skip_duplicates=True)
+
+
 #@schema
 #class FieldRegistration(dj.Computed):
 #    definition = """ # align a 2-d scan field to a stack
-#    -> CorrectedStack
-#    -> experiment.Scan
-#    -> shared.Field
+#    -> RegistrationTask
 #    ---
 #    reg_x       : float         # center of scan in stack coordinates
 #    reg_y       : float         # center of scan in stack coordinates
 #    reg_z       : float         # depth of scan in stack coordinates
+#    roll        : float         # degrees of rotation over the x axis
+#    pitch       : float         # degrees of rotation over the y axis
+#    yaw         : float         # degrees of rotation over the z axis
 #    score       : float         # cross-correlation score (-1 to 1)
 #    """
 #    #TODO: Rename attributes so sessions do not interfere
 #    @property
 #    def key_source(self):
-#        all_fields = reso.SummaryImages() + meso.SummaryImages() # project away field and channel, rename session
-#        return all_fields * StackInfo() & {'pipe_version': CURRENT_VERSION}
+#        stacks = StackInfo().proj('session -> stack_session') # project out pipe_version
+#        all_fields = reso.SummaryImages() + meso.SummaryImages()
+#        scan_fields = all_fields.proj('session -> scan_session')
+#        return stacks * scan_fields & {'pipe_version': CURRENT_VERSION}
 #
 #    def _make_tuples(self, key):
-#        pass
+#        stack_channel, scan_channel = (RegistrationTask() & key).fetch1('stack_channel', 'scan_channel')
+#        # Get data
+#        stack = (CorrectedStack() & key & {'session': key['stack_session']}).get_stack(stack_channel)
+#        avg_images = reso.SummaryImages() + meso.SummaryImages()
+#        field = (avg_images & key & {'session': key['scan_session'], 'channel': scan_channel}).fetch1('average_image')
+#
+#        # Make everything eb 1 x1 x 1 microns
+#
+#        # Register
+#        if key['registration_method'] == 1: # rigid
+#            #TODO: 3-d around the expected z (10 microns up and down)
+#            # Sizes are different
+#            # estimated z is not in the stack range
+#
+#        elif key['registration_method'] == 2: # rigid plus 3-d rotation
+#            # Deal with estimated z being to close to the top or bottom of the volume (rotations will make it go out)
+#            pass
 #
 #    @notify.ignore_exceptions
 #    def notify(self, key):
