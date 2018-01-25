@@ -53,7 +53,14 @@ classdef PopStats < dj.Imported
             
             % get traces
             [Traces, caTimes] = getAdjustedSpikes(fuse.ActivityTrace & key,'soma');
-            X = @(t) interp1(caTimes-caTimes(1), Traces, t, 'linear', nan);  % traces indexed by time
+            
+            % get rid of nans
+            notnanidx = ~isnan(mean(Traces,2)); % faster than all
+            Traces = Traces(notnanidx,:);
+            caTimes = caTimes(notnanidx);
+           
+            % interpolate over time
+            X = @(t) interp1(caTimes-caTimes(1), Traces, t, 'linear', 'extrap');  % traces indexed by time
             
             % fetch stuff
             flip_times = fetchn(stimulus.Trial & key,'flip_times');
