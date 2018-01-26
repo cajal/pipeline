@@ -10,7 +10,7 @@ classdef Stitching < dj.Computed
 
 		function makeTuples(self, key)
 		%!!! compute missing fields for key here
-			 self.insert(key)
+% 			 self.insert(key)
 		end
 	end
 

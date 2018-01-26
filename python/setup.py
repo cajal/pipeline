@@ -26,10 +26,6 @@ setup(
         'License :: OSI Approved :: GNU LGPL',
         'Topic :: Database :: Front-Ends',
     ],
-    scripts=[
-        'scripts/worker',
-        'scripts/worker-populate.py',
-        'scripts/worker-environment.py',
-    ]
+    scripts=['scripts/populate-minion.py']
 )
 

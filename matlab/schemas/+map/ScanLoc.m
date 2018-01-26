@@ -8,7 +8,7 @@ vessels=null              : mediumblob                    # vessel map of the im
 vessel_map=null              : mediumblob                 # vessel map with 2P centered at the imaging location
 %}
 
-classdef ScanLoc < dj.Relvar & dj.AutoPopulate
+classdef ScanLoc < dj.Manual
     
     properties (Constant)
         popRel = experiment.Scan & (mice.Mice & map.OptImageBar) & 'software="scanimage"' & 'aim="2pScan"'
@@ -82,18 +82,24 @@ classdef ScanLoc < dj.Relvar & dj.AutoPopulate
     
     methods
         
-        function plot(obj)
+        function plot(obj,varargin)
+            params.figure=[];
+            params = getParams(params,varargin);
             
-            keys = fetch(mice.Mice & obj & mov3d.Decode );
+            keys = fetch(mice.Mice & obj );
             for ikey = 1:length(keys)
                 
-                [x,y,scan,sess,area,mi] = fetchn(obj*experiment.Scan*mov3d.Decode ...
-                    & keys(ikey) & 'dec_opt=36','x','y','scan_idx','session','brain_area','mi');
-                
-                [im(:,:,1),im(:,:,2),im(:,:,3)] = plot(map.OptImageBar & experiment.Session & ...
-                    keys(ikey) & 'selected=1' & 'axis = "horizontal"');
+                [x,y,scan,sess,area] = fetchn(obj*experiment.Scan...
+                    & keys(ikey),'x','y','scan_idx','session','brain_area');
+                map_keys = fetch(map.OptImageBar & experiment.Session & ...
+                    keys(ikey) & 'axis = "horizontal"');
+                [im(:,:,1),im(:,:,2),im(:,:,3)] = plot(map.OptImageBar & map_keys(1));
                 im = hsv2rgb(im);
-                figure
+                if isempty(params.figure)
+                    figure
+                else
+                    figure(params.figure);
+                end
                 imshow(im)
                 set(gcf,'name',num2str(keys(ikey).animal_id))
                 axis image
@@ -103,7 +109,7 @@ classdef ScanLoc < dj.Relvar & dj.AutoPopulate
                 for i = 1:length(x)
                     plot(x(i),y(i),'*k')
                     text(x(i)+5,y(i)+5,[num2str(sess(i)) '-' num2str(scan(i)) ...
-                        ' (' area{i} ', ' num2str(roundall(mean(mi{i}),0.01)) ')'])
+                        ' (' area{i} ')'])
                 end
                 
             end

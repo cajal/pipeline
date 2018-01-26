@@ -1,7 +1,7 @@
 %{
 # single unit in the scan
 -> reso.ScanInfo
--> `pipeline_shared`.`#segmentation_method`
+-> shared.SegmentationMethod
 unit_id                     : int                           # unique per scan & segmentation method
 ---
 -> reso.ScanSet
@@ -15,7 +15,7 @@ classdef ScanSetUnit < dj.Computed
 
 		function makeTuples(self, key)
 		%!!! compute missing fields for key here
-			 %self.insert(key)
+% 			 self.insert(key)
 		end
 	end
 

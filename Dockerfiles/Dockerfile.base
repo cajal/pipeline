@@ -17,7 +17,9 @@ RUN \
     octave \
     wget \
     bzip2 \
+    nano \
     git
+
 
 RUN apt-get install -y build-essential cmake pkg-config libjpeg8-dev libtiff5-dev libjasper-dev \
     libpng12-dev libavcodec-dev libavformat-dev libswscale-dev libv4l-dev libxvidcore-dev libx264-dev \
@@ -84,7 +86,6 @@ RUN wget http://www.fftw.org/fftw-3.3.6-pl2.tar.gz && \
 
 
 # --- install CaImAn
-RUN pwd
 RUN apt-get update -y -q && \
     apt-get install -y software-properties-common && \
     wget -O - http://apt.llvm.org/llvm-snapshot.gpg.key | apt-key add - && \
@@ -97,7 +98,10 @@ RUN apt-get update -y -q && \
     pip3 install cython scikit-image ipyparallel psutil numba && \
     pip3 install peakutils tqdm && \
     pip3 install git+https://github.com/j-friedrich/OASIS.git && \
-    pip3 install future cvxpy keras
+    pip3 install future cvxpy keras && \
+    export MKL_NUM_THREADS=1 && \
+    export OPENBLAS_NUM_THREADS=1
+
 
 RUN grep -vwE "install_requires=" CaImAn/setup.py > tmp && mv tmp CaImAn/setup.py &&\
     pip3 install -e CaImAn/
@@ -106,6 +110,5 @@ RUN grep -vwE "install_requires=" CaImAn/setup.py > tmp && mv tmp CaImAn/setup.p
 RUN pip3 install scikit-learn --upgrade && \
     pip3 install imreg_dft
 
-RUN pip3 install slacker
 
-ENTRYPOINT ["worker"]
+RUN pip3 install slacker

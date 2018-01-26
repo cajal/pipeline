@@ -21,7 +21,7 @@ def classify_manual(masks, template):
         tmp_mask = np.array(mask[il:ih, jl:jh])
 
         with sns.axes_style('white'):
-            fig, ax = plt.subplots(1, 3, sharex=True, sharey=True, figsize=(20, 5))
+            fig, ax = plt.subplots(1, 3, sharex=True, sharey=True, figsize=(10, 3))
 
         ax[0].imshow(template[il:ih, jl:jh], cmap=plt.cm.get_cmap('gray'))
         ax[1].imshow(template[il:ih, jl:jh], cmap=plt.cm.get_cmap('gray'))
