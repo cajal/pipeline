@@ -1,59 +1,99 @@
-from distutils.version import StrictVersion
 import sys
 import datajoint as dj
+from distutils.version import StrictVersion
 from . import experiment, reso, meso, shared
 from .exceptions import PipelineException
-
-assert StrictVersion(dj.__version__) >= StrictVersion('0.8.2'), "Please upgrade datajoint to 0.8.2+"
 
 
 schema = dj.schema('pipeline_fuse', locals())
 
+
 @schema
 class Pipe(dj.Lookup):
-    definition = """
-    # Names of fused pipelines
-    pipe  : varchar(16)    # pipeline name
+    definition = """ # names of fused pipelines
+    pipe                : varchar(16)                   # pipeline name
     """
-    contents = zip(('reso', 'meso'))
-
+    contents = [['reso'], ['meso']]
 
 
 class Resolver:
-    """
-    This mixin class populates tables that fuse two pipelines
-    """
+    """ This mixin class populates tables that fuse two pipelines """
+    @property
+    def module(self):
+        """ (fuse.Activity() & key).module is the module where the activity resides.
+
+        Raises an exception if the activity comes from multiple modules. Works similarly
+        for other subclasses of Resolver.
+        """
+        pipes = (dj.U('pipe') & self).fetch('pipe')
+        if len(pipes) != 1:
+            raise PipelineException('Please restrict query to a single pipeline.')
+        rel, _ = self.mapping[pipes[0]]
+        return sys.modules[rel.__module__]
 
     def _make_tuples(self, key):
-
-        for pipe, (src, dest) in self.mapping.items():
-            if src() & key:
-                break
-        else:
-            raise PipelineException(
-                    'The key source yielded a key from an uknown pipeline')
-
-        self.insert1(dict(key, pipe=pipe))
+        # find the matching pipeline from those specified in self.mapping
+        try:
+            pipe, src, dest = next(((pipe, src, dest)
+                for pipe, (src, dest) in self.mapping.items() if src() & key))
+        except StopIteration:
+            raise PipelineException('The key source yielded a key from an uknown pipeline')
+        self.insert1({**key, 'pipe': pipe})
         dest().insert(src() & key, ignore_extra_fields=True)
+        return src
 
 
-    def resolve(self):
+@schema
+class ScanSet(Resolver, dj.Computed):
+    definition = """ # set of units in the same scan
+    -> experiment.Scan
+    -> shared.PipelineVersion
+    -> shared.Field
+    -> shared.Channel
+    -> shared.SegmentationMethod
+    ---
+    -> Pipe
+    """
+    @property
+    def key_source(self):
+        return reso.ScanSet().proj() + meso.ScanSet().proj()
+
+    @property
+    def mapping(self):
+        return {'reso': (reso.ScanSet, ScanSet.Reso),
+                'meso': (meso.ScanSet, ScanSet.Meso)}
+
+    class Unit(dj.Part):
+        definition = """ # individual units corresponding to <module>.ScanSet.Unit
+        -> experiment.Scan
+        -> shared.PipelineVersion
+        -> shared.SegmentationMethod
+        unit_id                 : int       # unique per scan & segmentation method
+        ---
+        -> master                           # for it to act as a part table of ScanSet
         """
-        Given a fuse.Activity() object, return the corresponding
-        module.Activity() object and the module itself.
-        :return: (activity,  module) where activity is the module.Activity for the right module
+
+    class Reso(dj.Part):
+        definition = """
+        -> reso.ScanSet
+        -> master
         """
-        if len(dj.U('pipe') & self) != 1:
-            raise PipelineException('Please restrict query to a single pipeline.')
-        for _, rel in self.mapping.values():
-            if rel:
-                return rel, sys.modules[rel.__module__]
+
+    class Meso(dj.Part):
+        definition = """
+        -> meso.ScanSet
+        -> master
+        """
+
+    def _make_tuples(self, key):
+        src = super()._make_tuples(key)
+        module = sys.modules[src.__module__]
+        self.Unit().insert(self * module.ScanSet.Unit() & key, ignore_extra_fields=True)
 
 
 @schema
 class Activity(Resolver, dj.Computed):
-    definition = """
-    # Calcium activity for a single field within a scan
+    definition = """ # calcium activity for a single field within a scan
     -> experiment.Scan
     -> shared.PipelineVersion
     -> shared.Field
@@ -63,31 +103,43 @@ class Activity(Resolver, dj.Computed):
     ---
     -> Pipe
     """
+    @property
+    def key_source(self):
+        return reso.Activity().proj() + meso.Activity().proj()
 
-    key_source = meso.Activity().proj() + reso.Activity().proj()
+    @property
+    def mapping(self):
+        return {'reso': (reso.Activity, Activity.Reso),
+                'meso': (meso.Activity, Activity.Meso)}
+
+    class Trace(dj.Part):
+        definition = """
+        # Trace corresponding to <module>.Activity.Trace
+        -> master
+        unit_id                 : int           # unique per scan & segmentation method
+        """
 
     class Reso(dj.Part):
         definition = """
         -> reso.Activity
-        -> Activity
+        -> master
         """
 
     class Meso(dj.Part):
         definition = """
         -> meso.Activity
-        -> Activity
+        -> master
         """
 
-    @property
-    def mapping(self):
-        return {'meso': (meso.Activity, Activity.Meso),
-                'reso': (reso.Activity, Activity.Reso)}
+    def _make_tuples(self, key):
+        src = super()._make_tuples(key)
+        module = sys.modules[src.__module__]
+        self.Trace().insert(self * module.Activity.Trace() & key, ignore_extra_fields=True)
 
 
 @schema
 class ScanDone(Resolver, dj.Computed):
-    definition = """
-    # Calcium activity for the whole scan (multiple scan fields)
+    definition = """ # calcium activity for the whole scan (multiple scan fields)
     -> experiment.Scan
     -> shared.PipelineVersion
     -> shared.SegmentationMethod
@@ -95,22 +147,55 @@ class ScanDone(Resolver, dj.Computed):
     ---
     -> Pipe
     """
+    @property
+    def key_source(self):
+        return reso.ScanDone().proj() + meso.ScanDone().proj()
 
-    key_source = meso.ScanDone().proj() + reso.ScanDone().proj()
+    @property
+    def mapping(self):
+        return {'reso': (reso.ScanDone, ScanDone.Reso),
+                'meso': (meso.ScanDone, ScanDone.Meso)}
 
     class Reso(dj.Part):
         definition = """
         -> reso.ScanDone
-        -> ScanDone
+        -> master
         """
 
     class Meso(dj.Part):
         definition = """
         -> meso.ScanDone
-        -> ScanDone
+        -> master
         """
+
+
+@schema
+class MotionCorrection(Resolver, dj.Computed):
+    definition = """ # calcium activity for the whole scan (multiple scan fields)
+    -> experiment.Scan
+    -> shared.PipelineVersion
+    -> shared.Field
+    ---
+    -> Pipe
+    """
+
+    @property
+    def key_source(self):
+        return reso.MotionCorrection().proj() + meso.MotionCorrection().proj()
 
     @property
     def mapping(self):
-        return {'meso': (meso.ScanDone, ScanDone.Meso),
-                'reso': (reso.ScanDone, ScanDone.Reso)}
+        return {'reso': (reso.MotionCorrection, MotionCorrection.Reso),
+                'meso': (meso.MotionCorrection, MotionCorrection.Meso)}
+
+    class Reso(dj.Part):
+        definition = """
+        -> reso.MotionCorrection
+        -> master
+        """
+
+    class Meso(dj.Part):
+        definition = """
+        -> meso.MotionCorrection
+        -> master
+        """

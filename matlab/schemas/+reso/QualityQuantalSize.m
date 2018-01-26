@@ -1,8 +1,8 @@
 %{
 # quantal size in images
 -> reso.Quality
--> `pipeline_shared`.`#slice`
--> `pipeline_shared`.`#channel`
+-> shared.Field
+-> shared.Channel
 ---
 min_intensity               : int                           # min value in movie
 max_intensity               : int                           # max value in movie
@@ -18,7 +18,7 @@ classdef QualityQuantalSize < dj.Computed
 
 		function makeTuples(self, key)
 		%!!! compute missing fields for key here
-			 %self.insert(key)
+% 			 self.insert(key)
 		end
 	end
 
