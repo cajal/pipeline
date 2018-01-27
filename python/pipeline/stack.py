@@ -654,6 +654,9 @@ class Stitching(dj.Computed):
                 smoothing_filter = signal.hann(filter_size + 1 if filter_size % 2 == 0 else 0)
                 y_detrend = y_cumsum - mirrconv(y_cumsum, smoothing_filter / sum(smoothing_filter))
                 x_detrend = x_cumsum - mirrconv(x_cumsum, smoothing_filter / sum(smoothing_filter))
+            else:
+                y_detrend = y_cumsum - y_cumsum.mean()
+                x_detrend = x_cumsum - x_cumsum.mean()
 
             # Apply alignment shifts in roi
             for slice_, y_align, x_align in zip(roi.slices, y_detrend, x_detrend):
