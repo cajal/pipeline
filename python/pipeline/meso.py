@@ -309,7 +309,7 @@ class RasterCorrection(dj.Computed):
     @property
     def key_source(self):
         # Run make_tuples once per scan iff correction channel has been set for all fields
-        scans = (ScanInfo() & CorrectionChannel()) - (ScanInfo.Field() - CorrectionChannel())
+        scans = (ScanInfo().proj() & CorrectionChannel()) - (ScanInfo.Field() - CorrectionChannel())
         return scans & {'pipe_version': CURRENT_VERSION}
 
     def _make_tuples(self, key):
@@ -1171,7 +1171,7 @@ class Fluorescence(dj.Computed):
                                          x=slice(None), channel=channel, kwargs=kwargs)
 
         # Reduce: Concatenate
-        traces = np.zeros(len(mask_ids), scan.num_frames, dtype=np.float32)
+        traces = np.zeros((len(mask_ids), scan.num_frames), dtype=np.float32)
         for frames, chunk_traces in results:
                 traces[:, frames] = chunk_traces
 
