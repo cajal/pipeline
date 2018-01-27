@@ -5,7 +5,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scanreader
 from scipy import signal
-from scipy import interpolate  as interp
 import itertools
 
 from . import experiment, notify, shared, reso, meso
