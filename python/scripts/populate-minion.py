@@ -4,10 +4,13 @@ from pipeline import experiment
 import time
 import warnings
 
+pixelmap_restr = experiment.Session() &
 while True:
     # Scans
     for priority in range(120, -130, -10): # highest to lowest priority
         next_scans = experiment.AutoProcessing() & 'priority > {}'.format(priority)
+
+        # reso/meso
         for pipe in [reso, meso]:
             pipe.ScanInfo().populate(next_scans, reserve_jobs=True, suppress_errors=True)
             pipe.Quality().populate(next_scans, reserve_jobs=True, suppress_errors=True)
@@ -27,7 +30,8 @@ while True:
         fuse.Activity().populate(next_scans, reserve_jobs=True, suppress_errors=True)
         fuse.ScanDone().populate(next_scans, reserve_jobs=True, suppress_errors=True)
 
-        # tune (some of this are memory intensive)
+        # tune (some of these are memory intensive)
+        next_scans = next_scans & (experiment.Scan() & 'scan_ts > "2017-12-00 00:00:00"')
         try:
             from stimline import tune
         except ImportError:
