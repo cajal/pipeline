@@ -4,7 +4,6 @@ from pipeline import experiment
 import time
 import warnings
 
-pixelmap_restr = experiment.Session() &
 while True:
     # Scans
     for priority in range(120, -130, -10): # highest to lowest priority
