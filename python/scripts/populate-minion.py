@@ -40,8 +40,6 @@ while True:
             #stimulus.Sync needs to be ran from Matlab
             tune.STA().populate(next_scans, reserve_jobs=True, suppress_errors=True)
             tune.STAQual().populate(next_scans, reserve_jobs=True, suppress_errors=True)
-            tune.TimedSTA().populate(next_scans, reserve_jobs=True, suppress_errors=True)
-            tune.TimedSTAQual().populate(next_scans, reserve_jobs=True, suppress_errors=True)
 
             tune.CaMovie().populate(next_scans, reserve_jobs=True, suppress_errors=True)
             tune.Drift().populate(next_scans, reserve_jobs=True, suppress_errors=True)
