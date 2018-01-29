@@ -1181,7 +1181,7 @@ class Fluorescence(dj.Computed):
                                          x=slice(None), channel=channel, kwargs=kwargs)
 
         # Reduce: Concatenate
-        traces = np.zeros(len(mask_ids), scan.num_frames, dtype=np.float32)
+        traces = np.zeros((len(mask_ids), scan.num_frames), dtype=np.float32)
         for frames, chunk_traces in results:
                 traces[:, frames] = chunk_traces
 
