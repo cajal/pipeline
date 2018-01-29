@@ -83,7 +83,7 @@ class ScanInfo(dj.Imported):
             tuple_['um_width'] = scan.field_widths_in_microns[field_id]
             tuple_['x'] = x_zero + scan._degrees_to_microns(scan.fields[field_id].x)
             tuple_['y'] = y_zero + scan._degrees_to_microns(scan.fields[field_id].y)
-            tuple_['z'] = scan.field_depths[field_id] - surf_z
+            tuple_['z'] = scan.field_depths[field_id] - surf_z # fastZ only
             tuple_['delay_image'] = scan.field_offsets[field_id]
             tuple_['roi'] = scan.field_rois[field_id][0]
 
@@ -309,7 +309,7 @@ class RasterCorrection(dj.Computed):
     @property
     def key_source(self):
         # Run make_tuples once per scan iff correction channel has been set for all fields
-        scans = (ScanInfo() & CorrectionChannel()) - (ScanInfo.Field() - CorrectionChannel())
+        scans = (ScanInfo().proj() & CorrectionChannel()) - (ScanInfo.Field() - CorrectionChannel())
         return scans & {'pipe_version': CURRENT_VERSION}
 
     def _make_tuples(self, key):
@@ -1171,7 +1171,7 @@ class Fluorescence(dj.Computed):
                                          x=slice(None), channel=channel, kwargs=kwargs)
 
         # Reduce: Concatenate
-        traces = np.zeros(len(mask_ids), scan.num_frames, dtype=np.float32)
+        traces = np.zeros((len(mask_ids), scan.num_frames), dtype=np.float32)
         for frames, chunk_traces in results:
                 traces[:, frames] = chunk_traces
 
