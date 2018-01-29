@@ -1,5 +1,5 @@
 #!/usr/local/bin/python
-from pipeline import reso, meso, fuse, stack
+from pipeline import reso, meso, fuse, stack, pupil, treadmill
 from pipeline import experiment
 import time
 import warnings
@@ -8,6 +8,13 @@ while True:
     # Scans
     for priority in range(120, -130, -10): # highest to lowest priority
         next_scans = experiment.AutoProcessing() & 'priority > {}'.format(priority)
+
+        # pupil
+        pupil.Eye().populate(next_scans, reserve_jobs=True, suppress_errors=True)
+
+        # treadmill
+        treadmill.Sync().populate(next_scans, reserve_jobs=True, suppress_errors=True)
+        treadmill.Treadmill().populate(next_scans, reserve_jobs=True, suppress_errors=True)
 
         # reso/meso
         for pipe in [reso, meso]:
@@ -29,7 +36,7 @@ while True:
         fuse.Activity().populate(next_scans, reserve_jobs=True, suppress_errors=True)
         fuse.ScanDone().populate(next_scans, reserve_jobs=True, suppress_errors=True)
 
-        # tune (some of these are memory intensive)
+        # tune (these are memory intensive)
         next_scans = next_scans & (experiment.Scan() & 'scan_ts > "2017-12-00 00:00:00"')
         try:
             from stimline import tune
@@ -41,7 +48,7 @@ while True:
             tune.STA().populate(next_scans, reserve_jobs=True, suppress_errors=True)
             tune.STAQual().populate(next_scans, reserve_jobs=True, suppress_errors=True)
 
-            tune.CaMovie().populate(next_scans, reserve_jobs=True, suppress_errors=True)
+            #tune.CaMovie().populate(next_scans, reserve_jobs=True, suppress_errors=True) # needs python>3.5.2
             tune.Drift().populate(next_scans, reserve_jobs=True, suppress_errors=True)
             tune.OriDesign().populate(next_scans, reserve_jobs=True, suppress_errors=True)
             tune.OriMap().populate(next_scans, reserve_jobs=True, suppress_errors=True)
