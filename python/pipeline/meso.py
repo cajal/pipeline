@@ -684,7 +684,8 @@ class SummaryImages(dj.Computed):
 
         msg = 'SummaryImages for `{}` has been populated.'.format(key)
         (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
-                                                                   file_title='summary images')
+                                                                   file_title='summary images',
+                                                                   channel='#pipeline_quality')
 
 
 @schema
@@ -1057,7 +1058,8 @@ class Segmentation(dj.Computed):
 
         msg = 'Segmentation for `{}` has been populated.'.format(key)
         (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
-                                                                   file_title='mask contours')
+                                                                   file_title='mask contours',
+                                                                   channel='#pipeline_quality')
 
     @staticmethod
     def reshape_masks(mask_pixels, mask_weights, image_height, image_width):
@@ -1277,7 +1279,8 @@ class MaskClassification(dj.Computed):
         msg = 'MaskClassification for `{}` has been populated.\n'.format(key)
         msg += ', '.join('{} {}s'.format(c, n) for c, n in zip(mask_counts, mask_names))
         (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
-                                                                   file_title='mask classes')
+                                                                   file_title='mask classes',
+                                                                   channel='#pipeline_quality')
 
     def plot_masks(self, threshold=0.99):
         """ Draw contours of masks over the correlation image (if available) with different
@@ -1413,7 +1416,8 @@ class ScanSet(dj.Computed):
 
         msg = 'ScanSet for `{}` has been populated.'.format(key)
         (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
-                                                                   file_title='unit centroids')
+                                                                   file_title='unit centroids',
+                                                                   channel='#pipeline_quality')
 
     def plot_centroids(self, first_n=None):
         """ Draw masks centroids over the correlation image. Works on a single field/channel
