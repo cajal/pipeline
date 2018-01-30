@@ -2,13 +2,12 @@
 from pipeline import reso, meso, fuse, stack, pupil, treadmill
 from pipeline import experiment
 import time
-import warnings
 
 try:
     from stimline import tune
 except ImportError:
-    warnings.warn('Warning: Skipping pixelwise maps. Install stimulus (cajal/stimuli) and'
-                  ' stimline (cajal/stimulus-pipeline).')
+    print('Warning: Skipping pixelwise maps. Install stimulus (cajal/stimuli) and stimline'
+         ' (cajal/stimulus-pipeline).')
     POPULATE_TUNE = False
 else: # import worked fine
     POPULATE_TUNE = True
@@ -56,7 +55,7 @@ while True:
             #tune.CaMovie().populate(tune_scans, reserve_jobs=True, suppress_errors=True) # needs python>3.5.2
             tune.Drift().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
             tune.OriDesign().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
-            tune.OriMap().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
+            #tune.OriMap().populate(tune_scans, reserve_jobs=True, suppress_errors=True) # needs python>3.5.2
             tune.Cos2Map().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
             tune.OriMapQuality().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
 
