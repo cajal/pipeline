@@ -80,7 +80,7 @@ class Eye(dj.Imported):
             cam_key = 'eyecam_ts'
             eye_time, _ = ts2sec(data[cam_key][0])
         else:
-            cam_key = 'cam1ts' if info['rig'] == '2P3' else  'cam2ts'
+            cam_key = 'cam1ts' if info['rig'] == '2P3' else 'cam2ts'
             eye_time, _ = ts2sec(data[cam_key])
 
         total_frames = len(eye_time)
@@ -125,7 +125,8 @@ class Eye(dj.Imported):
         frames = [imresize(img, 0.25) for img in frames]
         imageio.mimsave(img_filename, frames, duration=0.5)
         (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
-                                                                   file_title='preview frames')
+                                                                   file_title='preview frames',
+                                                                   channel='#pipeline_quality')
 
     def get_video_path(self):
         video_info = (experiment.Session() * experiment.Scan.EyeVideo() & self).fetch1()
@@ -163,7 +164,6 @@ class TrackingTask(dj.Manual):
         ---
         mask        : longblob 
         """
-
 
     @staticmethod
     def _get_modified_parameters():

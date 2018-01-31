@@ -52,6 +52,13 @@ classdef SignMap < dj.Imported
             [Ver(:,:,1),Ver(:,:,2),Ver(:,:,3)] = plot(map.OptImageBar & (map.RetMapScan & key) & 'axis="vertical"','exp',params.pexp,'sigma',sign_params.init_gauss(1));
             Amp = ne7.mat.normalize(self.replaceNaNs(A1+A2));
             Ves = ne7.mat.normalize(self.replaceNaNs(Ves));
+            Ves = ones(size(Ves));
+            Hor(:,:,3) = ones(size(Hor,1),size(Hor,2));
+            Ver(:,:,3) = ones(size(Ver,1),size(Ver,2));
+            Hor(:,:,2) = ones(size(Hor,1),size(Hor,2));
+            Ver(:,:,2) = ones(size(Ver,1),size(Ver,2));
+            V = wrapTo2Pi(V);
+            H = wrapTo2Pi(H);
             H = self.replaceNaNs(H);
             V = self.replaceNaNs(V);
             createMAP
