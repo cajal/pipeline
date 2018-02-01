@@ -186,6 +186,7 @@ class PupilTracker:
         self._radius = None
         self._mask = mask
         self._last_detection = 1
+        self._last_ellipse = None
 
     @staticmethod
     def goodness_of_fit(contour, ellipse):
@@ -219,8 +220,9 @@ class PupilTracker:
         err = np.inf
         best_ellipse = None
         best_contour = None
-        results, cond = defaultdict(list), defaultdict(list)
         kernel = np.ones((3, 3))
+
+        results, cond = defaultdict(list), defaultdict(list)
         for j, cnt in enumerate(contours):
 
             mask2 = cv2.erode(mask, kernel, iterations=1)
@@ -305,13 +307,15 @@ class PupilTracker:
 
         # Manual meso settins
         if 'extreme_meso' in self._params and self._params['extreme_meso']:
-            c = 0.1
-            p = 7
+            c = self._params['running_avg']
+            p = self._params['exponent']
             if self._running_avg is None:
-                self._running_avg = np.array(small_gray) ** p
+                self._running_avg = np.array(small_gray / 255) ** p * 255
             else:
-                self._running_avg = c * np.array(small_gray) ** p + (1 - c) * self._running_avg
-                small_gray += self._running_avg.astype(np.uint8) - small_gray  # big hack
+                self._running_avg = c * np.array(small_gray / 255) ** p * 255 + (1 - c) * self._running_avg
+                small_gray = self._running_avg.astype(np.uint8)
+                cv2.imshow('power', small_gray)
+                # small_gray += self._running_avg.astype(np.uint8) - small_gray  # big hack
         # --- mesosetting end
 
         blur = cv2.GaussianBlur(small_gray, (2 * h + 1, 2 * h + 1), 0)  # play with blur
@@ -324,12 +328,13 @@ class PupilTracker:
                 eye_center=None,
                 font=cv2.FONT_HERSHEY_SIMPLEX):
         cv2.imshow('blur', blur)
+
         cv2.imshow('threshold', thres)
         cv2.putText(gray, "Frames {fr_count}/{frames} | Found contours {ncontours}".format(fr_count=fr_count,
                                                                                            frames=n_frames,
                                                                                            ncontours=ncontours),
                     (10, 30), font, 1, (255, 255, 255), 2)
-
+        # cv.drawContours(mask, contours, -1, (255), 1)
         if contour is not None and ellipse is not None and eye_center is not None:
             ellipse = list(ellipse)
             ellipse[0] = tuple(eye_center)
@@ -342,6 +347,8 @@ class PupilTracker:
 
     def track(self, videofile, eye_roi, display=False):
         contrast_low = self._params['contrast_threshold']
+        mask_kernel = np.ones((3, 3))
+        dilation_iter = 10
 
         print("Tracking videofile", videofile)
         cap = cv2.VideoCapture(videofile)
@@ -387,16 +394,18 @@ class PupilTracker:
             # --- detect contours
             ellipse, eye_center, contour = None, None, None
 
-            print(thres.shape, small_mask.shape)
+            if self._last_ellipse is not None:
+                mask = np.zeros(small_mask.shape, dtype=np.uint8)
+                cv2.ellipse(mask, tuple(self._last_ellipse), (255), thickness=cv2.FILLED)
+                # cv2.drawContours(mask, [self._last_contour], -1, (255), thickness=cv2.FILLED)
+                mask = cv2.dilate(mask, mask_kernel, iterations=dilation_iter)
+                thres *= mask
             thres *= small_mask
 
             _, contours, hierarchy1 = cv2.findContours(thres.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-            # contour, ellipse = self.get_pupil_from_contours(contours, small_gray)
             contour, ellipse = self.get_pupil_from_contours(contours, blur, small_mask)
-            # if display:
-            #     self.display(self._mask.copy() if self._mask is not None else gray,
-            #                  blur, thres, eye_roi, fr_count, n_frames, ncontours=len(contours))
 
+            self._last_ellipse = ellipse
 
             if contour is None:
                 traces.append(dict(frame_id=fr_count, frame_intensity=img_std))
