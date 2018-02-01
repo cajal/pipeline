@@ -34,7 +34,9 @@ DEFAULT_PARAMETERS = dict(relative_area_threshold=0.002,
                           speed_threshold=0.1,
                           dr_threshold=0.1,
                           gaussian_blur=5,
-                          extreme_meso=0)
+                          extreme_meso=0,
+                          running_avg=0.4,
+                          exponent=9)
 
 
 @schema
