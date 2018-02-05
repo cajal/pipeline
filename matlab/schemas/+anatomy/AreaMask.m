@@ -17,6 +17,11 @@ classdef AreaMask < dj.Manual
             
             params = ne7.mat.getParams(params,varargin);
             
+            if strcmp(fetch1(experiment.Scan & key,'aim'),'widefield')
+                contiguous = 1;
+            else
+                contiguous = 0;
+            end
             % populate if retinotopy map doesn't exist
             ret_key = getRetKey(map.RetMap, key);
             
@@ -31,7 +36,7 @@ classdef AreaMask < dj.Manual
             
             % get masks already extracted
             if exists(obj & rmfield(key,'ret_idx'))
-                [area_map, keys] = getContiguousMask(obj, rmfield(key,'ret_idx'));
+                [area_map, keys] = getContiguousMask(obj, rmfield(key,'ret_idx'),contiguous);
             else
                 area_map = zeros(size(background,1),size(background,2));
             end
@@ -83,8 +88,13 @@ classdef AreaMask < dj.Manual
             % get base key
             tuple = ret_key;
             
-            % get field specific area map
-            [field_area_maps, fields] = splitContiguousMask(obj, tuple, area_map);
+            if ~contiguous
+                % get field specific area map
+                [field_area_maps, fields] = splitContiguousMask(obj, tuple, area_map);
+            else
+                field_area_maps{1} = area_map;
+                fields(1) = 1;
+            end
             
             % loop through all fields
             for ifield = 1:length(fields)
@@ -160,13 +170,13 @@ classdef AreaMask < dj.Manual
             end
         end
         
-        function [area_map, keys, background] = getContiguousMask(obj, key)
+        function [area_map, keys, background] = getContiguousMask(obj, key, override)
             
             % fetch masks & keys
             [masks, keys] = fetchn(obj & key,'mask');
             
             % get information from the scans depending on the setup
-            if strcmp(fetch1(experiment.Session & key,'rig'),'2P4') || length(masks)<2
+            if (nargin<3 || ~override) && (strcmp(fetch1(experiment.Session & key,'rig'),'2P4') || length(masks)<2)
                 [x_pos, y_pos, fieldWidths, fieldHeights, fieldWidthsInMicrons, masks, areas, avg_image] = ...
                     fetchn(obj * meso.ScanInfoField * meso.SummaryImagesAverage & key,...
                     'x','y','px_width','px_height','um_width','mask','brain_area','average_image');
@@ -203,9 +213,15 @@ classdef AreaMask < dj.Manual
             params.exp = 0.4;
             
             params = ne7.mat.getParams(params,varargin);
-                        
+            
+            if strcmp(fetch1(proj(experiment.Scan,'aim') & obj,'aim'),'widefield')
+                contiguous = 1;
+            else
+                contiguous = 0;
+            end
+            
             % get masks
-            [area_map, keys, mask_background] = getContiguousMask(obj,fetch(obj));
+            [area_map, keys, mask_background] = getContiguousMask(obj,fetch(obj),contiguous);
             areas = {keys(:).brain_area}';
             
             % get maps
@@ -215,7 +231,10 @@ classdef AreaMask < dj.Manual
                 % if FieldCoordinates exists add it to the background
                 if exists(anatomy.FieldCoordinates & proj(anatomy.RefMap & obj))
                     background = cat(4,background,plot(anatomy.FieldCoordinates & ...
-                        (anatomy.RefMap & obj)));
+                        proj(anatomy.RefMap & obj)));
+                    if isempty(params.back_idx)
+                        params.back_idx = size(background,4);
+                    end
                 end
             else
                 background = mask_background;
@@ -225,7 +244,9 @@ classdef AreaMask < dj.Manual
             background = ne7.mat.normalize(abs(background.^ params.exp));
             
             % merge masks with background
-            im = hsv2rgb(cat(3,ne7.mat.normalize(area_map),background(:,:,1,1),background(:,:,1,1)));
+            sat = background(:,:,1,1);
+            sat(area_map==0) = 0;
+            im = hsv2rgb(cat(3,ne7.mat.normalize(area_map),sat,background(:,:,1,1)));
             if nargin<2 || isempty(params.back_idx) || params.back_idx > size(background,4)
                 image((im));
             else
