@@ -465,14 +465,17 @@ class ManualTracker:
         cv2.setMouseCallback(self.main_window, self.mouse_callback)
         cv2.setMouseCallback(self.progress_window, self.progress_mouse_callback)
 
-        self.update_frame = True # must be true to ensure correct starting conditions
-        self._visited = None
+        self.update_frame = True  # must be true to ensure correct starting conditions
+        self._contour_processed = None
         self._progress_len = 1000
 
     def mouse_callback(self, event, x, y, flags, param):
         if event == cv2.EVENT_MBUTTONDOWN:
             if self._mask is not None:
-                cv2.circle(self._mask, (x, y), self.brush, (0), -1)
+                cv2.circle(self._mask, (x, y), self.brush, (0, 0, 0), -1)
+        elif event == cv2.EVENT_RBUTTONDOWN:
+            if self._mask is not None:
+                cv2.circle(self._mask, (x, y), self.brush, (255, 255, 255), -1)
         elif event == cv2.EVENT_LBUTTONDOWN:
             self.start = (x, y)
         elif event == cv2.EVENT_LBUTTONUP:
@@ -484,7 +487,7 @@ class ManualTracker:
 
     def progress_mouse_callback(self, event, x, y, flags, param):
         if event == cv2.EVENT_LBUTTONDOWN:
-            frame = int(x * self._n_frames/self._progress_len)
+            frame = int(x * self._n_frames / self._progress_len)
             print('Jumping to frame', frame)
             self.goto_frame(frame)
 
@@ -510,6 +513,7 @@ class ManualTracker:
         self.dilation_kernel = np.ones((3, 3))
 
         self.min_contour_len = 10
+        self.skip = False
 
     def set_brush(self, brush):
         self.brush = brush
@@ -533,8 +537,19 @@ class ManualTracker:
         elif key == ord(' '):
             self.pause = not self.pause
             return True
+        elif key == ord('s'):
+            self.skip = not self.skip
+            return True
         elif key == ord('b'):
             self.goto_frame(self._frame_number - self.step)
+            return True
+        elif key == ord('u'):
+            self.goto_frame(self._frame_number + 1)
+            return True
+        elif key == ord('d'):
+            self.start = None
+            self.end = None
+            self.roi = None
             return True
         elif key == ord('c'):
             self._mask = np.ones_like(self._mask) * 255
@@ -553,7 +568,11 @@ class ManualTracker:
     def display_frame_number(self, img):
         font = cv2.FONT_HERSHEY_SIMPLEX
         cv2.putText(img, "[{fr_count:05d}/{frames:05d}]".format(fr_count=self._frame_number, frames=self._n_frames),
-                    (10, 30), font, 1, (255, 255, 255), 2)
+                    (10, 30), font, 1, (255, 144, 30), 2)
+        if self._contours[self._frame_number] is not None:
+            cv2.putText(img, "OK", (300, 30), font, 1, (0, 255, 0), 2)
+        if self.skip:
+            cv2.putText(img, "Skip", (10, 70), font, 1, (0, 0, 255), 2)
 
     def read_frame(self):
         if not self.pause or self.update_frame:
@@ -564,15 +583,14 @@ class ManualTracker:
             ret, frame = self._cap.read()
 
             self._last_frame = ret, frame
-            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
             if self._mask is None:
-                self._mask = np.ones_like(gray) * 255
+                self._mask = np.ones_like(frame) * 255
 
-            self._last_frame = ret, gray
-            return ret, gray.copy()
+            self._last_frame = ret, frame
+            return ret, frame.copy()
         else:
-            ret, gray = self._last_frame
-            return ret, gray.copy()
+            ret, frame = self._last_frame
+            return ret, frame.copy()
 
     def preprocess_image(self, frame):
         h = int(self.blur)
@@ -588,9 +606,10 @@ class ManualTracker:
         return thres, blur, mask
 
     def find_contours(self, thres):
-        _, contours, hierarchy1 = cv2.findContours(thres.copy(), cv2.RETR_TREE,
-                                                   cv2.CHAIN_APPROX_SIMPLE)  # remove copy when cv2=3.2 is installed
-
+        _, contours, hierarchy = cv2.findContours(thres.copy(), cv2.RETR_TREE,
+                                                  cv2.CHAIN_APPROX_SIMPLE)  # remove copy when cv2=3.2 is installed
+        if len(contours) > 1:
+            contours = [c for i, c in enumerate(contours) if hierarchy[0, i, 3] == -1]
         contours = [c + self.roi[::-1, 0][None, None, :] for c in contours if len(c) >= self.min_contour_len]
         contours = [cv2.convexHull(c) for c in contours]
         return contours
@@ -600,63 +619,70 @@ class ManualTracker:
         self._cap.set(cv2.CAP_PROP_POS_FRAMES, self._frame_number)
         self.update_frame = True
 
+    def display_progress(self):
+        progress = np.interp(np.linspace(0, 100, self._progress_len), np.linspace(0, 100, self._n_frames),
+                             self._contour_processed.astype(np.float) * 255)
+        progress = np.tile(progress[None, :, None], (50, 1, 3)).astype(np.uint8)
+        x = int(self._frame_number * self._progress_len / self._n_frames)
+        progress = cv2.line(progress, (x, 0), (x, 50), (0, 255, 0), 2)
+        cv2.imshow(self.progress_window, progress)
+
     def run(self):
         self._cap = cap = cv2.VideoCapture(self.videofile)
 
         self._n_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         self._frame_number = 0
-        self.update_frame = True # ensure correct starting conditions
-        self._visited = np.zeros(self._n_frames, dtype=bool)
-
+        self.update_frame = True  # ensure correct starting conditions
+        self._contour_processed = np.zeros(self._n_frames, dtype=bool)
+        self._contours = np.zeros(self._n_frames, dtype=object)
+        self._contours[:] = None
         while cap.isOpened():
             if self._frame_number >= self._n_frames:
                 print("Reached end of videofile ", self.videofile, 'Start from beginning')
-                self._frame_number = 0
-                self._cap.set(cv2.CAP_PROP_POS_FRAMES, self._frame_number)
+                break
 
             _, frame = self.read_frame()
 
-            self.display_frame_number(frame)
             if self.start is not None and self.end is not None:
-                cv2.rectangle(frame, self.start, self.end, (0, 255, 0), 2)
-                small_gray = frame[slice(*self.roi[0]), slice(*self.roi[1])]
+                cv2.rectangle(frame, self.start, self.end, (0, 255, 255), 2)
+                small_gray = cv2.cvtColor(frame[slice(*self.roi[0]), slice(*self.roi[1]), :], cv2.COLOR_BGR2GRAY)
+
                 try:
                     thres, small_gray, dilation_mask = self.preprocess_image(small_gray)
                 except:
-                    print('Problems with processing')
+                    print('Problems with processing reversing to frame', self._frame_number - 10)
                     self.goto_frame(self._frame_number - 10)
                     self.pause = True
                 else:
                     if self._mask is not None:
-                        small_mask = self._mask[slice(*self.roi[0]), slice(*(self.roi[1] + 1))]
+                        small_mask = self._mask[slice(*self.roi[0]), slice(*(self.roi[1] + 1)), 0]
                         cv2.bitwise_and(thres, small_mask, dst=thres)
                         cv2.bitwise_and(thres, dilation_mask, dst=thres)
 
                     contours = self.find_contours(thres)
 
-                    frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
-                    cv2.drawContours(frame, contours, 0, (0, 255, 0), 3)
-                    if len(contours) > 1:
+                    cv2.drawContours(frame, contours, -1, (0, 255, 0), 3)
+                    cv2.drawContours(small_gray, contours, -1, (127, 127, 127), 3, offset=tuple(-self.roi[::-1, 0]))
+                    if len(contours) != 1:
                         self.pause = True
                     elif len(contours) == 1:
-                        self._visited[self._frame_number] = True
+                        self._contour_processed[self._frame_number] = True
+                        self._contours[self._frame_number] = contours[0]
 
                     cv2.imshow(self.roi_window, small_gray)
                     cv2.imshow(self.thres_window, thres)
 
-            cv2.bitwise_and(frame, self._mask if len(frame.shape) == 2 else np.tile(self._mask[..., None], (1, 1, 3)),
-                            dst=frame)
+            if self.skip:
+                self._contour_processed[self._frame_number] = True
+                self._contours[self._frame_number] = None
+
+            self.display_frame_number(frame)
+            cv2.bitwise_and(frame, self._mask, dst=frame)
             cv2.imshow(self.main_window, frame)
+            self.display_progress()
 
-            if not self.process_key(cv2.waitKey(1) & 0xFF):
+            if not self.process_key(cv2.waitKey(5) & 0xFF):
                 break
-
-            progress = np.interp(np.linspace(0, 100, self._progress_len), np.linspace(0, 100, self._n_frames),
-                                 self._visited.astype(np.float) * 255)
-            progress = np.tile(progress[None, :, None], (50, 1, 3)).astype(np.uint8)
-            x = int(self._frame_number * self._progress_len/self._n_frames)
-            progress = cv2.line(progress, (x, 0), (x, 50), (0, 255, 0), 2)
-            cv2.imshow(self.progress_window, progress)
 
         cap.release()
         cv2.destroyAllWindows()
