@@ -13,13 +13,13 @@ import json
 import os
 from commons import lab
 import sh
-
+from datajoint.autopopulate import AutoPopulate
 try:
     import pyfnnd
 except ImportError:
     warn('Could not load pyfnnd.  Oopsi spike inference will fail. Install from https://github.com/cajal/PyFNND.git')
 
-from .utils.eye_tracking import ROIGrabber, PupilTracker, CVROIGrabber
+from .utils.eye_tracking import ROIGrabber, PupilTracker, CVROIGrabber, ManualTracker
 from pipeline.utils import ts2sec, read_video_hdf5
 from . import config
 
@@ -364,3 +364,38 @@ class TrackedVideo(dj.Computed):
 
         cap.release()
         cv2.destroyAllWindows()
+
+
+@schema
+class ManuallyTrackedContours(dj.Manual, AutoPopulate):
+    definition = """
+    -> Eye
+    ---
+    tracking_ts=CURRENT_TIMESTAMP    : timestamp  # automatic
+    """
+
+    class Frame(dj.Part):
+        definition = """
+        -> master
+        frame_id                 : int           # frame id with matlab based 1 indexing
+        ---
+        contour=NULL             : longblob      # eye contour relative to ROI
+        """
+
+    def make(self, key):
+        print("Populating", key)
+
+        avi_path = (Eye() & key).get_video_path()
+        print(avi_path)
+
+        tracker = ManualTracker(avi_path)
+        tracker.run()
+        # self.insert1(key)
+        # fr = self.Frame()
+        # for trace in traces:
+        #     trace.update(key)
+        #     fr.insert1(trace, ignore_extra_fields=True)
+        #
+        # (notify.SlackUser() & (experiment.Session() & key)).notify(
+        #     'Pupil tracking for {} has been populated'.format(str(key)))
+
