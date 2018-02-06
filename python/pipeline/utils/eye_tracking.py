@@ -438,11 +438,13 @@ class ManualTracker:
     main_window = "Main Window"
     roi_window = "ROI"
     thres_window = "Thresholded"
+    progress_window = "Progress"
 
     def __init__(self, videofile):
         self.reset()
 
         cv2.namedWindow(self.main_window)
+        cv2.namedWindow(self.progress_window)
         cv2.createTrackbar("mask brush", self.main_window,
                            self.brush, 100,
                            self.set_brush)
@@ -461,8 +463,11 @@ class ManualTracker:
         self.videofile = videofile
 
         cv2.setMouseCallback(self.main_window, self.mouse_callback)
+        cv2.setMouseCallback(self.progress_window, self.progress_mouse_callback)
 
-        self.update_frame = False
+        self.update_frame = True # must be true to ensure correct starting conditions
+        self._visited = None
+        self._progress_len = 1000
 
     def mouse_callback(self, event, x, y, flags, param):
         if event == cv2.EVENT_MBUTTONDOWN:
@@ -477,22 +482,11 @@ class ManualTracker:
             self.roi = np.asarray([[tmp[1], tmp[3]], [tmp[0], tmp[2]]], dtype=int) + 1
             print('Set ROI to', self.roi)
 
-            # crop = img[roi[0, 0]:roi[0, 1], roi[1, 0]:roi[1, 1]]
-            # crop = np.asarray(crop / crop.max(), dtype=float)
-            # self.roi = roi
-            # cv2.imshow('crop', crop)
-
-            # m = (img * self.mask).copy() # needed for a weird reason
-            # self.draw_img = (img * self.mask).copy()
-            # cv2.rectangle(self.draw_img, tuple(self.start), tuple(self.end), (0, 255, 0), 2)
-
-            # cv2.imshow('real image', self.draw_img)
-            # key = (cv2.waitKey(0) & 0xFF)
-            # if key == ord('q'):
-            #     cv2.destroyAllWindows()
-            #     self.exit = True
-            # elif key == ord('c'):
-            #     self.mask = 0 * self.mask + 1
+    def progress_mouse_callback(self, event, x, y, flags, param):
+        if event == cv2.EVENT_LBUTTONDOWN:
+            frame = int(x * self._n_frames/self._progress_len)
+            print('Jumping to frame', frame)
+            self.goto_frame(frame)
 
     def reset(self):
         self.pause = False
@@ -540,9 +534,7 @@ class ManualTracker:
             self.pause = not self.pause
             return True
         elif key == ord('b'):
-            self._frame_number = max(self._frame_number - self.step, 0)
-            self._cap.set(cv2.CAP_PROP_POS_FRAMES, self._frame_number)
-            self.update_frame = True
+            self.goto_frame(self._frame_number - self.step)
             return True
         elif key == ord('c'):
             self._mask = np.ones_like(self._mask) * 255
@@ -555,9 +547,7 @@ class ManualTracker:
             self.jump_frame = min(self._n_frames, self.jump_frame)
             print('Jump frame is', self.jump_frame)
         elif key == ord('j'):
-            self._cap.set(cv2.CAP_PROP_POS_FRAMES, self.jump_frame)
-            self._frame_number = self.jump_frame
-            self.update_frame = True
+            self.goto_frame(self.jump_frame)
         return True
 
     def display_frame_number(self, img):
@@ -567,6 +557,9 @@ class ManualTracker:
 
     def read_frame(self):
         if not self.pause or self.update_frame:
+            if not self.update_frame:
+                self._frame_number += 1
+
             self.update_frame = False
             ret, frame = self._cap.read()
 
@@ -575,7 +568,6 @@ class ManualTracker:
             if self._mask is None:
                 self._mask = np.ones_like(gray) * 255
 
-            self._frame_number += 1
             self._last_frame = ret, gray
             return ret, gray.copy()
         else:
@@ -585,7 +577,6 @@ class ManualTracker:
     def preprocess_image(self, frame):
         h = int(self.blur)
 
-        # # Manual meso settins
         if self.power > 1:
             frame = np.array(frame / 255) ** self.power * 255
             frame = frame.astype(np.uint8)
@@ -593,22 +584,29 @@ class ManualTracker:
         blur = cv2.GaussianBlur(frame, (2 * h + 1, 2 * h + 1), 0)
         _, thres = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         mask = cv2.erode(thres, self.dilation_kernel, iterations=self.dilation_iter)
-        mask = cv2.dilate(mask, self.dilation_kernel, iterations=int(1.2 * self.dilation_iter))
+        mask = cv2.dilate(mask, self.dilation_kernel, iterations=int(1.1 * self.dilation_iter))
         return thres, blur, mask
 
     def find_contours(self, thres):
         _, contours, hierarchy1 = cv2.findContours(thres.copy(), cv2.RETR_TREE,
                                                    cv2.CHAIN_APPROX_SIMPLE)  # remove copy when cv2=3.2 is installed
 
-        contours =  [c + self.roi[::-1, 0][None, None, :] for c in contours if len(c) >= self.min_contour_len]
+        contours = [c + self.roi[::-1, 0][None, None, :] for c in contours if len(c) >= self.min_contour_len]
         contours = [cv2.convexHull(c) for c in contours]
         return contours
+
+    def goto_frame(self, no):
+        self._frame_number = min(max(no, 0), self._n_frames - 1)
+        self._cap.set(cv2.CAP_PROP_POS_FRAMES, self._frame_number)
+        self.update_frame = True
 
     def run(self):
         self._cap = cap = cv2.VideoCapture(self.videofile)
 
         self._n_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         self._frame_number = 0
+        self.update_frame = True # ensure correct starting conditions
+        self._visited = np.zeros(self._n_frames, dtype=bool)
 
         while cap.isOpened():
             if self._frame_number >= self._n_frames:
@@ -622,22 +620,29 @@ class ManualTracker:
             if self.start is not None and self.end is not None:
                 cv2.rectangle(frame, self.start, self.end, (0, 255, 0), 2)
                 small_gray = frame[slice(*self.roi[0]), slice(*self.roi[1])]
-                thres, small_gray, dilation_mask = self.preprocess_image(small_gray)
-                if self._mask is not None:
-                    small_mask = self._mask[slice(*self.roi[0]), slice(*self.roi[1])]
-                    cv2.bitwise_and(thres, small_mask, dst=thres)
-                    cv2.bitwise_and(thres, dilation_mask, dst=thres)
-
-                contours = self.find_contours(thres)
-
-                frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
-                cv2.drawContours(frame, contours, 0, (0, 255, 0), 3)
-                if len(contours) > 1:
+                try:
+                    thres, small_gray, dilation_mask = self.preprocess_image(small_gray)
+                except:
+                    print('Problems with processing')
+                    self.goto_frame(self._frame_number - 10)
                     self.pause = True
+                else:
+                    if self._mask is not None:
+                        small_mask = self._mask[slice(*self.roi[0]), slice(*(self.roi[1] + 1))]
+                        cv2.bitwise_and(thres, small_mask, dst=thres)
+                        cv2.bitwise_and(thres, dilation_mask, dst=thres)
 
-                cv2.imshow(self.roi_window, small_gray)
-                cv2.imshow(self.thres_window, thres)
+                    contours = self.find_contours(thres)
 
+                    frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+                    cv2.drawContours(frame, contours, 0, (0, 255, 0), 3)
+                    if len(contours) > 1:
+                        self.pause = True
+                    elif len(contours) == 1:
+                        self._visited[self._frame_number] = True
+
+                    cv2.imshow(self.roi_window, small_gray)
+                    cv2.imshow(self.thres_window, thres)
 
             cv2.bitwise_and(frame, self._mask if len(frame.shape) == 2 else np.tile(self._mask[..., None], (1, 1, 3)),
                             dst=frame)
@@ -645,6 +650,14 @@ class ManualTracker:
 
             if not self.process_key(cv2.waitKey(1) & 0xFF):
                 break
+
+            progress = np.interp(np.linspace(0, 100, self._progress_len), np.linspace(0, 100, self._n_frames),
+                                 self._visited.astype(np.float) * 255)
+            progress = np.tile(progress[None, :, None], (50, 1, 3)).astype(np.uint8)
+            x = int(self._frame_number * self._progress_len/self._n_frames)
+            progress = cv2.line(progress, (x, 0), (x, 50), (0, 255, 0), 2)
+            cv2.imshow(self.progress_window, progress)
+
         cap.release()
         cv2.destroyAllWindows()
 
