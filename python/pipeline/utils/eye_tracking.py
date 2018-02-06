@@ -432,3 +432,223 @@ class PupilTracker:
         cv2.destroyAllWindows()
 
         return traces
+
+
+class ManualTracker:
+    main_window = "Main Window"
+    roi_window = "ROI"
+    thres_window = "Thresholded"
+
+    def __init__(self, videofile):
+        self.reset()
+
+        cv2.namedWindow(self.main_window)
+        cv2.createTrackbar("mask brush", self.main_window,
+                           self.brush, 100,
+                           self.set_brush)
+        cv2.createTrackbar("Gaussian blur half width", self.main_window,
+                           self.blur, 20,
+                           self.set_blur)
+        cv2.createTrackbar("p (meso only)", self.main_window,
+                           self.power, 15,
+                           self.set_power)
+        cv2.createTrackbar("erosion/dilation iterations", self.main_window,
+                           self.dilation_iter, 30,
+                           self.set_dilation)
+        cv2.createTrackbar("min contour length", self.main_window,
+                           self.min_contour_len, 50,
+                           self.set_min_contour)
+        self.videofile = videofile
+
+        cv2.setMouseCallback(self.main_window, self.mouse_callback)
+
+        self.update_frame = False
+
+    def mouse_callback(self, event, x, y, flags, param):
+        if event == cv2.EVENT_MBUTTONDOWN:
+            if self._mask is not None:
+                cv2.circle(self._mask, (x, y), self.brush, (0), -1)
+        elif event == cv2.EVENT_LBUTTONDOWN:
+            self.start = (x, y)
+        elif event == cv2.EVENT_LBUTTONUP:
+            self.end = (x, y)
+            x = np.vstack((self.start, self.end))
+            tmp = np.hstack((x.min(axis=0), x.max(axis=0)))
+            self.roi = np.asarray([[tmp[1], tmp[3]], [tmp[0], tmp[2]]], dtype=int) + 1
+            print('Set ROI to', self.roi)
+
+            # crop = img[roi[0, 0]:roi[0, 1], roi[1, 0]:roi[1, 1]]
+            # crop = np.asarray(crop / crop.max(), dtype=float)
+            # self.roi = roi
+            # cv2.imshow('crop', crop)
+
+            # m = (img * self.mask).copy() # needed for a weird reason
+            # self.draw_img = (img * self.mask).copy()
+            # cv2.rectangle(self.draw_img, tuple(self.start), tuple(self.end), (0, 255, 0), 2)
+
+            # cv2.imshow('real image', self.draw_img)
+            # key = (cv2.waitKey(0) & 0xFF)
+            # if key == ord('q'):
+            #     cv2.destroyAllWindows()
+            #     self.exit = True
+            # elif key == ord('c'):
+            #     self.mask = 0 * self.mask + 1
+
+    def reset(self):
+        self.pause = False
+        self.step = 50
+        self._cap = None
+        self._frame_number = None
+        self._n_frames = None
+        self._last_frame = None
+        self._mask = None
+        self.brush = 40
+        self.jump_frame = 0
+
+        self.start = None
+        self.end = None
+        self.roi = None
+
+        self.blur = 3
+        self.power = 3
+
+        self.dilation_iter = 7
+        self.dilation_kernel = np.ones((3, 3))
+
+        self.min_contour_len = 10
+
+    def set_brush(self, brush):
+        self.brush = brush
+
+    def set_blur(self, blur):
+        self.blur = blur
+
+    def set_power(self, power):
+        self.power = power
+
+    def set_dilation(self, d):
+        self.dilation_iter = d
+
+    def set_min_contour(self, m):
+        self.min_contour_len = max(m, 5)
+        print('Setting min contour length to', self.min_contour_len)
+
+    def process_key(self, key):
+        if key == ord('q'):
+            return False
+        elif key == ord(' '):
+            self.pause = not self.pause
+            return True
+        elif key == ord('b'):
+            self._frame_number = max(self._frame_number - self.step, 0)
+            self._cap.set(cv2.CAP_PROP_POS_FRAMES, self._frame_number)
+            self.update_frame = True
+            return True
+        elif key == ord('c'):
+            self._mask = np.ones_like(self._mask) * 255
+        elif key == ord('f'):
+            print('Resetting jump frame')
+            self.jump_frame = 0
+        elif 48 <= key < 58:
+            self.jump_frame *= 10
+            self.jump_frame += key - 48
+            self.jump_frame = min(self._n_frames, self.jump_frame)
+            print('Jump frame is', self.jump_frame)
+        elif key == ord('j'):
+            self._cap.set(cv2.CAP_PROP_POS_FRAMES, self.jump_frame)
+            self._frame_number = self.jump_frame
+            self.update_frame = True
+        return True
+
+    def display_frame_number(self, img):
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        cv2.putText(img, "[{fr_count:05d}/{frames:05d}]".format(fr_count=self._frame_number, frames=self._n_frames),
+                    (10, 30), font, 1, (255, 255, 255), 2)
+
+    def read_frame(self):
+        if not self.pause or self.update_frame:
+            self.update_frame = False
+            ret, frame = self._cap.read()
+
+            self._last_frame = ret, frame
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            if self._mask is None:
+                self._mask = np.ones_like(gray) * 255
+
+            self._frame_number += 1
+            self._last_frame = ret, gray
+            return ret, gray.copy()
+        else:
+            ret, gray = self._last_frame
+            return ret, gray.copy()
+
+    def preprocess_image(self, frame):
+        h = int(self.blur)
+
+        # # Manual meso settins
+        if self.power > 1:
+            frame = np.array(frame / 255) ** self.power * 255
+            frame = frame.astype(np.uint8)
+
+        blur = cv2.GaussianBlur(frame, (2 * h + 1, 2 * h + 1), 0)
+        _, thres = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        mask = cv2.erode(thres, self.dilation_kernel, iterations=self.dilation_iter)
+        mask = cv2.dilate(mask, self.dilation_kernel, iterations=int(1.2 * self.dilation_iter))
+        return thres, blur, mask
+
+    def find_contours(self, thres):
+        _, contours, hierarchy1 = cv2.findContours(thres.copy(), cv2.RETR_TREE,
+                                                   cv2.CHAIN_APPROX_SIMPLE)  # remove copy when cv2=3.2 is installed
+
+        contours =  [c + self.roi[::-1, 0][None, None, :] for c in contours if len(c) >= self.min_contour_len]
+        contours = [cv2.convexHull(c) for c in contours]
+        return contours
+
+    def run(self):
+        self._cap = cap = cv2.VideoCapture(self.videofile)
+
+        self._n_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        self._frame_number = 0
+
+        while cap.isOpened():
+            if self._frame_number >= self._n_frames:
+                print("Reached end of videofile ", self.videofile, 'Start from beginning')
+                self._frame_number = 0
+                self._cap.set(cv2.CAP_PROP_POS_FRAMES, self._frame_number)
+
+            _, frame = self.read_frame()
+
+            self.display_frame_number(frame)
+            if self.start is not None and self.end is not None:
+                cv2.rectangle(frame, self.start, self.end, (0, 255, 0), 2)
+                small_gray = frame[slice(*self.roi[0]), slice(*self.roi[1])]
+                thres, small_gray, dilation_mask = self.preprocess_image(small_gray)
+                if self._mask is not None:
+                    small_mask = self._mask[slice(*self.roi[0]), slice(*self.roi[1])]
+                    cv2.bitwise_and(thres, small_mask, dst=thres)
+                    cv2.bitwise_and(thres, dilation_mask, dst=thres)
+
+                contours = self.find_contours(thres)
+
+                frame = cv2.cvtColor(frame, cv2.COLOR_GRAY2BGR)
+                cv2.drawContours(frame, contours, 0, (0, 255, 0), 3)
+                if len(contours) > 1:
+                    self.pause = True
+
+                cv2.imshow(self.roi_window, small_gray)
+                cv2.imshow(self.thres_window, thres)
+
+
+            cv2.bitwise_and(frame, self._mask if len(frame.shape) == 2 else np.tile(self._mask[..., None], (1, 1, 3)),
+                            dst=frame)
+            cv2.imshow(self.main_window, frame)
+
+            if not self.process_key(cv2.waitKey(1) & 0xFF):
+                break
+        cap.release()
+        cv2.destroyAllWindows()
+
+
+if __name__ == "__main__":
+    tracker = ManualTracker('video2.mp4')
+    tracker.run()
