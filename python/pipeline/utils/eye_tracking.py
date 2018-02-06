@@ -706,7 +706,7 @@ class ManualTracker:
                         cv2.bitwise_and(thres, dilation_mask, dst=thres)
 
                     contours = self.find_contours(thres)
-
+                    # TODO check that I don't store the frame if unpause
                     cv2.drawContours(frame, contours, -1, (0, 255, 0), 3)
                     cv2.drawContours(small_gray, contours, -1, (127, 127, 127), 3, offset=tuple(-self.roi[::-1, 0]))
                     if len(contours) > 1:
