@@ -1,9 +1,12 @@
+from itertools import count
 from pprint import pprint
 
 from scipy.misc import imresize
 
 import datajoint as dj
 from datajoint.jobs import key_hash
+from tqdm import tqdm
+
 from . import experiment, notify
 from .exceptions import PipelineException
 
@@ -386,16 +389,16 @@ class ManuallyTrackedContours(dj.Manual, AutoPopulate):
         print("Populating", key)
 
         avi_path = (Eye() & key).get_video_path()
-        print(avi_path)
 
         tracker = ManualTracker(avi_path)
         tracker.run()
-        # self.insert1(key)
-        # fr = self.Frame()
-        # for trace in traces:
-        #     trace.update(key)
-        #     fr.insert1(trace, ignore_extra_fields=True)
-        #
-        # (notify.SlackUser() & (experiment.Session() & key)).notify(
-        #     'Pupil tracking for {} has been populated'.format(str(key)))
+        self.insert1(key)
+        frames = []
+        frame = self.Frame()
+        for frame_id, ok, contour in tqdm(zip(count(), tracker.contours_detected, tracker.contours),
+                                          total=len(tracker.contours)):
+            if ok:
+                frame.insert1(dict(key, frame_id=frame_id, contour=contour))
+            else:
+                frame.insert1(dict(key, frame_id=frame_id))
 
