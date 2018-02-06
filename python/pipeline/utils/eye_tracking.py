@@ -683,7 +683,7 @@ class ManualTracker:
         self.contours[:] = None
         while cap.isOpened():
             if self._frame_number >= self._n_frames - 1:
-                print("Reached end of videofile ", self.videofile, 'Start from beginning')
+                print("Reached end of videofile ", self.videofile)
                 break
 
             ret, frame = self.read_frame()
@@ -714,16 +714,9 @@ class ManualTracker:
                     elif len(contours) == 1:
                         self.contours_detected[self._frame_number] = True
                         self.contours[self._frame_number] = contours[0]
-                    else:
-                        self.contours_detected[self._frame_number] = False
-                        self.contours[self._frame_number] = None
 
                     cv2.imshow(self.roi_window, small_gray)
                     cv2.imshow(self.thres_window, thres)
-
-            if self.skip:
-                self.contours_detected[self._frame_number] = False
-                self.contours[self._frame_number] = None
 
             self.display_frame_number(frame)
             cv2.bitwise_and(frame, self._mask, dst=frame)
