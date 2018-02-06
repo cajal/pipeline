@@ -451,7 +451,7 @@ class ManualTracker:
         cv2.createTrackbar("Gaussian blur half width", self.main_window,
                            self.blur, 20,
                            self.set_blur)
-        cv2.createTrackbar("p (meso only)", self.main_window,
+        cv2.createTrackbar("exponent", self.main_window,
                            self.power, 15,
                            self.set_power)
         cv2.createTrackbar("erosion/dilation iterations", self.main_window,
