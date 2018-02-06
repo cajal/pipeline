@@ -47,7 +47,7 @@ classdef ActivityTrace < dj.Computed
             % Interpolate all spikes to the first timepoint
             Spikes = nan(size(traces));
             for itrace = 1:size(traces,2)
-                Spikes(:,itrace) = interp1(frame_times + ms_delay(itrace),traces(:,itrace),frame_times,'linear',nan);
+                Spikes(:,itrace) = interp1(frame_times + ms_delay(itrace)/1000,traces(:,itrace),frame_times,'linear',nan);
             end
         end
     end
