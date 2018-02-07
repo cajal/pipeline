@@ -713,9 +713,10 @@ class ManualTracker:
         graph = (self.contours_detected[idx].astype(np.float) * 255)[None, :, None]
         graph = np.tile(graph, (height, 1, 3)).astype(np.uint8)
         area = (height - self.area[idx] / (self.area[idx].max() + 1) * height).astype(int)
-
-        for x, y1, y2 in zip(count(), area[:-1], area[1:]):
-            graph = cv2.line(graph, (x, y1), (x + 1, y2), (209, 133, 4), thickness=2)
+        detected = self.contours_detected[idx]
+        for x, y1, y2, det1, det2 in zip(count(), area[:-1], area[1:], detected[:-1], detected[1:]):
+            if det1 and det2:
+                graph = cv2.line(graph, (x, y1), (x + 1, y2), (209, 133, 4), thickness=2)
 
         if t0 <= self._frame_number <= t1:
             x = int((self._frame_number - t0) / dt * self._progress_len)
