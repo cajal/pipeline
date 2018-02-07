@@ -447,12 +447,22 @@ class FittedContour(dj.Computed):
             ret, frame = self._cap.read()
             ckey = contours[frame_number]
             if ret and frame is not None and ckey['contour'] is not None:
-                if ckey['contour'] is not None:
+                if ckey['contour'] is not None and len(ckey['contour'] >= 5):
                     contour = ckey['contour']
                     center = contour.mean(axis=0)
                     cv2.drawContours(frame, [contour], -1, (0, 255, 0), 1)
                     cv2.circle(frame, tuple(center.squeeze().astype(int)), 4, (0, 165, 255), -1)
-                    ellipse = cv2.fitEllipse(contour)
+                    try:
+                        ellipse = cv2.fitEllipse(contour)
+                    except:
+                        # ---- TODO remove -----
+                        import inspect
+                        from IPython import embed
+                        __cf = inspect.currentframe()
+                        print(20*'=', 'Debug at', inspect.getabsfile(__cf), 'line', inspect.getlineno(__cf))
+                        embed()
+                        continue
+                        # ---------------------
                     cv2.ellipse(frame, ellipse, (255, 0, 255), 2)
                     ecenter = ellipse[0]
                     cv2.circle(frame, tuple(map(int, ecenter)), 5, (255, 165, 0), -1)
