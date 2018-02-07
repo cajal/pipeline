@@ -1,4 +1,6 @@
 from collections import defaultdict
+from itertools import count
+
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
@@ -439,12 +441,13 @@ class ManualTracker:
     roi_window = "ROI"
     thres_window = "Thresholded"
     progress_window = "Progress"
+    graph_window = "Area"
 
     def __init__(self, videofile):
         self.reset()
 
         cv2.namedWindow(self.main_window)
-        cv2.namedWindow(self.progress_window)
+        cv2.namedWindow(self.graph_window)
         cv2.createTrackbar("mask brush", self.main_window,
                            self.brush, 100,
                            self.set_brush)
@@ -463,11 +466,14 @@ class ManualTracker:
         self.videofile = videofile
 
         cv2.setMouseCallback(self.main_window, self.mouse_callback)
-        cv2.setMouseCallback(self.progress_window, self.progress_mouse_callback)
+        cv2.setMouseCallback(self.graph_window, self.graph_mouse_callback)
+        # cv2.setMouseCallback(self.progress_window, self.progress_mouse_callback)
 
         self.update_frame = True  # must be true to ensure correct starting conditions
         self.contours_detected = None
-        self._progress_len = 1000
+        self.area = None
+        self._progress_len = 1500
+        self._progress_len = 1500
 
     def mouse_callback(self, event, x, y, flags, param):
         if event == cv2.EVENT_MBUTTONDOWN:
@@ -485,11 +491,25 @@ class ManualTracker:
             self.roi = np.asarray([[tmp[1], tmp[3]], [tmp[0], tmp[2]]], dtype=int) + 1
             print('Set ROI to', self.roi)
 
-    def progress_mouse_callback(self, event, x, y, flags, param):
-        if event == cv2.EVENT_LBUTTONDOWN:
+    def graph_mouse_callback(self, event, x, y, flags, param):
+        t0, t1 = self.t0, self.t1
+        dt = t1 - t0
+        if event == cv2.EVENT_LBUTTONDBLCLK:
             frame = int(x * self._n_frames / self._progress_len)
             print('Jumping to frame', frame)
             self.goto_frame(frame)
+        elif event == cv2.EVENT_RBUTTONDBLCLK:
+            self.t0, self.t1 = 0, self._n_frames
+        elif event == cv2.EVENT_LBUTTONDOWN:
+            self.t0_tmp = t0 + int(x / self._progress_len * dt)
+        elif event == cv2.EVENT_LBUTTONUP:
+            t1 = t0 + int(x / self._progress_len * dt)
+            if t1 < self.t0_tmp:
+                self.t0, self.t1 = t1, self.t0_tmp
+            elif self.t0_tmp == t1:
+                self.t0, self.t1 = self.t0_tmp, self.t0_tmp + 1
+            else:
+                self.t0, self.t1 = self.t0_tmp, t1
 
     def reset(self):
         self.pause = False
@@ -505,6 +525,9 @@ class ManualTracker:
         self.start = None
         self.end = None
         self.roi = None
+
+        self.t0 = 0
+        self.t1 = None
 
         self.blur = 3
         self.power = 3
@@ -553,7 +576,9 @@ class ManualTracker:
         drag                      : drag ROI
         middle click              : add to mask
         right click               : delete from mask 
-        click in progress bar     : jump to location 
+        dbl-left click in area    : jump to location 
+        dbl-right click in area   : zoom out 
+        drag and drop in area     : zoom in 
         """
 
     def process_key(self, key):
@@ -664,13 +689,22 @@ class ManualTracker:
         self._cap.set(cv2.CAP_PROP_POS_FRAMES, self._frame_number)
         self.update_frame = True
 
-    def display_progress(self):
-        progress = np.interp(np.linspace(0, 100, self._progress_len), np.linspace(0, 100, self._n_frames),
-                             self.contours_detected.astype(np.float) * 255)
-        progress = np.tile(progress[None, :, None], (50, 1, 3)).astype(np.uint8)
-        x = int(self._frame_number * self._progress_len / self._n_frames)
-        progress = cv2.line(progress, (x, 0), (x, 50), (0, 255, 0), 2)
-        cv2.imshow(self.progress_window, progress)
+    def plot_area(self):
+        t0, t1 = self.t0, self.t1
+        dt = t1 - t0
+        idx = np.linspace(t0, t1, self._progress_len, endpoint=False).astype(int)
+        height = 300
+        graph = (self.contours_detected[idx].astype(np.float) * 255)[None, :, None]
+        graph = np.tile(graph, (height, 1, 3)).astype(np.uint8)
+        area = (height - self.area[idx] / (self.area[idx].max() + 1) * height).astype(int)
+
+        for x, y1, y2 in zip(count(), area[:-1], area[1:]):
+            graph = cv2.line(graph, (x, y1), (x + 1, y2), (209, 133, 4), thickness=2)
+
+        if t0 <= self._frame_number <= t1:
+            x = int((self._frame_number - t0) / dt * self._progress_len)
+            graph = cv2.line(graph, (x, 0), (x, height), (0, 255, 0), 2)
+        cv2.imshow(self.graph_window, graph)
 
     def run(self):
         self._cap = cap = cv2.VideoCapture(self.videofile)
@@ -680,7 +714,11 @@ class ManualTracker:
         self.update_frame = True  # ensure correct starting conditions
         self.contours_detected = np.zeros(self._n_frames, dtype=bool)
         self.contours = np.zeros(self._n_frames, dtype=object)
+        self.area = np.zeros(self._n_frames)
         self.contours[:] = None
+        self.t0 = 0
+        self.t1 = self._n_frames
+
         while cap.isOpened():
             if self._frame_number >= self._n_frames - 1:
                 print("Reached end of videofile ", self.videofile)
@@ -706,12 +744,15 @@ class ManualTracker:
                         cv2.bitwise_and(thres, dilation_mask, dst=thres)
 
                     contours = self.find_contours(thres)
-                    # TODO check that I don't store the frame if unpause
                     cv2.drawContours(frame, contours, -1, (0, 255, 0), 3)
                     cv2.drawContours(small_gray, contours, -1, (127, 127, 127), 3, offset=tuple(-self.roi[::-1, 0]))
                     if len(contours) > 1:
                         self.pause = True
                     elif len(contours) == 1:
+                        area = np.zeros_like(small_gray)
+                        area = cv2.drawContours(area, contours, -1, (255), thickness=cv2.FILLED,
+                                                offset=tuple(-self.roi[::-1, 0]))
+                        self.area[self._frame_number] = (area > 0).sum()
                         self.contours_detected[self._frame_number] = True
                         self.contours[self._frame_number] = contours[0]
 
@@ -721,8 +762,7 @@ class ManualTracker:
             self.display_frame_number(frame)
             cv2.bitwise_and(frame, self._mask, dst=frame)
             cv2.imshow(self.main_window, frame)
-            self.display_progress()
-
+            self.plot_area()
             if not self.process_key(cv2.waitKey(5) & 0xFF):
                 break
 
