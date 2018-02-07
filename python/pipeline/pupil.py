@@ -468,5 +468,5 @@ class FittedContour(dj.Computed):
 
         self.insert1(key)
         for ckey in tqdm(contours):
-            self.insert1(ckey, ignore_extra_fields=True)
+            self.insert1(dict(key, ckey), ignore_extra_fields=True)
 
