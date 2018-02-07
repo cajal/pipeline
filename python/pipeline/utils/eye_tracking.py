@@ -436,6 +436,17 @@ class PupilTracker:
         return traces
 
 
+def adjust_gamma(image, gamma=1.0):
+    # build a lookup table mapping the pixel values [0, 255] to
+    # their adjusted gamma values
+    invGamma = 1.0 / gamma
+    table = np.array([((i / 255.0) ** invGamma) * 255
+                      for i in np.arange(0, 256)]).astype("uint8")
+
+    # apply gamma correction using the lookup table
+    return cv2.LUT(image, table)
+
+
 class ManualTracker:
     main_window = "Main Window"
     roi_window = "ROI"
@@ -547,10 +558,13 @@ class ManualTracker:
         self.dilation_iter = 7
         self.dilation_kernel = np.ones((3, 3))
 
+        self.histogram_equalize = False
+
         self.min_contour_len = 10
         self.skip = False
 
         self.help = True
+
 
     def set_brush(self, brush):
         self.brush = brush
@@ -583,6 +597,7 @@ class ManualTracker:
         f       : reset jump frame
         [0-9]   : enter number for jump frame
         j       : jump to jump frame
+        e       : toggle histogram equalization
         h       : toggle help
         
         MOUSE:  
@@ -611,6 +626,9 @@ class ManualTracker:
             return True
         elif key == ord('n'):
             self.goto_frame(self._frame_number + 1)
+            return True
+        elif key == ord('e'):
+            self.histogram_equalize = not self.histogram_equalize
             return True
         elif key == ord('r'):
             self.start = None
@@ -684,6 +702,9 @@ class ManualTracker:
         if self.power > 1:
             frame = np.array(frame / 255) ** self.power * 255
             frame = frame.astype(np.uint8)
+
+        if self.histogram_equalize:
+            cv2.equalizeHist(frame, frame)
 
         blur = cv2.GaussianBlur(frame, (2 * h + 1, 2 * h + 1), 0)
         _, thres = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
