@@ -15,7 +15,7 @@ classdef PopStats < dj.Imported
     
     properties
         keySource = aggr( movies.PopStatsOpt * fuse.ScanDone * stimulus.Clip & ...
-            (stimulus.Movie & 'movie_class="cinema"'), stimulus.Trial, 'count(*)->n') & 'n>=2'
+            (stimulus.Movie & 'movie_class="cinema" OR movie_class="youtube" OR movie_class="unreal"'), stimulus.Trial, 'count(*)->n') & 'n>=2'
     end
     
     methods(Access=protected)
