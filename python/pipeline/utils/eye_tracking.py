@@ -494,22 +494,32 @@ class ManualTracker:
     def graph_mouse_callback(self, event, x, y, flags, param):
         t0, t1 = self.t0, self.t1
         dt = t1 - t0
-        if event == cv2.EVENT_LBUTTONDBLCLK:
-            frame = int(x * self._n_frames / self._progress_len)
+        sanitize = lambda t: int(max(min(t, self._n_frames - 1), 0))
+        if event == cv2.EVENT_MBUTTONDOWN:
+            frame = sanitize(t0 + x / self._progress_len * dt)
+
             print('Jumping to frame', frame)
             self.goto_frame(frame)
-        elif event == cv2.EVENT_RBUTTONDBLCLK:
-            self.t0, self.t1 = 0, self._n_frames
         elif event == cv2.EVENT_LBUTTONDOWN:
-            self.t0_tmp = t0 + int(x / self._progress_len * dt)
+            self.t0_tmp = sanitize(t0 + x / self._progress_len * dt)
         elif event == cv2.EVENT_LBUTTONUP:
-            t1 = t0 + int(x / self._progress_len * dt)
+            t1 = sanitize(t0 + x / self._progress_len * dt)
             if t1 < self.t0_tmp:
                 self.t0, self.t1 = t1, self.t0_tmp
             elif self.t0_tmp == t1:
                 self.t0, self.t1 = self.t0_tmp, self.t0_tmp + 1
             else:
                 self.t0, self.t1 = self.t0_tmp, t1
+        elif event == cv2.EVENT_RBUTTONDOWN:
+            self.del_tmp = sanitize(t0 + x / self._progress_len * dt)
+        elif event == cv2.EVENT_RBUTTONUP:
+            t1 = sanitize(t0 + x / self._progress_len * dt)
+            if t1 < self.del_tmp:
+                t0, t1 = t1, self.del_tmp
+            else:
+                t0, t1 = self.del_tmp, t1
+            self.contours_detected[t0:t1] = False
+            self.contours[t0:t1] = None
 
     def reset(self):
         self.pause = False
@@ -561,6 +571,7 @@ class ManualTracker:
         
         q       : quits
         space   : (un)pause
+        a       : reset area
         s       : toggle skip
         b       : jump back 10 frames
         n       : jump to next frame
@@ -576,9 +587,9 @@ class ManualTracker:
         drag                      : drag ROI
         middle click              : add to mask
         right click               : delete from mask 
-        dbl-left click in area    : jump to location 
-        dbl-right click in area   : zoom out 
+        middle click in area      : jump to location 
         drag and drop in area     : zoom in 
+        drag and drop in area     : drop frames
         """
 
     def process_key(self, key):
@@ -589,6 +600,9 @@ class ManualTracker:
             return True
         elif key == ord('s'):
             self.skip = not self.skip
+            return True
+        elif key == ord('a'):
+            self.t0, self.t1 = 0, self._n_frames
             return True
         elif key == ord('b'):
             self.goto_frame(self._frame_number - self.step)
@@ -625,7 +639,7 @@ class ManualTracker:
 
     def display_frame_number(self, img):
         font = cv2.FONT_HERSHEY_SIMPLEX
-        fs = .7
+        fs = .6
         cv2.putText(img, "[{fr_count:05d}/{frames:05d}]".format(fr_count=self._frame_number, frames=self._n_frames),
                     (10, 30), font, fs, (255, 144, 30), 2)
         if self.contours[self._frame_number] is not None:
