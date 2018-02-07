@@ -15,7 +15,7 @@ else: # import worked fine
 while True:
     # Scans
     for priority in range(120, -130, -10): # highest to lowest priority
-        next_scans = experiment.AutoProcessing() & 'priority > {}'.format(priority)
+        next_scans = experiment.AutoProcessing() - experiment.ScanIgnored() & 'priority > {}'.format(priority)
 
         # pupil
         pupil.Eye().populate(next_scans, reserve_jobs=True, suppress_errors=True)
@@ -32,7 +32,8 @@ while True:
             pipe.MotionCorrection().populate(next_scans, reserve_jobs=True, suppress_errors=True)
             pipe.SummaryImages().populate(next_scans, reserve_jobs=True, suppress_errors=True)
             pipe.Segmentation().populate(next_scans, reserve_jobs=True, suppress_errors=True)
-            pipe.MaskClassification().populate(next_scans, {'classification_method': 2}, reserve_jobs=True, suppress_errors=True)
+            pipe.MaskClassification().populate(next_scans, {'classification_method': 2},
+                                               reserve_jobs=True, suppress_errors=True)
             pipe.ScanSet().populate(next_scans, reserve_jobs=True, suppress_errors=True)
             pipe.Activity().populate(next_scans, {'spike_method': 5}, reserve_jobs=True, suppress_errors=True)
             full_scans = (pipe.ScanInfo().proj() & pipe.Activity()) - (pipe.ScanInfo.Field() - pipe.Activity())
