@@ -686,7 +686,7 @@ class ManualTracker:
         blur = cv2.GaussianBlur(frame, (2 * h + 1, 2 * h + 1), 0)
         _, thres = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         mask = cv2.erode(thres, self.dilation_kernel, iterations=self.dilation_iter)
-        mask = cv2.dilate(mask, self.dilation_kernel, iterations=int(1.1 * self.dilation_iter))
+        mask = cv2.dilate(mask, self.dilation_kernel, iterations=int(1.3 * self.dilation_iter))
         return thres, blur, mask
 
     def find_contours(self, thres):
