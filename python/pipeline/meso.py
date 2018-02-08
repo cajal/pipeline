@@ -83,7 +83,7 @@ class ScanInfo(dj.Imported):
             tuple_['um_width'] = scan.field_widths_in_microns[field_id]
             tuple_['x'] = x_zero + scan._degrees_to_microns(scan.fields[field_id].x)
             tuple_['y'] = y_zero + scan._degrees_to_microns(scan.fields[field_id].y)
-            tuple_['z'] = scan.field_depths[field_id] - surf_z
+            tuple_['z'] = scan.field_depths[field_id] - surf_z # fastZ only
             tuple_['delay_image'] = scan.field_offsets[field_id]
             tuple_['roi'] = scan.field_rois[field_id][0]
 
@@ -309,7 +309,7 @@ class RasterCorrection(dj.Computed):
     @property
     def key_source(self):
         # Run make_tuples once per scan iff correction channel has been set for all fields
-        scans = (ScanInfo() & CorrectionChannel()) - (ScanInfo.Field() - CorrectionChannel())
+        scans = (ScanInfo().proj() & CorrectionChannel()) - (ScanInfo.Field() - CorrectionChannel())
         return scans & {'pipe_version': CURRENT_VERSION}
 
     def _make_tuples(self, key):
@@ -684,7 +684,8 @@ class SummaryImages(dj.Computed):
 
         msg = 'SummaryImages for `{}` has been populated.'.format(key)
         (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
-                                                                   file_title='summary images')
+                                                                   file_title='summary images',
+                                                                   channel='#pipeline_quality')
 
 
 @schema
@@ -1057,7 +1058,8 @@ class Segmentation(dj.Computed):
 
         msg = 'Segmentation for `{}` has been populated.'.format(key)
         (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
-                                                                   file_title='mask contours')
+                                                                   file_title='mask contours',
+                                                                   channel='#pipeline_quality')
 
     @staticmethod
     def reshape_masks(mask_pixels, mask_weights, image_height, image_width):
@@ -1171,7 +1173,7 @@ class Fluorescence(dj.Computed):
                                          x=slice(None), channel=channel, kwargs=kwargs)
 
         # Reduce: Concatenate
-        traces = np.zeros(len(mask_ids), scan.num_frames, dtype=np.float32)
+        traces = np.zeros((len(mask_ids), scan.num_frames), dtype=np.float32)
         for frames, chunk_traces in results:
                 traces[:, frames] = chunk_traces
 
@@ -1277,7 +1279,8 @@ class MaskClassification(dj.Computed):
         msg = 'MaskClassification for `{}` has been populated.\n'.format(key)
         msg += ', '.join('{} {}s'.format(c, n) for c, n in zip(mask_counts, mask_names))
         (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
-                                                                   file_title='mask classes')
+                                                                   file_title='mask classes',
+                                                                   channel='#pipeline_quality')
 
     def plot_masks(self, threshold=0.99):
         """ Draw contours of masks over the correlation image (if available) with different
@@ -1413,7 +1416,8 @@ class ScanSet(dj.Computed):
 
         msg = 'ScanSet for `{}` has been populated.'.format(key)
         (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
-                                                                   file_title='unit centroids')
+                                                                   file_title='unit centroids',
+                                                                   channel='#pipeline_quality')
 
     def plot_centroids(self, first_n=None):
         """ Draw masks centroids over the correlation image. Works on a single field/channel

@@ -11,8 +11,7 @@ RUN \
 
 ## --- install pipeline
 COPY . /data/pipeline
-RUN \
-  pip3 install -e pipeline/python/
+RUN pip3 install -e pipeline/python/
 
 RUN git clone https://github.com/atlab/commons.git && \
     pip3 install -e commons/python

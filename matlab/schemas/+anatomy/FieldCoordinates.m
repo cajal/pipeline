@@ -53,7 +53,7 @@ classdef FieldCoordinates < dj.Manual
             % get information from the scans depending on the setup
             if strcmp(setup,'2P4')
                 [x_pos, y_pos, slice_pos, fieldWidths, fieldHeights, fieldWidthsInMicrons, frames, field_num] = ...
-                    fetchn(meso.ScanInfoField * meso.SummaryImagesAverage & keyI & fuse.ScanSet,...
+                    fetchn(meso.ScanInfoField * meso.SummaryImagesAverage & keyI & 'z<300',...
                     'x','y','z','px_width','px_height','um_width','average_image','field');
             else
                 tfp.fliplr = 1;
@@ -150,7 +150,7 @@ classdef FieldCoordinates < dj.Manual
                     'average_image','x_offset','y_offset','tform');
             end
             
-            %  construct image
+            % apply field transformations
             ref_map = ne7.mat.normalize(ref_map.^params.exp);
             if params.inv; ref_map = 1-ref_map;end
             idxX = [];idxY = []; frame = [];
@@ -165,14 +165,25 @@ classdef FieldCoordinates < dj.Manual
                 frame{islice} = self.processImage(imS,'exp',params.exp);
             end
             
-            im = zeros(max([size(ref_map,1) cellfun(@max,idxY)]),...
-                max([size(ref_map,2) cellfun(@max,idxX)]),3);
-            im(1:size(ref_map,1),1:size(ref_map,2),1) = ref_map;
-            for islice = 1:length(frame)
+            % find negetive indexes and expand mask
+            y_range = range([0 size(ref_map,1) cellfun(@min,idxY) cellfun(@max,idxY)])+1;
+            x_range = range([0 size(ref_map,2) cellfun(@min,idxX) cellfun(@max,idxX)])+1;
+            mnX = abs(min([0 cellfun(@min,idxX)]))+1;
+            mnY = abs(min([0 cellfun(@min,idxY)]))+1;
+            idxX = cellfun(@(x) x+mnX,idxX,'uni',0);
+            idxY = cellfun(@(x) x+mnY,idxY,'uni',0);
+            
+            % construct image
+            im = zeros(y_range,x_range,3);
+            im(1+mnY:size(ref_map,1)+mnY,1+mnX:size(ref_map,2)+mnX,1) = ref_map;
+
+            % put frames
+            for islice = 1:length(frames)
                 im(idxY{islice},idxX{islice},2) = ...
                     (im(idxY{islice},idxX{islice},2) + frame{islice});
             end
             im(:,:,2) = ne7.mat.normalize(im(:,:,2));
+            im = im(mnY+(1:size(ref_map,1)),mnX+(1:size(ref_map,2)),:);
             
             % plot
             if ~nargout
@@ -223,7 +234,7 @@ classdef FieldCoordinates < dj.Manual
             % fetch images
             setup = fetch1(experiment.Session & self, 'rig');
             if strcmp(setup,'2P4')
-                [frame,x_offset,y_offset,tform] = fetch1(meso.SummaryImagesAverage * self & fuse.ScanSet,...
+                [frame,x_offset,y_offset,tform] = fetch1(meso.SummaryImagesAverage * self,...
                     'average_image','x_offset','y_offset','tform');
             else
                 [frame,x_offset,y_offset,tform] = fetch1(reso.SummaryImagesAverage * self & fuse.ScanSet,...
@@ -234,11 +245,11 @@ classdef FieldCoordinates < dj.Manual
             imS = self.filterImage(ne7.mat.normalize(frame),tform);            % apply rotation/flips 
             YY = round(y_offset + size(ref_mask,1)/2 - size(imS,1)/2); % convert center coordinates to 0,0 coordinates
             XX = round(x_offset + size(ref_mask,2)/2 - size(imS,2)/2); % convert center coordinates to 0,0 coordinates
-            fmask = ref_mask(YY:size(imS,1)+YY-1,XX:size(imS,2)+XX-1);
+            fmask = ref_mask(YY+1:size(imS,1)+YY-1,XX+1:size(imS,2)+XX-1);
             fmask = self.filterImage(ne7.mat.normalize(fmask),tform,1)>0;
             fmask = fmask(...
-                round(size(fmask,1)/2)-floor(sz(1)/2):round(size(fmask,1)/2)+floor(sz(1)/2)-1,...
-                round(size(fmask,2)/2)-floor(sz(2)/2):round(size(fmask,2)/2)+floor(sz(2)/2)-1);
+                round(size(fmask,1)/2)-floor(sz(1)/2)+1:round(size(fmask,1)/2)+floor(sz(1)/2),...
+                round(size(fmask,2)/2)-floor(sz(2)/2)+1:round(size(fmask,2)/2)+floor(sz(2)/2));
         end
     end
     
