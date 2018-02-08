@@ -44,6 +44,38 @@ class Resolver:
 
 
 @schema
+class MotionCorrection(Resolver, dj.Computed):
+    definition = """ # calcium activity for the whole scan (multiple scan fields)
+    -> experiment.Scan
+    -> shared.PipelineVersion
+    -> shared.Field
+    ---
+    -> Pipe
+    """
+
+    @property
+    def key_source(self):
+        return reso.MotionCorrection().proj() + meso.MotionCorrection().proj()
+
+    @property
+    def mapping(self):
+        return {'reso': (reso.MotionCorrection, MotionCorrection.Reso),
+                'meso': (meso.MotionCorrection, MotionCorrection.Meso)}
+
+    class Reso(dj.Part):
+        definition = """
+        -> reso.MotionCorrection
+        -> master
+        """
+
+    class Meso(dj.Part):
+        definition = """
+        -> meso.MotionCorrection
+        -> master
+        """
+
+
+@schema
 class ScanSet(Resolver, dj.Computed):
     definition = """ # set of units in the same scan
     -> experiment.Scan
@@ -165,37 +197,5 @@ class ScanDone(Resolver, dj.Computed):
     class Meso(dj.Part):
         definition = """
         -> meso.ScanDone
-        -> master
-        """
-
-
-@schema
-class MotionCorrection(Resolver, dj.Computed):
-    definition = """ # calcium activity for the whole scan (multiple scan fields)
-    -> experiment.Scan
-    -> shared.PipelineVersion
-    -> shared.Field
-    ---
-    -> Pipe
-    """
-
-    @property
-    def key_source(self):
-        return reso.MotionCorrection().proj() + meso.MotionCorrection().proj()
-
-    @property
-    def mapping(self):
-        return {'reso': (reso.MotionCorrection, MotionCorrection.Reso),
-                'meso': (meso.MotionCorrection, MotionCorrection.Meso)}
-
-    class Reso(dj.Part):
-        definition = """
-        -> reso.MotionCorrection
-        -> master
-        """
-
-    class Meso(dj.Part):
-        definition = """
-        -> meso.MotionCorrection
         -> master
         """
