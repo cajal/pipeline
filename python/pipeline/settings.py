@@ -5,7 +5,7 @@ import json
 from collections import OrderedDict
 from .exceptions import PipelineException
 import collections
-from pprint import pprint, pformat
+from pprint import pformat
 
 LOCALCONFIG = 'pipeline_config.json'
 GLOBALCONFIG = '.pipeline_config.json'
