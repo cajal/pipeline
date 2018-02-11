@@ -21,9 +21,5 @@ This software is published under the [LGPLv3 license](LICENSE.txt).
 * [scanreader](https://github.com/atlab/scanreader.git)
 * check `requirements.txt` for other libraries
 
-# Howto
-Examples for specific purposes can be found [HOWTO.md](HOWTO.md).
-
-
 # Tutorial 
 Tutorial IPython Notebooks are in [TUTORIAL.md](TUTORIAL.md).
