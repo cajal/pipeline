@@ -1,4 +1,4 @@
-#!/usr/local/bin/python
+#!/usr/local/bin/python3
 from pipeline import reso, meso, fuse, stack, pupil, treadmill
 from pipeline import experiment
 import time
@@ -53,10 +53,10 @@ while True:
             tune.STA().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
             tune.STAQual().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
 
-            #tune.CaMovie().populate(tune_scans, reserve_jobs=True, suppress_errors=True) # needs python>3.5.2
+            tune.CaMovie().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
             tune.Drift().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
             tune.OriDesign().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
-            #tune.OriMap().populate(tune_scans, reserve_jobs=True, suppress_errors=True) # needs python>3.5.2
+            tune.OriMap().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
             tune.Cos2Map().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
             tune.OriMapQuality().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
 
