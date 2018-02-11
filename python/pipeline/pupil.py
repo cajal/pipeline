@@ -1,7 +1,4 @@
-from pprint import pprint
-
 from scipy.misc import imresize
-
 import datajoint as dj
 from datajoint.jobs import key_hash
 from . import experiment, notify
@@ -12,12 +9,6 @@ import numpy as np
 import json
 import os
 from commons import lab
-import sh
-
-try:
-    import pyfnnd
-except ImportError:
-    warn('Could not load pyfnnd.  Oopsi spike inference will fail. Install from https://github.com/cajal/PyFNND.git')
 
 from .utils.eye_tracking import ROIGrabber, PupilTracker, CVROIGrabber
 from pipeline.utils import ts2sec, read_video_hdf5
@@ -45,7 +36,7 @@ class Eye(dj.Imported):
     -> experiment.Scan
     ---
     total_frames                : int       # total number of frames in movie.
-    preview_frames              : longblob  # 16 preview frames 
+    preview_frames              : longblob  # 16 preview frames
     eye_time                    : longblob  # timestamps of each frame in seconds, with same t=0 as patch and ball data
     eye_ts=CURRENT_TIMESTAMP    : timestamp # automatic
     """
@@ -162,7 +153,7 @@ class TrackingTask(dj.Manual):
         # mask for tracking
         -> master
         ---
-        mask        : longblob 
+        mask        : longblob
         """
 
     @staticmethod
@@ -195,7 +186,7 @@ class TrackingTask(dj.Manual):
             else:
                 new_param = dict(DEFAULT_PARAMETERS, **kwargs)
                 print('Those are the tracking parameters')
-                pprint(new_param)
+                print(new_param)
                 new_param = json.dumps(new_param)
                 extra_parameters = input('Do you want to change them? [N/y]')
                 if extra_parameters.lower() == 'y':
@@ -292,7 +283,7 @@ class TrackedVideo(dj.Computed):
             ax[2].set_title('Contrast (frame std)')
             ax[2].set_xlabel('Frames')
             try:
-                sh.mkdir('-p', os.path.expanduser(outdir) + '/{animal_id}/'.format(**key))
+                os.mkdirs(os.path.expanduser(outdir) + '/{animal_id}/'.format(**key), exist_ok=True)
             except:
                 pass
 
