@@ -1,26 +1,20 @@
-from pprint import pprint, pformat
 from random import shuffle
-
 import cv2
-from glob import glob
-
 import io
-
 import imageio
 import numpy as np
 import datajoint as dj
-from commons import lab
 from stimulus import stimulus
 
 
 schema = dj.schema('pipeline_movies', locals())
-from stimulus import stimulus
+
 
 @schema
 class QualityLabel(dj.Lookup):
     definition = """
-    label         : char(4) 
-    --- 
+    label         : char(4)
+    ---
     numeric_label : tinyint
     """
 
@@ -33,7 +27,6 @@ class MovieQualityLabels(dj.Manual):
     ---
     -> QualityLabel
     """
-
     @property
     def unpopulated(self):
         return (stimulus.Movie.Clip() & AvgClipStats() & dict(movie_name='bigrun')) - self
@@ -63,12 +56,9 @@ class MovieQualityLabels(dj.Manual):
             verdict = input('Video quality? [Good, Bad, default=g]: ')
             verdict = 'good' if verdict.lower() in ['', 'g'] else 'bad'
             key = dict(key, label=verdict)
-            print('{}/{}: {}'.format(i+1, n, pformat(key)))
+            print('{}/{}: {}'.format(i+1, n, key))
             self.insert1(key)
         cv2.destroyAllWindows()
-
-
-
 
 
 schema.spawn_missing_classes()
