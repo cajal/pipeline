@@ -73,7 +73,7 @@ classdef OptImageBar < dj.Imported
                         frame_times = frame_times(frame_start:frame_end);
                          
                         % get Data
-                        Data = permute(squeeze(mean(reader(:,:,:,:,frame_start:frame_end),1)),[3 1 2]);
+                        Data = permute(squeeze(mean(reader(:,:,:,1,frame_start:frame_end),1,'native')),[3 1 2]);
 
                     else
                         reader = preprocess.getGalvoReader(key);
@@ -101,14 +101,14 @@ classdef OptImageBar < dj.Imported
                     end
                     
                     % get the vessel image
-                    vessels = squeeze(mean(Data(:,:,:)));
+                    vessels = int16(squeeze(mean(Data(:,:,:))));
             end
             
             % Preprocessing data
             disp 'Preprocessing...'
             
             % DF/F
-            mData = mean(Data);
+            mData = int16(mean(Data));
             Data = bsxfun(@rdivide,bsxfun(@minus,Data,mData),mData);
             
             % loop through axis
@@ -126,8 +126,8 @@ classdef OptImageBar < dj.Imported
                 % find trace segments
                 dataCell = cell(1,length(times));
                 for iTrial = 1:length(times)
-                    dataCell{iTrial} = Data(frame_times>=times{iTrial}(1) & ...
-                        frame_times<times{iTrial}(end),:,:);
+                    dataCell{iTrial} = single(Data(frame_times>=times{iTrial}(1) & ...
+                        frame_times<times{iTrial}(end),:,:));
                 end
                 
                 % remove incomplete trials
@@ -158,8 +158,8 @@ classdef OptImageBar < dj.Imported
                 
                 % save the data
                 disp 'inserting data...'
-                key.amp = imA;
-                key.ang = imP;
+                key.amp = single(imA);
+                key.ang = single(imP);
                 key.pxpitch = pxpitch;
                 if ~isempty(vessels); key.vessels = vessels; end
                 
@@ -200,6 +200,7 @@ classdef OptImageBar < dj.Imported
                 
                 % get data
                 [imP, vessels, imA] = fetch1(obj & keys(ikey),'ang','vessels','amp');
+                vessels = single(vessels);
                 
                 % process image range
                 imP(imP<-3.14) = imP(imP<-3.14) +3.14*2;
