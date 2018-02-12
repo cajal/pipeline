@@ -372,8 +372,8 @@ def parallel_quality_stack(chunks, results):
         results.append((field_idx, mean_intensity, contrast, mean_frame))
 
 
-def parallel_motion_stack(chunks, results, raster_phase, fill_fraction, max_y_shift,
-                          max_x_shift):
+def parallel_motion_stack(chunks, results, raster_phase, fill_fraction, skip_rows,
+                          skip_cols, max_y_shift, max_x_shift):
     """ Compute motion correction shifts to field in scan.
 
     Function to run in each process. Consumes input from chunks and writes results to
@@ -383,6 +383,8 @@ def parallel_motion_stack(chunks, results, raster_phase, fill_fraction, max_y_sh
     :param list results: Where to put results.
     :param float raster_phase: Raster phase used for raster correction.
     :param float fill_fraction: Fill fraction used for raster correction.
+    :param int skip_rows/skip_cols: The number of rows/columss to drop before motion
+        corrections. This needs to be an integer greater than zero.
     :param float max_y_shift/max_x_shift: Maximum shifts allowed in outlier detection.
 
     :returns: (field_id, y_shifts, x_shifts) tuples.
@@ -397,29 +399,34 @@ def parallel_motion_stack(chunks, results, raster_phase, fill_fraction, max_y_sh
 
         print(time.ctime(), 'Processing field:', field_idx)
 
-        # Apply anscombe transform
-        field = field.astype(np.float32, copy=False)
-        field = 2 * np.sqrt(field - np.min(field, axis=(0, 1)) + 3 / 8)
-
         # Correct raster
+        field = field.astype(np.float32, copy=False)
         if abs(raster_phase) > 1e-7:
             field = galvo_corrections.correct_raster(field, raster_phase, fill_fraction)
 
-        # Compute initial template by averaging 10 frames that correlate highly with middle one
-        num_frames = field.shape[-1]
-        frames = field.reshape((-1, num_frames)) # num_pixels x num_frames
+        # Apply anscombe transform
+        field = 2 * np.sqrt(field - field.min() + 3 / 8)
+
+        # Compute correlation matrix between frames (ignoring edges)
+        frames = np.reshape(field[skip_rows:-skip_rows, skip_cols:-skip_cols],
+                            [-1, field.shape[-1]]) # num_pixels x num_frames
         residuals = frames - frames.mean(axis=0)
         frames_std = frames.std(axis=0)
-        covs = np.mean(residuals.T * residuals[:, int(num_frames / 2)], axis=-1)
-        corrs = covs / (frames_std * frames_std[int(num_frames / 2)])
-        selected = np.argsort(corrs)[-10:]
+        covs = np.dot(residuals.T, residuals)
+        corrs = covs / (frames.shape[0] * np.outer(frames_std, frames_std))
+
+        # Compute initial template as the average of 10 highly correlated frames
+        good_frame = corrs.mean(axis=0).argmax() # frame that correlates highly with others
+        selected = np.argsort(corrs[good_frame])[-10:]
         template = ndimage.gaussian_filter(np.mean(field[:, :, selected], axis=-1), 0.6)
 
         # Compute shifts
         for j in range(3):
-            # Compute motion correction shifts
-            y_shifts, x_shifts = galvo_corrections.compute_motion_shifts(field, template,
-                                                           num_threads=1, in_place=False)
+            # Compute motion correction shifts (in the cropped up field)
+            small_field = field[skip_rows: -skip_rows, skip_cols: - skip_cols]
+            small_template = template[skip_rows: -skip_rows, skip_cols: - skip_cols]
+            y_shifts, x_shifts = galvo_corrections.compute_motion_shifts(small_field,
+                                           small_template, num_threads=1, in_place=False)
 
             # Fix outliers
             y_shifts, x_shifts, _ = galvo_corrections.fix_outliers(y_shifts, x_shifts,
@@ -448,7 +455,7 @@ def parallel_correct_stack(chunks, results, raster_phase, fill_fraction, y_shift
     :param float fill_fraction: Fill fraction used for raster correction.
     :param np.array y_shifts: Array with shifts in y for all fields.
     :param np.array x_shifts: Array with shifts in x for all fields
-    :param bool apply_anscombe: Whether to apply anscombe transofrm to the input.
+    :param bool apply_anscombe: Whether to apply anscombe transform to the input.
 
     :returns: (field_id, corrected_field) tuples.
     """
@@ -460,18 +467,20 @@ def parallel_correct_stack(chunks, results, raster_phase, fill_fraction, y_shift
 
         print(time.ctime(), 'Processing field:', field_idx)
 
-        # Apply anscombe transform
-        field = field.astype(np.float32, copy=False)
-        if apply_anscombe:
-            field = 2 * np.sqrt(field - np.min(field, axis=(0, 1)) + 3 / 8)
-
         # Correct raster
+        field = field.astype(np.float32, copy=False)
         if abs(raster_phase) > 1e-7:
             field = galvo_corrections.correct_raster(field, raster_phase, fill_fraction)
 
         # Correct motion
         xy_shifts = np.stack([x_shifts[field_idx], y_shifts[field_idx]])
         corrected = galvo_corrections.correct_motion(field, xy_shifts)
+
+        # Apply anscombe transform
+        if apply_anscombe:
+             corrected = 2 * np.sqrt(corrected - corrected.min() + 3 / 8)
+
+        # Average across time
         averaged = np.mean(corrected, axis=-1) if corrected.ndim > 2 else corrected
 
         # Add to results

@@ -121,14 +121,14 @@ class StitchedROI():
     def height(self):
         y_min = min([slice_.y - slice_.height / 2 for slice_ in self.slices])
         y_max = max([slice_.y + slice_.height / 2 for slice_ in self.slices])
-        y_max -= (y_max - y_min) % 1 # Make sure they add up to an integer value
+        y_max = y_max - (y_max - y_min) % 1 + 1 # Round up to an integer value
         return int(round(y_max - y_min))
 
     @property
     def width(self):
         x_min = min([slice_.x - slice_.width / 2 for slice_ in self.slices])
         x_max = max([slice_.x + slice_.width / 2 for slice_ in self.slices])
-        x_max -= (x_max - x_min) % 1 # Make sure they add up to an integer value
+        x_max = x_max - (x_max - x_min) % 1 + 1 # Round up to an integer value
         return int(round(x_max - x_min))
 
     @property
@@ -229,7 +229,7 @@ class StitchedROI():
 
 
 
-def linear_stitch(left, right, expected_delta_x, expected_delta_y):
+def linear_stitch(left, right, expected_delta_y, expected_delta_x):
     """ Compute offsets to stitch two side-by-side volumes via cross-correlation.
 
     Subpixel shifts are calculated per depth and the median is returned.
@@ -237,10 +237,10 @@ def linear_stitch(left, right, expected_delta_x, expected_delta_y):
     Arguments:
     :param left: Slice (height x width) to be stitched in the left.
     :param right: Slice (height x width) to be stitched in the right.
-    :param float expected_delta_x: Expected distance between center of left to right.
     :param float expected_delta_y: Expected distance between center of left to right.
+    :param float expected_delta_x: Expected distance between center of left to right.
 
-    :returns: (delta_x, delta_y). Distance between center of right ROI and left ROI after
+    :returns: (delta_y, delta_x). Distance between center of right ROI and left ROI after
         stitching (right_center - left_center)
     """
     # Get some params
@@ -271,4 +271,4 @@ def linear_stitch(left, right, expected_delta_x, expected_delta_y):
     delta_y = -(right_ycenter - left_height / 2) # negative to change direction of y axis
     delta_x = right_xcenter - left_width / 2
 
-    return delta_x, delta_y
+    return delta_y, delta_x

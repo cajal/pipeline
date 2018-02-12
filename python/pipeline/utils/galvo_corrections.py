@@ -115,16 +115,20 @@ def compute_motion_shifts(scan, template, in_place=True, num_threads=8):
     return y_shifts, x_shifts
 
 
-def fix_outliers(y_shifts, x_shifts, max_y_shift=15, max_x_shift=15, in_place=True):
+def fix_outliers(y_shifts, x_shifts, max_y_shift=20, max_x_shift=20, method='median'):
     """ Look for spikes in motion shifts and set them to a sensible value.
 
     Reject any shift whose y or x shift is higher than max_y_shift/max_x_shift pixels
-    from the moving average. Outliers filled by interpolating original traces (after
-    skipping all outliers).
+    from the median/moving average. Outliers filled by interpolating original traces
+    (after skipping all outliers).
 
     :param np.array y_shifts/x_shifts: Shifts in y, x.
     :param float max_y_shift/max_x_shifts: Number of pixels used as threshold to classify
         a point as an outlier in y, x.
+    :param string method: One of 'mean' or 'trend'.
+        'mean': Detect outliers as deviations from the median of the shifts.
+        'trend': Detect outliers as deviations from the shift trend computed as a moving
+            average over the entire scan.
 
     :returns: (y_shifts, x_shifts) Two arrays (num_frames) with the fixed motion shifts.
     :returns: (outliers) A boolean array (num_frames) with True for outlier frames.
@@ -132,27 +136,38 @@ def fix_outliers(y_shifts, x_shifts, max_y_shift=15, max_x_shift=15, in_place=Tr
     # Basic checks
     num_frames = len(y_shifts)
     if num_frames < 5:
-        return y_shifts, x_shifts, np.zeros(num_frames, dtype=bool)
-    if not in_place:
-        y_shifts, x_shifts = y_shifts.copy(), x_shifts.copy()
+        return y_shifts, x_shifts, np.full(num_frames, False)
+
+    # Copy shifts to avoid changing originals
+    y_shifts, x_shifts = y_shifts.copy(), x_shifts.copy()
 
     # Get smooth traces
-    window_size = min(101, num_frames)
-    window_size -= 1 if window_size % 2 == 0 else 0
-    y_smooth = mirrconv(y_shifts, np.ones(window_size) / window_size)
-    x_smooth = mirrconv(x_shifts, np.ones(window_size) / window_size)
+    if method == 'median':
+        y_smooth = np.full(num_frames, np.median(y_shifts))
+        x_smooth = np.full(num_frames, np.median(x_shifts))
+    else:
+        window_size = min(101, num_frames)
+        window_size -= 1 if window_size % 2 == 0 else 0
+        y_smooth = mirrconv(y_shifts, np.ones(window_size) / window_size)
+        x_smooth = mirrconv(x_shifts, np.ones(window_size) / window_size)
 
     # Get outliers
     outliers = np.logical_or(abs(y_shifts - y_smooth) > max_y_shift,
                              abs(x_shifts - x_smooth) > max_x_shift)
 
     # Interpolate outliers
-    y_interp = interp.interp1d(np.where(~outliers)[0], y_shifts[~outliers],
-                               bounds_error=False, fill_value=(y_smooth[0], y_smooth[-1]))
-    x_interp = interp.interp1d(np.where(~outliers)[0], x_shifts[~outliers],
-                               bounds_error=False, fill_value=(x_smooth[0], x_smooth[-1]))
-    y_shifts[outliers] = y_interp(np.where(outliers)[0])
-    x_shifts[outliers] = x_interp(np.where(outliers)[0])
+    num_outliers = np.sum(outliers)
+    if num_outliers < num_frames - 1: # at least two good points needed for interpolation
+        y_interp = interp.interp1d(np.where(~outliers)[0], y_shifts[~outliers],
+                                   bounds_error=False, fill_value=(y_smooth[0], y_smooth[-1]))
+        x_interp = interp.interp1d(np.where(~outliers)[0], x_shifts[~outliers],
+                                   bounds_error=False, fill_value=(x_smooth[0], x_smooth[-1]))
+        y_shifts[outliers] = y_interp(np.where(outliers)[0])
+        x_shifts[outliers] = x_interp(np.where(outliers)[0])
+    else:
+        print('Warning: {} out of {} frames were outliers.'.format(num_outliers, num_frames))
+        y_shifts = y_smooth
+        x_shifts = x_smooth
 
     return y_shifts, x_shifts, outliers
 
@@ -183,7 +198,7 @@ def correct_raster(scan, raster_phase, temporal_fill_fraction, in_place=True):
         raise PipelineException('Scan with less than 2 dimensions.')
 
     # Assert scan is float
-    if not np.issubdtype(scan.dtype, np.float):
+    if not np.issubdtype(scan.dtype, np.floating):
          print('Warning: Changing scan type from', str(scan.dtype), 'to np.float32')
          scan = scan.astype(np.float32, copy=(not in_place))
     elif not in_place:
@@ -243,7 +258,7 @@ def correct_motion(scan, xy_shifts, in_place=True):
         raise PipelineException('Scan with less than 2 dimensions.')
 
     # Assert scan is float (integer precision is not good enough)
-    if not np.issubdtype(scan.dtype, np.float):
+    if not np.issubdtype(scan.dtype, np.floating):
         print('Warning: Changing scan type from', str(scan.dtype), 'to np.float32')
         scan = scan.astype(np.float32, copy=(not in_place))
     elif not in_place:
