@@ -46,6 +46,7 @@ class ScanInfo(dj.Imported):
     bidirectional           : boolean           # true = bidirectional scanning
     usecs_per_line          : float             # microseconds per scan line
     fill_fraction           : float             # raster scan temporal fill fraction (see scanimage)
+    valid_depth=false       : boolean           # whether depth has been manually check
     """
 
     @property
@@ -89,6 +90,7 @@ class ScanInfo(dj.Imported):
         tuple_['bidirectional'] = scan.is_bidirectional
         tuple_['usecs_per_line'] = scan.seconds_per_line * 1e6
         tuple_['fill_fraction'] = scan.temporal_fill_fraction
+        tuple_['valid_depth'] = True
 
         # Estimate height and width in microns using measured FOVs for similar setups
         fov_rel = (experiment.FOV() * experiment.Session() * experiment.Scan() & key
@@ -104,11 +106,20 @@ class ScanInfo(dj.Imported):
         # Insert in ScanInfo
         self.insert1(tuple_)
 
+        # Compute field depths with respect to surface
+        surf_z = (experiment.Scan() & key).fetch1('depth')  # surface depth in motor coordinates
+        motor_zero = surf_z - scan.motor_position_at_zero[2]
+        if scan.is_slow_stack and not scan.is_slow_stack_with_fastZ: # using motor
+            # Correct for motor and fastZ pointing in different directions
+            initial_fastZ = scan.initial_secondary_z or 0
+            rel_field_depths = 2 * initial_fastZ - np.array(scan.field_depths)
+        else: # using fastZ
+            rel_field_depths = np.array(scan.field_depths)
+        field_depths = motor_zero + rel_field_depths
+
         # Insert field information
-        z_zero = (experiment.Scan() & key).fetch1('depth')  # true depth at ScanImage's 0
-        for field_id, (field_z, field_offsets) in enumerate(zip(scan.field_depths,
-                                                                scan.field_offsets)):
-            ScanInfo.Field().insert1({**key, 'field': field_id + 1, 'z': z_zero - field_z,
+        for field_id, (field_z, field_offsets) in enumerate(zip(field_depths, scan.field_offsets)):
+            ScanInfo.Field().insert1({**key, 'field': field_id + 1, 'z': field_z,
                                       'delay_image': field_offsets})
 
         # Fill in CorrectionChannel if only one channel
@@ -396,14 +407,11 @@ class MotionCorrection(dj.Computed):
 
         for field_id in range(scan.num_fields):
             print('Correcting motion in field', field_id + 1)
+            field_key = {**key, 'field': field_id + 1}
 
             # Select channel
-            correction_channel = (CorrectionChannel() & key & {'field': field_id + 1})
+            correction_channel = (CorrectionChannel() & field_key)
             channel = correction_channel.fetch1('channel') - 1
-
-            # Create results tuple
-            tuple_ = key.copy()
-            tuple_['field'] = field_id + 1
 
             # Load some frames from middle of scan to compute template
             skip_rows = int(round(px_height * 0.10)) # we discard some rows/cols to avoid edge artifacts
@@ -414,7 +422,7 @@ class MotionCorrection(dj.Computed):
             mini_scan = mini_scan.astype(np.float32, copy=False)
 
             # Correct mini scan
-            correct_raster = (RasterCorrection() & key & {'field': field_id + 1}).get_correct_raster()
+            correct_raster = (RasterCorrection() & field_key).get_correct_raster()
             mini_scan = correct_raster(mini_scan)
 
             # Create template
@@ -426,7 +434,7 @@ class MotionCorrection(dj.Computed):
 
             # Map: compute motion shifts in parallel
             f = performance.parallel_motion_shifts # function to map
-            raster_phase = (RasterCorrection() & key & {'field': field_id + 1}).fetch1('raster_phase')
+            raster_phase = (RasterCorrection() & field_key).fetch1('raster_phase')
             fill_fraction = (ScanInfo() & key).fetch1('fill_fraction')
             kwargs = {'raster_phase': raster_phase, 'fill_fraction': fill_fraction, 'template': template}
             results = performance.map_frames(f, scan, field_id=field_id, y=slice(skip_rows, -skip_rows),
@@ -440,7 +448,7 @@ class MotionCorrection(dj.Computed):
                 x_shifts[frames] = chunk_x_shifts
 
             # Detect outliers
-            max_y_shift, max_x_shift = 15 / (ScanInfo() & key).microns_per_pixel
+            max_y_shift, max_x_shift = 20 / (ScanInfo() & key).microns_per_pixel
             y_shifts, x_shifts, outliers = galvo_corrections.fix_outliers(y_shifts, x_shifts,
                                                                           max_y_shift, max_x_shift)
 
@@ -1173,7 +1181,7 @@ class Fluorescence(dj.Computed):
                                          x=slice(None), channel=channel, kwargs=kwargs)
 
         # Reduce: Concatenate
-        traces = np.zeros(len(mask_ids), scan.num_frames, dtype=np.float32)
+        traces = np.zeros((len(mask_ids), scan.num_frames), dtype=np.float32)
         for frames, chunk_traces in results:
                 traces[:, frames] = chunk_traces
 
@@ -1637,6 +1645,10 @@ class ScanDone(dj.Computed):
     @property
     def target(self):
         return ScanDone.Partial() # trigger make_tuples for fields in Activity that aren't in ScanDone.Partial
+
+    def _job_key(self, key):
+        # Force reservation key to be per scan so diff fields are not run in parallel
+        return {k: v for k, v in key.items() if k not in ['field', 'channel']}
 
     class Partial(dj.Part):
         definition = """ # fields that have been processed in the current scan

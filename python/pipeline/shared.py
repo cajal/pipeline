@@ -87,3 +87,18 @@ class SpikeMethod(dj.Lookup):
         [3, 'stm', 'spike triggered mixture model from Theis et al. (2016)', 'python'],
         [5, 'nmf', 'noise constrained deconvolution from Pnevmatikakis et al. (2016)', 'python']
     ]
+
+@schema
+class RegistrationMethod(dj.Lookup):
+    definition = """
+    registration_method : tinyint                   # method used for registration
+    ---
+    name                : varchar(16)               # short name to identify the registration method
+    details             : varchar(255)              # more details
+    language            : enum('matlab', 'python')  # implementation language
+    """
+
+    contents = [
+        [1, 'rigid', '3-d cross-correlation', 'python'],
+        [2, 'affine', 'exhaustive search of 3-d rotations + cross-correlation', 'python']
+    ]

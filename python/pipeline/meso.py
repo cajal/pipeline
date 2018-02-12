@@ -66,6 +66,7 @@ class ScanInfo(dj.Imported):
         z                   : float         # (um) absolute depth with respect to the surface of the cortex
         delay_image         : longblob      # (ms) delay between the start of the scan and pixels in this field
         roi                 : tinyint       # ROI to which this field belongs
+        valid_depth=false   : boolean       # whether depth has been manually check
         """
 
         def _make_tuples(self, key, scan, field_id):
@@ -75,14 +76,14 @@ class ScanInfo(dj.Imported):
 
             # Get attributes
             x_zero, y_zero, _ = scan.motor_position_at_zero  # motor x, y at ScanImage's 0
-            z_zero = (experiment.Scan() & key).fetch1('depth')  # true z at ScanImage's 0
+            surf_z = (experiment.Scan() & key).fetch1('depth')  # surface depth in fastZ coordinates
             tuple_['px_height'] = scan.field_heights[field_id]
             tuple_['px_width'] = scan.field_widths[field_id]
             tuple_['um_height'] = scan.field_heights_in_microns[field_id]
             tuple_['um_width'] = scan.field_widths_in_microns[field_id]
             tuple_['x'] = x_zero + scan._degrees_to_microns(scan.fields[field_id].x)
             tuple_['y'] = y_zero + scan._degrees_to_microns(scan.fields[field_id].y)
-            tuple_['z'] = z_zero + scan.field_depths[field_id]
+            tuple_['z'] = scan.field_depths[field_id] - surf_z # fastZ only
             tuple_['delay_image'] = scan.field_offsets[field_id]
             tuple_['roi'] = scan.field_rois[field_id][0]
 
@@ -116,6 +117,7 @@ class ScanInfo(dj.Imported):
         tuple_['usecs_per_line'] = scan.seconds_per_line * 1e6
         tuple_['fill_fraction'] = scan.temporal_fill_fraction
         tuple_['nrois'] = scan.num_rois
+        tuple_['valid_depth'] = True
 
         # Insert in ScanInfo
         self.insert1(tuple_)
@@ -307,7 +309,7 @@ class RasterCorrection(dj.Computed):
     @property
     def key_source(self):
         # Run make_tuples once per scan iff correction channel has been set for all fields
-        scans = (ScanInfo() & CorrectionChannel()) - (ScanInfo.Field() - CorrectionChannel())
+        scans = (ScanInfo().proj() & CorrectionChannel()) - (ScanInfo.Field() - CorrectionChannel())
         return scans & {'pipe_version': CURRENT_VERSION}
 
     def _make_tuples(self, key):
@@ -400,13 +402,14 @@ class MotionCorrection(dj.Computed):
 
         for field_id in range(scan.num_fields):
             print('Correcting motion in field', field_id + 1)
+            field_key = {**key, 'field': field_id + 1}
 
             # Get some params
-            field = (ScanInfo.Field() & key & {'field': field_id + 1})
+            field = (ScanInfo.Field() & field_key)
             px_height, px_width = field.fetch1('px_height', 'px_width')
 
             # Select channel
-            correction_channel = (CorrectionChannel() & key & {'field': field_id + 1})
+            correction_channel = (CorrectionChannel() & field_key)
             channel = correction_channel.fetch1('channel') - 1
 
             # Load some frames from middle of scan to compute template
@@ -418,7 +421,7 @@ class MotionCorrection(dj.Computed):
             mini_scan = mini_scan.astype(np.float32, copy=False)
 
             # Correct mini scan
-            correct_raster = (RasterCorrection() & key & {'field': field_id + 1}).get_correct_raster()
+            correct_raster = (RasterCorrection() & field_key).get_correct_raster()
             mini_scan = correct_raster(mini_scan)
 
             # Create template
@@ -430,7 +433,7 @@ class MotionCorrection(dj.Computed):
 
             # Map: compute motion shifts in parallel
             f = performance.parallel_motion_shifts # function to map
-            raster_phase = (RasterCorrection() & key & {'field': field_id + 1}).fetch1('raster_phase')
+            raster_phase = (RasterCorrection() & field_key).fetch1('raster_phase')
             fill_fraction = (ScanInfo() & key).fetch1('fill_fraction')
             kwargs = {'raster_phase': raster_phase, 'fill_fraction': fill_fraction, 'template': template}
             results = performance.map_frames(f, scan, field_id=field_id, y=slice(skip_rows, -skip_rows),
@@ -444,7 +447,7 @@ class MotionCorrection(dj.Computed):
                 x_shifts[frames] = chunk_x_shifts
 
             # Detect outliers
-            max_y_shift, max_x_shift = 15 / (ScanInfo.Field() & key).microns_per_pixel
+            max_y_shift, max_x_shift = 20 / (ScanInfo.Field() & field_key).microns_per_pixel
             y_shifts, x_shifts, outliers = galvo_corrections.fix_outliers(y_shifts, x_shifts,
                                                                           max_y_shift, max_x_shift)
 
@@ -681,7 +684,8 @@ class SummaryImages(dj.Computed):
 
         msg = 'SummaryImages for `{}` has been populated.'.format(key)
         (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
-                                                                   file_title='summary images')
+                                                                   file_title='summary images',
+                                                                   channel='#pipeline_quality')
 
 
 @schema
@@ -1054,7 +1058,8 @@ class Segmentation(dj.Computed):
 
         msg = 'Segmentation for `{}` has been populated.'.format(key)
         (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
-                                                                   file_title='mask contours')
+                                                                   file_title='mask contours',
+                                                                   channel='#pipeline_quality')
 
     @staticmethod
     def reshape_masks(mask_pixels, mask_weights, image_height, image_width):
@@ -1168,7 +1173,7 @@ class Fluorescence(dj.Computed):
                                          x=slice(None), channel=channel, kwargs=kwargs)
 
         # Reduce: Concatenate
-        traces = np.zeros(len(mask_ids), scan.num_frames, dtype=np.float32)
+        traces = np.zeros((len(mask_ids), scan.num_frames), dtype=np.float32)
         for frames, chunk_traces in results:
                 traces[:, frames] = chunk_traces
 
@@ -1274,7 +1279,8 @@ class MaskClassification(dj.Computed):
         msg = 'MaskClassification for `{}` has been populated.\n'.format(key)
         msg += ', '.join('{} {}s'.format(c, n) for c, n in zip(mask_counts, mask_names))
         (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
-                                                                   file_title='mask classes')
+                                                                   file_title='mask classes',
+                                                                   channel='#pipeline_quality')
 
     def plot_masks(self, threshold=0.99):
         """ Draw contours of masks over the correlation image (if available) with different
@@ -1410,7 +1416,8 @@ class ScanSet(dj.Computed):
 
         msg = 'ScanSet for `{}` has been populated.'.format(key)
         (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
-                                                                   file_title='unit centroids')
+                                                                   file_title='unit centroids',
+                                                                   channel='#pipeline_quality')
 
     def plot_centroids(self, first_n=None):
         """ Draw masks centroids over the correlation image. Works on a single field/channel
@@ -1480,7 +1487,6 @@ class ScanSet(dj.Computed):
             xs, ys = units_rel.fetch('px_x', 'px_y', order_by='unit_id')
             centroids = np.stack([xs, ys], axis=1)
         return centroids
-
 
 @schema
 class Activity(dj.Computed):
@@ -1632,6 +1638,10 @@ class ScanDone(dj.Computed):
     @property
     def target(self):
         return ScanDone.Partial()  # trigger make_tuples for fields in Activity that aren't in ScanDone.Partial
+
+    def _job_key(self, key):
+        # Force reservation key to be per scan so diff fields are not run in parallel
+        return {k: v for k, v in key.items() if k not in ['field', 'channel']}
 
     class Partial(dj.Part):
         definition = """ # fields that have been processed in the current scan

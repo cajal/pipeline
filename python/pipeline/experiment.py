@@ -2,7 +2,6 @@ import datajoint as dj
 import pandas as pd
 from . import mice  # needed for referencing
 import numpy as np
-from distutils.version import StrictVersion
 import os
 from commons import lab
 
@@ -364,7 +363,7 @@ class HasFilename:
         scan_path = (Session() & self).fetch1('scan_path')
         local_path = lab.Paths().get_local_path(scan_path)
 
-        scan_name = (self.__class__() & self).fetch1('filename')
+        scan_name = (self.__class__() & self.proj()).fetch1('filename')
         local_filename = os.path.join(local_path, scan_name) + '*.tif'  # all parts
 
         return local_filename
@@ -381,7 +380,7 @@ class Scan(dj.Manual, HasFilename):
     -> BrainArea
     -> Aim
     filename                : varchar(255)          # file base name
-    depth=0                 : int                   # (um) manual depth measurement with respect to the surface of the cortex where fastZ = 0
+    depth=0                 : int                   # (um) manual depth measurement of the cortex surface
     scan_notes              : varchar(4095)         # free-notes
     site_number=0           : tinyint               # site number
     -> Software
@@ -424,6 +423,7 @@ class Stack(dj.Manual):
     -> BrainArea
     -> Aim
     -> Software
+    surf_depth=0            : smallint              # (um) depth of the surface of the cortex
     top_depth               : smallint              # (um) depth at top of the stack
     bottom_depth            : smallint              # (um) depth at bottom of stack
     stack_notes             : varchar(4095)         # free notes
