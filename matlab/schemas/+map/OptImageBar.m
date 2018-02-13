@@ -50,7 +50,7 @@ classdef OptImageBar < dj.Imported
                     vesObj = experiment.Scan - experiment.ScanIgnored & k & 'software = "imager" and aim = "vessels"';
                     if ~isempty(vesObj)
                         keys = fetch( vesObj);
-                        vessels = squeeze(mean(getOpticalData(keys(end))));
+                        vessels = int16(squeeze(mean(getOpticalData(keys(end)))));
                     end
                     pxpitch = 3800/size(Data,2);
                 case 'scanimage'
@@ -115,7 +115,7 @@ classdef OptImageBar < dj.Imported
             [axis,cond_idices] = fetchn(stimulus.FancyBar * (stimulus.Condition & (stimulus.Trial & key)),'axis','condition_hash');
             uaxis = unique(axis);
             for iaxis = 1:length(uaxis)
-                
+                fprintf('Computing %s axis ...', axis{iaxis})
                 key.axis = axis{iaxis};
                 icond = [];
                 icond.condition_hash = cond_idices{strcmp(axis,axis{iaxis})};
@@ -151,7 +151,6 @@ classdef OptImageBar < dj.Imported
                 t = (0:L-1)*T; % time series
                 
                 % do it
-                fprintf('Computing %s axis ...', axis{iaxis})
                 R = exp(2*pi*1i*t*tf)*dataCell;
                 imP = squeeze(reshape((angle(R)),imsize(2),imsize(3)));
                 imA = squeeze(reshape((abs(R)),imsize(2),imsize(3)));
