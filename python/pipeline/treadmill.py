@@ -57,8 +57,9 @@ class Sync(dj.Computed):
         self.notify(key)
 
     def notify(self, key):
-        msg = 'behavior.Sync for `{}` has been populated.'.format(key)
+        msg = 'treadmill.Sync for `{}` has been populated.'.format(key)
         (notify.SlackUser() & (experiment.Session() & key)).notify(msg)
+
 
 
 @schema
@@ -67,7 +68,7 @@ class Treadmill(dj.Computed):
     -> experiment.Scan
     ---
     treadmill_raw                       :longblob           #raw treadmill counts
-    treadmill_vel                       :longblob           #ball velocity integrated over 100ms bins in cm/sec 
+    treadmill_vel                       :longblob           #ball velocity integrated over 100ms bins in cm/sec
     treadmill_time                      :longblob           #timestamps of each sample in seconds on behavior clock
     treadmill_ts = CURRENT_TIMESTAMP    :timestamp          #automatic
     """
@@ -121,5 +122,5 @@ class Treadmill(dj.Computed):
         self.notify({k: key[k] for k in self.heading.primary_key})
 
     def notify(self, key):
-        msg = 'behavior.Treadmill for `{}` has been populated.'.format(key)
+        msg = 'treadmill.Treadmill for `{}` has been populated.'.format(key)
         (notify.SlackUser() & (experiment.Session() & key)).notify(msg)

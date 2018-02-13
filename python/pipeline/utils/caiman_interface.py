@@ -427,7 +427,7 @@ def classify_masks(masks, soma_diameter=(14, 14)):
     masks = coo_matrix(masks)
     soma_radius = np.int32(np.round(np.array(soma_diameter)/2))
 
-    model_path = '/data/CaImAn/use_cases/CaImAnpaper/cnn_model'
+    model_path = '/data/pipeline/python/pipeline/data/cnn_model'
     probs, _ = components_evaluation.evaluate_components_CNN(masks, (image_height, image_width),
                                                              soma_radius, model_name=model_path)
 

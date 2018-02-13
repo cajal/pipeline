@@ -198,7 +198,7 @@ def correct_raster(scan, raster_phase, temporal_fill_fraction, in_place=True):
         raise PipelineException('Scan with less than 2 dimensions.')
 
     # Assert scan is float
-    if not np.issubdtype(scan.dtype, np.float):
+    if not np.issubdtype(scan.dtype, np.floating):
          print('Warning: Changing scan type from', str(scan.dtype), 'to np.float32')
          scan = scan.astype(np.float32, copy=(not in_place))
     elif not in_place:
@@ -258,7 +258,7 @@ def correct_motion(scan, xy_shifts, in_place=True):
         raise PipelineException('Scan with less than 2 dimensions.')
 
     # Assert scan is float (integer precision is not good enough)
-    if not np.issubdtype(scan.dtype, np.float):
+    if not np.issubdtype(scan.dtype, np.floating):
         print('Warning: Changing scan type from', str(scan.dtype), 'to np.float32')
         scan = scan.astype(np.float32, copy=(not in_place))
     elif not in_place:
