@@ -498,6 +498,8 @@ class Stitching(dj.Computed):
     definition = """ # stitches together overlapping rois
 
     -> StackInfo
+    ---
+    y_direction='up'  : enum('up', 'down')  # whether y points upwards or downwards in the coordinate system
     """
     @property
     def key_source(self):
@@ -588,8 +590,7 @@ class Stitching(dj.Computed):
                         # Compute stitching shifts
                         left_ys, left_xs = [], []
                         for l, r in zip(left.slices, right.slices):
-                            delta_y, delta_x = stitching.linear_stitch(l.slice, r.slice,
-                                                                       r.y - l.y, r.x - l.x)
+                            delta_y, delta_x = stitching.linear_stitch(l.slice, r.slice, r.x - l.x)
                             left_ys.append(r.y - delta_y)
                             left_xs.append(r.x - delta_x)
 
@@ -659,15 +660,15 @@ class Stitching(dj.Computed):
 
             # Apply alignment shifts in roi
             for slice_, y_align, x_align in zip(roi.slices, y_detrend, x_detrend):
-                slice_.y += y_align
+                slice_.y -= y_align
                 slice_.x -= x_align
             for roi_coord in roi.roi_coordinates:
-                roi_coord.ys = [prev_y + y_align for prev_y, y_align in zip(roi_coord.ys, y_detrend)]
+                roi_coord.ys = [prev_y - y_align for prev_y, y_align in zip(roi_coord.ys, y_detrend)]
                 roi_coord.xs = [prev_x - x_align for prev_x, x_align in zip(roi_coord.xs, x_detrend)]
 
         # Insert in Stitching
         print('Inserting...')
-        self.insert1(key)
+        self.insert1({**key, 'y_direction': 'down'})
 
         # Insert each stitched volume
         for volume_id, roi in enumerate(rois):
@@ -942,19 +943,14 @@ class FieldRegistration:#(dj.Computed):
     definition = """ # align a 2-d scan field to a stack
     -> RegistrationTask
     ---
-    reg_x       : float         # center of scan in stack coordinates
-    reg_y       : float         # center of scan in stack coordinates
-    reg_z       : float         # depth of scan in stack coordinates
-    yaw         : float         # degrees of rotation over the z axis
-    pitch       : float         # degrees of rotation over the y axis
-    roll        : float         # degrees of rotation over the x axis
-    scan_scaling final commmon_res
-    stack_scaling # how where they scaled before
-    or maybe just common_res
-
-    # Maybe store px_offsets in the rescaled versionn, too (that's more exact)
-
+    reg_x       : float         # (px) center of scan in stack coordinates
+    reg_y       : float         # (px) center of scan in stack coordinates
+    reg_z       : float         # (um) depth of scan in stack coordinates
+    yaw=0       : float         # degrees of rotation over the z axis
+    pitch=0     : float         # degrees of rotation over the y axis
+    roll=0      : float         # degrees of rotation over the x axis
     score       : float         # cross-correlation score (-1 to 1)
+    common_res  : float         # (um/px) common resolution used for registration
     """
     @property
     def key_source(self):
@@ -964,6 +960,7 @@ class FieldRegistration:#(dj.Computed):
     def _make_tuples(self, key):
         from scipy import ndimage
         from skimage import feature
+        import itertools
 
         print('Registering', key)
 
@@ -1003,150 +1000,80 @@ class FieldRegistration:#(dj.Computed):
         estimated_px_z = int(round((field_z - stack_z) / common_res)) # in pixels
 
         # Register
+        z_range = int(round(40 / common_res)) # search 40 microns up and down
         if key['registration_method'] == 1: # rigid
-            # Restrict to relevant part of the scan (50 microns up and down)
-            mini_stack = stack[max(0, estimated_px_z - 50): estimated_px_z + 50 + 1]
+            # Restrict to relevant part of the scan
+            mini_stack = stack[max(0, estimated_px_z - z_range): estimated_px_z + z_range + 1]
 
             # 3-d match_template
             corrs = feature.match_template(mini_stack, np.expand_dims(field, 0), pad_input=True)
             smooth_corrs = ndimage.gaussian_filter(corrs, 0.7)
+            best_score = np.max(smooth_corrs)
             z, y, x = np.unravel_index(np.argmax(smooth_corrs), smooth_corrs.shape)
 
-            # Rewrite depth as stack coordinates (in microns)
-            final_z = stack_z + (z + max(0, estimated_px_z - 50)) * common_res
+            # Rewrite offsets as stack coordinates
+            stack_x, stack_y, stack_z = stack_rel.fetch1('x', 'y', 'z')
+            final_x = stack_x + ((x + 0.5) - mini_stack.shape[2] / 2) * (common_res / stack_res[2]) # in stack pixels
+            final_y = stack_y + ((y + 0.5) - mini_stack.shape[1] / 2) * (common_res / stack_res[1]) # in stack pixels
+            final_z = stack_z + (max(0, estimated_px_z - z_range) + z) * common_res # in microns
 
-            # Rewrite x, y as stack coordinates (pixels)
-            stack_x, stack_y = stack_rel.fetch1('x', 'y')
-            final_x = stack_x - (mini_stack.shape[2] / 2 - (x + 0.5)) * (common_res / stack_res[2])
-            final_y = stack_y - (mini_stack.shape[1] / 2 - (y + 0.5)) * (common_res / stack_res[1])
-
-            self.insert1({**key, 'reg_z': final_z})
-
-            #TODO: 3-d around the expected z (10 microns up and down)
-            # Sizes are different
-            # estimated z is not in the stack range
-            pass
+            self.insert1({**key, 'reg_x': final_x, 'reg_y': final_y, 'reg_z': final_z,
+                          'score': best_score, 'common_res': common_res})
 
         elif key['registration_method'] == 2: # rigid plus 3-d rotation
-            # Deal with estimated z being to close to the top or bottom of the volume (rotations will make it go out)
-            pass
+            max_angle = 5 # max angle in degrees to try for rotations
+
+            # Restrict to relevant part of the scan
+            z_range += rotate_point([stack.shape[2], stack.shape[1], 0], alpha=0,
+                                    beta=-max_angle, gamma=max_angle)[2] # max_z_tilt
+            mini_stack = stack[max(0, estimated_px_z - z_range): estimated_px_z + z_range + 1]
+
+            for alpha, beta, gamma in itertools.product(range(-max_angle, max_angle + 1),
+                                                        range(-max_angle, max_angle + 1),
+                                                        range(-max_angle, max_angle + 1)):
+
+                #Can I compute xtil, y_tilt, z_tilt directly here and do a single cut.
+                # Yes I can: rotate_point([stack.shape[2], stack.shape[1], z_range], alpha, beta, gamma)
+
+                # Restrict to relevant part of the scan
+                z_tilt = rotate_point([mini_stack.shape[2], mini_stack.shape[1], 0],
+                                      alpha, beta, gamma)[2]
+
+
+                # Cut excess after rotation(same amounf on each side)
+
+
+            # Rotate stack to the inverse of an intrinsic yaw->pitch->roll rotation
+            # Note: Rotations happen taking the middle of the stack as (0, 0, 0)
+            for gamma in range(-5, 5): # roll
+                # Apply rotation over z with negative roll
+                for beta in range(-5, 5): # pitch
+                        #Apply rotation voer y with posit
+                    for alpha in range(-5, 5):
+                        # Aplly rotation over x with negative alpha
+                        pass
+
+                   # Cut again to restrict to right part, record center (this is the center around which it will rotate) keep right z in the center
 
 
 
+                    # Cut a bit of the field, if stack ends up being smaller
 
-#        max_z_tilt = rotate_point([stack.shape[2], stack.shape[1], 0], alpha=0, beta=-5, gamma=5)[2]
-#        slack = 50 / commmon_res + max_z_tilt#TODO: + add z_lack here
-#        mini_stack = stack[:estim]
-#
-#        ministack_center # in pixel coordinates
-#        z_center = field_z + 0 if top_z > stack_z else (top_z - stack_z) if top_z < stack_z else 0 # need to account for bottom, too
-#
-#        # Restrict to relevant part of the stack in z (50 microns around estimated z)
-#        estimated_z = (pipe.ScanInfo.Field() & field_key).fetch1('z') - stack_rel.fetch1('z')  # in microns
-#        estimated_z = estimated_z / common_res  # in pixels
-#
-#        # Compute max offset in z dimension after max pitch and roll
-#        rotate_point(())
-#
-#        z_offset = ...
-#        or z_center in stack coordinates
-#
-#        "Where will z be centered now"
-#
-#
-#
-#        # Taper edges of field to avoid artifacts near edges
-#
-#        Oly option:
-#            Do the slicing in original (non-rotated) stack and then preserve the new center through the actual rotations:
-#                Prob: When estimated z is close to the border (say at 10 microns) the center of the cut chunk
-#                    may not be the estimated_z for instance:
-#                        Opt 1. Adding max possible slack up and down. (I could end up with a tack from 0 to 147=10+50+87
-#                        and center is 74 rather than 10). 10 will be chopped up in most orientations.
-#                        Opt 2. only adding the necessary slack according to rotations.  sO for smaller rotations a small slack
-#                                say 24 is added and the final stack will go from 0-84=10+5-0+24(center is 40).
-#                                Kind of still not good enough.
-#                                Kind of like this, it lets it move up to the last place. I would like to be able to cut
-#                                more in the bottom than in the top, that's the main problem.
-#                        Opt 3. Cutting only as much as there is on the other side so the entire final
-#                        stack will be 20 microns height. And a lot of rotations will not work because it goes out of plane.
-#                            this may be alright, though. I
-#
-#
-#                        I add say 10 microns above and 50 below (center at . And
-#                    then when I rotate and cut
-#
-#            Some of this is remedy if I don't add the max possible slack but only the slack for the given rotation, but I
-#            still may end up cutting the right place. (It will appear in smaller rotations, though.
-#            Will it also appear in smaller rotations if adding max possible slack? Yes
-#
-#                Prob 2: if i always add all slack and don't cut it below the no rotation option will be a tack
-#                with height 274 = 87+50+50+87:
-#            Main problem is how to deal with rotations that go out of plane.
-#
-#
-#
-#
-#
-#        slacks = h (length across) * np.tan(angle_in_radians) # angle*np.pi/180
-#
-#
-#
-#        calculate slack
-#
-#        / or * stack_res[0]
-#        get expected z and cut around it
-#        50 mirons plus 2* whatevrer number of pixles gets dropped in the largest rotation
-#
-#        #TODO: Deal with initial z estimate being outside range (as well as being close to the borders)
-#
-#
-#        Map everything to scan
-#        x, y, z in stack coordinates
-#        z
-#
-#        # Rotate stack to the inverse of an intrinsic yaw->pitch->roll rotation
-#        # Note: Rotations happen taking the middle of the stack as (0, 0, 0)
-#        for gamma in range(-5, 5): # roll
-#            # Apply rotation over z with negative roll
-#            for beta in range(-5, 5): # pitch
-#                    #Apply rotation voer y with posit
-#                for alpha in range(-5, 5): yaw:
-#                    # Aplly rotation over x with negative alpha
-#
-#                # Get new ones and keep printing them
-#
-#                # After you rotate cut black spaces and remember how much you cut (at least in z, in x and y it shouldn't matter)
-#
-#                If the final cut doesn't covert the 50 microns up and down it's alright
-#
-#                # Cut a bit of the field, if stack ends up being smaller
+
 #        Crop and record initial center (or maybe not ?)
 #        Rotate and crop 50 microns up and 50 microns down, recording where the initial center ended up,
 #        Measure distance to this (secondly) center, translate back to original coordinate system and voila :)
 #
-#
 #        # Maybe aply pitch and then later cut li9miting to only things inside the volume,
 #        # I'll do will have to record where the thing starts
 #        # Do pitch, cut 50 microns up and down or clip if going below zero or over ut if going over 0-50
-#
-#
-#        # Crop in the center of field to match stack
-#
-#
-#        # How do the 3-d rotations map back to rotating the field (axis is not gonna be through the center of field anymore)
-#        # Or is it?
 #
 #        # !This should work
 #        # For translation , Whatever transltaion I've got will be measure from 0, 0, 0 in the upper right corner,
 #        # do the inverse rotation transform to know where would it be (with zero still ion the upper right corner)
 #        # before any rotation and then proceed as if there were no rotations to compute x, y, z.
 #        # Before just adding it to the stack x, y, z remember to rescale the stack's x-y-z
-#
-##a = np.stack([match_template(stack[i], field) for i in range(stack.shape[0])])
-#b = feature.match_template(stack[:200], np.expand_dims(field, 0)) # does the entire 3-d match_template. Doing it per plane seems faster, though
-#
-#
+
 
 #
 #    @notify.ignore_exceptions
@@ -1156,30 +1083,30 @@ class FieldRegistration:#(dj.Computed):
 #        msg += ' Field found in {}, {}, {} (x, y, z)'.format(reg_x, reg_y, reg_z)
 #        (notify.SlackUser() & (experiment.Session() & key)).notify(msg)
 #
-#    def rotate_point(point, alpha, beta, gamma):
-#        """ Rotate a 3D point using an intrinsic yaw-> pitch-> roll rotation.
-#
-#        We use a right handed coordinate system (x points to the right, y forward, and z
-#        downward) with right-handed/clockwise rotations.
-#
-#        :param float point: Triplet (x, y, z) point.
-#        :param float alpha: Angle in degrees for rotation over z axis in degress (yaw)
-#        :param float beta: Angle in degrees for rotation over y axis in degress (pitch)
-#        :param float gamma: Angle in degrees for rotation over x axis in degress (roll)
-#
-#        :returns: A triplet of the rotated point
-#        """
-#        # Rotation matrix from here:
-#        #    danceswithcode.net/engineeringnotes/rotations_in_3d/rotations_in_3d_part1.html
-#        w, v, u = alpha *np.pi/180, beta * np.pi/180, gamma * np.pi/180 # degrees to radians
-#        sin, cos = np.sin, np.cos
-#        rotation_matrix = [
-#            [cos(v)*cos(w), sin(u)*sin(v)*cos(w) - cos(u)*sin(w), sin(u)*sin(w) + cos(u)*sin(v)*cos(w)],
-#            [cos(v)*sin(w), cos(u)*cos(w) + sin(u)*sin(v)*sin(w), cos(u)*sin(v)*sin(w) - sin(u)*cos(w)],
-#            [-sin(v),       sin(u)*cos(v),                        cos(u)*cos(v)]
-#        ]
-#        return np.dot(rotation_matrix, point)
-#
+    def rotate_point(point, alpha, beta, gamma):
+        """ Rotate a 3D point using an intrinsic yaw-> pitch-> roll rotation.
+
+        We use a right handed coordinate system (x points to the right, y forward, and z
+        downward) with right-handed/clockwise rotations.
+
+        :param float point: Triplet (x, y, z) point.
+        :param float alpha: Angle in degrees for rotation over z axis in degress (yaw)
+        :param float beta: Angle in degrees for rotation over y axis in degress (pitch)
+        :param float gamma: Angle in degrees for rotation over x axis in degress (roll)
+
+        :returns: A triplet. The rotated point.
+        """
+        # Rotation matrix from here:
+        #    danceswithcode.net/engineeringnotes/rotations_in_3d/rotations_in_3d_part1.html
+        w, v, u = alpha *np.pi/180, beta * np.pi/180, gamma * np.pi/180 # degrees to radians
+        sin, cos = np.sin, np.cos
+        rotation_matrix = [
+            [cos(v)*cos(w), sin(u)*sin(v)*cos(w) - cos(u)*sin(w), sin(u)*sin(w) + cos(u)*sin(v)*cos(w)],
+            [cos(v)*sin(w), cos(u)*cos(w) + sin(u)*sin(v)*sin(w), cos(u)*sin(v)*sin(w) - sin(u)*cos(w)],
+            [-sin(v),       sin(u)*cos(v),                        cos(u)*cos(v)]
+        ]
+        return np.dot(rotation_matrix, point)
+
 
 # TODO: Add this in shared
 #class SegmentationMethod(dj.Lookup):
