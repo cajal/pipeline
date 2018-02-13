@@ -1,16 +1,29 @@
+from itertools import count
+from pprint import pprint
+
 from scipy.misc import imresize
 import datajoint as dj
 from datajoint.jobs import key_hash
+from tqdm import tqdm
+
 from . import experiment, notify
 from .exceptions import PipelineException
 
 from warnings import warn
+import cv2
 import numpy as np
 import json
 import os
 from commons import lab
+import sh
+from datajoint.autopopulate import AutoPopulate
 
-from .utils.eye_tracking import ROIGrabber, PupilTracker, CVROIGrabber
+try:
+    import pyfnnd
+except ImportError:
+    warn('Could not load pyfnnd.  Oopsi spike inference will fail. Install from https://github.com/cajal/PyFNND.git')
+
+from .utils.eye_tracking import ROIGrabber, PupilTracker, CVROIGrabber, ManualTracker
 from pipeline.utils import ts2sec, read_video_hdf5
 from . import config
 
@@ -25,7 +38,9 @@ DEFAULT_PARAMETERS = dict(relative_area_threshold=0.002,
                           speed_threshold=0.1,
                           dr_threshold=0.1,
                           gaussian_blur=5,
-                          extreme_meso=0)
+                          extreme_meso=0,
+                          running_avg=0.4,
+                          exponent=9)
 
 
 @schema
@@ -353,3 +368,104 @@ class TrackedVideo(dj.Computed):
 
         cap.release()
         cv2.destroyAllWindows()
+
+
+@schema
+class ManuallyTrackedContours(dj.Manual, AutoPopulate):
+    definition = """
+    -> Eye
+    ---
+    tracking_ts=CURRENT_TIMESTAMP    : timestamp  # automatic
+    """
+
+    class Frame(dj.Part):
+        definition = """
+        -> master
+        frame_id                 : int           # frame id with matlab based 1 indexing
+        ---
+        contour=NULL             : longblob      # eye contour relative to ROI
+        """
+
+    def make(self, key):
+        print("Populating", key)
+
+        avi_path = (Eye() & key).get_video_path()
+
+        tracker = ManualTracker(avi_path)
+        tracker.run()
+        self.insert1(key)
+        frames = []
+        frame = self.Frame()
+        for frame_id, ok, contour in tqdm(zip(count(), tracker.contours_detected, tracker.contours),
+                                          total=len(tracker.contours)):
+            if ok:
+                frame.insert1(dict(key, frame_id=frame_id, contour=contour))
+            else:
+                frame.insert1(dict(key, frame_id=frame_id))
+
+
+@schema
+class FittedContour(dj.Computed):
+    definition = """
+    -> ManuallyTrackedContours
+    ---
+    tracking_ts=CURRENT_TIMESTAMP    : timestamp  # automatic
+    """
+
+    class Ellipse(dj.Part):
+        definition = """
+        -> master
+        frame_id                 : int           # frame id with matlab based 1 indexing
+        ---
+        center=NULL              : tinyblob      # center of the ellipse in (x, y) of image
+        major_r=NULL             : float         # major radius of the ellipse
+        """
+
+    def display_frame_number(self, img, frame_number, n_frames):
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        fs = .7
+        cv2.putText(img, "[{fr_count:05d}/{frames:05d}]".format(
+            fr_count=frame_number, frames=n_frames),
+                    (10, 30), font, fs, (255, 144, 30), 2)
+
+    def make(self, key):
+        print("Populating", key)
+
+        avi_path = (Eye() & key).get_video_path()
+
+        contours = (ManuallyTrackedContours.Frame() & key).fetch(order_by='frame_id ASC', as_dict=True)
+        self._cap = cap = cv2.VideoCapture(avi_path)
+
+        frame_number = 0
+        n_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        while cap.isOpened():
+            if frame_number >= n_frames - 1:
+                print("Reached end of videofile ", avi_path)
+                break
+
+            ret, frame = self._cap.read()
+            ckey = contours[frame_number]
+            if ret and frame is not None and ckey['contour'] is not None:
+                if ckey['contour'] is not None and len(ckey['contour']) >= 5:
+                    contour = ckey['contour']
+                    center = contour.mean(axis=0)
+                    cv2.drawContours(frame, [contour], -1, (0, 255, 0), 1)
+                    cv2.circle(frame, tuple(center.squeeze().astype(int)), 4, (0, 165, 255), -1)
+                    ellipse = cv2.fitEllipse(contour)
+                    cv2.ellipse(frame, ellipse, (255, 0, 255), 2)
+                    ecenter = ellipse[0]
+                    cv2.circle(frame, tuple(map(int, ecenter)), 5, (255, 165, 0), -1)
+                    ckey['center'] = np.array(ecenter, dtype=np.float32)
+                    ckey['major_r'] = max(ellipse[1])
+                self.display_frame_number(frame, frame_number, n_frames)
+                cv2.imshow('Sauron', frame)
+                if (cv2.waitKey(5) & 0xFF) == ord('q'):
+                    break
+            frame_number += 1
+        cap.release()
+        cv2.destroyAllWindows()
+
+        self.insert1(key)
+        for ckey in tqdm(contours):
+            self.Ellipse().insert1(ckey, ignore_extra_fields=True)
+
