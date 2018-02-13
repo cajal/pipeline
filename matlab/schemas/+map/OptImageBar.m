@@ -27,6 +27,11 @@ classdef OptImageBar < dj.Imported
             end
             frame_times =fetch1(stimulus.Sync & key,'frame_times');
             
+            % get stimulus limits
+            times  = fetchn(stimulus.Trial & stimulus.FancyBar & key,'flip_times');
+            mn = min(cell2mat(times'));
+            mx = max(cell2mat(times'));
+            
             % get scan info
             [name, path, software, setup] = fetch1( experiment.Scan * experiment.Session & key ,...
                 'filename','scan_path','software','rig');
@@ -45,7 +50,7 @@ classdef OptImageBar < dj.Imported
                     vesObj = experiment.Scan - experiment.ScanIgnored & k & 'software = "imager" and aim = "vessels"';
                     if ~isempty(vesObj)
                         keys = fetch( vesObj);
-                        vessels = squeeze(mean(getOpticalData(keys(end))));
+                        vessels = int16(squeeze(mean(getOpticalData(keys(end)))));
                     end
                     pxpitch = 3800/size(Data,2);
                 case 'scanimage'
@@ -55,9 +60,21 @@ classdef OptImageBar < dj.Imported
                         path = getLocalPath(fullfile(path, sprintf('%s*.tif', name)));
                         reader = ne7.scanreader.readscan(path,'int16',1);
                         pxpitch = reader.fieldHeightsInMicrons(1)/reader.fieldHeights(1);
-                        Data = permute(squeeze(mean(reader(:,:,:,:,:),1)),[3 1 2]);
+                        
                         data_fs = reader.fps;
                         nslices = reader.nScanningDepths;
+                        
+                        % get frame times and remove slices
+                        frame_times = frame_times(1:nslices:end);
+                        
+                        % build frame index to get only revelant Data
+                        frame_start = find(frame_times>=mn,1,'first');
+                        frame_end = find(frame_times>mx,1,'first');
+                        frame_times = frame_times(frame_start:frame_end);
+                         
+                        % get Data
+                        Data = permute(squeeze(mean(reader(:,:,:,1,frame_start:frame_end),1,'native')),[3 1 2]);
+
                     else
                         reader = preprocess.getGalvoReader(key);
                         
@@ -77,25 +94,28 @@ classdef OptImageBar < dj.Imported
                         um_height = fetch1(fov & struct('mag', mag), 'height');
                         um_height = um_height * mag/zoom * slowScanMultiplier;
                         pxpitch = um_height/px_height;
+                        
+                        % fix frame times
+                        frame_times = frame_times(1:nslices:end);
+                        frame_times = frame_times(1:size(Data,1));
                     end
                     
-                    % fix frame times
-                    frame_times = frame_times(1:nslices:end);
-                    frame_times = frame_times(1:size(Data,1));
-                    
                     % get the vessel image
-                    vessels = squeeze(mean(Data(:,:,:)));
+                    vessels = int16(squeeze(mean(Data(:,:,:))));
             end
             
+            % Preprocessing data
+            disp 'Preprocessing...'
+            
             % DF/F
-            mData = mean(Data);
+            mData = int16(mean(Data));
             Data = bsxfun(@rdivide,bsxfun(@minus,Data,mData),mData);
             
             % loop through axis
             [axis,cond_idices] = fetchn(stimulus.FancyBar * (stimulus.Condition & (stimulus.Trial & key)),'axis','condition_hash');
             uaxis = unique(axis);
             for iaxis = 1:length(uaxis)
-                
+                fprintf('Computing %s axis ...', axis{iaxis})
                 key.axis = axis{iaxis};
                 icond = [];
                 icond.condition_hash = cond_idices{strcmp(axis,axis{iaxis})};
@@ -106,8 +126,8 @@ classdef OptImageBar < dj.Imported
                 % find trace segments
                 dataCell = cell(1,length(times));
                 for iTrial = 1:length(times)
-                    dataCell{iTrial} = Data(frame_times>=times{iTrial}(1) & ...
-                        frame_times<times{iTrial}(end),:,:);
+                    dataCell{iTrial} = single(Data(frame_times>=times{iTrial}(1) & ...
+                        frame_times<times{iTrial}(end),:,:));
                 end
                 
                 % remove incomplete trials
@@ -131,15 +151,14 @@ classdef OptImageBar < dj.Imported
                 t = (0:L-1)*T; % time series
                 
                 % do it
-                disp 'computing...'
                 R = exp(2*pi*1i*t*tf)*dataCell;
                 imP = squeeze(reshape((angle(R)),imsize(2),imsize(3)));
                 imA = squeeze(reshape((abs(R)),imsize(2),imsize(3)));
                 
                 % save the data
                 disp 'inserting data...'
-                key.amp = imA;
-                key.ang = imP;
+                key.amp = single(imA);
+                key.ang = single(imP);
                 key.pxpitch = pxpitch;
                 if ~isempty(vessels); key.vessels = vessels; end
                 
@@ -180,6 +199,7 @@ classdef OptImageBar < dj.Imported
                 
                 % get data
                 [imP, vessels, imA] = fetch1(obj & keys(ikey),'ang','vessels','amp');
+                vessels = single(vessels);
                 
                 % process image range
                 imP(imP<-3.14) = imP(imP<-3.14) +3.14*2;
@@ -323,8 +343,8 @@ classdef OptImageBar < dj.Imported
                 end
             end
             
-        end   
-
+        end
+        
     end
     
 end
