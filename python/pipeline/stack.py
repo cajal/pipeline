@@ -98,7 +98,7 @@ class StackInfo(dj.Imported):
                 tuple_['roi_um_width'] = stack.field_widths_in_microns[field_ids[0]]
             else:
                 tuple_['roi_x'] = x_zero
-                tuple_['roi_y'] = y_zero
+                tuple_['roi_y'] = y_zero #TODO: Add sign flip if ys in reso point upwards
                 tuple_['roi_px_height'] = stack.image_height
                 tuple_['roi_px_width'] = stack.image_width
 
@@ -917,89 +917,123 @@ class RegistrationTask(dj.Manual):
 
 
 #@schema
-#class FieldRegistration(dj.Computed):
-#    """
-#    Note: We stick with this conventions to define rotations:
-#    http://danceswithcode.net/engineeringnotes/rotations_in_3d/rotations_in_3d_part1.html
-#
-#    "To summarize, we will employ a Tait-Bryan Euler angle convention using active,
-#    intrinsic rotations around the axes in the order z-y-x". We use a right-handed
-#    coordinate system (x points to the right, y points forward and z points downwards)
-#    with right-handed/clockwise rotations.
-#
-#    To register the field to the stack:
-#        1. Scale the field & stack to have isotropic pixels & voxels that match the lowest
-#            pixels-per-microns resolution among the two.
-#        2. Rotate the field over x -> y -> z (extrinsic roll->pitch->yaw is equivalent to
-#            an intrinsic yaw->pitch-roll rotation) using clockwise rotations and taking
-#            center of the field as (0, 0, 0).
-#        3. Translate to final x, y, z position (accounting for the previous scaling).
-#
-#        Scale the Scale the stack to have the same pixels/micron as the lowest pixels/microns in
-#    To register apply an intrisict yaw pitch roll transformation or equivalently, apply a
-#    roll pitch yaw extrinsic transformation and the move the center of the FOV to the
-#    """
-#    definition = """ # align a 2-d scan field to a stack
-#    -> RegistrationTask
-#    ---
-#    reg_x       : float         # center of scan in stack coordinates
-#    reg_y       : float         # center of scan in stack coordinates
-#    reg_z       : float         # depth of scan in stack coordinates
-#    yaw         : float         # degrees of rotation over the z axis
-#    pitch       : float         # degrees of rotation over the y axis
-#    roll        : float         # degrees of rotation over the x axis
-#    scan_scaling
-#    stack_scaling # how where they scaled before
-#    or maybe just common_res
-#
-#    # Maybe store px_offsets in the rescaled versionn, too (that's more exact)
-#
-#    score       : float         # cross-correlation score (-1 to 1)
-#    """
-#    @property
-#    def key_source(self):
-#        processed_fields = (reso.SummaryImages() + meso.SummaryImages()).proj('session -> scan_session')
-#        return RegistrationTask() & processed_fields & {'pipe_version': CURRENT_VERSION}
-#
-#    def _make_tuples(self, key):
-#        from scipy import ndimage
-#
-#        print('Registering', key)
-#
-#        # Get stack
-#        stack_rel = (CorrectedStack() & key & {'session': key['stack_session']})
-#        stack = stack_rel.get_stack(key['stack_channel'])
-#
-#        # Get average field
-#        field_key = {'animal_id': key['animal_id'], 'session': key['scan_session'],
-#                     'scan_idx': key['scan_idx'], 'field': key['field'],
-#                     'channel': key['scan_channel']} # no pipe_version
-#        pipe = reso if reso.ScanInfo() & field_key else meso if meso.ScanInfo() & field_key else None
-#        field = (pipe.SummaryImages.Average() & field_key).fetch1('average_image')
-#
-#        # Drop some edges (only y and x) to avoid artifacts (and black edges in stacks)
-#        skip_dims = np.clip(np.round(np.array(stack.shape) * 0.025), 1, None).astype(int)
-#        stack = stack[:, skip_dims[1] : -skip_dims[1], skip_dims[2]: -skip_dims[2]]
-#        skip_dims = np.clip(np.round(np.array(field.shape) * 0.025), 1, None).astype(int)
-#        field = field[skip_dims[0] : -skip_dims[0], skip_dims[1]: -skip_dims[1]]
-#
-#        # Rescale to match lowest resolution  (isotropic pixels/voxels)
-#        field_res = ((reso.ScanInfo() & field_key).microns_per_pixel if pipe == reso else
-#                     (meso.ScanInfo.Field() & field_key).microns_per_pixel)
-#        dims = stack_rel.fetch1('um_depth', 'px_depth', 'um_height', 'px_height',
-#                                'um_width', 'px_width')
-#        stack_res = np.array([dims[0] / dims[1], dims[2] / dims[3], dims[4] / dims[5]])
-#        common_res = max(*field_res, *stack_res) # minimum available resolution
-#        stack = ndimage.zoom(stack, stack_res / common_res, order=1)
-#        field = ndimage.zoom(field, field_res / common_res, order=1)
-#
-#        # Restrict to relevant part of the stack in z
-#        stack_z = stack_rel.fetch1('z') # z of the first slice (zero is at surface depth)
-#        field_z = (pipe.ScanInfo.Field() & field_key).fetch1('z') # measured in microns (zero is at surface depth)
-#        if field_z < stack_z or field_z > stack_z + dims[0]:
-#            print('Warning: Estimated depth ({}) outside stack range ({}-{}).'.format(field_z, stack_z , stack_z + dims[0]))
-#
-#        estimated_z = int(round((field_z - stack_z) / common_res)) # in pixels
+class FieldRegistration:#(dj.Computed):
+    """
+    Note: We stick with this conventions to define rotations:
+    http://danceswithcode.net/engineeringnotes/rotations_in_3d/rotations_in_3d_part1.html
+
+    "To summarize, we will employ a Tait-Bryan Euler angle convention using active,
+    intrinsic rotations around the axes in the order z-y-x". We use a right-handed
+    coordinate system (x points to the right, y points forward and z points downwards)
+    with right-handed/clockwise rotations.
+
+    To register the field to the stack:
+        1. Scale the field & stack to have isotropic pixels & voxels that match the lowest
+            pixels-per-microns resolution among the two.
+        2. Rotate the field over x -> y -> z (extrinsic roll->pitch->yaw is equivalent to
+            an intrinsic yaw->pitch-roll rotation) using clockwise rotations and taking
+            center of the field as (0, 0, 0).
+        3. Translate to final x, y, z position (accounting for the previous scaling).
+
+        Scale the Scale the stack to have the same pixels/micron as the lowest pixels/microns in
+    To register apply an intrisict yaw pitch roll transformation or equivalently, apply a
+    roll pitch yaw extrinsic transformation and the move the center of the FOV to the
+    """
+    definition = """ # align a 2-d scan field to a stack
+    -> RegistrationTask
+    ---
+    reg_x       : float         # center of scan in stack coordinates
+    reg_y       : float         # center of scan in stack coordinates
+    reg_z       : float         # depth of scan in stack coordinates
+    yaw         : float         # degrees of rotation over the z axis
+    pitch       : float         # degrees of rotation over the y axis
+    roll        : float         # degrees of rotation over the x axis
+    scan_scaling final commmon_res
+    stack_scaling # how where they scaled before
+    or maybe just common_res
+
+    # Maybe store px_offsets in the rescaled versionn, too (that's more exact)
+
+    score       : float         # cross-correlation score (-1 to 1)
+    """
+    @property
+    def key_source(self):
+        processed_fields = (reso.SummaryImages() + meso.SummaryImages()).proj('session -> scan_session')
+        return RegistrationTask() & processed_fields & {'pipe_version': CURRENT_VERSION}
+
+    def _make_tuples(self, key):
+        from scipy import ndimage
+        from skimage import feature
+
+        print('Registering', key)
+
+        # Get stack
+        stack_rel = (CorrectedStack() & key & {'session': key['stack_session']})
+        stack = stack_rel.get_stack(key['stack_channel'])
+
+        # Get average field
+        field_key = {'animal_id': key['animal_id'], 'session': key['scan_session'],
+                     'scan_idx': key['scan_idx'], 'field': key['field'],
+                     'channel': key['scan_channel']} # no pipe_version
+        pipe = reso if reso.ScanInfo() & field_key else meso if meso.ScanInfo() & field_key else None
+        field = (pipe.SummaryImages.Average() & field_key).fetch1('average_image')
+
+        # Drop some edges (only y and x) to avoid artifacts (and black edges in stacks)
+        skip_dims = np.clip(np.round(np.array(stack.shape) * 0.025), 1, None).astype(int)
+        stack = stack[:, skip_dims[1] : -skip_dims[1], skip_dims[2]: -skip_dims[2]]
+        skip_dims = np.clip(np.round(np.array(field.shape) * 0.025), 1, None).astype(int)
+        field = field[skip_dims[0] : -skip_dims[0], skip_dims[1]: -skip_dims[1]]
+
+        # Rescale to match lowest resolution  (isotropic pixels/voxels)
+        field_res = ((reso.ScanInfo() & field_key).microns_per_pixel if pipe == reso else
+                     (meso.ScanInfo.Field() & field_key).microns_per_pixel)
+        dims = stack_rel.fetch1('um_depth', 'px_depth', 'um_height', 'px_height',
+                                'um_width', 'px_width')
+        stack_res = np.array([dims[0] / dims[1], dims[2] / dims[3], dims[4] / dims[5]])
+        common_res = max(*field_res, *stack_res) # minimum available resolution
+        stack = ndimage.zoom(stack, stack_res / common_res, order=1)
+        field = ndimage.zoom(field, field_res / common_res, order=1)
+
+        # Get estimated depth of the field (from experimenters)
+        stack_z = stack_rel.fetch1('z') # z of the first slice (zero is at surface depth)
+        field_z = (pipe.ScanInfo.Field() & field_key).fetch1('z') # measured in microns (zero is at surface depth)
+        if field_z < stack_z or field_z > stack_z + dims[0]:
+            msg_template = 'Warning: Estimated depth ({}) outside stack range ({}-{}).'
+            print(msg_template.format(field_z, stack_z , stack_z + dims[0]))
+        estimated_px_z = int(round((field_z - stack_z) / common_res)) # in pixels
+
+        # Register
+        if key['registration_method'] == 1: # rigid
+            # Restrict to relevant part of the scan (50 microns up and down)
+            mini_stack = stack[max(0, estimated_px_z - 50): estimated_px_z + 50 + 1]
+
+            # 3-d match_template
+            corrs = feature.match_template(mini_stack, np.expand_dims(field, 0), pad_input=True)
+            smooth_corrs = ndimage.gaussian_filter(corrs, 0.7)
+            z, y, x = np.unravel_index(np.argmax(smooth_corrs), smooth_corrs.shape)
+
+            # Rewrite depth as stack coordinates (in microns)
+            final_z = stack_z + (z + max(0, estimated_px_z - 50)) * common_res
+
+            # Rewrite x, y as stack coordinates (pixels)
+            stack_x, stack_y = stack_rel.fetch1('x', 'y')
+            final_x = stack_x - (mini_stack.shape[2] / 2 - (x + 0.5)) * (common_res / stack_res[2])
+            final_y = stack_y - (mini_stack.shape[1] / 2 - (y + 0.5)) * (common_res / stack_res[1])
+
+            self.insert1({**key, 'reg_z': final_z})
+
+            #TODO: 3-d around the expected z (10 microns up and down)
+            # Sizes are different
+            # estimated z is not in the stack range
+            pass
+
+        elif key['registration_method'] == 2: # rigid plus 3-d rotation
+            # Deal with estimated z being to close to the top or bottom of the volume (rotations will make it go out)
+            pass
+
+
+
+
 #        max_z_tilt = rotate_point([stack.shape[2], stack.shape[1], 0], alpha=0, beta=-5, gamma=5)[2]
 #        slack = 50 / commmon_res + max_z_tilt#TODO: + add z_lack here
 #        mini_stack = stack[:estim]
@@ -1113,16 +1147,7 @@ class RegistrationTask(dj.Manual):
 #b = feature.match_template(stack[:200], np.expand_dims(field, 0)) # does the entire 3-d match_template. Doing it per plane seems faster, though
 #
 #
-#        # Register
-#        if key['registration_method'] == 1: # rigid
-#            #TODO: 3-d around the expected z (10 microns up and down)
-#            # Sizes are different
-#            # estimated z is not in the stack range
-#            pass
-#
-#        elif key['registration_method'] == 2: # rigid plus 3-d rotation
-#            # Deal with estimated z being to close to the top or bottom of the volume (rotations will make it go out)
-#            pass
+
 #
 #    @notify.ignore_exceptions
 #    def notify(self, key):
