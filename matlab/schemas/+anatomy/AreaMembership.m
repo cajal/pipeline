@@ -9,7 +9,7 @@
 classdef AreaMembership <  dj.Computed
     
     properties
-        keySource = proj(experiment.Scan) * shared.SegmentationMethod * shared.PipelineVersion & fuse.ScanDone & anatomy.AreaMask
+        keySource = proj(experiment.Scan) *  proj(shared.SegmentationMethod) *  proj(shared.PipelineVersion) & fuse.ScanDone & anatomy.AreaMask
     end
     
     methods(Access=protected)
@@ -35,6 +35,7 @@ classdef AreaMembership <  dj.Computed
                         fetchn((meso.ScanSetUnitInfo & (fuse.ScanSetUnit & field_key)) * ...
                         proj(meso.ScanInfoField & field_key,'px_height','px_width'),...
                         'px_x','px_y');
+                    keys = rmfield(keys,'field');
                 else
                     [px_width, px_height, keys] = ...
                         fetchn((reso.ScanSetUnitInfo & (fuse.ScanSetUnit & field_key)) * ...
@@ -46,7 +47,7 @@ classdef AreaMembership <  dj.Computed
                 for imask = 1:length(keys)
                     % get mask position
                     area_idx = area_mask(round(px_height(imask)),round(px_width(imask)));
-                    tuple = rmfield(keys(imask),'field');
+                    tuple = keys(imask);
                     if area_idx>0
                         tuple.brain_area = areas{area_idx};
                     else

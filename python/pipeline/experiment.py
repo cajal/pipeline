@@ -2,7 +2,6 @@ import datajoint as dj
 import pandas as pd
 from . import mice  # needed for referencing
 import numpy as np
-from distutils.version import StrictVersion
 import os
 from commons import lab
 

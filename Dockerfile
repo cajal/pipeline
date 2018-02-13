@@ -4,16 +4,13 @@ LABEL maintainer="Edgar Y. Walker, Fabian Sinz, Erick Cobos"
 
 WORKDIR /data
 
-# --- install scanreader
-RUN \
-  git clone https://github.com/atlab/scanreader.git && \
-  pip3 install -e scanreader
+# Install commons
+RUN git clone https://github.com/atlab/commons.git && \
+    pip3 install commons/python && \
+    rm -r commons
 
-## --- install pipeline
+# Install pipeline
 COPY . /data/pipeline
 RUN pip3 install -e pipeline/python/
-
-RUN git clone https://github.com/atlab/commons.git && \
-    pip3 install -e commons/python
 
 ENTRYPOINT ["python3", "/data/pipeline/python/scripts/populate-minion.py"]
