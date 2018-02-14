@@ -15,7 +15,7 @@ else: # import worked fine
 while True:
     # Scans
     for priority in range(120, -130, -10): # highest to lowest priority
-        next_scans = experiment.AutoProcessing() - experiment.ScanIgnored() & 'priority > {}'.format(priority)
+        next_scans = experiment.AutoProcessing() & 'priority > {}'.format(priority)
 
         # pupil
         pupil.Eye().populate(next_scans, reserve_jobs=True, suppress_errors=True)
