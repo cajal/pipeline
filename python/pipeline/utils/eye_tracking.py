@@ -1,4 +1,6 @@
 from collections import defaultdict
+from itertools import count
+
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
@@ -186,6 +188,7 @@ class PupilTracker:
         self._radius = None
         self._mask = mask
         self._last_detection = 1
+        self._last_ellipse = None
 
     @staticmethod
     def goodness_of_fit(contour, ellipse):
@@ -219,8 +222,9 @@ class PupilTracker:
         err = np.inf
         best_ellipse = None
         best_contour = None
-        results, cond = defaultdict(list), defaultdict(list)
         kernel = np.ones((3, 3))
+
+        results, cond = defaultdict(list), defaultdict(list)
         for j, cnt in enumerate(contours):
 
             mask2 = cv2.erode(mask, kernel, iterations=1)
@@ -305,13 +309,15 @@ class PupilTracker:
 
         # Manual meso settins
         if 'extreme_meso' in self._params and self._params['extreme_meso']:
-            c = 0.1
-            p = 7
+            c = self._params['running_avg']
+            p = self._params['exponent']
             if self._running_avg is None:
-                self._running_avg = np.array(small_gray) ** p
+                self._running_avg = np.array(small_gray / 255) ** p * 255
             else:
-                self._running_avg = c * np.array(small_gray) ** p + (1 - c) * self._running_avg
-                small_gray += self._running_avg.astype(np.uint8) - small_gray  # big hack
+                self._running_avg = c * np.array(small_gray / 255) ** p * 255 + (1 - c) * self._running_avg
+                small_gray = self._running_avg.astype(np.uint8)
+                cv2.imshow('power', small_gray)
+                # small_gray += self._running_avg.astype(np.uint8) - small_gray  # big hack
         # --- mesosetting end
 
         blur = cv2.GaussianBlur(small_gray, (2 * h + 1, 2 * h + 1), 0)  # play with blur
@@ -324,12 +330,13 @@ class PupilTracker:
                 eye_center=None,
                 font=cv2.FONT_HERSHEY_SIMPLEX):
         cv2.imshow('blur', blur)
+
         cv2.imshow('threshold', thres)
         cv2.putText(gray, "Frames {fr_count}/{frames} | Found contours {ncontours}".format(fr_count=fr_count,
                                                                                            frames=n_frames,
                                                                                            ncontours=ncontours),
                     (10, 30), font, 1, (255, 255, 255), 2)
-
+        # cv.drawContours(mask, contours, -1, (255), 1)
         if contour is not None and ellipse is not None and eye_center is not None:
             ellipse = list(ellipse)
             ellipse[0] = tuple(eye_center)
@@ -342,6 +349,8 @@ class PupilTracker:
 
     def track(self, videofile, eye_roi, display=False):
         contrast_low = self._params['contrast_threshold']
+        mask_kernel = np.ones((3, 3))
+        dilation_iter = 10
 
         print("Tracking videofile", videofile)
         cap = cv2.VideoCapture(videofile)
@@ -387,16 +396,18 @@ class PupilTracker:
             # --- detect contours
             ellipse, eye_center, contour = None, None, None
 
-            print(thres.shape, small_mask.shape)
+            if self._last_ellipse is not None:
+                mask = np.zeros(small_mask.shape, dtype=np.uint8)
+                cv2.ellipse(mask, tuple(self._last_ellipse), (255), thickness=cv2.FILLED)
+                # cv2.drawContours(mask, [self._last_contour], -1, (255), thickness=cv2.FILLED)
+                mask = cv2.dilate(mask, mask_kernel, iterations=dilation_iter)
+                thres *= mask
             thres *= small_mask
 
             _, contours, hierarchy1 = cv2.findContours(thres.copy(), cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-            # contour, ellipse = self.get_pupil_from_contours(contours, small_gray)
             contour, ellipse = self.get_pupil_from_contours(contours, blur, small_mask)
-            # if display:
-            #     self.display(self._mask.copy() if self._mask is not None else gray,
-            #                  blur, thres, eye_roi, fr_count, n_frames, ncontours=len(contours))
 
+            self._last_ellipse = ellipse
 
             if contour is None:
                 traces.append(dict(frame_id=fr_count, frame_intensity=img_std))
@@ -423,3 +434,380 @@ class PupilTracker:
         cv2.destroyAllWindows()
 
         return traces
+
+
+def adjust_gamma(image, gamma=1.0):
+    # build a lookup table mapping the pixel values [0, 255] to
+    # their adjusted gamma values
+    invGamma = 1.0 / gamma
+    table = np.array([((i / 255.0) ** invGamma) * 255
+                      for i in np.arange(0, 256)]).astype("uint8")
+
+    # apply gamma correction using the lookup table
+    return cv2.LUT(image, table)
+
+
+class ManualTracker:
+    main_window = "Main Window"
+    roi_window = "ROI"
+    thres_window = "Thresholded"
+    progress_window = "Progress"
+    graph_window = "Area"
+
+    def __init__(self, videofile):
+        self.reset()
+
+        cv2.namedWindow(self.main_window)
+        cv2.namedWindow(self.graph_window)
+        cv2.createTrackbar("mask brush", self.main_window,
+                           self.brush, 100,
+                           self.set_brush)
+        cv2.createTrackbar("Gaussian blur half width", self.main_window,
+                           self.blur, 20,
+                           self.set_blur)
+        cv2.createTrackbar("exponent", self.main_window,
+                           self.power, 15,
+                           self.set_power)
+        cv2.createTrackbar("erosion/dilation iterations", self.main_window,
+                           self.dilation_iter, 30,
+                           self.set_dilation)
+        cv2.createTrackbar("min contour length", self.main_window,
+                           self.min_contour_len, 50,
+                           self.set_min_contour)
+        self.videofile = videofile
+
+        cv2.setMouseCallback(self.main_window, self.mouse_callback)
+        cv2.setMouseCallback(self.graph_window, self.graph_mouse_callback)
+        # cv2.setMouseCallback(self.progress_window, self.progress_mouse_callback)
+
+        self.update_frame = True  # must be true to ensure correct starting conditions
+        self.contours_detected = None
+        self.area = None
+        self._progress_len = 1500
+        self._progress_len = 1500
+
+        self.dilation_factor = 1.3
+
+    def mouse_callback(self, event, x, y, flags, param):
+        if event == cv2.EVENT_MBUTTONDOWN:
+            if self._mask is not None:
+                cv2.circle(self._mask, (x, y), self.brush, (0, 0, 0), -1)
+        elif event == cv2.EVENT_RBUTTONDOWN:
+            if self._mask is not None:
+                cv2.circle(self._mask, (x, y), self.brush, (255, 255, 255), -1)
+        elif event == cv2.EVENT_LBUTTONDOWN:
+            self.start = (x, y)
+        elif event == cv2.EVENT_LBUTTONUP:
+            self.end = (x, y)
+            x = np.vstack((self.start, self.end))
+            tmp = np.hstack((x.min(axis=0), x.max(axis=0)))
+            self.roi = np.asarray([[tmp[1], tmp[3]], [tmp[0], tmp[2]]], dtype=int) + 1
+            print('Set ROI to', self.roi)
+
+    def graph_mouse_callback(self, event, x, y, flags, param):
+        t0, t1 = self.t0, self.t1
+        dt = t1 - t0
+        sanitize = lambda t: int(max(min(t, self._n_frames - 1), 0))
+        if event == cv2.EVENT_MBUTTONDOWN:
+            frame = sanitize(t0 + x / self._progress_len * dt)
+
+            print('Jumping to frame', frame)
+            self.goto_frame(frame)
+        elif event == cv2.EVENT_LBUTTONDOWN:
+            self.t0_tmp = sanitize(t0 + x / self._progress_len * dt)
+        elif event == cv2.EVENT_LBUTTONUP:
+            t1 = sanitize(t0 + x / self._progress_len * dt)
+            if t1 < self.t0_tmp:
+                self.t0, self.t1 = t1, self.t0_tmp
+            elif self.t0_tmp == t1:
+                self.t0, self.t1 = self.t0_tmp, self.t0_tmp + 1
+            else:
+                self.t0, self.t1 = self.t0_tmp, t1
+        elif event == cv2.EVENT_RBUTTONDOWN:
+            self.del_tmp = sanitize(t0 + x / self._progress_len * dt)
+        elif event == cv2.EVENT_RBUTTONUP:
+            t1 = sanitize(t0 + x / self._progress_len * dt)
+            if t1 < self.del_tmp:
+                t0, t1 = t1, self.del_tmp
+            else:
+                t0, t1 = self.del_tmp, t1
+            self.contours_detected[t0:t1] = False
+            self.contours[t0:t1] = None
+
+    def reset(self):
+        self.pause = False
+        self.step = 50
+        self._cap = None
+        self._frame_number = None
+        self._n_frames = None
+        self._last_frame = None
+        self._mask = None
+        self.brush = 20
+        self.jump_frame = 0
+
+        self.start = None
+        self.end = None
+        self.roi = None
+
+        self.t0 = 0
+        self.t1 = None
+
+        self.blur = 3
+        self.power = 3
+
+        self.dilation_iter = 7
+        self.dilation_kernel = np.ones((3, 3))
+
+        self.histogram_equalize = False
+
+        self.min_contour_len = 10
+        self.skip = False
+
+        self.help = True
+
+
+    def set_brush(self, brush):
+        self.brush = brush
+
+    def set_blur(self, blur):
+        self.blur = blur
+
+    def set_power(self, power):
+        self.power = power
+
+    def set_dilation(self, d):
+        self.dilation_iter = d
+
+    def set_min_contour(self, m):
+        self.min_contour_len = max(m, 5)
+        print('Setting min contour length to', self.min_contour_len)
+
+    help_text = """
+        KEYBOARD:
+        
+        q       : quits
+        space   : (un)pause
+        a       : reset area
+        s       : toggle skip
+        b       : jump back 10 frames
+        n       : jump to next frame
+        r       : delete roi
+        d       : drop frame
+        c       : delete mask
+        f       : reset jump frame
+        [0-9]   : enter number for jump frame
+        j       : jump to jump frame
+        e       : toggle histogram equalization
+        h       : toggle help
+        
+        MOUSE:  
+        drag                      : drag ROI
+        middle click              : add to mask
+        right click               : delete from mask 
+        middle click in area      : jump to location 
+        drag and drop in area     : zoom in 
+        drag and drop in area     : drop frames
+        """
+
+    def process_key(self, key):
+        if key == ord('q'):
+            return False
+        elif key == ord(' '):
+            self.pause = not self.pause
+            return True
+        elif key == ord('s'):
+            self.skip = not self.skip
+            return True
+        elif key == ord('a'):
+            self.t0, self.t1 = 0, self._n_frames
+            return True
+        elif key == ord('b'):
+            self.goto_frame(self._frame_number - self.step)
+            return True
+        elif key == ord('n'):
+            self.goto_frame(self._frame_number + 1)
+            return True
+        elif key == ord('e'):
+            self.histogram_equalize = not self.histogram_equalize
+            return True
+        elif key == ord('r'):
+            self.start = None
+            self.end = None
+            self.roi = None
+            return True
+        elif key == ord('d'):
+            self.contours_detected[self._frame_number] = False
+            self.contours[self._frame_number] = None
+            self.goto_frame(self._frame_number + 1)
+        elif key == ord('c'):
+            self._mask = np.ones_like(self._mask) * 255
+        elif key == ord('f'):
+            print('Resetting jump frame')
+            self.jump_frame = 0
+        elif 48 <= key < 58:
+            self.jump_frame *= 10
+            self.jump_frame += key - 48
+            self.jump_frame = min(self._n_frames, self.jump_frame)
+            print('Jump frame is', self.jump_frame)
+        elif key == ord('j'):
+            self.goto_frame(self.jump_frame)
+        elif key == ord('h'):
+            self.help = not self.help
+            return True
+
+        return True
+
+    def display_frame_number(self, img):
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        fs = .6
+        cv2.putText(img, "[{fr_count:05d}/{frames:05d}]".format(fr_count=self._frame_number, frames=self._n_frames),
+                    (10, 30), font, fs, (255, 144, 30), 2)
+        if self.contours[self._frame_number] is not None:
+            cv2.putText(img, "OK", (200, 30), font, fs, (0, 255, 0), 2)
+        else:
+            cv2.putText(img, "NOT OK", (200, 30), font, fs, (0, 0, 255), 2)
+        cv2.putText(img, "Jump Frame {}".format(self.jump_frame), (300, 30), font, fs, (255, 144, 30), 2)
+        if self.skip:
+            cv2.putText(img, "Skip", (10, 70), font, fs, (0, 0, 255), 2)
+        if self.help:
+            y0, dy = 70, 20
+            for i, line in enumerate(self.help_text.replace('\t', '    ').split('\n')):
+                y = y0 + i * dy
+                cv2.putText(img, line, (10, y), font, fs, (255, 144, 30), 2)
+
+    def read_frame(self):
+        if not self.pause or self.update_frame:
+            if not self.update_frame:
+                self._frame_number += 1
+
+            self.update_frame = False
+            ret, frame = self._cap.read()
+
+            self._last_frame = ret, frame
+            if self._mask is None:
+                self._mask = np.ones_like(frame) * 255
+
+            self._last_frame = ret, frame
+            if ret and frame is not None:
+                return ret, frame.copy()
+            else:
+                return ret, None
+        else:
+            ret, frame = self._last_frame
+            return ret, frame.copy()
+
+    def preprocess_image(self, frame):
+        h = int(self.blur)
+
+        if self.power > 1:
+            frame = np.array(frame / 255) ** self.power * 255
+            frame = frame.astype(np.uint8)
+
+        if self.histogram_equalize:
+            cv2.equalizeHist(frame, frame)
+
+        blur = cv2.GaussianBlur(frame, (2 * h + 1, 2 * h + 1), 0)
+        _, thres = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        mask = cv2.erode(thres, self.dilation_kernel, iterations=self.dilation_iter)
+        mask = cv2.dilate(mask, self.dilation_kernel, iterations=int(self.dilation_factor * self.dilation_iter))
+        return thres, blur, mask
+
+    def find_contours(self, thres):
+        _, contours, hierarchy = cv2.findContours(thres.copy(), cv2.RETR_TREE,
+                                                  cv2.CHAIN_APPROX_SIMPLE)  # remove copy when cv2=3.2 is installed
+        if len(contours) > 1:
+            contours = [c for i, c in enumerate(contours) if hierarchy[0, i, 3] == -1]
+        contours = [c + self.roi[::-1, 0][None, None, :] for c in contours if len(c) >= self.min_contour_len]
+        contours = [cv2.convexHull(c) for c in contours]
+        return contours
+
+    def goto_frame(self, no):
+        self._frame_number = min(max(no, 0), self._n_frames - 1)
+        self._cap.set(cv2.CAP_PROP_POS_FRAMES, self._frame_number)
+        self.update_frame = True
+
+    def plot_area(self):
+        t0, t1 = self.t0, self.t1
+        dt = t1 - t0
+        idx = np.linspace(t0, t1, self._progress_len, endpoint=False).astype(int)
+        height = 300
+        graph = (self.contours_detected[idx].astype(np.float) * 255)[None, :, None]
+        graph = np.tile(graph, (height, 1, 3)).astype(np.uint8)
+        area = (height - self.area[idx] / (self.area[idx].max() + 1) * height).astype(int)
+        detected = self.contours_detected[idx]
+        for x, y1, y2, det1, det2 in zip(count(), area[:-1], area[1:], detected[:-1], detected[1:]):
+            if det1 and det2:
+                graph = cv2.line(graph, (x, y1), (x + 1, y2), (209, 133, 4), thickness=2)
+
+        if t0 <= self._frame_number <= t1:
+            x = int((self._frame_number - t0) / dt * self._progress_len)
+            graph = cv2.line(graph, (x, 0), (x, height), (0, 255, 0), 2)
+        cv2.imshow(self.graph_window, graph)
+
+    def run(self):
+        self._cap = cap = cv2.VideoCapture(self.videofile)
+
+        self._n_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+        self._frame_number = 0
+        self.update_frame = True  # ensure correct starting conditions
+        self.contours_detected = np.zeros(self._n_frames, dtype=bool)
+        self.contours = np.zeros(self._n_frames, dtype=object)
+        self.area = np.zeros(self._n_frames)
+        self.contours[:] = None
+        self.t0 = 0
+        self.t1 = self._n_frames
+
+        while cap.isOpened():
+            if self._frame_number >= self._n_frames - 1:
+                print("Reached end of videofile ", self.videofile)
+                break
+
+            ret, frame = self.read_frame()
+
+            if ret and not self.skip and self.start is not None and self.end is not None:
+                cv2.rectangle(frame, self.start, self.end, (0, 255, 255), 2)
+                small_gray = cv2.cvtColor(frame[slice(*self.roi[0]), slice(*self.roi[1]), :], cv2.COLOR_BGR2GRAY)
+
+                try:
+                    thres, small_gray, dilation_mask = self.preprocess_image(small_gray)
+                except:
+                    print('Problems with processing reversing to frame', self._frame_number - 10, 'Please redraw ROI')
+                    self.goto_frame(self._frame_number - 10)
+                    self.start = self.end = self.roi = None
+                    self.pause = True
+                else:
+                    if self._mask is not None:
+                        small_mask = self._mask[slice(*self.roi[0]), slice(*(self.roi[1] + 1)), 0]
+                        cv2.bitwise_and(thres, small_mask, dst=thres)
+                        cv2.bitwise_and(thres, dilation_mask, dst=thres)
+
+                    contours = self.find_contours(thres)
+                    cv2.drawContours(frame, contours, -1, (0, 255, 0), 3)
+                    cv2.drawContours(small_gray, contours, -1, (127, 127, 127), 3, offset=tuple(-self.roi[::-1, 0]))
+                    if len(contours) > 1:
+                        self.pause = True
+                    elif len(contours) == 1:
+                        area = np.zeros_like(small_gray)
+                        area = cv2.drawContours(area, contours, -1, (255), thickness=cv2.FILLED,
+                                                offset=tuple(-self.roi[::-1, 0]))
+                        self.area[self._frame_number] = (area > 0).sum()
+                        self.contours_detected[self._frame_number] = True
+                        self.contours[self._frame_number] = contours[0]
+
+                    cv2.imshow(self.roi_window, small_gray)
+                    cv2.imshow(self.thres_window, thres)
+
+            self.display_frame_number(frame)
+            cv2.bitwise_and(frame, self._mask, dst=frame)
+            cv2.imshow(self.main_window, frame)
+            self.plot_area()
+            if not self.process_key(cv2.waitKey(5) & 0xFF):
+                break
+
+        cap.release()
+        cv2.destroyAllWindows()
+
+
+if __name__ == "__main__":
+    tracker = ManualTracker('video2.mp4')
+    tracker.run()
