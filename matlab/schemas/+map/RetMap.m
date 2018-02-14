@@ -97,6 +97,7 @@ classdef RetMap < dj.Manual
             % get horizontal map
             Hor = [];
             vessels = fetch1(map.OptImageBar & (map.RetMapScan & self) & 'axis="horizontal"','vessels');
+            vessels = single(vessels);
             [Hor(:,:,1),Hor(:,:,2),Hor(:,:,3)] = plot(map.OptImageBar & (map.RetMapScan & self) ...
                 & 'axis="horizontal"','exp',params.exp,'sigma',params.sigma);
             background = cat(4,repmat(vessels/max(vessels(:)),1,1,3),hsv2rgb(Hor));
