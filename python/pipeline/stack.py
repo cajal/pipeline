@@ -917,8 +917,31 @@ class RegistrationTask(dj.Manual):
                                         'field': field['field']}, skip_duplicates=True)
 
 
-#@schema
-class FieldRegistration:#(dj.Computed):
+def _create_rotation_matrix(alpha, beta, gamma):
+    """ 3-D rotation matrix to apply a intrinsic yaw-> pitch-> roll rotation.
+
+    We use a right handed coordinate system (x points to the right, y towards you, and z
+    downward) with right-handed/clockwise rotations.
+
+    :param float alpha: Angle in degrees for rotation over z axis in degress (yaw)
+    :param float beta: Angle in degrees for rotation over y axis in degress (pitch)
+    :param float gamma: Angle in degrees for rotation over x axis in degress (roll)
+
+    :returns: (3, 3) rotation matrix
+    """
+    # Rotation matrix from here:
+    #    danceswithcode.net/engineeringnotes/rotations_in_3d/rotations_in_3d_part1.html
+    w, v, u = alpha *np.pi/180, beta * np.pi/180, gamma * np.pi/180 # degrees to radians
+    sin, cos = np.sin, np.cos
+    rotation_matrix = [
+        [cos(v)*cos(w), sin(u)*sin(v)*cos(w) - cos(u)*sin(w), sin(u)*sin(w) + cos(u)*sin(v)*cos(w)],
+        [cos(v)*sin(w), cos(u)*cos(w) + sin(u)*sin(v)*sin(w), cos(u)*sin(v)*sin(w) - sin(u)*cos(w)],
+        [-sin(v),       sin(u)*cos(v),                        cos(u)*cos(v)]
+    ]
+    return rotation_matrix
+
+@schema
+class FieldRegistration(dj.Computed):
     """
     Note: We stick with this conventions to define rotations:
     http://danceswithcode.net/engineeringnotes/rotations_in_3d/rotations_in_3d_part1.html
@@ -929,16 +952,12 @@ class FieldRegistration:#(dj.Computed):
     with right-handed/clockwise rotations.
 
     To register the field to the stack:
-        1. Scale the field & stack to have isotropic pixels & voxels that match the lowest
-            pixels-per-microns resolution among the two.
+        1. Scale the field & stack to have isotropic pixels & voxels that match the
+            lowest pixels-per-microns resolution among the two (common_res).
         2. Rotate the field over x -> y -> z (extrinsic roll->pitch->yaw is equivalent to
             an intrinsic yaw->pitch-roll rotation) using clockwise rotations and taking
             center of the field as (0, 0, 0).
-        3. Translate to final x, y, z position (accounting for the previous scaling).
-
-        Scale the Scale the stack to have the same pixels/micron as the lowest pixels/microns in
-    To register apply an intrisict yaw pitch roll transformation or equivalently, apply a
-    roll pitch yaw extrinsic transformation and the move the center of the FOV to the
+        3. Translate to final x, y, z position (accounting for the previous stack scaling).
     """
     definition = """ # align a 2-d scan field to a stack
     -> RegistrationTask
@@ -954,13 +973,14 @@ class FieldRegistration:#(dj.Computed):
     """
     @property
     def key_source(self):
-        processed_fields = (reso.SummaryImages() + meso.SummaryImages()).proj('session -> scan_session')
+        processed_fields = (reso.SummaryImages() + meso.SummaryImages()).proj(scan_session='session')
         return RegistrationTask() & processed_fields & {'pipe_version': CURRENT_VERSION}
 
     def _make_tuples(self, key):
         from scipy import ndimage
         from skimage import feature
-        import itertools
+        from itertools import product
+        from tqdm import tqdm
 
         print('Registering', key)
 
@@ -992,7 +1012,7 @@ class FieldRegistration:#(dj.Computed):
         field = ndimage.zoom(field, field_res / common_res, order=1)
 
         # Get estimated depth of the field (from experimenters)
-        stack_z = stack_rel.fetch1('z') # z of the first slice (zero is at surface depth)
+        stack_x, stack_y, stack_z = stack_rel.fetch1('x', 'y', 'z') # z of the first slice (zero is at surface depth)
         field_z = (pipe.ScanInfo.Field() & field_key).fetch1('z') # measured in microns (zero is at surface depth)
         if field_z < stack_z or field_z > stack_z + dims[0]:
             msg_template = 'Warning: Estimated depth ({}) outside stack range ({}-{}).'
@@ -1005,14 +1025,18 @@ class FieldRegistration:#(dj.Computed):
             # Restrict to relevant part of the scan
             mini_stack = stack[max(0, estimated_px_z - z_range): estimated_px_z + z_range + 1]
 
+            # Crop field FOV to be smaller than the stack's
+            cut_rows = max(1, int(np.ceil((field.shape[0] - mini_stack.shape[1]) / 2)))
+            cut_cols = max(1, int(np.ceil((field.shape[1] - mini_stack.shape[2]) / 2)))
+            field = field[cut_rows:-cut_rows, cut_cols:-cut_cols]
+
             # 3-d match_template
-            corrs = feature.match_template(mini_stack, np.expand_dims(field, 0), pad_input=True)
+            corrs = np.stack(feature.match_template(s, field, pad_input=True) for s in mini_stack)
             smooth_corrs = ndimage.gaussian_filter(corrs, 0.7)
             best_score = np.max(smooth_corrs)
             z, y, x = np.unravel_index(np.argmax(smooth_corrs), smooth_corrs.shape)
 
             # Rewrite offsets as stack coordinates
-            stack_x, stack_y, stack_z = stack_rel.fetch1('x', 'y', 'z')
             final_x = stack_x + ((x + 0.5) - mini_stack.shape[2] / 2) * (common_res / stack_res[2]) # in stack pixels
             final_y = stack_y + ((y + 0.5) - mini_stack.shape[1] / 2) * (common_res / stack_res[1]) # in stack pixels
             final_z = stack_z + (max(0, estimated_px_z - z_range) + z) * common_res # in microns
@@ -1024,89 +1048,69 @@ class FieldRegistration:#(dj.Computed):
             max_angle = 5 # max angle in degrees to try for rotations
 
             # Restrict to relevant part of the scan
-            z_range += rotate_point([stack.shape[2], stack.shape[1], 0], alpha=0,
-                                    beta=-max_angle, gamma=max_angle)[2] # max_z_tilt
             mini_stack = stack[max(0, estimated_px_z - z_range): estimated_px_z + z_range + 1]
 
-            for alpha, beta, gamma in itertools.product(range(-max_angle, max_angle + 1),
-                                                        range(-max_angle, max_angle + 1),
-                                                        range(-max_angle, max_angle + 1)):
+            # Crop field FOV to be smaller than the stack's
+            cut_rows = max(1, int(np.ceil((field.shape[0] - mini_stack.shape[1]) / 2)))
+            cut_cols = max(1, int(np.ceil((field.shape[1] - mini_stack.shape[2]) / 2)))
+            field = field[cut_rows:-cut_rows, cut_cols:-cut_cols]
 
-                #Can I compute xtil, y_tilt, z_tilt directly here and do a single cut.
-                # Yes I can: rotate_point([stack.shape[2], stack.shape[1], z_range], alpha, beta, gamma)
+            # Over each angle combination
+            best_score = -1
+            best_angles = (0, 0, 0)
+            for alpha, beta, gamma in tqdm(product(range(-max_angle, max_angle + 1),
+                                                   range(-max_angle, max_angle + 1),
+                                                   range(-max_angle, max_angle + 1))): # TODO: Parallelize
+                # TODO: Do the restriction in z here adding some slack in z (to avoid
+                # black spaces when rotating at high pitch/roll) but cut the rotated
+                # version so it can only mach up to 40 microns apart of the original
+                # estimated value.
 
-                # Restrict to relevant part of the scan
-                z_tilt = rotate_point([mini_stack.shape[2], mini_stack.shape[1], 0],
-                                      alpha, beta, gamma)[2]
+                # Rotate stack (inverse of intrinsic yaw -> pitch -> roll= extrinsic yaw -> pitch -> roll with flipped signs)
+                r1 = ndimage.rotate(mini_stack, alpha, axes=(1, 2), order=1, reshape=False) # yaw(-w)
+                r2 = ndimage.rotate(r1, -beta, axes=(0, 2), order=1, reshape=False) # pitch(-v)
+                rotated = ndimage.rotate(r2, gamma, axes=(0, 1), order=1, reshape=False) # roll(-u)
+                # Note on ndimage.rotate: Assuming our coordinate system (z points towards
+                # the screen, y downwards and x to the right). Axes (1, 2) will do a left
+                # handed rotation in z, (0, 2) is a right handed rotation in y and (0, 1)
+                # is a left-handed rotation in x.
 
+                #TODO: Leave reshape=True and manually cut unnecessary black spaces both
+                # above and below and on the sides.
 
-                # Cut excess after rotation(same amounf on each side)
+                 # 3-d match_template
+                corrs = np.stack(feature.match_template(s, field, pad_input=True) for s in rotated)
+                smooth_corrs = ndimage.gaussian_filter(corrs, 0.7)
+                score = np.max(smooth_corrs)
+                z, y, x = np.unravel_index(np.argmax(smooth_corrs), smooth_corrs.shape)
 
+                if score > best_score:
+                    # Save best params
+                    best_score = score
+                    best_angles = (alpha, beta, gamma)
 
-            # Rotate stack to the inverse of an intrinsic yaw->pitch->roll rotation
-            # Note: Rotations happen taking the middle of the stack as (0, 0, 0)
-            for gamma in range(-5, 5): # roll
-                # Apply rotation over z with negative roll
-                for beta in range(-5, 5): # pitch
-                        #Apply rotation voer y with posit
-                    for alpha in range(-5, 5):
-                        # Aplly rotation over x with negative alpha
-                        pass
+                    # Map x, y, z back to original coordinate system
+                    x_offset = (x + 0.5) - mini_stack.shape[2] / 2
+                    y_offset = (y + 0.5) - mini_stack.shape[1] / 2
+                    z_offset = z - mini_stack.shape[0] / 2
+                    rotation_matrix = _create_rotation_matrix(alpha, beta, gamma)
+                    xp, yp, zp = np.dot(np.linalg.inv(rotation_matrix), [x_offset, y_offset, z_offset]) # common coordinates
+                    final_x = stack_x + xp * (common_res / stack_res[2]) # in stack pixels
+                    final_y = stack_y + yp * (common_res / stack_res[1]) # in stack pixels
+                    final_z = stack_z + (max(0, estimated_px_z - z_range) + mini_stack.shape[0] / 2 + zp) * common_res # in microns
 
-                   # Cut again to restrict to right part, record center (this is the center around which it will rotate) keep right z in the center
+            yaw, pitch, roll = best_angles
+            self.insert1({**key, 'reg_x': final_x, 'reg_y': final_y, 'reg_z': final_z,
+                          'yaw': yaw, 'pitch': pitch, 'gamma': roll,'score': best_score,
+                          'common_res': common_res})
+        #self.notify(key)
 
-
-
-                    # Cut a bit of the field, if stack ends up being smaller
-
-
-#        Crop and record initial center (or maybe not ?)
-#        Rotate and crop 50 microns up and 50 microns down, recording where the initial center ended up,
-#        Measure distance to this (secondly) center, translate back to original coordinate system and voila :)
-#
-#        # Maybe aply pitch and then later cut li9miting to only things inside the volume,
-#        # I'll do will have to record where the thing starts
-#        # Do pitch, cut 50 microns up and down or clip if going below zero or over ut if going over 0-50
-#
-#        # !This should work
-#        # For translation , Whatever transltaion I've got will be measure from 0, 0, 0 in the upper right corner,
-#        # do the inverse rotation transform to know where would it be (with zero still ion the upper right corner)
-#        # before any rotation and then proceed as if there were no rotations to compute x, y, z.
-#        # Before just adding it to the stack x, y, z remember to rescale the stack's x-y-z
-
-
-#
-#    @notify.ignore_exceptions
-#    def notify(self, key):
-#        reg_x, reg_y, reg_z = (FieldRegistration() &  key).fetch('reg_x', 'reg_y', 'reg_z')
-#        msg = 'FieldRegistration for {} has been populated.'.format(key)
-#        msg += ' Field found in {}, {}, {} (x, y, z)'.format(reg_x, reg_y, reg_z)
-#        (notify.SlackUser() & (experiment.Session() & key)).notify(msg)
-#
-    def rotate_point(point, alpha, beta, gamma):
-        """ Rotate a 3D point using an intrinsic yaw-> pitch-> roll rotation.
-
-        We use a right handed coordinate system (x points to the right, y forward, and z
-        downward) with right-handed/clockwise rotations.
-
-        :param float point: Triplet (x, y, z) point.
-        :param float alpha: Angle in degrees for rotation over z axis in degress (yaw)
-        :param float beta: Angle in degrees for rotation over y axis in degress (pitch)
-        :param float gamma: Angle in degrees for rotation over x axis in degress (roll)
-
-        :returns: A triplet. The rotated point.
-        """
-        # Rotation matrix from here:
-        #    danceswithcode.net/engineeringnotes/rotations_in_3d/rotations_in_3d_part1.html
-        w, v, u = alpha *np.pi/180, beta * np.pi/180, gamma * np.pi/180 # degrees to radians
-        sin, cos = np.sin, np.cos
-        rotation_matrix = [
-            [cos(v)*cos(w), sin(u)*sin(v)*cos(w) - cos(u)*sin(w), sin(u)*sin(w) + cos(u)*sin(v)*cos(w)],
-            [cos(v)*sin(w), cos(u)*cos(w) + sin(u)*sin(v)*sin(w), cos(u)*sin(v)*sin(w) - sin(u)*cos(w)],
-            [-sin(v),       sin(u)*cos(v),                        cos(u)*cos(v)]
-        ]
-        return np.dot(rotation_matrix, point)
-
+    @notify.ignore_exceptions
+    def notify(self, key):
+        reg_x, reg_y, reg_z = (FieldRegistration() &  key).fetch('reg_x', 'reg_y', 'reg_z')
+        msg = 'FieldRegistration for {} has been populated.'.format(key)
+        msg += ' Field found in {}, {}, {} (x, y, z)'.format(reg_x, reg_y, reg_z)
+        (notify.SlackUser() & (experiment.Session() & key)).notify(msg)
 
 # TODO: Add this in shared
 #class SegmentationMethod(dj.Lookup):
