@@ -940,6 +940,46 @@ def _create_rotation_matrix(alpha, beta, gamma):
     ]
     return rotation_matrix
 
+#TODO: Move to performance
+def parallel_registration(angles, stack, field):
+    """ Registers using skimage.feature match_template.
+
+    Rotates the stack, cross-correlates the field at each position and returns the score,
+    coordinates and angles of the best one. We use a right handed coordinate system (x
+    points to the right, y towards you, and z downward) with right-handed/clockwise
+    rotations.
+
+    :param triplet angles: A triplet with the angle in degrees for rotation over z (yaw),
+        y (pitch) and x (roll).
+    :param np.array stack: 3-d stack. Depth x height x width.
+    :param np.array field: A single field. Height x width.
+
+    : returns: The best score, a triplet of angles (yaw, pitch, roll) and a triplet of
+        coordinates (x, y, z)
+
+    .. note:: Assumes field height/width is smaller than stack height/width.
+    """
+    from skimage import feature
+    from scipy import ndimage
+
+    # Rotate stack (inverse of intrinsic yaw -> pitch -> roll= extrinsic yaw -> pitch -> roll with flipped signs)
+    rotated = ndimage.rotate(stack, angles[0], axes=(1, 2), order=1, reshape=False) # yaw(-w)
+    rotated = ndimage.rotate(rotated, -angles[1], axes=(0, 2), order=1, reshape=False) # pitch(-v)
+    rotated = ndimage.rotate(rotated, angles[2], axes=(0, 1), order=1, reshape=False) # roll(-u)
+    # Note on ndimage.rotate: Assuming our coordinate system (z points towards
+    # the screen, y downwards and x to the right). Axes (1, 2) will do a left
+    # handed rotation in z, (0, 2) is a right handed rotation in y and (0, 1)
+    # is a left-handed rotation in x.
+
+     # 3-d match_template
+    corrs = np.stack(feature.match_template(s, field, pad_input=True) for s in rotated)
+    smooth_corrs = ndimage.gaussian_filter(corrs, 0.7)
+    score = np.max(smooth_corrs)
+    z, y, x = np.unravel_index(np.argmax(smooth_corrs), smooth_corrs.shape)
+
+    return score, angles, (x, y, z)
+
+
 @schema
 class FieldRegistration(dj.Computed):
     """
@@ -978,9 +1018,9 @@ class FieldRegistration(dj.Computed):
 
     def _make_tuples(self, key):
         from scipy import ndimage
-        from skimage import feature
         from itertools import product
-        from tqdm import tqdm
+        from functools import partial
+        import multiprocessing as mp
 
         print('Registering', key)
 
@@ -1019,22 +1059,19 @@ class FieldRegistration(dj.Computed):
             print(msg_template.format(field_z, stack_z , stack_z + dims[0]))
         estimated_px_z = int(round((field_z - stack_z) / common_res)) # in pixels
 
-        # Register
+        # Restrict to relevant part of the scan
         z_range = int(round(40 / common_res)) # search 40 microns up and down
+        mini_stack = stack[max(0, estimated_px_z - z_range): estimated_px_z + z_range + 1]
+
+        # Crop field FOV to be smaller than the stack's
+        cut_rows = max(1, int(np.ceil((field.shape[0] - mini_stack.shape[1]) / 2)))
+        cut_cols = max(1, int(np.ceil((field.shape[1] - mini_stack.shape[2]) / 2)))
+        field = field[cut_rows:-cut_rows, cut_cols:-cut_cols]
+
+        # Register
         if key['registration_method'] == 1: # rigid
-            # Restrict to relevant part of the scan
-            mini_stack = stack[max(0, estimated_px_z - z_range): estimated_px_z + z_range + 1]
-
-            # Crop field FOV to be smaller than the stack's
-            cut_rows = max(1, int(np.ceil((field.shape[0] - mini_stack.shape[1]) / 2)))
-            cut_cols = max(1, int(np.ceil((field.shape[1] - mini_stack.shape[2]) / 2)))
-            field = field[cut_rows:-cut_rows, cut_cols:-cut_cols]
-
             # 3-d match_template
-            corrs = np.stack(feature.match_template(s, field, pad_input=True) for s in mini_stack)
-            smooth_corrs = ndimage.gaussian_filter(corrs, 0.7)
-            best_score = np.max(smooth_corrs)
-            z, y, x = np.unravel_index(np.argmax(smooth_corrs), smooth_corrs.shape)
+            best_score, _, (x, y, z) = parallel_registration((0, 0, 0), mini_stack, field)
 
             # Rewrite offsets as stack coordinates
             final_x = stack_x + ((x + 0.5) - mini_stack.shape[2] / 2) * (common_res / stack_res[2]) # in stack pixels
@@ -1047,69 +1084,35 @@ class FieldRegistration(dj.Computed):
         elif key['registration_method'] == 2: # rigid plus 3-d rotation
             max_angle = 5 # max angle in degrees to try for rotations
 
-            # Restrict to relevant part of the scan
-            mini_stack = stack[max(0, estimated_px_z - z_range): estimated_px_z + z_range + 1]
-
-            # Crop field FOV to be smaller than the stack's
-            cut_rows = max(1, int(np.ceil((field.shape[0] - mini_stack.shape[1]) / 2)))
-            cut_cols = max(1, int(np.ceil((field.shape[1] - mini_stack.shape[2]) / 2)))
-            field = field[cut_rows:-cut_rows, cut_cols:-cut_cols]
-
             # Over each angle combination
-            best_score = -1
-            best_angles = (0, 0, 0)
-            for alpha, beta, gamma in tqdm(product(range(-max_angle, max_angle + 1),
-                                                   range(-max_angle, max_angle + 1),
-                                                   range(-max_angle, max_angle + 1))): # TODO: Parallelize
-                # TODO: Do the restriction in z here adding some slack in z (to avoid
-                # black spaces when rotating at high pitch/roll) but cut the rotated
-                # version so it can only mach up to 40 microns apart of the original
-                # estimated value.
+            angles = product(range(-max_angle, max_angle + 1), range(-max_angle, max_angle + 1),
+                             range(-max_angle, max_angle + 1))
+            with mp.Pool(8) as pool:
+                results = pool.map(partial(parallel_registration, stack=mini_stack, field=field), angles)
+            best_score, (yaw, pitch, roll), (x, y, z) = sorted(results)[-1]
 
-                # Rotate stack (inverse of intrinsic yaw -> pitch -> roll= extrinsic yaw -> pitch -> roll with flipped signs)
-                r1 = ndimage.rotate(mini_stack, alpha, axes=(1, 2), order=1, reshape=False) # yaw(-w)
-                r2 = ndimage.rotate(r1, -beta, axes=(0, 2), order=1, reshape=False) # pitch(-v)
-                rotated = ndimage.rotate(r2, gamma, axes=(0, 1), order=1, reshape=False) # roll(-u)
-                # Note on ndimage.rotate: Assuming our coordinate system (z points towards
-                # the screen, y downwards and x to the right). Axes (1, 2) will do a left
-                # handed rotation in z, (0, 2) is a right handed rotation in y and (0, 1)
-                # is a left-handed rotation in x.
+            # Map x, y, z back to original coordinate system
+            x_offset = (x + 0.5) - mini_stack.shape[2] / 2
+            y_offset = (y + 0.5) - mini_stack.shape[1] / 2
+            z_offset = z - mini_stack.shape[0] / 2
+            rotation_matrix = _create_rotation_matrix(yaw, pitch, roll)
+            xp, yp, zp = np.dot(np.linalg.inv(rotation_matrix), [x_offset, y_offset, z_offset]) # common coordinates
+            final_x = stack_x + xp * (common_res / stack_res[2]) # in stack pixels
+            final_y = stack_y + yp * (common_res / stack_res[1]) # in stack pixels
+            final_z = stack_z + (max(0, estimated_px_z - z_range) + mini_stack.shape[0] / 2 + zp) * common_res # in microns
 
-                #TODO: Leave reshape=True and manually cut unnecessary black spaces both
-                # above and below and on the sides.
-
-                 # 3-d match_template
-                corrs = np.stack(feature.match_template(s, field, pad_input=True) for s in rotated)
-                smooth_corrs = ndimage.gaussian_filter(corrs, 0.7)
-                score = np.max(smooth_corrs)
-                z, y, x = np.unravel_index(np.argmax(smooth_corrs), smooth_corrs.shape)
-
-                if score > best_score:
-                    # Save best params
-                    best_score = score
-                    best_angles = (alpha, beta, gamma)
-
-                    # Map x, y, z back to original coordinate system
-                    x_offset = (x + 0.5) - mini_stack.shape[2] / 2
-                    y_offset = (y + 0.5) - mini_stack.shape[1] / 2
-                    z_offset = z - mini_stack.shape[0] / 2
-                    rotation_matrix = _create_rotation_matrix(alpha, beta, gamma)
-                    xp, yp, zp = np.dot(np.linalg.inv(rotation_matrix), [x_offset, y_offset, z_offset]) # common coordinates
-                    final_x = stack_x + xp * (common_res / stack_res[2]) # in stack pixels
-                    final_y = stack_y + yp * (common_res / stack_res[1]) # in stack pixels
-                    final_z = stack_z + (max(0, estimated_px_z - z_range) + mini_stack.shape[0] / 2 + zp) * common_res # in microns
-
-            yaw, pitch, roll = best_angles
             self.insert1({**key, 'reg_x': final_x, 'reg_y': final_y, 'reg_z': final_z,
-                          'yaw': yaw, 'pitch': pitch, 'gamma': roll,'score': best_score,
+                          'yaw': yaw, 'pitch': pitch, 'roll': roll, 'score': best_score,
                           'common_res': common_res})
-        #self.notify(key)
+        self.notify(key)
 
     @notify.ignore_exceptions
     def notify(self, key):
-        reg_x, reg_y, reg_z = (FieldRegistration() &  key).fetch('reg_x', 'reg_y', 'reg_z')
-        msg = 'FieldRegistration for {} has been populated.'.format(key)
-        msg += ' Field found in {}, {}, {} (x, y, z)'.format(reg_x, reg_y, reg_z)
+        x, y, z = (FieldRegistration() &  key).fetch('reg_x', 'reg_y', 'reg_z')
+        yaw, pitch, roll = (FieldRegistration() &  key).fetch('yaw', 'pitch', 'roll')
+        f_string = ('FieldRegistration for {} has been populated. Field registered at {},'
+                    '{}, {} (z, y, x) with {}, {}, {} (yaw, pitch, roll) inclination')
+        msg = f_string.format(key, z, y, x, yaw, pitch, roll)
         (notify.SlackUser() & (experiment.Session() & key)).notify(msg)
 
 # TODO: Add this in shared
