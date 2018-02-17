@@ -17,7 +17,7 @@ classdef ActivityTrace < dj.Computed
     
     methods
         
-        function [Spikes, frame_times] = getAdjustedSpikes(obj,type)
+        function [Spikes, frame_times, keys] = getAdjustedSpikes(obj,type)
             
             if nargin<2; type = 'soma';end
             
@@ -26,12 +26,12 @@ classdef ActivityTrace < dj.Computed
             
             % get traces
             if exists(fuse.ActivityReso & obj) % There must be a more elegant method than this
-                [traces, ms_delay] = fetchn(reso.ActivityTrace * (proj(reso.ScanSetUnitInfo,'ms_delay') & ...
+                [traces, ms_delay, keys] = fetchn(reso.ActivityTrace * (proj(reso.ScanSetUnitInfo,'ms_delay') & ...
                     proj(reso.ScanSetUnit & (reso.MaskClassificationType & struct('type',type)) & obj)),'trace','ms_delay');
                 
                 nfields = fetch1(reso.ScanInfo & obj,'nfields');
             else
-                [traces, ms_delay] = fetchn(meso.ActivityTrace * (proj(meso.ScanSetUnitInfo,'ms_delay') & ...
+                [traces, ms_delay, keys] = fetchn(meso.ActivityTrace * (proj(meso.ScanSetUnitInfo,'ms_delay') & ...
                     proj(meso.ScanSetUnit & (meso.MaskClassificationType & struct('type',type)) & obj)),'trace','ms_delay');
                 nfields = fetch1(proj(meso.ScanInfo & obj,'nfields/nrois->depths'),'depths');
             end
