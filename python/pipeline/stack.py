@@ -917,90 +917,6 @@ class RegistrationTask(dj.Manual):
                                         'field': field['field']}, skip_duplicates=True)
 
 
-def _create_rotation_matrix(alpha, beta, gamma):
-    """ 3-D rotation matrix to apply a intrinsic yaw-> pitch-> roll rotation.
-
-    We use a right handed coordinate system (x points to the right, y towards you, and z
-    downward) with right-handed/clockwise rotations.
-
-    :param float alpha: Angle in degrees for rotation over z axis in degress (yaw)
-    :param float beta: Angle in degrees for rotation over y axis in degress (pitch)
-    :param float gamma: Angle in degrees for rotation over x axis in degress (roll)
-
-    :returns: (3, 3) rotation matrix
-
-    ..ref:: danceswithcode.net/engineeringnotes/rotations_in_3d/rotations_in_3d_part1.html
-    """
-    # Rotation matrix from here:
-    #    danceswithcode.net/engineeringnotes/rotations_in_3d/rotations_in_3d_part1.html
-    w, v, u = alpha *np.pi/180, beta * np.pi/180, gamma * np.pi/180 # degrees to radians
-    sin, cos = np.sin, np.cos
-    rotation_matrix = [
-        [cos(v)*cos(w), sin(u)*sin(v)*cos(w) - cos(u)*sin(w), sin(u)*sin(w) + cos(u)*sin(v)*cos(w)],
-        [cos(v)*sin(w), cos(u)*cos(w) + sin(u)*sin(v)*sin(w), cos(u)*sin(v)*sin(w) - sin(u)*cos(w)],
-        [-sin(v),       sin(u)*cos(v),                        cos(u)*cos(v)]
-    ]
-    return rotation_matrix
-
-def find_intersecting_point(p1, p2, z):
-    """ Find a point at a given z in the line that crosses p1 and p2.
-
-    :param np.array p1: A point (1-d array of size 3) or a matrix of points (3 x n).
-    :param np.array p2: A point (1-d array of size 3) or a matrix of points (3 x n).
-        Number of points in p2 needs to match p1.
-    :param float z: z to insersect the line.
-
-    :returns: A point (1-d array of size 3) or a matrix of points (3 x n).
-
-    ..ref:: See https://brilliant.org/wiki/3d-coordinate-geometry-equation-of-a-line/
-    """
-    direction_vector = p2 - p1
-    if any(abs(direction_vector[2]) < 1e-10):
-        raise ArithmeticError('Line is parallel to the z-plane. Infinite or no solutions.')
-    q = p1 + ((z - p1[2]) / direction_vector[2]) * direction_vector # p1 + ((z-z1)/ n) * d
-    return q
-
-
-#TODO: Move to performance
-def parallel_registration(angles, stack, field):
-    """ Registers using skimage.feature match_template.
-
-    Rotates the stack, cross-correlates the field at each position and returns the score,
-    coordinates and angles of the best one. We use a right handed coordinate system (x
-    points to the right, y towards you, and z downward) with right-handed/clockwise
-    rotations.
-
-    :param triplet angles: A triplet with the angle in degrees for rotation over z (yaw),
-        y (pitch) and x (roll).
-    :param np.array stack: 3-d stack. Depth x height x width.
-    :param np.array field: A single field. Height x width.
-
-    : returns: The best score, a triplet of angles (yaw, pitch, roll) and a triplet of
-        coordinates (x, y, z)
-
-    .. note:: Assumes field height/width is smaller than stack height/width.
-    """
-    from skimage import feature
-    from scipy import ndimage
-
-    # Rotate stack (inverse of intrinsic yaw -> pitch -> roll= extrinsic yaw -> pitch -> roll with flipped signs)
-    rotated = ndimage.rotate(stack, angles[0], axes=(1, 2), order=1, reshape=False) # yaw(-w)
-    rotated = ndimage.rotate(rotated, -angles[1], axes=(0, 2), order=1, reshape=False) # pitch(-v)
-    rotated = ndimage.rotate(rotated, angles[2], axes=(0, 1), order=1, reshape=False) # roll(-u)
-    # Note on ndimage.rotate: Assuming our coordinate system (z points towards
-    # the screen, y downwards and x to the right). Axes (1, 2) will do a left
-    # handed rotation in z, (0, 2) is a right handed rotation in y and (0, 1)
-    # is a left-handed rotation in x.
-
-     # 3-d match_template
-    corrs = np.stack(feature.match_template(s, field, pad_input=True) for s in rotated)
-    smooth_corrs = ndimage.gaussian_filter(corrs, 0.7)
-    score = np.max(smooth_corrs)
-    z, y, x = np.unravel_index(np.argmax(smooth_corrs), smooth_corrs.shape)
-
-    return score, angles, (x, y, z)
-
-
 @schema
 class FieldRegistration(dj.Computed):
     """
@@ -1037,8 +953,17 @@ class FieldRegistration(dj.Computed):
         processed_fields = (reso.SummaryImages() + meso.SummaryImages()).proj(scan_session='session')
         return RegistrationTask() & processed_fields & {'pipe_version': CURRENT_VERSION}
 
+    class AffineResults(dj.Part):
+        definition = """ # some intermediate results from affine registration
+        -> master
+        ---
+        score_map       : longblob     # 3-d map of best correlation scores for each yaw, pitch, rol combination
+        position_map    : longblob     # 3-d map of best positions (x, y, z) for each yaw, pitch, roll combination
+        """
+
     def _make_tuples(self, key):
         from scipy import ndimage
+        from .utils import registration
 
         print('Registering', key)
 
@@ -1080,122 +1005,39 @@ class FieldRegistration(dj.Computed):
         # Register
         z_range = 40 / common_res # search 40 microns up and down
         if key['registration_method'] == 1: # rigid
-            # Restrict to relevant part of the scan
-            mini_stack = stack[max(0, int(round(estimated_px_z - z_range))): int(round(estimated_px_z + z_range))]
-
-            # Crop field FOV to be smaller than the stack's
-            cut_rows = max(1, int(np.ceil((field.shape[0] - mini_stack.shape[1]) / 2)))
-            cut_cols = max(1, int(np.ceil((field.shape[1] - mini_stack.shape[2]) / 2)))
-            field = field[cut_rows:-cut_rows, cut_cols:-cut_cols]
-
-            # 3-d match_template
-            best_score, _, (x, y, z) = parallel_registration((0, 0, 0), mini_stack, field)
-
-            # Rewrite offsets as stack coordinates
-            final_x = stack_x + ((x + 0.5) - mini_stack.shape[2] / 2) * (common_res / stack_res[2]) # in stack pixels
-            final_y = stack_y + ((y + 0.5) - mini_stack.shape[1] / 2) * (common_res / stack_res[1]) # in stack pixels
-            final_z = stack_z + (max(0, int(round(estimated_px_z - z_range))) + z + 0.5) * common_res # in microns
-            #Note: Best match in the first slice will return z = 0.5 * z_step and not 0.
-
-            self.insert1({**key, 'reg_x': final_x, 'reg_y': final_y, 'reg_z': final_z,
-                          'score': best_score, 'common_res': common_res})
+            # Run rigid registration with no rotations
+            result = registration.register_rigid(stack, field, estimated_px_z, z_range)
+            score, (x, y, z), (yaw, pitch, roll) = result
 
         elif key['registration_method'] == 2: # rigid plus 3-d rotation
-            import multiprocessing as mp
-            from itertools import product
-            from functools import partial
+            max_angle = 5
 
-            max_angle = 5 # max angle in degrees to try for rotations
+            # Run parallel registration searching for best rotation angles
+            results = performance.map_angles(stack, field, estimated_px_z, z_range, max_angle)
+            score, (x, y, z), (yaw, pitch, roll) = sorted(results)[-1]
 
+            # Create some intermediate results (inserted below)
+            num_angles = 2 * max_angle + 1
+            score_map = np.zeros([num_angles, num_angles, num_angles])
+            position_map = np.zeros([num_angles, num_angles, num_angles, 3])
+            for rho, position, angles in results:
+                idx1, idx2, idx3 = (a + max_angle for a in angles)
+                score_map[idx1, idx2, idx3] = rho
+                position_map[idx1, idx2, idx3] = position
 
+        # Map back to stack coordinates
+        final_x = stack_x + x * (common_res / stack_res[2]) # in stack pixels
+        final_y = stack_y + y * (common_res / stack_res[1]) # in stack pixels
+        final_z = stack_z + (z + stack.shape[0] / 2) * common_res # in microns*
+        #* Best match in the first slice will not result in z = 0 but 0.5 * z_step.
 
-            #TODO: Delete this
-            yaw, pitch, roll = 2, 3, 4
+        # Insert
+        self.insert1({**key, 'common_res': common_res, 'reg_x': final_x, 'reg_y': final_y,
+                      'reg_z': final_z, 'yaw': yaw, 'pitch': pitch, 'roll': roll,
+                      'score': score})
+        if key['registration_method'] == 2: # store correlation values
+            self.AffineResults().insert1({**key, 'score_map': score_map, 'position_map': position_map})
 
-
-
-            # Get rotation matrix and its inverse
-            R = _create_rotation_matrix(yaw, pitch, roll)
-            R_inv = np.linalg.inv(R)
-            # We'll rotate the stack with the inverse of an intrinsic yaw->pitch-> roll rotation
-
-            # Compute highest z after rotation (accounting for z_range)
-            h, w = stack.shape[1] / 2, stack.shape[2] / 2 # y, x
-            corners_at_zrange = [[-w, -h, z_range], [w, -h, z_range], [w, h, z_range],
-                                 [-w, h, z_range]] # four stack corners at z=z_range
-            rot_corners_at_zrange = np.dot(R_inv, np.array(corners_at_zrange).T)
-            rot_z_top = np.max(rot_corners_at_zrange[2])
-
-            # We'll cut the rotated stack at rot_z_top and we want to know how many more
-            # slices above rot_z_top are needed to avoid black spaces at the edges.
-            # We find all corners of the cross-section at z=rot_z_top, map it back to
-            # our original coordinate system and find the maximum z.
-            corners_at_zero = [[-w, -h, 0], [w, -h, 0], [w, h, 0], [-w, h, 0]] # clockwise, starting at upper left
-            corners_at_100= [[-w, -h, 100], [w, -h, 100], [w, h, 100], [-w, h, 100]]
-            rot_corners_at_zero = np.dot(R_inv, np.array(corners_at_zero).T) #
-            rot_corners_at_100 = np.dot(R_inv, np.array(corners_at_100).T)
-            rot_corners_at_ztop = find_intersecting_point(rot_corners_at_zero, rot_corners_at_100, rot_z_top)
-            corners_at_ztop = np.dot(R, rot_corners_at_ztop)
-            z_slack = np.max(corners_at_ztop[2])
-
-            # Restrict stack to relevant part of the scan
-            mini_stack = stack[max(0, int(round(estimated_px_z - z_slack))): int(round(estimated_px_z + z_slack))]
-
-            # Rotate stack (inverse of intrinsic yaw-> pitch -> roll)
-            rotated = ndimage.rotate(mini_stack, yaw, axes=(1, 2), order=1) # yaw(-w)
-            rotated = ndimage.rotate(rotated, -pitch, axes=(0, 2), order=1) # pitch(-v)
-            rotated = ndimage.rotate(rotated, roll, axes=(0, 1), order=1) # roll(-u)
-
-            # Compute amount of cut in z
-            est_z = (estimated_px_z - max(0, int(round(estimated_px_z - z_slack)))) - mini_stack.shape[0] / 2
-            rot_est_z = np.dot(R_inv, [0, 0, est_z])[2]
-            min_z, max_z = rot_est_z - rot_z_top, rot_est_z + rot_z_top
-
-            # Compute amount of x and y slack
-            top_corners = find_intersecting_point(rot_corners_at_zero, rot_corners_at_100, max(-rotated.shape[0] / 2, min_z))
-            bottom_corners = find_intersecting_point(rot_corners_at_zero, rot_corners_at_100, min(rotated.shape[0] / 2, max_z))
-            min_x = max(*top_corners[0, [0, 3]], *bottom_corners[0, [0, 3]])
-            max_x = min(*top_corners[0, [1, 2]], *bottom_corners[0, [1, 2]])
-            min_y = max(*top_corners[1, [0, 1]], *bottom_corners[1, [0, 1]])
-            max_y = min(*top_corners[1, [2, 3]], *bottom_corners[1, [2, 3]])
-
-            # Cut rotated stack
-            mini_rotated = rotated[max(0, int(round(rotated.shape[0] / 2 + min_z))): int(round(rotated.shape[0] / 2 + max_z)),
-                                   max(0, int(round(rotated.shape[1] / 2 + min_y))): int(round(rotated.shape[1] / 2 + max_y)),
-                                   max(0, int(round(rotated.shape[2] / 2 + min_x))): int(round(rotated.shape[2] / 2 + max_x))]
-            z_center = rotated.shape[0] / 2 - max(0, int(round(rotated.shape[0] / 2 + min_z)))  # z of the center with zero at the top of mini_rotated
-            y_center = rotated.shape[1] / 2 - max(0, int(round(rotated.shape[1] / 2 + min_y)))
-            x_center = rotated.shape[2] / 2 - max(0, int(round(rotated.shape[2] / 2 + min_x)))
-
-            # Crop field FOV to be smaller than the stack's
-            cut_rows = max(1, int(np.ceil((field.shape[0] - mini_rotated.shape[1]) / 2)))
-            cut_cols = max(1, int(np.ceil((field.shape[1] - mini_rotated.shape[2]) / 2)))
-            field = field[cut_rows:-cut_rows, cut_cols:-cut_cols]
-
-            # 3-d match_template
-            corrs = np.stack(feature.match_template(s, field, pad_input=True) for s in mini_rotated)
-            smooth_corrs = ndimage.gaussian_filter(corrs, 0.7)
-            best_score = np.max(smooth_corrs)
-            z, y, x = np.unravel_index(np.argmax(smooth_corrs), smooth_corrs.shape)
-
-            x_offset = (x + 0.5) - x_center
-            y_offset = (y + 0.5) - y_center
-            z_offset = (z + 0.5) - z_center
-
-            # Map back to original coordinates
-            xp, yp, zp = np.dot(R, [x_offset, y_offset, z_offset])
-            zp = ((max(0, int(round(estimated_px_z - z_slack))) + mini_stack.shape[0] / 2
-                   + zp) - stack.shape[0] / 2) # with respect to original z center
-
-            # Map back to stack coordinates
-            final_x = stack_x + xp * (common_res / stack_res[2]) # in stack pixels
-            final_y = stack_y + yp * (common_res / stack_res[1]) # in stack pixels
-            final_z = stack_z + (zp + stack.shape[0] / 2) * common_res # in microns
-
-
-            self.insert1({**key, 'reg_x': final_x, 'reg_y': final_y, 'reg_z': final_z,
-                          'yaw': yaw, 'pitch': pitch, 'roll': roll, 'score': best_score,
-                          'common_res': common_res})
         #self.notify(key)
 
     @notify.ignore_exceptions
@@ -1206,6 +1048,7 @@ class FieldRegistration(dj.Computed):
                     '{}, {} (z, y, x) with {}, {}, {} (yaw, pitch, roll) inclination')
         msg = f_string.format(key, z, y, x, yaw, pitch, roll)
         (notify.SlackUser() & (experiment.Session() & key)).notify(msg)
+
 
 # TODO: Add this in shared
 #class SegmentationMethod(dj.Lookup):
