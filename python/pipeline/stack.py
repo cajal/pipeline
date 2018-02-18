@@ -1029,7 +1029,7 @@ class FieldRegistration(dj.Computed):
         final_x = stack_x + x * (common_res / stack_res[2]) # in stack pixels
         final_y = stack_y + y * (common_res / stack_res[1]) # in stack pixels
         final_z = stack_z + (z + stack.shape[0] / 2) * common_res # in microns*
-        #* Best match in the first slice will not result in z = 0 but 0.5 * z_step.
+        #* Best match in slice 0 will not result in z = 0 but 0.5 * z_step.
 
         # Insert
         self.insert1({**key, 'common_res': common_res, 'reg_x': final_x, 'reg_y': final_y,
@@ -1038,7 +1038,7 @@ class FieldRegistration(dj.Computed):
         if key['registration_method'] == 2: # store correlation values
             self.AffineResults().insert1({**key, 'score_map': score_map, 'position_map': position_map})
 
-        #self.notify(key)
+        self.notify(key)
 
     @notify.ignore_exceptions
     def notify(self, key):
