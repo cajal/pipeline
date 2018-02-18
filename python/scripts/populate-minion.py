@@ -71,5 +71,6 @@ while True:
     stack.MotionCorrection().populate(reserve_jobs=True, suppress_errors=True)
     stack.Stitching().populate(reserve_jobs=True, suppress_errors=True)
     stack.CorrectedStack().populate(reserve_jobs=True, suppress_errors=True)
+    stack.FieldRegistration().populate(reserve_jobs=True, suppress_errors=True)
 
     time.sleep(600) # wait 10 minutes before trying to process things again
