@@ -1,5 +1,5 @@
 #!/usr/local/bin/python3
-from pipeline import reso, meso, fuse, stack, pupil, treadmill
+from pipeline import reso, meso, fuse, stack, pupil, treadmill, fastmeso
 from pipeline import experiment
 import time
 
@@ -27,6 +27,7 @@ while True:
         # reso/meso
         for pipe in [reso, meso]:
             pipe.ScanInfo().populate(next_scans, reserve_jobs=True, suppress_errors=True)
+            fastmeso.FastRegistration().populate(next_scans, reserve_jobs=True, suppress_errors=True)
             pipe.Quality().populate(next_scans, reserve_jobs=True, suppress_errors=True)
             pipe.RasterCorrection().populate(next_scans, reserve_jobs=True, suppress_errors=True)
             pipe.MotionCorrection().populate(next_scans, reserve_jobs=True, suppress_errors=True)
