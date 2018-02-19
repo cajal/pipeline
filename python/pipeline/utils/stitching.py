@@ -28,10 +28,10 @@ class StitchedSlice():
         return self.slice.shape[1]
 
     def rot90(self):
-        """ Rotates slice 90 degrees counterclockwise. """
+        """ Rotates slice (around z axis) 90 degrees clockwise. """
         self.x, self.y = -self.y, self.x # parallel assignment
-        self.mask = np.rot90(self.mask)
-        self.slice = np.rot90(self.slice)
+        self.mask = np.rot90(self.mask, k=-1)
+        self.slice = np.rot90(self.slice, k=-1)
 
     def join_with(self, other, x, y, smooth_blend=True):
         """ Stitches a new slice to the current slice at the given coordinates.
@@ -52,9 +52,7 @@ class StitchedSlice():
 
         # Taper sides for smoother blending
         if smooth_blend:
-            overlap = int(round((self.width + other.width) -
-                                (max(self.x + self.width / 2, x + other.width / 2) -
-                                 min(self.x - self.width / 2, x - other.width / 2))))
+            overlap = (self.width + other.width) - output_width
             taper = signal.hann(2 * overlap)[:overlap]
 
             if self.x + self.width / 2 > x + other.width / 2:  # other | self
@@ -76,13 +74,13 @@ class StitchedSlice():
         slice2[:other.height, :other.width] = other.slice
 
         # Move rois to their final position
-        delta_x1, delta_y1 = (self.x - self.width / 2) - x_min, (self.y + self.height / 2) - y_max
-        mask1 = interpolation.shift(mask1, (-delta_y1, delta_x1), order=1)
-        slice1 = interpolation.shift(slice1, (-delta_y1, delta_x1), order=1)
+        delta1 = (self.y - self.height / 2) - y_min, (self.x - self.width / 2) - x_min
+        mask1 = interpolation.shift(mask1, delta1, order=1)
+        slice1 = interpolation.shift(slice1, delta1, order=1)
 
-        delta_x2, delta_y2 = (x - other.width / 2) - x_min, (y + other.height / 2) - y_max
-        mask2 = interpolation.shift(mask2, (-delta_y2, delta_x2), order=1)
-        slice2 = interpolation.shift(slice2, (-delta_y2, delta_x2), order=1)
+        delta2 = (y - other.height / 2) - y_min, (x - other.width / 2) - x_min
+        mask2 = interpolation.shift(mask2, delta2, order=1)
+        slice2 = interpolation.shift(slice2, delta2, order=1)
 
         # Blend (mask act as weights and normalization needed for them to sum to 1)
         self.mask = mask1 + mask2
@@ -150,16 +148,14 @@ class StitchedROI():
         """ Collects all slices into a single 3-d volume."""
         x_min = min([slice_.x - slice_.width / 2 for slice_ in self.slices])
         y_min = min([slice_.y - slice_.height / 2 for slice_ in self.slices])
-        y_max = max([slice_.y + slice_.height / 2 for slice_ in self.slices])
-        y_max -= (y_max - y_min) % 1 # Make sure they add up to an integer value
 
         # Move each slice to the right position
         volume = np.zeros([self.depth, self.height, self.width], dtype=self.dtype)
         for i, slice_ in enumerate(self.slices):
             volume[i, :slice_.height, :slice_.width] = slice_.slice
-            delta_y = (slice_.y + slice_.height / 2) - y_max
-            delta_x = (slice_.x - slice_.width / 2) - x_min
-            volume[i] = interpolation.shift(volume[i], (-delta_y, delta_x), order=1)
+            delta = ((slice_.y - slice_.height / 2) - y_min,
+                     (slice_.x - slice_.width / 2) - x_min)
+            volume[i] = interpolation.shift(volume[i], delta, order=1)
 
         return volume
 
@@ -229,7 +225,7 @@ class StitchedROI():
 
 
 
-def linear_stitch(left, right, expected_delta_y, expected_delta_x):
+def linear_stitch(left, right, expected_delta_x):
     """ Compute offsets to stitch two side-by-side volumes via cross-correlation.
 
     Subpixel shifts are calculated per depth and the median is returned.
@@ -237,7 +233,6 @@ def linear_stitch(left, right, expected_delta_y, expected_delta_x):
     Arguments:
     :param left: Slice (height x width) to be stitched in the left.
     :param right: Slice (height x width) to be stitched in the right.
-    :param float expected_delta_y: Expected distance between center of left to right.
     :param float expected_delta_x: Expected distance between center of left to right.
 
     :returns: (delta_y, delta_x). Distance between center of right ROI and left ROI after
@@ -268,7 +263,7 @@ def linear_stitch(left, right, expected_delta_y, expected_delta_x):
     # Compute right_center minus left_center
     right_ycenter = right_height / 2 - y_shift # original + offset
     right_xcenter = right_width / 2 + (left_width - expected_overlap - 2*skip_columns) - x_shift # original + repositioning + offset
-    delta_y = -(right_ycenter - left_height / 2) # negative to change direction of y axis
+    delta_y = right_ycenter - left_height / 2 # negative to change direction of y axis
     delta_x = right_xcenter - left_width / 2
 
     return delta_y, delta_x
