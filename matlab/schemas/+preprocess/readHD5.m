@@ -150,14 +150,26 @@ switch version
         
         % check for correct waveform structure
         waveformDescStr=H5Tools.readAttribute(fp,'AS_channelNames')';
-        assert(strcmp(deblank(waveformDescStr),'Photodiode, FrameSync, Time'),...
-            'waveform Channels Description is wrong for this file version');
         
         % read wf and convert waveform to structure
-        wf = H5Tools.readDataset(fp,'Analog Signals') ;
-        data.syncPd = wf(:,1);
-        data.scanImage = wf(:,2);
-        data.ts = wf(:,3);
+        asVersion = H5Tools.readAttribute(fp,'AS_Version');
+        switch asVersion
+            case 2
+                assert(strcmp(deblank(waveformDescStr),'Photodiode, FrameSync, Time'),...
+            'waveform Channels Description is wrong for this file version');
+                wf = H5Tools.readDataset(fp,'Analog Signals') ;
+                data.syncPd = wf(:,1);
+                data.scanImage = wf(:,2);
+                data.ts = wf(:,3);
+            case 2.1
+                assert(strcmp(deblank(waveformDescStr),'Photodiode, ScanImageFrameSync, LaserPower ,Time'),...
+            'waveform Channels Description is wrong for this file version');
+                wf = H5Tools.readDataset(fp,'Analog Signals') ;
+                data.syncPd = wf(:,1);
+                data.scanImage = wf(:,2);
+                data.ts = wf(:,4);
+        end
+        
         
         % close file
         H5F.close(fp);
