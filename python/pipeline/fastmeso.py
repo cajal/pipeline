@@ -96,4 +96,5 @@ class FastRegistration(dj.Computed):
         score = (FastRegistration() &  key).fetch('score')
         msg = ('FastRegistration for {} has been populated. Field registered at {}, {}, '
                '{} (z, y, x) with a score of {}').format(key, z, y, x, score)
-        (notify.SlackUser() & (experiment.Session() & key)).notify(msg)
+        slack_user = (notify.SlackUser() & (experiment.Session() & key & {'session': key['stack_session']}))
+        slack_user.notify(msg)
