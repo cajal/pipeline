@@ -1100,7 +1100,6 @@ class StackSet(dj.Computed):
     class Match(dj.Part):
         definition = """ # Scan unit to stack unit match (n:1 relation)
         (scan_session) -> experiment.Scan(session)  # animal_id, scan_session, scan_idx
-        -> shared.Field
         -> shared.SegmentationMethod
         unit_id             :int        # unit id from ScanSet.Unit
         ---
@@ -1236,7 +1235,7 @@ class StackSet(dj.Computed):
 
                 # Insert new unit
                 units.append(unit1)
-        print('x number of final masks')
+        print(len(units), 'number of final masks')
 
         # Insert
         self.insert1({**key, 'min_distance': min_distance, 'max_height': max_height})
@@ -1245,18 +1244,52 @@ class StackSet(dj.Computed):
             self.Unit().insert1({**key, 'munit_id': munit_id, 'munit_x': centroid[0],
                                  'munit_y': centroid[1], 'munit_z': centroid[2]})
             for unit in munit.units:
-                new_match = {**key, **unit.key, 'scan_session': unit.key['session']}
+                new_match = {**key, 'munit_id': munit_id,
+                             **unit.key, 'scan_session': unit.key['session']}
                 self.Match().insert1(new_match, ignore_extra_fields=True)
 
         self.notify(key)
 
     @notify.ignore_exceptions
     def notify(self, key):
-        msg = ('StackSet for {animal_id}-{stack_session}-{stack_idx} populated: '
-               '{num_units} final units').format(**key, num_units=len(self.Unit() & key))
+        fig = (StackSet() & key).plot_centroids3d()
+        img_filename = '/tmp/' + key_hash(key) + '.png'
+        fig.savefig(img_filename)
+        plt.close(fig)
+
+        msg = ('StackSet for {animal_id}-{stack_session}-{stack_idx}: {num_units} final '
+               'units').format(**key, num_units=len(self.Unit() & key))
         slack_user = notify.SlackUser() & (experiment.Session() & key &
                                            {'session': key['stack_session']})
-        slack_user.notify(msg)
+        slack_user.notify(file=img_filename, file_title=msg)
+
+    def plot_centroids3d(self):
+        """ Plots the centroids of all units in the motor coordinate system (in microns)
+
+        :returns Figure. You can call show() on it.
+        :rtype: matplotlib.figure.Figure
+        """
+        from mpl_toolkits.mplot3d import Axes3D
+
+        # Get stack resolution
+        stack_rel = CorrectedStack() & self.proj(session='stack_session')
+        dims = stack_rel.fetch1('um_height', 'px_height', 'um_width', 'px_width')
+        stack_res = [dims[0] / dims[1], dims[2] / dims[3]]
+
+        # Get centroids
+        xs, ys, zs = (StackSet.Unit() & self).fetch('munit_x', 'munit_y', 'munit_z')
+        centroids = np.stack([xs * stack_res[1], ys * stack_res[0], zs], axis=1)
+
+        # Plot
+        fig = plt.figure(figsize=(10, 10))
+        ax = fig.add_subplot(111, projection='3d')
+        ax.scatter(centroids[:, 0], centroids[:, 1], centroids[:, 2])
+        ax.invert_zaxis()
+        ax.set_xlabel('x (um)')
+        ax.set_ylabel('y (um)')
+        ax.set_zlabel('z (um)')
+
+        return fig
 
 
 
