@@ -981,13 +981,13 @@ class FieldRegistration(dj.Computed):
                      'scan_idx': key['scan_idx'], 'field': key['field'],
                      'channel': key['scan_channel']} # no pipe_version
         pipe = reso if reso.ScanInfo() & field_key else meso if meso.ScanInfo() & field_key else None
-        field = (pipe.SummaryImages.Average() & field_key).fetch1('average_image')
+        mean_image = (pipe.SummaryImages.Average() & field_key).fetch1('average_image')
 
         # Drop some edges (only y and x) to avoid artifacts
         skip_dims = [max(1, int(round(s * 0.025))) for s in stack.shape]
         stack = stack[:, skip_dims[1] : -skip_dims[1], skip_dims[2]: -skip_dims[2]]
-        skip_dims = [max(1, int(round(s * 0.025))) for s in field.shape]
-        field = field[skip_dims[0] : -skip_dims[0], skip_dims[1]: -skip_dims[1]]
+        skip_dims = [max(1, int(round(s * 0.025))) for s in mean_image.shape]
+        field = mean_image[skip_dims[0] : -skip_dims[0], skip_dims[1]: -skip_dims[1]]
 
         # Rescale to match lowest resolution  (isotropic pixels/voxels)
         field_res = ((reso.ScanInfo() & field_key).microns_per_pixel if pipe == reso else
@@ -1031,9 +1031,11 @@ class FieldRegistration(dj.Computed):
                 position_map[idx1, idx2, idx3] = position
 
         # Get field in stack (after registration)
-        reg_field_ = registration.find_field_in_stack(stack, x, y, z, yaw, pitch, roll,
-                                                      *field.shape)
-        reg_field = ndimage.zoom(reg_field_, common_res / field_res, order=1)
+        common_field_shape = field.shape + 2 * np.array(skip_dims)
+        reg_field = registration.find_field_in_stack(stack, x, y, z, yaw, pitch, roll,
+                                                     *common_field_shape)
+        reg_field = ndimage.zoom(reg_field, common_res / field_res, order=1) # *
+        # * this could not be the same as the original shape but it should be pretty close
 
         # Map back to stack coordinates
         final_x = stack_x + x * (common_res / stack_res[2]) # in stack pixels
@@ -1050,7 +1052,7 @@ class FieldRegistration(dj.Computed):
             self.AffineResults().insert1({**key, 'score_map': score_map,
                                           'position_map': position_map})
 
-        self.notify(key, field, reg_field_)
+        self.notify(key, mean_image, reg_field)
 
     @notify.ignore_exceptions
     def notify(self, key, original_field, registered_field):
@@ -1073,7 +1075,7 @@ class FieldRegistration(dj.Computed):
 @schema
 class StackSet(dj.Computed):
     definition=""" # give a unique id to segmented masks in the stack
-    -> CorrectedStack
+    (stack_session) -> CorrectedStack(session)  # animal_id, stack_session, stack_idx, pipe_version, volume_id
     -> shared.RegistrationMethod
     ---
     min_distance            :tinyint        # distance used as threshold to accept two masks as the same
@@ -1083,30 +1085,27 @@ class StackSet(dj.Computed):
     @property
     def key_source(self):
         all_keys = CorrectedStack() * shared.RegistrationMethod()
-        return all_keys & FieldRegistration().proj(session='stack_session')
+        return all_keys.proj(stack_session='session') & FieldRegistration()
 
-#    class Match:
-#        ->cell_id
-#        ---        -> unitId1
-#        -> unitId2
-#
-#    class Cell(dj.Part):
-#        definition=""" # Unique ID and cell coordinates
-#        -> StackSet
-#        cell_id             :int
-#        ---
-#        cell_x              :float      # (px) position of the centroid in the stack
-#        cell_y              :float      # (px) position of the centroid in the stack
-#        cell_z              :float      # (um) position of the centroid in the stack
-#        """
-#
-#    class MaskMatch(dj.Part):
-#        definition = """
-#        -> (meso/reso)ScanSet.Unit  #$ Unit or UnitInfo, probably Unit to have field
-#        ---
-#        -> Cell
-#        """
+    class Unit(dj.Part):
+        definition = """ # a unit in the stack
+        -> master
+        munit_id            :int        # unique id in the stack
+        ---
+        munit_x             :float      # (px) position of the centroid in the stack
+        munit_y             :float      # (px) position of the centroid in the stack
+        munit_z             :float      # (um) position of the centroid in the stack
+        """
 
+    class Match(dj.Part):
+        definition = """ # Scan unit to stack unit match (n:1 relation)
+        (scan_session) -> experiment.Scan(session)  # animal_id, scan_session, scan_idx
+        -> shared.Field
+        -> shared.SegmentationMethod
+        unit_id             :int        # unit id from ScanSet.Unit
+        ---
+        -> StackSet.Unit
+        """
 
     class SingleUnit:
         """ Container of coordinates for a single cell. """
@@ -1119,7 +1118,7 @@ class StackSet(dj.Computed):
             self.centroid = np.dot(transform_matrix, self.centroid)
 
 
-    class JointUnit():
+    class MatchedUnit():
         """ Utility function to keep the coordinates of a set of cells. """
         def __init__(self, unit):
             self.units = [unit] # single
@@ -1138,7 +1137,7 @@ class StackSet(dj.Computed):
 
         @property
         def centroid(self):
-            centroids = [u.centroid for u in self.units]
+            centroids = [u.centroid[:-1] for u in self.units] # drop homogeneous dimension
             return np.mean(centroids, axis=0)
 
         def join_with(self, other):
@@ -1157,13 +1156,14 @@ class StackSet(dj.Computed):
         max_height = 20
 
         # Compute stack resolution
-        dims = (CorrectedStack() & key).fetch1('um_depth', 'px_depth', 'um_height',
-                                               'px_height', 'um_width', 'px_width')
+        stack_rel = (CorrectedStack() & key & {'session': key['stack_session']})
+        dims = stack_rel.fetch1('um_depth', 'px_depth', 'um_height', 'px_height',
+                                'um_width', 'px_width')
         stack_res = np.array([dims[0] / dims[1], dims[2] / dims[3], dims[4] / dims[5]])
 
         # Create list of units
-        units = []
-        registered_fields = FieldRegistration() & key & {'stack_session': key['session']}
+        units = [] # stands for matched units
+        registered_fields = FieldRegistration() & key
         for field in registered_fields.fetch():
             # Get field_key, field_hash and field_res
             field_key = {'animal_id': field['animal_id'], 'session': field['scan_session'],
@@ -1185,10 +1185,10 @@ class StackSet(dj.Computed):
             # Create cell objects
             somas = (pipe.MaskClassification.Type() & {'type': 'soma'})
             field_somas = pipe.ScanSet.Unit() & field_key & somas
-            for key, x, y in zip(*(pipe.ScanSet.UnitInfo() & field_somas).fetch('KEY', 'px_x', 'px_y')):
-                unit = StackSet.SingleUnit(key, x * field_res[1], y * field_res[0], 0, field_hash)
+            for unit_key, x, y in zip(*(pipe.ScanSet.UnitInfo() & field_somas).fetch('KEY', 'px_x', 'px_y')):
+                unit = StackSet.SingleUnit(unit_key, x * field_res[1], y * field_res[0], 0, field_hash)
                 unit.apply_transform(affine_matrix)
-                units.append(StackSet.JointUnit(unit))
+                units.append(StackSet.MatchedUnit(unit))
         print(len(units), 'initial units')
 
 
@@ -1207,7 +1207,7 @@ class StackSet(dj.Computed):
 
         # Create distance matrix
         # For memory efficiency we use an adjacency list with only the units at less than 10 microns
-        centroids = np.array([u.centroid for u in units]) # n x 4, last coordinate is always 1\
+        centroids = np.array([u.centroid for u in units])
         distance_list = [] # list of triples (distance, unit1, unit2)
         for i in range(len(units)):
             indices, distances = find_close_units(centroids[i], centroids[i+1:], min_distance)
@@ -1215,7 +1215,7 @@ class StackSet(dj.Computed):
                                      [units[i + 1 + j] for j in indices]))
         print(len(distance_list), 'possible pairings')
 
-        # What if I do the is_valid check during joining
+        # Join units
         distance_list = sorted(distance_list, key=lambda x: x[0])
         while(len(distance_list) > 0):
             d, unit1, unit2 = distance_list.pop(0)
@@ -1223,46 +1223,40 @@ class StackSet(dj.Computed):
                 # Remove them from lists
                 units.remove(unit1)
                 units.remove(unit2)
+                f = lambda x: (unit1 not in x[1:]) and (unit2 not in x[1:])
+                distance_list = list(filter(f, distance_list))
 
-                # This doesnt; work, Do I need to search in the unit list of the units in the distance_list.
-                # Can that happen?>
-                distance_list = filter(distance_list, lambda x: [unit1, unit2] not in x[1:2])
-
-                # Join them and add joint unit to list
+                # Join them
                 unit1.join_with(unit2)
-                units.append(unit1)
-
-#TODO: Remove centroids from list or just recompute for the new units, make sure not to compute distance to itself.
-                # Mayeb just recompute centroids from the new unit_list (before adding the new unit)
 
                 # Recalculate distances
+                centroids = np.array([u.centroid for u in units])
                 indices, distances = find_close_units(unit1.centroid, centroids, min_distance)
-
-
                 distance_list.extend(zip(distances, itertools.repeat(unit1), [units[j] for j in indices]))
 
+                # Insert new unit
+                units.append(unit1)
         print('x number of final masks')
 
-        # Algorithm 2: More expensive, slightly more complex
-            # Compute distance matrix
-            # Set distance in matches that make final cell higher than 15 microns to infinity
-            # Set distance in matches that are in the same plane to infinity
-            # while true:
-                # Select minimum distance (or break if nest minimum distance greater than 15)
-                # Join the cells (compute new coordinates, new height, etc.)
-                # Delete row and columns corresponding to the two joined cells
-        #TODO: HO w to manage inidices (maybe just keep a list with the cells ) and delete things from the list as they are deleted from the main one
-                # Update distance matrix to have distances to the new cell (with matches greater than 15 being set to infinity)
+        # Insert
+        self.insert1({**key, 'min_distance': min_distance, 'max_height': max_height})
+        for munit_id, munit in zip(itertools.count(start=1), units):
+            centroid = munit.centroid / stack_res[::-1] # in stack coordinates
+            self.Unit().insert1({**key, 'munit_id': munit_id, 'munit_x': centroid[0],
+                                 'munit_y': centroid[1], 'munit_z': centroid[2]})
+            for unit in munit.units:
+                new_match = {**key, **unit.key, 'scan_session': unit.key['session']}
+                self.Match().insert1(new_match, ignore_extra_fields=True)
 
-        # Relabel cell_ids to start from 1 andf not have gaps
+        self.notify(key)
 
-
-        # Transform them to stack coords
-
-        #TODO: Remember to insert min_distance and max_height
-
-
-        # Better algorithm but too expensive: (essentially a dendogram)
+    @notify.ignore_exceptions
+    def notify(self, key):
+        msg = ('StackSet for {animal_id}-{stack_session}-{stack_idx} populated: '
+               '{num_units} final units').format(**key, num_units=len(self.Unit() & key))
+        slack_user = notify.SlackUser() & (experiment.Session() & key &
+                                           {'session': key['stack_session']})
+        slack_user.notify(msg)
 
 
 
