@@ -166,11 +166,16 @@ def parallel_summary_images(chunks, results, raster_phase, fill_fraction, y_shif
         xy_motion = np.stack([x_shifts[frames], y_shifts[frames]])
         chunk = galvo_corrections.correct_motion(chunk, xy_motion)
 
+        # Compute sum and l6-norm
+        chunk_sum = np.sum(chunk, axis=-1, dtype=float)
+        chunk -= chunk.min()
+        chunk_l6norm = np.sum(chunk**6, axis=-1, dtype=float)
+
         # Subtract overall brightness per frame
         chunk -= chunk.mean(axis=(0, 1))
 
         # Compute sum_x and sum_x^2
-        chunk_sum = np.sum(chunk, axis=-1, dtype=float)
+        chunk_sum2 = np.sum(chunk, axis=-1, dtype=float)
         chunk_sqsum = np.sum(chunk**2, axis=-1, dtype=float)
 
         # Compute sum_xy: Multiply each pixel by its eight neighbors
@@ -187,12 +192,8 @@ def parallel_summary_images(chunks, results, raster_phase, fill_fraction, y_shif
             chunk = np.rot90(rotated_chunk, k=4 - k)
             chunk_xysum = np.rot90(rotated_xysum, k=4 - k)
 
-        # Compute l6 norm (before square root)
-        chunk -= chunk.min()
-        chunk_l6norm = np.sum(chunk**6, axis=-1, dtype=float)
-
         # Save results
-        results.append((chunk_sum, chunk_sqsum, chunk_xysum, chunk_l6norm))
+        results.append((chunk_sum, chunk_l6norm, chunk_sum2, chunk_sqsum, chunk_xysum))
 
 
 def parallel_save_memmap(chunks, results, raster_phase, fill_fraction, y_shifts,
