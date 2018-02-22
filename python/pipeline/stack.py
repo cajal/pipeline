@@ -1008,13 +1008,13 @@ class FieldRegistration(dj.Computed):
         estimated_px_z = (field_z - stack_z + 0.5) / common_res # in pixels
 
         # Register
-        z_range = 40 / common_res # search 40 microns up and down
-        if key['registration_method'] == 1: # rigid
+        z_range = (40 if key['registration_method'] in [1, 3] else 100) / common_res # search 40/100 microns up and down
+        if key['registration_method'] in [1, 2]: # rigid
             # Run rigid registration with no rotations
             result = registration.register_rigid(stack, field, estimated_px_z, z_range)
             score, (x, y, z), (yaw, pitch, roll) = result
 
-        elif key['registration_method'] == 2: # rigid plus 3-d rotation
+        elif key['registration_method'] == 3: # rigid plus 3-d rotation
             max_angle = 5
 
             # Run parallel registration searching for best rotation angles
@@ -1214,6 +1214,7 @@ class StackSet(dj.Computed):
                                      [units[i + 1 + j] for j in indices]))
         print(len(distance_list), 'possible pairings')
 
+        # TODO: This takes too much
         # Join units
         distance_list = sorted(distance_list, key=lambda x: x[0])
         while(len(distance_list) > 0):
