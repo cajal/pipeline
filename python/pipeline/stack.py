@@ -538,8 +538,6 @@ class Stitching(dj.Computed):
             not match) or pixel heights could happen to match even if true heights are
             different and thus they'll be erroneously stitched.
         """
-        import itertools
-
         print('Stitching ROIs for stack', key)
 
         # Get some params
@@ -953,6 +951,13 @@ class FieldRegistration(dj.Computed):
         processed_fields = (reso.SummaryImages() + meso.SummaryImages()).proj(scan_session='session')
         return RegistrationTask() & processed_fields & {'pipe_version': CURRENT_VERSION}
 
+    class FieldInStack(dj.Part):
+        definition = """ # cut out of the field in the stack after registration
+        -> master
+        ---
+        reg_field       : longblob    # 2-d field taken from the stack
+        """
+
     class AffineResults(dj.Part):
         definition = """ # some intermediate results from affine registration
         -> master
@@ -976,13 +981,13 @@ class FieldRegistration(dj.Computed):
                      'scan_idx': key['scan_idx'], 'field': key['field'],
                      'channel': key['scan_channel']} # no pipe_version
         pipe = reso if reso.ScanInfo() & field_key else meso if meso.ScanInfo() & field_key else None
-        field = (pipe.SummaryImages.Average() & field_key).fetch1('average_image')
+        mean_image = (pipe.SummaryImages.Average() & field_key).fetch1('average_image')
 
-        # Drop some edges (only y and x) to avoid artifacts (and black edges in stacks)
-        skip_dims = np.clip(np.round(np.array(stack.shape) * 0.025), 1, None).astype(int)
+        # Drop some edges (only y and x) to avoid artifacts
+        skip_dims = [max(1, int(round(s * 0.025))) for s in stack.shape]
         stack = stack[:, skip_dims[1] : -skip_dims[1], skip_dims[2]: -skip_dims[2]]
-        skip_dims = np.clip(np.round(np.array(field.shape) * 0.025), 1, None).astype(int)
-        field = field[skip_dims[0] : -skip_dims[0], skip_dims[1]: -skip_dims[1]]
+        skip_dims = [max(1, int(round(s * 0.025))) for s in mean_image.shape]
+        field = mean_image[skip_dims[0] : -skip_dims[0], skip_dims[1]: -skip_dims[1]]
 
         # Rescale to match lowest resolution  (isotropic pixels/voxels)
         field_res = ((reso.ScanInfo() & field_key).microns_per_pixel if pipe == reso else
@@ -1003,13 +1008,13 @@ class FieldRegistration(dj.Computed):
         estimated_px_z = (field_z - stack_z + 0.5) / common_res # in pixels
 
         # Register
-        z_range = 40 / common_res # search 40 microns up and down
-        if key['registration_method'] == 1: # rigid
+        z_range = (40 if key['registration_method'] in [1, 3] else 100) / common_res # search 40/100 microns up and down
+        if key['registration_method'] in [1, 2]: # rigid
             # Run rigid registration with no rotations
             result = registration.register_rigid(stack, field, estimated_px_z, z_range)
             score, (x, y, z), (yaw, pitch, roll) = result
 
-        elif key['registration_method'] == 2: # rigid plus 3-d rotation
+        elif key['registration_method'] in [3, 4]: # rigid plus 3-d rotation
             max_angle = 5
 
             # Run parallel registration searching for best rotation angles
@@ -1025,6 +1030,13 @@ class FieldRegistration(dj.Computed):
                 score_map[idx1, idx2, idx3] = rho
                 position_map[idx1, idx2, idx3] = position
 
+        # Get field in stack (after registration)
+        common_field_shape = field.shape + 2 * np.array(skip_dims)
+        reg_field = registration.find_field_in_stack(stack, x, y, z, yaw, pitch, roll,
+                                                     *common_field_shape)
+        reg_field = ndimage.zoom(reg_field, common_res / field_res, order=1) # *
+        # * this could not be the same as the original shape but it should be pretty close
+
         # Map back to stack coordinates
         final_x = stack_x + x * (common_res / stack_res[2]) # in stack pixels
         final_y = stack_y + y * (common_res / stack_res[1]) # in stack pixels
@@ -1035,19 +1047,247 @@ class FieldRegistration(dj.Computed):
         self.insert1({**key, 'common_res': common_res, 'reg_x': final_x, 'reg_y': final_y,
                       'reg_z': final_z, 'yaw': yaw, 'pitch': pitch, 'roll': roll,
                       'score': score})
-        if key['registration_method'] == 2: # store correlation values
-            self.AffineResults().insert1({**key, 'score_map': score_map, 'position_map': position_map})
+        self.FieldInStack().insert1({**key, 'reg_field': reg_field})
+        if key['registration_method'] in [3, 4]: # store correlation values
+            self.AffineResults().insert1({**key, 'score_map': score_map,
+                                          'position_map': position_map})
+
+        self.notify(key, mean_image, reg_field)
+
+    @notify.ignore_exceptions
+    def notify(self, key, original_field, registered_field):
+        import imageio
+        from pipeline.utils import signal
+
+        reg = np.zeros([*original_field.shape, 3], dtype=np.uint8)
+        reg[:, :, 1] = signal.float2uint8(original_field) # original in green
+        reg[:, :, 0] = signal.float2uint8(registered_field) # stack in red
+        img_filename = '/tmp/{}.png'.format(key_hash(key))
+        imageio.imwrite(img_filename, reg)
+
+        msg = ('registration of {animal_id}-{scan_session}-{field} to {animal_id}-'
+               '{stack_session}-{stack_idx} (method {registration_method})').format(**key)
+        slack_user = notify.SlackUser() & (experiment.Session() & key &
+                                 {'session': key['stack_session']})
+        slack_user.notify(file=img_filename, file_title=msg)
+
+
+@schema
+class StackSet(dj.Computed):
+    definition=""" # give a unique id to segmented masks in the stack
+    (stack_session) -> CorrectedStack(session)  # animal_id, stack_session, stack_idx, pipe_version, volume_id
+    -> shared.RegistrationMethod
+    ---
+    min_distance            :tinyint        # distance used as threshold to accept two masks as the same
+    max_height              :tinyint        # maximum allowed height of a joint mask
+    """
+    #TODO: Make it automatic to delete itself and repopulate if a new field is registered to the stack
+    @property
+    def key_source(self):
+        all_keys = CorrectedStack() * shared.RegistrationMethod()
+        return all_keys.proj(stack_session='session') & FieldRegistration()
+
+    class Unit(dj.Part):
+        definition = """ # a unit in the stack
+        -> master
+        munit_id            :int        # unique id in the stack
+        ---
+        munit_x             :float      # (px) position of the centroid in the stack
+        munit_y             :float      # (px) position of the centroid in the stack
+        munit_z             :float      # (um) position of the centroid in the stack
+        """
+
+    class Match(dj.Part):
+        definition = """ # Scan unit to stack unit match (n:1 relation)
+        (scan_session) -> experiment.Scan(session)  # animal_id, scan_session, scan_idx
+        -> shared.SegmentationMethod
+        unit_id             :int        # unit id from ScanSet.Unit
+        ---
+        -> StackSet.Unit
+        """
+
+    class SingleUnit:
+        """ Container of coordinates for a single cell. """
+        def __init__(self, key, x, y, z, plane_id):
+            self.key = key
+            self.centroid = np.array([x, y, z, 1])
+            self.plane_id = plane_id
+
+        def apply_transform(self, transform_matrix):
+            self.centroid = np.dot(transform_matrix, self.centroid)
+
+
+    class MatchedUnit():
+        """ Utility function to keep the coordinates of a set of cells. """
+        def __init__(self, unit):
+            self.units = [unit] # single
+
+        @property
+        def zs(self):
+            return [u.centroid[2] for u in self.units]
+
+        @property
+        def plane_ids(self):
+            return [u.plane_id for u in self.units]
+
+        @property
+        def centroid(self):
+            centroids = [u.centroid[:-1] for u in self.units] # drop homogeneous dimension
+            return np.mean(centroids, axis=0)
+
+        def join_with(self, other):
+            self.units += other.units
+
+        def distance_to(self, other):
+            return np.sqrt(((self.centroid - other.centroid) ** 2).sum())
+
+
+    def _make_tuples(self, key):
+        from .utils.registration import create_rotation_matrix
+        from scipy.spatial import distance
+
+        # Set some params
+        min_distance = 10
+        max_height = 20
+
+        # Compute stack resolution
+        stack_rel = (CorrectedStack() & key & {'session': key['stack_session']})
+        dims = stack_rel.fetch1('um_depth', 'px_depth', 'um_height', 'px_height',
+                                'um_width', 'px_width')
+        stack_res = np.array([dims[0] / dims[1], dims[2] / dims[3], dims[4] / dims[5]])
+
+        # Create list of units
+        units = [] # stands for matched units
+        registered_fields = FieldRegistration() & key
+        for field in registered_fields.fetch():
+            # Get field_key, field_hash and field_res
+            field_key = {'animal_id': field['animal_id'], 'session': field['scan_session'],
+                         'scan_idx': field['scan_idx'], 'field': field['field'],
+                         'channel': field['scan_channel']} # no pipe_version
+            field_hash = key_hash(field_key)
+            pipe = reso if reso.ScanInfo() & field_key else meso if meso.ScanInfo() & field_key else None
+            field_res = ((reso.ScanInfo() & field_key).microns_per_pixel if pipe == reso
+                         else (meso.ScanInfo.Field() & field_key).microns_per_pixel)
+
+            # Create transformation matrix
+            affine_matrix = np.eye(4)
+            affine_matrix[:3, :3] = create_rotation_matrix(field['yaw'], field['pitch'],
+                                                           field['roll'])
+            affine_matrix[0, 3] = field['reg_x'] * stack_res[2] # 1 x 1 resolution
+            affine_matrix[1, 3] = field['reg_y'] * stack_res[1]
+            affine_matrix[2, 3] = field['reg_z'] * stack_res[0]
+
+            # Create cell objects
+            somas = (pipe.MaskClassification.Type() & {'type': 'soma'})
+            field_somas = pipe.ScanSet.Unit() & field_key & somas
+            for unit_key, x, y in zip(*(pipe.ScanSet.UnitInfo() & field_somas).fetch('KEY', 'px_x', 'px_y')):
+                unit = StackSet.SingleUnit(unit_key, x * field_res[1], y * field_res[0], 0, field_hash)
+                unit.apply_transform(affine_matrix)
+                units.append(StackSet.MatchedUnit(unit))
+        print(len(units), 'initial units')
+
+
+        def find_close_units(centroid, centroids, min_distance):
+            """ Finds centroids that are closer than min_distance to centroid. """
+            dists = distance.cdist(np.expand_dims(centroid, 0), centroids)
+            indices = np.flatnonzero(dists < min_distance)
+            return indices, dists[0, indices]
+
+        def is_valid(unit1, unit2, max_height):
+            """ Checks that units belong to different fields and that the resulting unit
+            would not be bigger than 20 microns."""
+            different_fields = len(set(unit1.plane_ids) & set(unit2.plane_ids)) == 0
+            acceptable_height = (np.max(unit1.zs + unit2.zs) - np.min(unit1.zs + unit2.zs)) < max_height
+            return different_fields and acceptable_height
+
+        # Create distance matrix
+        # For memory efficiency we use an adjacency list with only the units at less than 10 microns
+        centroids = np.array([u.centroid for u in units])
+        distance_list = [] # list of triples (distance, unit1, unit2)
+        for i in range(len(units)):
+            indices, distances = find_close_units(centroids[i], centroids[i+1:], min_distance)
+            distance_list.extend(zip(distances, itertools.repeat(units[i]),
+                                     [units[i + 1 + j] for j in indices]))
+        print(len(distance_list), 'possible pairings')
+
+        # TODO: This takes too much
+        # Join units
+        distance_list = sorted(distance_list, key=lambda x: x[0])
+        while(len(distance_list) > 0):
+            d, unit1, unit2 = distance_list.pop(0)
+            if is_valid(unit1, unit2, max_height):
+                # Remove them from lists
+                units.remove(unit1)
+                units.remove(unit2)
+                f = lambda x: (unit1 not in x[1:]) and (unit2 not in x[1:])
+                distance_list = list(filter(f, distance_list))
+
+                # Join them
+                unit1.join_with(unit2)
+
+                # Recalculate distances
+                centroids = np.array([u.centroid for u in units])
+                indices, distances = find_close_units(unit1.centroid, centroids, min_distance)
+                distance_list.extend(zip(distances, itertools.repeat(unit1), [units[j] for j in indices]))
+
+                # Insert new unit
+                units.append(unit1)
+        print(len(units), 'number of final masks')
+
+        # Insert
+        self.insert1({**key, 'min_distance': min_distance, 'max_height': max_height})
+        for munit_id, munit in zip(itertools.count(start=1), units):
+            centroid = munit.centroid / stack_res[::-1] # in stack coordinates
+            self.Unit().insert1({**key, 'munit_id': munit_id, 'munit_x': centroid[0],
+                                 'munit_y': centroid[1], 'munit_z': centroid[2]})
+            for unit in munit.units:
+                new_match = {**key, 'munit_id': munit_id,
+                             **unit.key, 'scan_session': unit.key['session']}
+                self.Match().insert1(new_match, ignore_extra_fields=True)
 
         self.notify(key)
 
     @notify.ignore_exceptions
     def notify(self, key):
-        x, y, z = (FieldRegistration() &  key).fetch('reg_x', 'reg_y', 'reg_z')
-        yaw, pitch, roll = (FieldRegistration() &  key).fetch('yaw', 'pitch', 'roll')
-        f_string = ('FieldRegistration for {} has been populated. Field registered at {},'
-                    '{}, {} (z, y, x) with {}, {}, {} (yaw, pitch, roll) inclination')
-        msg = f_string.format(key, z, y, x, yaw, pitch, roll)
-        (notify.SlackUser() & (experiment.Session() & key)).notify(msg)
+        fig = (StackSet() & key).plot_centroids3d()
+        img_filename = '/tmp/' + key_hash(key) + '.png'
+        fig.savefig(img_filename)
+        plt.close(fig)
+
+        msg = ('StackSet for {animal_id}-{stack_session}-{stack_idx}: {num_units} final '
+               'units').format(**key, num_units=len(self.Unit() & key))
+        slack_user = notify.SlackUser() & (experiment.Session() & key &
+                                           {'session': key['stack_session']})
+        slack_user.notify(file=img_filename, file_title=msg)
+
+    def plot_centroids3d(self):
+        """ Plots the centroids of all units in the motor coordinate system (in microns)
+
+        :returns Figure. You can call show() on it.
+        :rtype: matplotlib.figure.Figure
+        """
+        from mpl_toolkits.mplot3d import Axes3D
+
+        # Get stack resolution
+        stack_rel = CorrectedStack() & self.proj(session='stack_session')
+        dims = stack_rel.fetch1('um_height', 'px_height', 'um_width', 'px_width')
+        stack_res = [dims[0] / dims[1], dims[2] / dims[3]]
+
+        # Get centroids
+        xs, ys, zs = (StackSet.Unit() & self).fetch('munit_x', 'munit_y', 'munit_z')
+        centroids = np.stack([xs * stack_res[1], ys * stack_res[0], zs], axis=1)
+
+        # Plot
+        fig = plt.figure(figsize=(10, 10))
+        ax = fig.add_subplot(111, projection='3d')
+        ax.scatter(centroids[:, 0], centroids[:, 1], centroids[:, 2])
+        ax.invert_zaxis()
+        ax.set_xlabel('x (um)')
+        ax.set_ylabel('y (um)')
+        ax.set_zlabel('z (um)')
+
+        return fig
+
 
 
 # TODO: Add this in shared
