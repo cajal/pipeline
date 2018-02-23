@@ -99,6 +99,10 @@ class RegistrationMethod(dj.Lookup):
     """
 
     contents = [
-        [1, 'rigid', '3-d cross-correlation', 'python'],
-        [2, 'affine', 'exhaustive search of 3-d rotations + cross-correlation', 'python']
+        [1, 'rigid', '3-d cross-correlation (40 microns above and below estimated z)', 'python'],
+        [2, 'rigid2', '3-d cross-correlation (100 microns above and below estimated z)', 'python'],
+        [3, 'affine', ('exhaustive search of 3-d rotations + cross-correlation (40 microns'
+                       'above and below estimated z)'), 'python'],
+        [4, 'affine2', ('exhaustive search of 3-d rotations + cross-correlation (100 microns'
+                        'above and below estimated z)'), 'python']
     ]

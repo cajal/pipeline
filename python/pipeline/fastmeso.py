@@ -49,10 +49,10 @@ class FastRegistration(dj.Computed):
         frames = (meso.Quality().SummaryFrames() & field_key).fetch1('summary')
         field = frames[:, :, int(frames.shape[-1] / 2)]
 
-        # Drop some edges (only y and x) to avoid artifacts (and black edges in stacks)
-        skip_dims = np.clip(np.round(np.array(stack_.shape) * 0.025), 1, None).astype(int)
+        # Drop some edges (only y and x) to avoid artifacts
+        skip_dims = [max(1, int(round(s * 0.025))) for s in stack_.shape]
         stack_ = stack_[:, skip_dims[1] : -skip_dims[1], skip_dims[2]: -skip_dims[2]]
-        skip_dims = np.clip(np.round(np.array(field.shape) * 0.025), 1, None).astype(int)
+        skip_dims = [max(1, int(round(s * 0.025))) for s in field.shape]
         field = field[skip_dims[0] : -skip_dims[0], skip_dims[1]: -skip_dims[1]]
 
         # Rescale to match lowest resolution  (isotropic pixels/voxels)
@@ -96,4 +96,5 @@ class FastRegistration(dj.Computed):
         score = (FastRegistration() &  key).fetch('score')
         msg = ('FastRegistration for {} has been populated. Field registered at {}, {}, '
                '{} (z, y, x) with a score of {}').format(key, z, y, x, score)
-        (notify.SlackUser() & (experiment.Session() & key)).notify(msg)
+        slack_user = (notify.SlackUser() & (experiment.Session() & key & {'session': key['stack_session']}))
+        slack_user.notify(msg)

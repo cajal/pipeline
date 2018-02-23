@@ -299,6 +299,42 @@ class LaserCalibration(dj.Manual):
 
         return fig, ax
 
+@schema
+class MonitorCalibration(dj.Manual):
+    definition = """ # Monitor luminance calibration
+    -> experiment.Scan
+    ---
+    pixel_value             : mediumblob      # control pixel value (0-255)
+    luminance               : mediumblob      # luminance in cd/m^2
+    amplitude               : float           # lum = Amp*pixel_value^gamma + offset
+    gamma                   : float           #
+    offset                  : float           #
+    mse                     : float           #
+    ts                      : timestamp       # timestamp
+    """
+
+    def plot_calibration_curve(self):
+        import matplotlib.pyplot as plt
+
+        # Get data
+        pixel_values, luminances = self.fetch1('pixel_value', 'luminance')
+
+        # Plot original data
+        fig = plt.figure()
+        plt.plot(pixel_values, luminances, label='Data')
+        plt.xlabel('Pixel intensities')
+        plt.ylabel('Luminance (cd/m^2)')
+
+        # Plot fit
+        amp, gamma, offset = self.fetch1('amplitude', 'gamma', 'offset')
+        xs = np.arange(255) # pixel
+        ys = amp * (xs ** gamma) + offset
+        plt.plot(xs, ys, label='Fit')
+
+        plt.legend()
+
+        return fig
+
 
 @schema
 class Session(dj.Manual):

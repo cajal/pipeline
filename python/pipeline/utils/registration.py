@@ -85,8 +85,12 @@ def register_rigid(stack, field, z_estimate, z_range, yaw=0, pitch=0, roll=0):
     cut_cols = max(1, int(np.ceil((field.shape[1] - mini_rotated.shape[2]) / 2)))
     field = field[cut_rows:-cut_rows, cut_cols:-cut_cols]
 
+    # Sharpen images
+    norm_field = sharpen_2pimage(field)
+    norm_stack = np.stack(sharpen_2pimage(s) for s in mini_rotated)
+
     # 3-d match_template
-    corrs = np.stack(feature.match_template(s, field, pad_input=True) for s in mini_rotated)
+    corrs = np.stack(feature.match_template(s, norm_field, pad_input=True) for s in norm_stack)
     smooth_corrs = ndimage.gaussian_filter(corrs, 0.7)
     best_score = np.max(smooth_corrs)
     z, y, x = np.unravel_index(np.argmax(smooth_corrs), smooth_corrs.shape)
@@ -144,3 +148,51 @@ def find_intersecting_point(p1, p2, z):
         raise ArithmeticError('Line is parallel to the z-plane. Infinite or no solutions.')
     q = p1 + ((z - p1[2]) / direction_vector[2]) * direction_vector # p1 + ((z-z1)/ n) * d
     return q
+
+
+def sharpen_2pimage(image, laplace_sigma=0.7, low_percentile=3, high_percentile=99.9):
+    """ Apply a laplacian filter, clip pixel range and normalize.
+
+    :param np.array image: Array with raw two-photon images.
+    :param float laplace_sigma: Sigma of the gaussian used in the laplace filter.
+    :param float low_percentile, high_percentile: Percentiles at which to clip.
+
+    :returns: Array of same shape as input. Sharpened image.
+    """
+    sharpened = image - ndimage.gaussian_laplace(image, laplace_sigma)
+    clipped = np.clip(sharpened, *np.percentile(sharpened, [low_percentile, high_percentile]))
+    norm = (clipped - clipped.mean()) / (clipped.max() - clipped.min())
+    return norm
+
+
+def find_field_in_stack(stack, x, y, z, yaw, pitch, roll, height, width):
+    """ Get a cutout of the given height, width dimensions in the rotated stack at x, y, z.
+
+    :param np.array stack: 3-d stack (depth, height, width)
+    :param float x, y, z: Center of field measured as distance from the center in the
+        original stack (before rotation).
+    :param yaw, pitch, roll: Rotation angles to apply to the field.
+    :param height, width: Height and width of the cutout from the stack.
+
+    :returns: A height x width np.array at the desired location.
+    """
+    # Rotate stack (inverse of intrinsic yaw-> pitch -> roll)
+    rotated = ndimage.rotate(stack, yaw, axes=(1, 2), order=1) # yaw(-w)
+    rotated = ndimage.rotate(rotated, -pitch, axes=(0, 2), order=1) # pitch(-v)
+    rotated = ndimage.rotate(rotated, roll, axes=(0, 1), order=1) # roll(-u)
+
+    # Compute center of field in the rotated stack
+    R_inv = np.linalg.inv(create_rotation_matrix(yaw, pitch, roll))
+    rot_center = np.dot(R_inv, [x, y, z])
+    center_ind = np.array(rotated.shape) / 2 + rot_center[::-1] # z, y, x
+
+    # Crop field (interpolate at the desired positions)
+    z_coords = [center_ind[0] - 0.5] # -0.5 is because our (0.5, 0.5) is np.map_coordinates' (0, 0)
+    y_coords = np.arange(height) - height / 2 + center_ind[1] # - 0.5 is added by '- height / 2' term
+    x_coords = np.arange(width)  - width / 2 + center_ind[2]
+    coords = np.meshgrid(z_coords, y_coords, x_coords)
+    out = ndimage.map_coordinates(rotated, [coords[0].reshape(-1), coords[1].reshape(-1),
+                                            coords[2].reshape(-1)], order=1)
+    field = out.reshape([height, width])
+
+    return field

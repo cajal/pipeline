@@ -66,7 +66,10 @@ def read_video_hdf5(hdf_path):
             data['eyecam_ts'] = np.asarray(fid['videotimestamps']).squeeze()
             data['syncPd'] = wf[:, 0]  # flip photo diode
             data['scanImage'] = wf[:, 1]
-            data['ts'] = wf[:, 2]
+            if fid.attrs['AS_Version'] == 2:
+                data['ts'] = wf[:, 2]
+            elif fid.attrs['AS_Version'] == 2.1:
+                data['ts'] = wf[:, 3]
             data['analogPacketLen'] = float(fid.attrs['AS_samples_per_channel'])
 
         elif float(fid.attrs['Version']) == 1.:
