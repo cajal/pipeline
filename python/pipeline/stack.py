@@ -1014,7 +1014,7 @@ class FieldRegistration(dj.Computed):
             result = registration.register_rigid(stack, field, estimated_px_z, z_range)
             score, (x, y, z), (yaw, pitch, roll) = result
 
-        elif key['registration_method'] == 3: # rigid plus 3-d rotation
+        elif key['registration_method'] in [3, 4]: # rigid plus 3-d rotation
             max_angle = 5
 
             # Run parallel registration searching for best rotation angles
@@ -1048,7 +1048,7 @@ class FieldRegistration(dj.Computed):
                       'reg_z': final_z, 'yaw': yaw, 'pitch': pitch, 'roll': roll,
                       'score': score})
         self.FieldInStack().insert1({**key, 'reg_field': reg_field})
-        if key['registration_method'] == 2: # store correlation values
+        if key['registration_method'] in [3, 4]: # store correlation values
             self.AffineResults().insert1({**key, 'score_map': score_map,
                                           'position_map': position_map})
 
@@ -1121,10 +1121,6 @@ class StackSet(dj.Computed):
         """ Utility function to keep the coordinates of a set of cells. """
         def __init__(self, unit):
             self.units = [unit] # single
-
-        @property
-        def height(self):
-            return max(self.zs) - min(self.zs)
 
         @property
         def zs(self):
