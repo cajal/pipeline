@@ -1064,8 +1064,9 @@ class FieldRegistration(dj.Computed):
         img_filename = '/tmp/{}.png'.format(key_hash(key))
         imageio.imwrite(img_filename, reg)
 
-        msg = ('registration of {animal_id}-{scan_session}-{field} to {animal_id}-'
-               '{stack_session}-{stack_idx} (method {registration_method})').format(**key)
+        msg = ('registration of {animal_id}-{scan_session}-{scan_idx} field {field} to '
+               '{animal_id}-{stack_session}-{stack_idx} (method {registration_method})')
+        msg = msg.format(**key)
         slack_user = notify.SlackUser() & (experiment.Session() & key &
                                  {'session': key['stack_session']})
         slack_user.notify(file=img_filename, file_title=msg)
