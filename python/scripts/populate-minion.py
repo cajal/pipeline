@@ -24,7 +24,15 @@ while True:
         treadmill.Sync().populate(next_scans, reserve_jobs=True, suppress_errors=True)
         treadmill.Treadmill().populate(next_scans, reserve_jobs=True, suppress_errors=True)
 
-        # reso/meso
+        # Stacks
+        stack.StackInfo().populate(stack.CorrectionChannel(), reserve_jobs=True, suppress_errors=True) #TODO: stackAutoProcessing
+        stack.Quality().populate(reserve_jobs=True, suppress_errors=True)
+        stack.RasterCorrection().populate(reserve_jobs=True, suppress_errors=True)
+        stack.MotionCorrection().populate(reserve_jobs=True, suppress_errors=True)
+        stack.Stitching().populate(reserve_jobs=True, suppress_errors=True)
+        stack.CorrectedStack().populate(reserve_jobs=True, suppress_errors=True)
+
+        # reso/meso (up to SummaryImages)
         for pipe in [reso, meso]:
             pipe.ScanInfo().populate(next_scans, reserve_jobs=True, suppress_errors=True)
             pipe.Quality().populate(next_scans, reserve_jobs=True, suppress_errors=True)
@@ -32,13 +40,9 @@ while True:
             pipe.RasterCorrection().populate(next_scans, reserve_jobs=True, suppress_errors=True)
             pipe.MotionCorrection().populate(next_scans, reserve_jobs=True, suppress_errors=True)
             pipe.SummaryImages().populate(next_scans, reserve_jobs=True, suppress_errors=True)
-            pipe.Segmentation().populate(next_scans, reserve_jobs=True, suppress_errors=True)
-            pipe.MaskClassification().populate(next_scans, {'classification_method': 2},
-                                               reserve_jobs=True, suppress_errors=True)
-            pipe.ScanSet().populate(next_scans, reserve_jobs=True, suppress_errors=True)
-            pipe.Activity().populate(next_scans, {'spike_method': 5}, reserve_jobs=True, suppress_errors=True)
-            full_scans = (pipe.ScanInfo().proj() & pipe.Activity()) - (pipe.ScanInfo.Field() - pipe.Activity())
-            pipe.ScanDone().populate(next_scans & full_scans, reserve_jobs=True, suppress_errors=True)
+
+        # Field Registration
+        stack.FieldRegistration().populate(reserve_jobs=True, suppress_errors=True)
 
         # fuse
         fuse.MotionCorrection().populate(next_scans, reserve_jobs=True, suppress_errors=True)
@@ -65,13 +69,14 @@ while True:
 
             tune.OracleMap().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
 
-    # Stacks
-    stack.StackInfo().populate(stack.CorrectionChannel(), reserve_jobs=True, suppress_errors=True) #TODO: stackAutoProcessing
-    stack.Quality().populate(reserve_jobs=True, suppress_errors=True)
-    stack.RasterCorrection().populate(reserve_jobs=True, suppress_errors=True)
-    stack.MotionCorrection().populate(reserve_jobs=True, suppress_errors=True)
-    stack.Stitching().populate(reserve_jobs=True, suppress_errors=True)
-    stack.CorrectedStack().populate(reserve_jobs=True, suppress_errors=True)
-    stack.FieldRegistration().populate(reserve_jobs=True, suppress_errors=True)
+        # reso/meso (from Segmentation up)
+        for pipe in [reso, meso]:
+            pipe.Segmentation().populate(next_scans, reserve_jobs=True, suppress_errors=True)
+            pipe.MaskClassification().populate(next_scans, {'classification_method': 2},
+                                               reserve_jobs=True, suppress_errors=True)
+            pipe.ScanSet().populate(next_scans, reserve_jobs=True, suppress_errors=True)
+            pipe.Activity().populate(next_scans, {'spike_method': 5}, reserve_jobs=True, suppress_errors=True)
+            full_scans = (pipe.ScanInfo().proj() & pipe.Activity()) - (pipe.ScanInfo.Field() - pipe.Activity())
+            pipe.ScanDone().populate(next_scans & full_scans, reserve_jobs=True, suppress_errors=True)
 
     time.sleep(600) # wait 10 minutes before trying to process things again
