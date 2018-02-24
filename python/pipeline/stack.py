@@ -1125,7 +1125,7 @@ class StackSet(dj.Computed):
             self.centroid = [np.mean(self.xs), np.mean(self.ys), np.mean(self.zs)]
 
         def __lt__(self, other):
-            """ Used during sorting. """
+            """ Used for sorting. """
             return True
 
     def _make_tuples(self, key):
@@ -1173,7 +1173,6 @@ class StackSet(dj.Computed):
             units += [StackSet.MatchedUnit(*args, field_hash) for args in zip(unit_keys, xs, ys, zs)]
         print(len(units), 'initial units')
 
-
         def find_close_units(centroid, centroids, min_distance):
             """ Finds centroids that are closer than min_distance to centroid. """
             dists = distance.cdist(np.expand_dims(centroid, 0), centroids)
@@ -1193,32 +1192,34 @@ class StackSet(dj.Computed):
         distance_list = [] # list of triples (distance, unit1, unit2)
         for i in range(len(units)):
             indices, distances = find_close_units(centroids[i], centroids[i+1:], min_distance)
-            distance_list.extend(zip(distances, itertools.repeat(units[i]),
-                                     [units[i + 1 + j] for j in indices]))
+            for dist, j in zip(distances, i + 1 + indices):
+                if is_valid(units[i], units[j], max_height):
+                    bisect.insort(distance_list, (dist, units[i], units[j]))
         print(len(distance_list), 'possible pairings')
 
         # Join units
-        distance_list = sorted(distance_list)
         while(len(distance_list) > 0):
+            # Get next pair of units
             d, unit1, unit2 = distance_list.pop(0)
-            if is_valid(unit1, unit2, max_height):
-                # Remove them from lists
-                units.remove(unit1)
-                units.remove(unit2)
-                f = lambda x: (unit1 not in x[1:]) and (unit2 not in x[1:])
-                distance_list = list(filter(f, distance_list))
 
-                # Join them
-                unit1.join_with(unit2)
+            # Remove them from lists
+            units.remove(unit1)
+            units.remove(unit2)
+            f = lambda x: (unit1 not in x[1:]) and (unit2 not in x[1:])
+            distance_list = list(filter(f, distance_list))
 
-                # Recalculate distances
-                centroids = [u.centroid for u in units]
-                indices, distances = find_close_units(unit1.centroid, centroids, min_distance)
-                for d, u1, u2 in zip(distances, itertools.repeat(unit1), [units[j] for j in indices]):
-                    bisect.insort(distance_list, (d, u1, u2))
+            # Join them
+            unit1.join_with(unit2)
 
-                # Insert new unit
-                units.append(unit1)
+            # Recalculate distances
+            centroids = [u.centroid for u in units]
+            indices, distances = find_close_units(unit1.centroid, centroids, min_distance)
+            for dist, j in zip(distances, indices):
+                if is_valid(unit1, units[j], max_height):
+                    bisect.insort(distance_list, (d, unit1, units[j]))
+
+            # Insert new unit
+            units.append(unit1)
         print(len(units), 'number of final masks')
 
         # Insert
