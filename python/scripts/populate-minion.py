@@ -42,6 +42,8 @@ while True:
             pipe.SummaryImages().populate(next_scans, reserve_jobs=True, suppress_errors=True)
 
         # Field Registration
+        process_first = [{'registration_method': 1}, {'registration_method': 2}]
+        stack.FieldRegistration().populate(process_first, reserve_jobs=True, suppress_errors=True)
         stack.FieldRegistration().populate(reserve_jobs=True, suppress_errors=True)
 
         # fuse
