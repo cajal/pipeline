@@ -36,15 +36,15 @@ while True:
         for pipe in [reso, meso]:
             pipe.ScanInfo().populate(next_scans, reserve_jobs=True, suppress_errors=True)
             pipe.Quality().populate(next_scans, reserve_jobs=True, suppress_errors=True)
-            #fastmeso.FastRegistration().populate(next_scans, reserve_jobs=True, suppress_errors=True)
             pipe.RasterCorrection().populate(next_scans, reserve_jobs=True, suppress_errors=True)
             pipe.MotionCorrection().populate(next_scans, reserve_jobs=True, suppress_errors=True)
             pipe.SummaryImages().populate(next_scans, reserve_jobs=True, suppress_errors=True)
 
         # Field Registration
-        process_first = [{'registration_method': 1}, {'registration_method': 2}]
-        stack.FieldRegistration().populate(process_first, reserve_jobs=True, suppress_errors=True)
-        stack.FieldRegistration().populate(reserve_jobs=True, suppress_errors=True)
+        priority_methods = [{'registration_method': 1}, {'registration_method': 2}]
+        stack.FieldRegistration().populate(next_scans, priority_methods, reserve_jobs=True,
+                                           suppress_errors=True)
+        stack.FieldRegistration().populate(next_scans, reserve_jobs=True, suppress_errors=True)
 
         # fuse
         fuse.MotionCorrection().populate(next_scans, reserve_jobs=True, suppress_errors=True)
