@@ -892,7 +892,7 @@ class RegistrationTask(dj.Manual):
     (scan_channel) -> shared.Channel(channel)
     -> shared.RegistrationMethod
     """
-    def fill_in(self, stack_key, scan_key, stack_channel=1, scan_channel=1, method=1):
+    def fill_in(self, stack_key, scan_key, stack_channel=1, scan_channel=1, method=2):
         # Add stack attributes
         stack_rel = CorrectedStack() & stack_key
         if len(stack_rel) > 1:
