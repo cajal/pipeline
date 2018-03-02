@@ -47,8 +47,7 @@ class ScanInfo(dj.Imported):
 
     @property
     def key_source(self):
-        meso_sessions = (experiment.Session() & {'rig': '2P4'})
-        meso_scans = (experiment.Scan() - experiment.ScanIgnored()) & meso_sessions
+        meso_scans = experiment.Scan() & (experiment.Session() & {'rig': '2P4'})
         return meso_scans * (Version() & {'pipe_version': CURRENT_VERSION})
 
     class Field(dj.Part):
@@ -585,7 +584,7 @@ class SummaryImages(dj.Computed):
         return ScanInfo() & MotionCorrection() & {'pipe_version': CURRENT_VERSION}
 
     class Average(dj.Part):
-        definition = """ # l6-norm of each pixel across time
+        definition = """ # mean of each pixel across time
 
         -> master
         ---
@@ -598,6 +597,14 @@ class SummaryImages(dj.Computed):
         -> master
         ---
         correlation_image           : longblob
+        """
+
+    class L6Norm(dj.Part):
+        definition = """ # l6-norm of each pixel across time
+
+        -> master
+        ---
+        l6norm_image           : longblob
         """
 
     def _make_tuples(self, key):
@@ -619,10 +626,14 @@ class SummaryImages(dj.Computed):
                 results = performance.map_frames(f, scan, field_id=field_id, y=slice(None),
                                                  x=slice(None), channel=channel, kwargs=kwargs)
 
+                # Reduce: Compute average images
+                average_image = np.sum([r[0] for r in results], axis=0) / scan.num_frames
+                l6norm_image = np.sum([r[1] for r in results], axis=0) ** (1 / 6)
+
                 # Reduce: Compute correlation image
-                sum_x = np.sum([r[0] for r in results], axis=0) # h x w
-                sum_sqx = np.sum([r[1] for r in results], axis=0) # h x w
-                sum_xy = np.sum([r[2] for r in results], axis=0) # h x w x 8
+                sum_x = np.sum([r[2] for r in results], axis=0) # h x w
+                sum_sqx = np.sum([r[3] for r in results], axis=0) # h x w
+                sum_xy = np.sum([r[4] for r in results], axis=0) # h x w x 8
                 denom_factor = np.sqrt(scan.num_frames * sum_sqx - sum_x ** 2)
                 corrs = np.zeros(sum_xy.shape)
                 for k in [0, 1, 2, 3]:
@@ -637,9 +648,6 @@ class SummaryImages(dj.Computed):
 
                     # Return back to original orientation
                     corrs = np.rot90(rotated_corrs, k=4 - k)
-                    sum_x = np.rot90(rotated_sum_x, k=4 - k)
-                    denom_factor = np.rot90(rotated_dfactor, k=4 - k)
-                    sum_xy = np.rot90(rotated_sum_xy, k=4 - k)
 
                 correlation_image = np.sum(corrs, axis=-1)
                 norm_factor = 5 * np.ones(correlation_image.shape) # edges
@@ -647,14 +655,12 @@ class SummaryImages(dj.Computed):
                 norm_factor[1:-1, 1:-1] = 8 # center
                 correlation_image /= norm_factor
 
-                # Reduce: Compute average image
-                average_image = np.sum([r[3] for r in results], axis=0) ** (1 / 6)
-
                 # Insert
                 field_key = {**key, 'field': field_id + 1, 'channel': channel + 1}
                 SummaryImages().insert1(field_key)
-                SummaryImages.Correlation().insert1({**field_key, 'correlation_image': correlation_image})
                 SummaryImages.Average().insert1({**field_key, 'average_image': average_image})
+                SummaryImages.L6Norm().insert1({**field_key, 'l6norm_image': l6norm_image})
+                SummaryImages.Correlation().insert1({**field_key, 'correlation_image': correlation_image})
 
             self.notify({**key, 'field': field_id + 1}, scan.num_channels)  # once per field
 
@@ -663,7 +669,7 @@ class SummaryImages(dj.Computed):
         fig, axes = plt.subplots(num_channels, 2, squeeze=False, figsize=(12, 5 * num_channels))
 
         fig.suptitle('Field {}'.format(key['field']))
-        axes[0, 0].set_title('Average', size='small')
+        axes[0, 0].set_title('L6-Norm', size='small')
         axes[0, 1].set_title('Correlation', size='small')
         for ax in axes.ravel():
             ax.get_xaxis().set_ticks([])
@@ -673,8 +679,8 @@ class SummaryImages(dj.Computed):
             axes[channel, 0].set_ylabel('Channel {}'.format(channel + 1), size='large',
                                         rotation='horizontal', ha='right')
             corr = (SummaryImages.Correlation() & key & {'channel': channel + 1}).fetch1('correlation_image')
-            avg = (SummaryImages.Average() & key & {'channel': channel + 1}).fetch1('average_image')
-            axes[channel, 0].imshow(avg)
+            l6norm = (SummaryImages.L6Norm() & key & {'channel': channel + 1}).fetch1('l6norm_image')
+            axes[channel, 0].imshow(l6norm)
             axes[channel, 1].imshow(corr)
 
         fig.tight_layout()

@@ -1,5 +1,5 @@
 #!/usr/local/bin/python3
-from pipeline import reso, meso, fuse, stack, pupil, treadmill
+from pipeline import reso, meso, fuse, stack, pupil, treadmill, fastmeso
 from pipeline import experiment
 import time
 
@@ -15,7 +15,7 @@ else: # import worked fine
 while True:
     # Scans
     for priority in range(120, -130, -10): # highest to lowest priority
-        next_scans = experiment.AutoProcessing() - experiment.ScanIgnored() & 'priority > {}'.format(priority)
+        next_scans = experiment.AutoProcessing() & 'priority > {}'.format(priority)
 
         # pupil
         pupil.Eye().populate(next_scans, reserve_jobs=True, suppress_errors=True)
@@ -28,6 +28,7 @@ while True:
         for pipe in [reso, meso]:
             pipe.ScanInfo().populate(next_scans, reserve_jobs=True, suppress_errors=True)
             pipe.Quality().populate(next_scans, reserve_jobs=True, suppress_errors=True)
+            #fastmeso.FastRegistration().populate(next_scans, reserve_jobs=True, suppress_errors=True)
             pipe.RasterCorrection().populate(next_scans, reserve_jobs=True, suppress_errors=True)
             pipe.MotionCorrection().populate(next_scans, reserve_jobs=True, suppress_errors=True)
             pipe.SummaryImages().populate(next_scans, reserve_jobs=True, suppress_errors=True)
@@ -59,6 +60,8 @@ while True:
             tune.OriMap().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
             tune.Cos2Map().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
             tune.OriMapQuality().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
+            tune.CaTimes().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
+            tune.PixelwiseOri().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
 
             tune.OracleMap().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
 
@@ -69,5 +72,6 @@ while True:
     stack.MotionCorrection().populate(reserve_jobs=True, suppress_errors=True)
     stack.Stitching().populate(reserve_jobs=True, suppress_errors=True)
     stack.CorrectedStack().populate(reserve_jobs=True, suppress_errors=True)
+    stack.FieldRegistration().populate(reserve_jobs=True, suppress_errors=True)
 
     time.sleep(600) # wait 10 minutes before trying to process things again
