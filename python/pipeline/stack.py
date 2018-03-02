@@ -498,8 +498,6 @@ class Stitching(dj.Computed):
     definition = """ # stitches together overlapping rois
 
     -> StackInfo
-    ---
-    y_direction='up'  : enum('up', 'down')  # whether y points upwards or downwards in the coordinate system
     """
     @property
     def key_source(self):
@@ -666,7 +664,7 @@ class Stitching(dj.Computed):
 
         # Insert in Stitching
         print('Inserting...')
-        self.insert1({**key, 'y_direction': 'down'})
+        self.insert1(key)
 
         # Insert each stitched volume
         for volume_id, roi in enumerate(rois):
