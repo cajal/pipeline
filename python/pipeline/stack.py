@@ -1057,6 +1057,7 @@ class FieldRegistration(dj.Computed):
         from pipeline.utils import signal
 
         reg = np.zeros([*original_field.shape, 3], dtype=np.uint8)
+
         reg[:, :, 1] = signal.float2uint8(original_field) # original in green
         reg[:, :, 0] = signal.float2uint8(registered_field) # stack in red
         img_filename = '/tmp/{}.png'.format(key_hash(key))
@@ -1097,6 +1098,7 @@ class StackSet(dj.Computed):
 
     class Match(dj.Part):
         definition = """ # Scan unit to stack unit match (n:1 relation)
+        -> master
         (scan_session) -> experiment.Scan(session)  # animal_id, scan_session, scan_idx
         -> shared.SegmentationMethod
         unit_id             :int        # unit id from ScanSet.Unit
