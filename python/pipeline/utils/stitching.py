@@ -225,7 +225,7 @@ class StitchedROI():
 
 
 
-def linear_stitch(left, right, expected_delta_x, minimum_overlap=12.5):
+def linear_stitch(left, right, expected_delta_x, minimum_overlap=10):
     """ Compute offsets to stitch two side-by-side volumes via cross-correlation.
 
     Subpixel shifts are calculated per depth and the median is returned.
