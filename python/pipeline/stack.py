@@ -1056,12 +1056,14 @@ class FieldRegistration(dj.Computed):
         import imageio
         from pipeline.utils import signal
 
-        reg = np.zeros([*original_field.shape, 3], dtype=np.uint8)
+        orig_clipped = np.clip(original_field, *np.percentile(original_field, [1, 99.8]))
+        reg_clipped = np.clip(registered_field, *np.percentile(registered_field, [1, 99.8]))
 
-        reg[:, :, 1] = signal.float2uint8(original_field) # original in green
-        reg[:, :, 0] = signal.float2uint8(registered_field) # stack in red
+        overlay = np.zeros([*original_field.shape, 3], dtype=np.uint8)
+        overlay[:, :, 0] = signal.float2uint8(reg_clipped) # stack in red
+        overlay[:, :, 1] = signal.float2uint8(orig_clipped) # original in green
         img_filename = '/tmp/{}.png'.format(key_hash(key))
-        imageio.imwrite(img_filename, reg)
+        imageio.imwrite(img_filename, overlay)
 
         msg = ('registration of {animal_id}-{scan_session}-{scan_idx} field {field} to '
                '{animal_id}-{stack_session}-{stack_idx} (method {registration_method})')
