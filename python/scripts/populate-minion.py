@@ -1,5 +1,5 @@
 #!/usr/local/bin/python3
-from pipeline import reso, meso, fuse, stack, pupil, treadmill, fastmeso
+from pipeline import reso, meso, fuse, stack, pupil, treadmill
 from pipeline import experiment
 import time
 
