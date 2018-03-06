@@ -66,8 +66,8 @@ while True:
             tune.OriMap().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
             tune.Cos2Map().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
             tune.OriMapQuality().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
-            tune.CaTimes().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
-            tune.PixelwiseOri().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
+            #tune.CaTimes().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
+            #tune.PixelwiseOri().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
 
             tune.OracleMap().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
 
