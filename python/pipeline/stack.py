@@ -498,8 +498,6 @@ class Stitching(dj.Computed):
     definition = """ # stitches together overlapping rois
 
     -> StackInfo
-    ---
-    y_direction='up'  : enum('up', 'down')  # whether y points upwards or downwards in the coordinate system
     """
     @property
     def key_source(self):
@@ -666,7 +664,7 @@ class Stitching(dj.Computed):
 
         # Insert in Stitching
         print('Inserting...')
-        self.insert1({**key, 'y_direction': 'down'})
+        self.insert1(key)
 
         # Insert each stitched volume
         for volume_id, roi in enumerate(rois):
@@ -892,7 +890,7 @@ class RegistrationTask(dj.Manual):
     (scan_channel) -> shared.Channel(channel)
     -> shared.RegistrationMethod
     """
-    def fill_in(self, stack_key, scan_key, stack_channel=1, scan_channel=1, method=1):
+    def fill_in(self, stack_key, scan_key, stack_channel=1, scan_channel=1, method=2):
         # Add stack attributes
         stack_rel = CorrectedStack() & stack_key
         if len(stack_rel) > 1:
@@ -1031,9 +1029,8 @@ class FieldRegistration(dj.Computed):
                 position_map[idx1, idx2, idx3] = position
 
         # Get field in stack (after registration)
-        common_field_shape = field.shape + 2 * np.array(skip_dims)
-        reg_field = registration.find_field_in_stack(stack, x, y, z, yaw, pitch, roll,
-                                                     *common_field_shape)
+        common_shape = np.round(np.array(mean_image.shape) * field_res / common_res).astype(int)
+        reg_field = registration.find_field_in_stack(stack, x, y, z, yaw, pitch, roll, *common_shape)
         reg_field = ndimage.zoom(reg_field, common_res / field_res, order=1) # *
         # * this could not be the same as the original shape but it should be pretty close
 
@@ -1059,14 +1056,18 @@ class FieldRegistration(dj.Computed):
         import imageio
         from pipeline.utils import signal
 
-        reg = np.zeros([*original_field.shape, 3], dtype=np.uint8)
-        reg[:, :, 1] = signal.float2uint8(original_field) # original in green
-        reg[:, :, 0] = signal.float2uint8(registered_field) # stack in red
-        img_filename = '/tmp/{}.png'.format(key_hash(key))
-        imageio.imwrite(img_filename, reg)
+        orig_clipped = np.clip(original_field, *np.percentile(original_field, [1, 99.8]))
+        reg_clipped = np.clip(registered_field, *np.percentile(registered_field, [1, 99.8]))
 
-        msg = ('registration of {animal_id}-{scan_session}-{field} to {animal_id}-'
-               '{stack_session}-{stack_idx} (method {registration_method})').format(**key)
+        overlay = np.zeros([*original_field.shape, 3], dtype=np.uint8)
+        overlay[:, :, 0] = signal.float2uint8(reg_clipped) # stack in red
+        overlay[:, :, 1] = signal.float2uint8(orig_clipped) # original in green
+        img_filename = '/tmp/{}.png'.format(key_hash(key))
+        imageio.imwrite(img_filename, overlay)
+
+        msg = ('registration of {animal_id}-{scan_session}-{scan_idx} field {field} to '
+               '{animal_id}-{stack_session}-{stack_idx} (method {registration_method})')
+        msg = msg.format(**key)
         slack_user = notify.SlackUser() & (experiment.Session() & key &
                                  {'session': key['stack_session']})
         slack_user.notify(file=img_filename, file_title=msg)
@@ -1099,6 +1100,7 @@ class StackSet(dj.Computed):
 
     class Match(dj.Part):
         definition = """ # Scan unit to stack unit match (n:1 relation)
+        -> master
         (scan_session) -> experiment.Scan(session)  # animal_id, scan_session, scan_idx
         -> shared.SegmentationMethod
         unit_id             :int        # unit id from ScanSet.Unit
@@ -1106,45 +1108,32 @@ class StackSet(dj.Computed):
         -> StackSet.Unit
         """
 
-    class SingleUnit:
-        """ Container of coordinates for a single cell. """
-        def __init__(self, key, x, y, z, plane_id):
-            self.key = key
-            self.centroid = np.array([x, y, z, 1])
-            self.plane_id = plane_id
-
-        def apply_transform(self, transform_matrix):
-            self.centroid = np.dot(transform_matrix, self.centroid)
-
-
     class MatchedUnit():
-        """ Utility function to keep the coordinates of a set of cells. """
-        def __init__(self, unit):
-            self.units = [unit] # single
-
-        @property
-        def zs(self):
-            return [u.centroid[2] for u in self.units]
-
-        @property
-        def plane_ids(self):
-            return [u.plane_id for u in self.units]
-
-        @property
-        def centroid(self):
-            centroids = [u.centroid[:-1] for u in self.units] # drop homogeneous dimension
-            return np.mean(centroids, axis=0)
+        """ Coordinates for a set of cells."""
+        def __init__(self, key, x, y, z, plane_id):
+            self.keys = [key]
+            self.xs = [x]
+            self.ys = [y]
+            self.zs = [z]
+            self.plane_ids = [plane_id]
+            self.centroid = [x, y, z]
 
         def join_with(self, other):
-            self.units += other.units
+            self.keys += other.keys
+            self.xs += other.xs
+            self.ys += other.ys
+            self.zs += other.zs
+            self.plane_ids += other.plane_ids
+            self.centroid = [np.mean(self.xs), np.mean(self.ys), np.mean(self.zs)]
 
-        def distance_to(self, other):
-            return np.sqrt(((self.centroid - other.centroid) ** 2).sum())
-
+        def __lt__(self, other):
+            """ Used for sorting. """
+            return True
 
     def _make_tuples(self, key):
         from .utils.registration import create_rotation_matrix
         from scipy.spatial import distance
+        import bisect
 
         # Set some params
         min_distance = 10
@@ -1170,22 +1159,21 @@ class StackSet(dj.Computed):
                          else (meso.ScanInfo.Field() & field_key).microns_per_pixel)
 
             # Create transformation matrix
-            affine_matrix = np.eye(4)
-            affine_matrix[:3, :3] = create_rotation_matrix(field['yaw'], field['pitch'],
-                                                           field['roll'])
-            affine_matrix[0, 3] = field['reg_x'] * stack_res[2] # 1 x 1 resolution
-            affine_matrix[1, 3] = field['reg_y'] * stack_res[1]
-            affine_matrix[2, 3] = field['reg_z'] * stack_res[0]
+            transform_matrix = np.eye(4)
+            transform_matrix[:3, :3] = create_rotation_matrix(field['yaw'], field['pitch'],
+                                                              field['roll'])
+            transform_matrix[0, 3] = field['reg_x'] * stack_res[2] # 1 x 1 resolution
+            transform_matrix[1, 3] = field['reg_y'] * stack_res[1]
+            transform_matrix[2, 3] = field['reg_z'] * stack_res[0]
 
             # Create cell objects
             somas = (pipe.MaskClassification.Type() & {'type': 'soma'})
             field_somas = pipe.ScanSet.Unit() & field_key & somas
-            for unit_key, x, y in zip(*(pipe.ScanSet.UnitInfo() & field_somas).fetch('KEY', 'px_x', 'px_y')):
-                unit = StackSet.SingleUnit(unit_key, x * field_res[1], y * field_res[0], 0, field_hash)
-                unit.apply_transform(affine_matrix)
-                units.append(StackSet.MatchedUnit(unit))
+            unit_keys, xs, ys = (pipe.ScanSet.UnitInfo() & field_somas).fetch('KEY', 'px_x', 'px_y')
+            coords = [xs * field_res[1], ys * field_res[0], np.zeros(len(xs)), np.ones(len(xs))]
+            xs, ys, zs, _ = np.dot(transform_matrix, coords)
+            units += [StackSet.MatchedUnit(*args, field_hash) for args in zip(unit_keys, xs, ys, zs)]
         print(len(units), 'initial units')
-
 
         def find_close_units(centroid, centroids, min_distance):
             """ Finds centroids that are closer than min_distance to centroid. """
@@ -1197,41 +1185,43 @@ class StackSet(dj.Computed):
             """ Checks that units belong to different fields and that the resulting unit
             would not be bigger than 20 microns."""
             different_fields = len(set(unit1.plane_ids) & set(unit2.plane_ids)) == 0
-            acceptable_height = (np.max(unit1.zs + unit2.zs) - np.min(unit1.zs + unit2.zs)) < max_height
+            acceptable_height = (max(unit1.zs + unit2.zs) - min(unit1.zs + unit2.zs)) < max_height
             return different_fields and acceptable_height
 
         # Create distance matrix
         # For memory efficiency we use an adjacency list with only the units at less than 10 microns
-        centroids = np.array([u.centroid for u in units])
+        centroids = np.stack(u.centroid for u in units)
         distance_list = [] # list of triples (distance, unit1, unit2)
         for i in range(len(units)):
             indices, distances = find_close_units(centroids[i], centroids[i+1:], min_distance)
-            distance_list.extend(zip(distances, itertools.repeat(units[i]),
-                                     [units[i + 1 + j] for j in indices]))
+            for dist, j in zip(distances, i + 1 + indices):
+                if is_valid(units[i], units[j], max_height):
+                    bisect.insort(distance_list, (dist, units[i], units[j]))
         print(len(distance_list), 'possible pairings')
 
-        # TODO: This takes too much
         # Join units
-        distance_list = sorted(distance_list, key=lambda x: x[0])
         while(len(distance_list) > 0):
+            # Get next pair of units
             d, unit1, unit2 = distance_list.pop(0)
-            if is_valid(unit1, unit2, max_height):
-                # Remove them from lists
-                units.remove(unit1)
-                units.remove(unit2)
-                f = lambda x: (unit1 not in x[1:]) and (unit2 not in x[1:])
-                distance_list = list(filter(f, distance_list))
 
-                # Join them
-                unit1.join_with(unit2)
+            # Remove them from lists
+            units.remove(unit1)
+            units.remove(unit2)
+            f = lambda x: (unit1 not in x[1:]) and (unit2 not in x[1:])
+            distance_list = list(filter(f, distance_list))
 
-                # Recalculate distances
-                centroids = np.array([u.centroid for u in units])
-                indices, distances = find_close_units(unit1.centroid, centroids, min_distance)
-                distance_list.extend(zip(distances, itertools.repeat(unit1), [units[j] for j in indices]))
+            # Join them
+            unit1.join_with(unit2)
 
-                # Insert new unit
-                units.append(unit1)
+            # Recalculate distances
+            centroids = [u.centroid for u in units]
+            indices, distances = find_close_units(unit1.centroid, centroids, min_distance)
+            for dist, j in zip(distances, indices):
+                if is_valid(unit1, units[j], max_height):
+                    bisect.insort(distance_list, (d, unit1, units[j]))
+
+            # Insert new unit
+            units.append(unit1)
         print(len(units), 'number of final masks')
 
         # Insert
@@ -1240,9 +1230,9 @@ class StackSet(dj.Computed):
             centroid = munit.centroid / stack_res[::-1] # in stack coordinates
             self.Unit().insert1({**key, 'munit_id': munit_id, 'munit_x': centroid[0],
                                  'munit_y': centroid[1], 'munit_z': centroid[2]})
-            for unit in munit.units:
+            for subunit_key in munit.keys:
                 new_match = {**key, 'munit_id': munit_id,
-                             **unit.key, 'scan_session': unit.key['session']}
+                             **subunit_key, 'scan_session': subunit_key['session']}
                 self.Match().insert1(new_match, ignore_extra_fields=True)
 
         self.notify(key)
