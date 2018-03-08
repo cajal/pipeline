@@ -2,10 +2,9 @@ function ts = ts2sec(ts)
 % convert 10 MHz counts from the patching program (ts) to seconds 
 % return: timestamps converted to seconds for each sample in the ts
 
-% remove wraparound and convert to seconds
+% remove wraparound and convert to seconds starting at time zero
 rate = 1e7;  % Hz
-ts = double(ts(:));
-ts = [ts(1); ts(1) + cumsum(mod(diff(ts), 2^32))] / rate;
+ts = [0; cumsum(mod(diff(double(ts(:))), 2^32))] / rate;
 
 % Interpolate excluding areas with anomalies
 timed = find(diff([-inf; ts]));
