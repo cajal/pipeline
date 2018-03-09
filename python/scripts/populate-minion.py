@@ -56,7 +56,7 @@ while True:
         if POPULATE_TUNE:
             tune_scans = next_scans & (experiment.Scan() & 'scan_ts > "2017-12-00 00:00:00"')
 
-            #stimulus.Sync needs to be ran from Matlab
+            #stimulus.Sync needs to be run from Matlab
             tune.STA().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
             tune.STAQual().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
 
@@ -66,10 +66,14 @@ while True:
             tune.OriMap().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
             tune.Cos2Map().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
             tune.OriMapQuality().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
-            #tune.CaTimes().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
-            #tune.PixelwiseOri().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
 
             tune.OracleMap().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
+
+            tune.Ori().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
+            tune.Kuiper().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
+
+            #tune.CaTimes().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
+            #tune.PixelwiseOri().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
 
         # reso/meso (from Segmentation up)
         for pipe in [reso, meso]:
