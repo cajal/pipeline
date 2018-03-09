@@ -13,4 +13,4 @@ RUN git clone https://github.com/atlab/commons.git && \
 COPY . /data/pipeline
 RUN pip3 install -e pipeline/python/
 
-ENTRYPOINT ["python3", "/data/pipeline/python/scripts/populate-minion.py"]
+ENTRYPOINT ["/bin/bash"]
