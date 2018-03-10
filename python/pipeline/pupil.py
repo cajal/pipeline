@@ -1,5 +1,4 @@
 from itertools import count
-from pprint import pprint
 
 from scipy.misc import imresize
 import datajoint as dj
@@ -15,13 +14,8 @@ import numpy as np
 import json
 import os
 from commons import lab
-import sh
 from datajoint.autopopulate import AutoPopulate
 
-try:
-    import pyfnnd
-except ImportError:
-    warn('Could not load pyfnnd.  Oopsi spike inference will fail. Install from https://github.com/cajal/PyFNND.git')
 
 from .utils.eye_tracking import ROIGrabber, PupilTracker, CVROIGrabber, ManualTracker
 from pipeline.utils import ts2sec, read_video_hdf5
@@ -123,6 +117,7 @@ class Eye(dj.Imported):
         frames = key.pop('preview_frames')
         self.notify(key, frames)
 
+    @notify.ignore_exceptions
     def notify(self, key, frames):
         import imageio
         msg = 'Eye for `{}` has been populated. You can add a tracking task now. '.format(key)
@@ -265,8 +260,12 @@ class TrackedVideo(dj.Computed):
             trace.update(key)
             fr.insert1(trace, ignore_extra_fields=True)
 
-        (notify.SlackUser() & (experiment.Session() & key)).notify(
-            'Pupil tracking for {} has been populated'.format(str(key)))
+        self.notify(key)
+
+    @notify.ignore_exceptions
+    def notify(self, key):
+        msg = 'Pupil tracking for {} has been populated'.format(key)
+        (notify.SlackUser() & (experiment.Session() & key)).notify(msg)
 
     def plot_traces(self, outdir='./', show=False):
         """
