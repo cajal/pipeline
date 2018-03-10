@@ -69,11 +69,9 @@ while True:
 
             tune.OracleMap().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
 
+            tune.CaTimes().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
             tune.Ori().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
             tune.Kuiper().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
-
-            #tune.CaTimes().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
-            #tune.PixelwiseOri().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
 
         # reso/meso (from Segmentation up)
         for pipe in [reso, meso]:
