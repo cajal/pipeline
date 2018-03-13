@@ -127,7 +127,7 @@ class ScanInfo(dj.Imported):
 
         # Fill in CorrectionChannel if only one channel
         if scan.num_channels == 1:
-            CorrectionChannel().fill_in(key)
+            CorrectionChannel().fill(key)
 
         self.notify(key)
 
@@ -192,6 +192,20 @@ class Quality(dj.Computed):
         quantal_frame               : longblob      # average frame expressed in quanta
         """
 
+    class EpileptiformEvents(dj.Part):
+        definition = """ # compute frequency of epileptiform events
+
+        -> Quality
+        -> shared.Field
+        -> shared.Channel
+        ---
+        frequency       : float         # (events / sec) frequency of epileptiform events
+        abn_indices     : longblob      # indices of epileptiform events (0-based)
+        peak_indices    : longblob      # indices of all local maxima peaks (0-based)
+        prominences     : longblob      # peak prominence for all peaks
+        widths          : longblob      # (secs) width at half prominence for all peaks
+        """
+
     def _make_tuples(self, key):
         # Read the scan
         scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
@@ -228,6 +242,13 @@ class Quality(dj.Computed):
                 min_intensity, max_intensity, _, _, quantal_size, zero_level = results
                 quantal_frame = (np.mean(mini_scan, axis=-1) - zero_level) / quantal_size
 
+                # Compute abnormal event frequency
+                deviations = (mean_intensities - mean_intensities.mean()) / mean_intensities.mean()
+                peaks, prominences, widths = quality.find_peaks(deviations)
+                widths = [w / scan.fps for w in widths] # in seconds
+                abnormal = peaks[[p > 0.2 and w < 0.4 for p, w in zip(prominences, widths)]]
+                abnormal_freq = len(abnormal) / (scan.num_frames / scan.fps)
+
                 # Insert
                 field_key = {**key, 'field': field_id + 1, 'channel': channel + 1}
                 self.MeanIntensity().insert1({**field_key, 'intensities': mean_intensities})
@@ -238,6 +259,11 @@ class Quality(dj.Computed):
                                             'quantal_size': quantal_size,
                                             'zero_level': zero_level,
                                             'quantal_frame': quantal_frame})
+                self.EpileptiformEvents.insert1({**field_key, 'frequency': abnormal_freq,
+                                                 'abn_indices': abnormal,
+                                                 'peak_indices': peaks,
+                                                 'prominences': prominences,
+                                                 'widths': widths})
 
                 self.notify(field_key, frames, mean_intensities, contrasts)
 
@@ -288,7 +314,7 @@ class CorrectionChannel(dj.Manual):
     -> shared.Channel
     """
 
-    def fill_in(self, key, channel=1):
+    def fill(self, key, channel=1):
         for field_key in (ScanInfo.Field() & key).fetch(dj.key):
             self.insert1({**field_key, 'channel': channel}, ignore_extra_fields=True,
                          skip_duplicates=True)
@@ -706,7 +732,7 @@ class SegmentationTask(dj.Manual):
     -> experiment.Compartment
     """
 
-    def fill_in(self, key, channel=1, segmentation_method=3, compartment='soma'):
+    def fill(self, key, channel=1, segmentation_method=3, compartment='soma'):
         for field_key in (ScanInfo.Field() & key).fetch(dj.key):
             tuple_ = {**field_key, 'channel': channel, 'compartment': compartment,
                       'segmentation_method': segmentation_method}
@@ -1422,8 +1448,7 @@ class ScanSet(dj.Computed):
 
         msg = 'ScanSet for `{}` has been populated.'.format(key)
         (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
-                                                                   file_title='unit centroids',
-                                                                   channel='#pipeline_quality')
+                                                                   file_title='unit centroids')
 
     def plot_centroids(self, first_n=None):
         """ Draw masks centroids over the correlation image. Works on a single field/channel
