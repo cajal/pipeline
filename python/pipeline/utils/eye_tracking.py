@@ -483,12 +483,15 @@ class ManualTracker:
         self.update_frame = True  # must be true to ensure correct starting conditions
         self.contours_detected = None
         self.area = None
-        self._progress_len = 1500
-        self._progress_len = 1500
+        self._progress_len = 800
+        self._progress_height = 100
+        self._width = 800
 
         self.dilation_factor = 1.3
 
     def mouse_callback(self, event, x, y, flags, param):
+        if self._scale_factor is not None:
+            x, y = map(int, (i / self._scale_factor for i in (x, y)))
         if event == cv2.EVENT_MBUTTONDOWN:
             if self._mask is not None:
                 cv2.circle(self._mask, (x, y), self.brush, (0, 0, 0), -1)
@@ -564,7 +567,8 @@ class ManualTracker:
         self.skip = False
 
         self.help = True
-
+        self._scale_factor = None
+        self.dsize = None
 
     def set_brush(self, brush):
         self.brush = brush
@@ -730,7 +734,7 @@ class ManualTracker:
         t0, t1 = self.t0, self.t1
         dt = t1 - t0
         idx = np.linspace(t0, t1, self._progress_len, endpoint=False).astype(int)
-        height = 300
+        height = self._progress_height
         graph = (self.contours_detected[idx].astype(np.float) * 255)[None, :, None]
         graph = np.tile(graph, (height, 1, 3)).astype(np.uint8)
         area = (height - self.area[idx] / (self.area[idx].max() + 1) * height).astype(int)
@@ -797,8 +801,14 @@ class ManualTracker:
                     cv2.imshow(self.roi_window, small_gray)
                     cv2.imshow(self.thres_window, thres)
 
+
+            # --- plotting
             self.display_frame_number(frame)
             cv2.bitwise_and(frame, self._mask, dst=frame)
+            if self._scale_factor is None:
+                self._scale_factor = self._width / frame.shape[1]
+                self.dsize = tuple(int(self._scale_factor * s) for s in frame.shape[:2])[::-1]
+            frame = cv2.resize(frame, self.dsize)
             cv2.imshow(self.main_window, frame)
             self.plot_area()
             if not self.process_key(cv2.waitKey(5) & 0xFF):
