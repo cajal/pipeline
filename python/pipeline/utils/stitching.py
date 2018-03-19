@@ -225,7 +225,7 @@ class StitchedROI():
 
 
 
-def linear_stitch(left, right, expected_delta_x):
+def linear_stitch(left, right, expected_delta_x, minimum_overlap=10):
     """ Compute offsets to stitch two side-by-side volumes via cross-correlation.
 
     Subpixel shifts are calculated per depth and the median is returned.
@@ -234,6 +234,7 @@ def linear_stitch(left, right, expected_delta_x):
     :param left: Slice (height x width) to be stitched in the left.
     :param right: Slice (height x width) to be stitched in the right.
     :param float expected_delta_x: Expected distance between center of left to right.
+    :param float minimum_overlap: Minimum overlap after stitching.
 
     :returns: (delta_y, delta_x). Distance between center of right ROI and left ROI after
         stitching (right_center - left_center)
@@ -250,10 +251,13 @@ def linear_stitch(left, right, expected_delta_x):
     right = right[skip_rows: -skip_rows, skip_columns:]
     expected_overlap = int(round(expected_overlap - 2 * skip_columns))
 
-    # Cut strips of expected overlap
+    # Cut strips of expected overlap (plus some padding on the sides)
     min_height = min(left.shape[0], right.shape[0])
-    left_strip = left[:min_height, -expected_overlap:]
-    right_strip = right[:min_height, :expected_overlap]
+    pad_pixels = int(round(expected_overlap * 0.5 - minimum_overlap))
+    left_strip = np.zeros([min_height, expected_overlap + 2 * pad_pixels])
+    right_strip = np.zeros([min_height, expected_overlap + 2 * pad_pixels])
+    left_strip[:, :expected_overlap + pad_pixels] = left[:min_height, -(expected_overlap + pad_pixels):]
+    right_strip[:, -(expected_overlap + pad_pixels):] = right[:min_height, :expected_overlap + pad_pixels]
 
     # Compute best match
     y_shifts, x_shifts = galvo_corrections.compute_motion_shifts(right_strip, left_strip,
@@ -262,7 +266,7 @@ def linear_stitch(left, right, expected_delta_x):
 
     # Compute right_center minus left_center
     right_ycenter = right_height / 2 - y_shift # original + offset
-    right_xcenter = right_width / 2 + (left_width - expected_overlap - 2*skip_columns) - x_shift # original + repositioning + offset
+    right_xcenter = right_width / 2 + (left_width - expected_overlap - 2 * skip_columns) - x_shift # original + repositioning + offset
     delta_y = right_ycenter - left_height / 2 # negative to change direction of y axis
     delta_x = right_xcenter - left_width / 2
 

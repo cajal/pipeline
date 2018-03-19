@@ -1,6 +1,6 @@
 FROM ubuntu:17.10
 
-MAINTAINER Erick Cobos <ecobos@bcm.edu>
+LABEL maintainer="Erick Cobos <ecobos@bcm.edu>"
 
 ###############################################################################
 # Install some optimization libraries (used by many libraries below)
