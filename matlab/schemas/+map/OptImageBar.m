@@ -23,7 +23,7 @@ classdef OptImageBar < dj.Imported
             % get frame times
             if ~exists(stimulus.Sync & key)
                 disp 'Syncing...'
-                populate(stimulus.Sync,key)
+                makeTuples(stimulus.Sync,key)
             end
             frame_times =fetch1(stimulus.Sync & key,'frame_times');
             
@@ -53,6 +53,7 @@ classdef OptImageBar < dj.Imported
                         vessels = int16(squeeze(mean(getOpticalData(keys(end)))));
                     end
                     pxpitch = 3800/size(Data,2);
+                    mData = mean(Data);
                 case 'scanimage'
                     % get Optical data
                     disp 'loading movie...'
@@ -71,10 +72,10 @@ classdef OptImageBar < dj.Imported
                         frame_start = find(frame_times>=mn,1,'first');
                         frame_end = find(frame_times>mx,1,'first');
                         frame_times = frame_times(frame_start:frame_end);
-                         
+                        
                         % get Data
                         Data = permute(squeeze(mean(reader(:,:,:,1,frame_start:frame_end),1,'native')),[3 1 2]);
-
+                        
                     else
                         reader = preprocess.getGalvoReader(key);
                         
@@ -102,13 +103,15 @@ classdef OptImageBar < dj.Imported
                     
                     % get the vessel image
                     vessels = int16(squeeze(mean(Data(:,:,:))));
+                    
+                    % calc mean
+                    mData = int16(mean(Data));
             end
             
             % Preprocessing data
             disp 'Preprocessing...'
             
             % DF/F
-            mData = int16(mean(Data));
             Data = bsxfun(@rdivide,bsxfun(@minus,Data,mData),mData);
             
             % loop through axis
@@ -244,8 +247,10 @@ classdef OptImageBar < dj.Imported
                     % plot
                     angle_map = hsv2rgb(cat(3,h,cat(3,ones(size(s)),ones(size(v)))));
                     combined_map = hsv2rgb(cat(3,h,s,v));
-                    if params.subplot
+                    if params.subplot==1
                         imshowpair(angle_map,combined_map,'montage')
+                    elseif params.subplot==2
+                        imshow(combined_map)
                     else
                         imshow(angle_map)
                     end

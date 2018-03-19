@@ -14,10 +14,11 @@ classdef AreaMask < dj.Manual
             
             params.exp = 1.5;
             params.sigma = 2;
+            params.amp = 1;
             
             params = ne7.mat.getParams(params,varargin);
             
-            if strcmp(fetch1(experiment.Scan & key,'aim'),'widefield')
+            if strcmp(fetch1(experiment.Scan & key,'aim'),'widefield') || strcmp(fetch1(experiment.Scan & key,'aim'),'intrinsic')
                 contiguous = 1;
             else
                 contiguous = 0;
@@ -260,7 +261,7 @@ classdef AreaMask < dj.Manual
             un_areas = unique(areas);
             for iarea = 1:length(un_areas)
                 s = regionprops(area_map==iarea,'Centroid');
-                text(s(1).Centroid(1),s(1).Centroid(2),un_areas{iarea},'color',[1 0 0],'fontsize',16)
+                text(s(1).Centroid(1),s(1).Centroid(2),un_areas{iarea},'color',[1 0 0],'fontsize',16,'rotation',0)
             end
         end
         
