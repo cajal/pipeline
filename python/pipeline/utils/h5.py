@@ -69,6 +69,7 @@ def read_video_hdf5(hdf_path):
             if fid.attrs['AS_Version'] == 2:
                 data['ts'] = wf[:, 2]
             elif fid.attrs['AS_Version'] == 2.1:
+                data['laserPower'] = wf[:, 2]
                 data['ts'] = wf[:, 3]
             data['analogPacketLen'] = float(fid.attrs['AS_samples_per_channel'])
 
