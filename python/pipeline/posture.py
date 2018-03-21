@@ -9,10 +9,6 @@ from warnings import warn
 import cv2
 import numpy as np
 from commons import lab
-try:
-    import pyfnnd
-except ImportError:
-    warn('Could not load pyfnnd.  Oopsi spike inference will fail. Install from https://github.com/cajal/PyFNND.git')
 
 from pipeline.utils import ts2sec, read_video_hdf5
 
@@ -34,7 +30,7 @@ class Posture(dj.Imported):
 
     @property
     def key_source(self):
-        return (experiment.Scan() & experiment.Scan.PostureVideo().proj()) - experiment.ScanIgnored()
+        return experiment.Scan() & experiment.Scan.PostureVideo().proj()
 
     def grab_timestamps_and_frames(self, key, n_sample_frames=16):
         rel = experiment.Session() * experiment.Scan.PostureVideo() * experiment.Scan.BehaviorFile().proj(
@@ -89,6 +85,7 @@ class Posture(dj.Imported):
         frames = key.pop('preview_frames')
         self.notify(key, frames)
 
+    @notify.ignore_exceptions
     def notify(self, key, frames):
         import imageio
         msg = 'Posture for `{}` has been populated. You can add a tracking task now. '.format(key)
