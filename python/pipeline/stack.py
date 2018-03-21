@@ -162,7 +162,7 @@ class StackInfo(dj.Imported):
 
         # Fill in CorrectionChannel if only one channel
         if stacks[0].num_channels == 1:
-            CorrectionChannel().fill_in(key)
+            CorrectionChannel().fill(key)
 
         self.notify(key)
 
@@ -288,7 +288,7 @@ class CorrectionChannel(dj.Manual):
     -> shared.Channel
     """
 
-    def fill_in(self, key, channel=1):
+    def fill(self, key, channel=1):
         for stack_key in (StackInfo() & key).fetch(dj.key):
             self.insert1({**stack_key, 'channel': channel}, ignore_extra_fields=True,
                           skip_duplicates=True)
@@ -890,7 +890,7 @@ class RegistrationTask(dj.Manual):
     (scan_channel) -> shared.Channel(channel)
     -> shared.RegistrationMethod
     """
-    def fill_in(self, stack_key, scan_key, stack_channel=1, scan_channel=1, method=2):
+    def fill(self, stack_key, scan_key, stack_channel=1, scan_channel=1, method=2):
         # Add stack attributes
         stack_rel = CorrectedStack() & stack_key
         if len(stack_rel) > 1:
@@ -1060,8 +1060,8 @@ class FieldRegistration(dj.Computed):
         reg_clipped = np.clip(registered_field, *np.percentile(registered_field, [1, 99.8]))
 
         overlay = np.zeros([*original_field.shape, 3], dtype=np.uint8)
-        overlay[:, :, 0] = signal.float2uint8(reg_clipped) # stack in red
-        overlay[:, :, 1] = signal.float2uint8(orig_clipped) # original in green
+        overlay[:, :, 0] = signal.float2uint8(-reg_clipped) # stack in red
+        overlay[:, :, 1] = signal.float2uint8(-orig_clipped) # original in green
         img_filename = '/tmp/{}.png'.format(key_hash(key))
         imageio.imwrite(img_filename, overlay)
 

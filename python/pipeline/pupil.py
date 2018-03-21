@@ -52,7 +52,7 @@ class Eye(dj.Imported):
 
     @property
     def key_source(self):
-        return (experiment.Scan() & experiment.Scan.EyeVideo().proj()) - experiment.ScanIgnored()
+        return experiment.Scan() & experiment.Scan.EyeVideo().proj()
 
     def grab_timestamps_and_frames(self, key, n_sample_frames=16):
 
