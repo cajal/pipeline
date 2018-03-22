@@ -215,8 +215,7 @@ class Quality(dj.Computed):
             for channel in range(scan.num_channels):
                 # Map: Compute quality metrics in parallel
                 results = performance.map_frames(performance.parallel_quality_metrics,
-                                                 scan, field_id=field_id, y=slice(None),
-                                                 x=slice(None), channel=channel,
+                                                 scan, field_id=field_id, channel=channel,
                                                  chunk_size_in_GB=0.5)
 
                 # Reduce
@@ -635,8 +634,7 @@ class SummaryImages(dj.Computed):
                 y_shifts, x_shifts = (MotionCorrection() & key & {'field': field_id + 1}).fetch1('y_shifts', 'x_shifts')
                 kwargs = {'raster_phase': raster_phase, 'fill_fraction': fill_fraction,
                           'y_shifts': y_shifts, 'x_shifts': x_shifts}
-                results = performance.map_frames(f, scan, field_id=field_id, y=slice(None),
-                                                 x=slice(None), channel=channel, kwargs=kwargs)
+                results = performance.map_frames(f, scan, field_id=field_id, channel=channel, kwargs=kwargs)
 
                 # Reduce: Compute average images
                 average_image = np.sum([r[0] for r in results], axis=0) / scan.num_frames
@@ -858,8 +856,7 @@ class Segmentation(dj.Computed):
             y_shifts, x_shifts = (MotionCorrection() & key).fetch1('y_shifts', 'x_shifts')
             kwargs = {'raster_phase': raster_phase, 'fill_fraction': fill_fraction, 'y_shifts': y_shifts,
                       'x_shifts': x_shifts, 'mmap_scan': mmap_scan}
-            results = performance.map_frames(f, scan, field_id=field_id, y=slice(None),
-                                             x=slice(None), channel=channel, kwargs=kwargs)
+            results = performance.map_frames(f, scan, field_id=field_id, channel=channel, kwargs=kwargs)
 
             # Reduce: Use the minimum values to make memory mapped scan nonnegative
             mmap_scan -= np.min(results)  # bit inefficient but necessary
@@ -1192,8 +1189,7 @@ class Fluorescence(dj.Computed):
         kwargs = {'raster_phase': raster_phase, 'fill_fraction': fill_fraction,
                   'y_shifts': y_shifts, 'x_shifts': x_shifts, 'mask_pixels': pixels,
                   'mask_weights': weights}
-        results = performance.map_frames(f, scan, field_id=field_id, y=slice(None),
-                                         x=slice(None), channel=channel, kwargs=kwargs)
+        results = performance.map_frames(f, scan, field_id=field_id, channel=channel, kwargs=kwargs)
 
         # Reduce: Concatenate
         traces = np.zeros((len(mask_ids), scan.num_frames), dtype=np.float32)

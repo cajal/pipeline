@@ -4,8 +4,8 @@ from . import galvo_corrections
 import time
 
 
-def map_frames(f, scan, field_id, y, x, channel, kwargs={}, chunk_size_in_GB=1,
-               num_processes=8, queue_size=8):
+def map_frames(f, scan, field_id, channel, y=slice(None), x=slice(None), kwargs={},
+               chunk_size_in_GB=1, num_processes=8, queue_size=8):
     """ Apply function f to chunks of the scan (divided in the temporal axis).
 
     :param function f: Function that receives two positional arguments:
@@ -13,10 +13,10 @@ def map_frames(f, scan, field_id, y, x, channel, kwargs={}, chunk_size_in_GB=1,
             scan_chunks is a [height, width, num_frames] object
         results: A list to accumulate new results.
     :param Scan scan: An scan object as returned by scanreader.
-    :param int field_id: Which field to use: 0-indexed.
+    :param int field_id: Which field to use: 0-based.
+    :param int channel: Which channel to read. 0-based.
     :param slice y: How to slice the scan in y.
     :param slice x: How to slice the scan in x.
-    :param int channel: Which channel to read.
     :param dict kwargs: Dictionary with optional kwargs passed to f.
     :param int chunk_size_in_GB: Desired size of each chunk.
     :param int num_processes: Number of processes to use for mapping.
