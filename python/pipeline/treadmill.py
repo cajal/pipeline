@@ -7,8 +7,6 @@ from .utils.h5 import read_video_hdf5, ts2sec
 from . import experiment, notify
 from .exceptions import PipelineException
 
-import datajoint as dj
-
 from scipy.interpolate import interp1d
 
 schema = dj.schema('pipeline_treadmill', locals())
