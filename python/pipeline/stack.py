@@ -827,7 +827,7 @@ class CorrectedStack(dj.Computed):
 
         msg = 'corrected stack for {animal_id}-{session}-{stack_idx} volume {volume_id}'.format(**key)
         slack_user = notify.SlackUser() & (experiment.Session() & key)
-        slack_user.notify(file=video_filename, file_title=msg)
+        slack_user.notify(file=video_filename, file_title=msg, channel='#pipeline_quality')
 
     def get_stack(self, channel=1):
         """ Get full stack (num_slices, height, width).

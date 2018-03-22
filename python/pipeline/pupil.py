@@ -128,7 +128,7 @@ class Eye(dj.Imported):
 
         msg = 'eye frames for {animal_id}-{session}-{scan_idx}'.format(**key)
         slack_user = notify.SlackUser() & (experiment.Session() & key)
-        slack_user.notify(file=video_filename, file_title=msg)
+        slack_user.notify(file=video_filename, file_title=msg, channel='#pipeline_quality')
 
     def get_video_path(self):
         video_info = (experiment.Session() * experiment.Scan.EyeVideo() & self).fetch1()

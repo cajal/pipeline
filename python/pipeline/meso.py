@@ -699,7 +699,7 @@ class SummaryImages(dj.Computed):
 
         msg = 'summary images for {animal_id}-{session}-{scan_idx} field {field}'.format(**key)
         slack_user = notify.SlackUser() & (experiment.Session() & key)
-        slack_user.notify(file=img_filename, file_title=msg)
+        slack_user.notify(file=img_filename, file_title=msg, channel='#pipeline_quality')
 
 
 @schema
@@ -1290,7 +1290,7 @@ class MaskClassification(dj.Computed):
                '{somas} somas and {arts} artifacts').format(**key,
                     somas=mask_types.count('soma'), arts=mask_types.count('artifact'))
         slack_user = notify.SlackUser() & (experiment.Session() & key)
-        slack_user.notify(file=img_filename, file_title=msg)
+        slack_user.notify(file=img_filename, file_title=msg, channel='#pipeline_quality')
 
     def plot_masks(self, threshold=0.99):
         """ Draw contours of masks over the correlation image (if available) with different
