@@ -303,7 +303,7 @@ def _correct_field(field, raster_phase, fill_fraction, x_shifts, y_shifts):
     field = field.astype(np.float32, copy=False)
     if abs(raster_phase) > 1e-7:
         field = galvo_corrections.correct_raster(field, raster_phase, fill_fraction) # raster
-    field  = galvo_corrections.correct_motion(field, [x_shifts, y_shifts]) # motion
+    field  = galvo_corrections.correct_motion(field, x_shifts, y_shifts) # motion
 
     return field
 
@@ -458,8 +458,8 @@ def parallel_motion_stack(chunks, results, raster_phase, fill_fraction, skip_row
             x_shifts = x_shifts - np.median(x_shifts)
 
             # Create template from corrected scan (for next iteration)
-            xy_shifts = np.stack([x_shifts, y_shifts])
-            corrected = galvo_corrections.correct_motion(field, xy_shifts, in_place=False)
+            corrected = galvo_corrections.correct_motion(field, x_shifts, y_shifts,
+                                                         in_place=False)
             template = ndimage.gaussian_filter(np.mean(corrected, axis=-1), 0.6)
 
         # Add to results

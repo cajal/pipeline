@@ -1,8 +1,8 @@
 """ Utilities for motion and raster correction of resonant scans. """
+import numpy as np
 from scipy import interpolate  as interp
 from scipy import signal
-import numpy as np
-import scipy.ndimage as ndi
+from scipy import ndimage
 
 from ..exceptions import PipelineException
 from ..utils.signal import mirrconv
@@ -235,15 +235,15 @@ def correct_raster(scan, raster_phase, temporal_fill_fraction, in_place=True):
     return scan
 
 
-def correct_motion(scan, xy_shifts, in_place=True):
+def correct_motion(scan, x_shifts, y_shifts, in_place=True):
     """ Motion correction for multi-photon scans.
 
     Shifts each image in the scan x_shift pixels to the left and y_shift pixels up.
 
     :param np.array scan: Volume with images to be corrected in the first two dimensions.
         Works for 2-dimensions and up, usually (image_height, image_width, num_frames).
-    :param list/np.array xy_shifts: Volume with x, y motion shifts for each image in the
-        first dimension: usually (2 x num_frames).
+    :param list/np.array x_shifts: 1-d array with x motion shifts for each image.
+    :param list/np.array y_shifts: 1-d array with x motion shifts for each image.
     :param bool in_place: If True (default), the original array is modified in place.
 
     :return: Motion corrected scan
@@ -256,6 +256,10 @@ def correct_motion(scan, xy_shifts, in_place=True):
         raise PipelineException('Scan needs to be a numpy array.')
     if scan.ndim < 2:
         raise PipelineException('Scan with less than 2 dimensions.')
+    if np.ndim(y_shifts) != 1 or np.ndim(x_shifts) != 1:
+        raise PipelineException('Dimension of one or both motion arrays differs from 1.')
+    if len(x_shifts) != len(y_shifts):
+        raise PipelineException('Length of motion arrays differ.')
 
     # Assert scan is float (integer precision is not good enough)
     if not np.issubdtype(scan.dtype, np.floating):
@@ -271,16 +275,16 @@ def correct_motion(scan, xy_shifts, in_place=True):
 
     # Reshape input (to deal with more than 2-D volumes)
     reshaped_scan = np.reshape(scan, (image_height, image_width, -1))
-    reshaped_xy = np.reshape(xy_shifts, (2, -1))
-    if reshaped_xy.shape[-1] != reshaped_scan.shape[-1]:
+    if reshaped_scan.shape[-1] != len(x_shifts):
         raise PipelineException('Scan and motion arrays have different dimensions')
 
     # Shift each frame
-    yx_shifts = reshaped_xy[::-1].transpose() # put y shifts first, reshape to num_frames x 2
-    yx_shifts[np.logical_or(np.isnan(yx_shifts[:, 0]), np.isnan(yx_shifts[:, 1]))] = 0
-    for i, yx_shift in enumerate(yx_shifts):
+    y_shifts[np.logical_or(np.isnan(y_shifts), np.isnan(x_shifts))] = 0
+    x_shifts[np.logical_or(np.isnan(y_shifts), np.isnan(x_shifts))] = 0
+    for i, (y_shift, x_shift) in enumerate(zip(y_shifts, x_shifts)):
         image = reshaped_scan[:, :, i].copy()
-        ndi.interpolation.shift(image, -yx_shift, output=reshaped_scan[:, :, i], order=1)
+        ndimage.interpolation.shift(image, (-y_shift, -x_shift), order=1,
+                                    output=reshaped_scan[:, :, i])
 
     scan = np.reshape(reshaped_scan, original_shape)
     return scan
