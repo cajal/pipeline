@@ -120,14 +120,15 @@ class Eye(dj.Imported):
     @notify.ignore_exceptions
     def notify(self, key, frames):
         import imageio
-        msg = 'Eye for `{}` has been populated. You can add a tracking task now. '.format(key)
-        img_filename = '/tmp/' + key_hash(key) + '.gif'
+
+        video_filename = '/tmp/' + key_hash(key) + '.gif'
         frames = frames.transpose([2, 0, 1])
         frames = [imresize(img, 0.25) for img in frames]
-        imageio.mimsave(img_filename, frames, duration=0.5)
-        (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
-                                                                   file_title='preview frames',
-                                                                   channel='#pipeline_quality')
+        imageio.mimsave(video_filename, frames, duration=0.5)
+
+        msg = 'eye frames for {animal_id}-{session}-{scan_idx}'.format(**key)
+        slack_user = notify.SlackUser() & (experiment.Session() & key)
+        slack_user.notify(file=video_filename, file_title=msg)
 
     def get_video_path(self):
         video_info = (experiment.Session() * experiment.Scan.EyeVideo() & self).fetch1()
@@ -178,7 +179,6 @@ class TrackingTask(dj.Manual):
         key = (Eye() & key).fetch1(dj.key)  # complete key
         frames = (Eye() & key).fetch1('preview_frames')
         try:
-            import cv2
             print('Drag window and print q when done')
             rg = CVROIGrabber(frames.mean(axis=2))
             rg.grab()
@@ -277,7 +277,7 @@ class TrackedVideo(dj.Computed):
         import matplotlib.pyplot as plt
         plt.switch_backend('GTK3Agg')
 
-        for key in self.fetch.keys():
+        for key in self.fetch('KEY'):
             print('Processing', key)
             with sns.axes_style('ticks'):
                 fig, ax = plt.subplots(3, 1, figsize=(10, 6), sharex=True)
@@ -393,7 +393,6 @@ class ManuallyTrackedContours(dj.Manual, AutoPopulate):
         tracker = ManualTracker(avi_path)
         tracker.run()
         self.insert1(key)
-        frames = []
         frame = self.Frame()
         for frame_id, ok, contour in tqdm(zip(count(), tracker.contours_detected, tracker.contours),
                                           total=len(tracker.contours)):
