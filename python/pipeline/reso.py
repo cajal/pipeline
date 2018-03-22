@@ -575,11 +575,10 @@ class MotionCorrection(dj.Computed):
 
     def get_correct_motion(self):
         """ Returns a function to perform motion correction on scans. """
-        y_shifts, x_shifts = self.fetch1('y_shifts', 'x_shifts')
-        xy_motion = np.stack([x_shifts, y_shifts])
+        x_shifts, y_shifts = self.fetch1('x_shifts', 'y_shifts')
 
         return lambda scan, indices=slice(None): galvo_corrections.correct_motion(scan,
-                                                 xy_motion[:, indices])
+                                                 x_shifts, y_shifts)
 
 @schema
 class SummaryImages(dj.Computed):
