@@ -164,13 +164,6 @@ class StackInfo(dj.Imported):
         if stacks[0].num_channels == 1:
             CorrectionChannel().fill(key)
 
-        self.notify(key)
-
-    @notify.ignore_exceptions
-    def notify(self, key):
-        msg = 'StackInfo for `{}` has been populated.'.format(key)
-        (notify.SlackUser() & (experiment.Session() & key)).notify(msg)
-
 
 @schema
 class Quality(dj.Computed):
@@ -248,7 +241,6 @@ class Quality(dj.Computed):
 
     @notify.ignore_exceptions
     def notify(self, key, summary_frames, mean_intensities, contrasts):
-        """ Sends slack notification for a single slice + channel combination. """
         # Send summary frames
         import imageio
         video_filename = '/tmp/' + key_hash(key) + '.gif'
@@ -257,9 +249,9 @@ class Quality(dj.Computed):
         summary_frames = float2uint8(summary_frames).transpose([2, 0, 1])
         imageio.mimsave(video_filename, summary_frames, duration=0.4)
 
-        msg = 'Quality for `{}` has been populated.'.format(key)
-        (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=video_filename,
-                                                                   file_title='summary frames')
+        msg = 'summary frames for {animal_id}-{session}-{stack_idx} channel {channel}'.format(**key)
+        slack_user = notify.SlackUser() & (experiment.Session() & key)
+        slack_user.notify(file=video_filename, file_title=msg)
 
         # Send intensity and contrasts
         figsize = (min(4, contrasts.shape[1] / 10 + 1),  contrasts.shape[0] / 30 + 1) # set heuristically
@@ -276,7 +268,8 @@ class Quality(dj.Computed):
         fig.savefig(img_filename, bbox_inches='tight')
         plt.close(fig)
 
-        (notify.SlackUser() & (experiment.Session() & key)).notify(file=img_filename, file_title='quality images')
+        msg = 'quality images for {animal_id}-{session}-{stack_idx} channel {channel}'.format(**key)
+        slack_user.notify(file=img_filename, file_title=msg)
 
 
 @schema
@@ -354,8 +347,8 @@ class RasterCorrection(dj.Computed):
 
     @notify.ignore_exceptions
     def notify(self, key):
-        msg = 'RasterCorrection for `{}` has been populated.'.format(key)
-        msg += '\nRaster phase: {}'.format((self & key).fetch1('raster_phase'))
+        msg = 'raster phase for {animal_id}-{session}-{stack_idx} roi {roi_id}: {phase}'.format(
+                   **key, phase=(self & key).fetch1('raster_phase'))
         (notify.SlackUser() & (experiment.Session() & key)).notify(msg)
 
     def correct(self, roi):
@@ -431,16 +424,13 @@ class MotionCorrection(dj.Computed):
 
     @notify.ignore_exceptions
     def notify(self, key):
-        import seaborn as sns
-
         y_shifts, x_shifts = (MotionCorrection() & key).fetch1('y_shifts', 'x_shifts')
         fps, is_slow_stack = (StackInfo.ROI() & key).fetch1('fps', 'is_slow')
         num_slices, num_frames = y_shifts.shape
         fps = fps * (num_slices if is_slow_stack else 1)
         seconds = np.arange(num_frames) / fps
 
-        with sns.axes_style('white'):
-            fig, axes = plt.subplots(2, 1, figsize=(13, 10), sharex=True, sharey=True)
+        fig, axes = plt.subplots(2, 1, figsize=(13, 10), sharex=True, sharey=True)
         axes[0].set_title('Shifts in y for all slices')
         axes[0].set_ylabel('Pixels')
         axes[0].plot(seconds, y_shifts.T)
@@ -452,11 +442,10 @@ class MotionCorrection(dj.Computed):
         img_filename = '/tmp/' + key_hash(key) + '.png'
         fig.savefig(img_filename)
         plt.close(fig)
-        sns.reset_orig()
 
-        msg = 'MotionCorrection for `{}` has been populated.'.format(key)
-        (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
-                                            file_title='motion shifts')
+        msg = 'motion shifts for {animal_id}-{session}-{stack_idx} roi {roi_id}'.format(**key)
+        slack_user = notify.SlackUser() & (experiment.Session() & key)
+        slack_user.notify(file=img_filename, file_title=msg)
 
     def save_as_tiff(self, filename='roi.tif', channel=1):
         """ Correct roi and save as a tiff file.
@@ -681,16 +670,30 @@ class Stitching(dj.Computed):
 
     @notify.ignore_exceptions
     def notify(self, key):
-        notifier = (notify.SlackUser() & (experiment.Session() & key))
-        notifier.notify('Stitching for {} has been populated'.format(key))
-        for volume_key in (self.Volume() & key).fetch.keys():
-            msg = 'Volume {}:'.format(volume_key['volume_id'])
+        slack_user = (notify.SlackUser() & (experiment.Session() & key))
+        z_step = (StackInfo() & key).fetch1('z_step')
+        for volume_key in (self.Volume() & key).fetch('KEY'):
             for roi_coord in (self.ROICoordinates() & volume_key).fetch():
-                    roi_id = roi_coord['roi_id']
-                    xs, ys = roi_coord['stitch_xs'], roi_coord['stitch_ys']
-                    msg += ' ROI {} centered at {:.2f}, {:.2f} (x, y);'.format(roi_id,
-                                                                    xs.mean(), ys.mean())
-            notifier.notify(msg)
+                first_z, num_slices = (StackInfo.ROI() & roi_coord).fetch1('roi_z', 'roi_px_depth')
+                depths = first_z + z_step * np.arange(num_slices)
+
+                fig, axes = plt.subplots(2, 1, figsize=(15, 8), sharex=True, sharey=True)
+                axes[0].set_title('Center position (x)')
+                axes[0].plot(depths, roi_coord['stitch_xs'])
+                axes[1].set_title('Center position (y)')
+                axes[1].plot(depths, roi_coord['stitch_ys'])
+                axes[0].set_ylabel('Pixels')
+                axes[0].set_xlabel('Depths')
+                fig.tight_layout()
+                img_filename = '/tmp/' + key_hash(key) + '.png'
+                fig.savefig(img_filename, bbox_inches='tight')
+                plt.close(fig)
+
+                msg = ('stitch traces for {animal_id}-{session}-{stack_idx} volume '
+                       '{volume_id} roi {roi_id} ').format(**roi_coord)
+                slack_user.notify(file=img_filename, file_title=msg)
+
+            slack_user.notify(msg)
 
 
 @schema
@@ -822,9 +825,9 @@ class CorrectedStack(dj.Computed):
         video_filename = '/tmp/' + key_hash(key) + '.gif'
         imageio.mimsave(video_filename, float2uint8(volume), duration=1)
 
-        msg = 'CorrectedStack for {} has been populated.'.format(key)
-        (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=video_filename,
-                                                                   file_title='stitched ROI')
+        msg = 'corrected stack for {animal_id}-{session}-{stack_idx} volume {volume_id}'.format(**key)
+        slack_user = notify.SlackUser() & (experiment.Session() & key)
+        slack_user.notify(file=video_filename, file_title=msg)
 
     def get_stack(self, channel=1):
         """ Get full stack (num_slices, height, width).
