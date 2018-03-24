@@ -278,10 +278,13 @@ def correct_motion(scan, x_shifts, y_shifts, in_place=True):
     if reshaped_scan.shape[-1] != len(x_shifts):
         raise PipelineException('Scan and motion arrays have different dimensions')
 
+    # Ignore NaN values (present in some older data)
+    y_clean, x_clean = y_shifts.copy(), x_shifts.copy()
+    y_clean[np.logical_or(np.isnan(y_shifts), np.isnan(x_shifts))] = 0
+    x_clean[np.logical_or(np.isnan(y_shifts), np.isnan(x_shifts))] = 0
+
     # Shift each frame
-    y_shifts[np.logical_or(np.isnan(y_shifts), np.isnan(x_shifts))] = 0
-    x_shifts[np.logical_or(np.isnan(y_shifts), np.isnan(x_shifts))] = 0
-    for i, (y_shift, x_shift) in enumerate(zip(y_shifts, x_shifts)):
+    for i, (y_shift, x_shift) in enumerate(zip(y_clean, x_clean)):
         image = reshaped_scan[:, :, i].copy()
         ndimage.interpolation.shift(image, (-y_shift, -x_shift), order=1,
                                     output=reshaped_scan[:, :, i])
