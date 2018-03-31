@@ -673,7 +673,7 @@ class Stitching(dj.Computed):
         slack_user = (notify.SlackUser() & (experiment.Session() & key))
         z_step = (StackInfo() & key).fetch1('z_step')
         for volume_key in (self.Volume() & key).fetch('KEY'):
-            for roi_coord in (self.ROICoordinates() & volume_key).fetch():
+            for roi_coord in (self.ROICoordinates() & volume_key).fetch(as_dict=True):
                 first_z, num_slices = (StackInfo.ROI() & roi_coord).fetch1('roi_z', 'roi_px_depth')
                 depths = first_z + z_step * np.arange(num_slices)
 
@@ -690,7 +690,7 @@ class Stitching(dj.Computed):
                 plt.close(fig)
 
                 msg = ('stitch traces for {animal_id}-{session}-{stack_idx} volume '
-                       '{volume_id} roi {roi_id} ').format(**roi_coord)
+                       '{volume_id} roi {roi_id}').format(**roi_coord)
                 slack_user.notify(file=img_filename, file_title=msg)
 
             slack_user.notify(msg)
