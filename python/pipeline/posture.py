@@ -88,14 +88,15 @@ class Posture(dj.Imported):
     @notify.ignore_exceptions
     def notify(self, key, frames):
         import imageio
-        msg = 'Posture for `{}` has been populated. You can add a tracking task now. '.format(key)
-        img_filename = '/tmp/' + key_hash(key) + '.gif'
+
+        video_filename = '/tmp/' + key_hash(key) + '.gif'
         frames = frames.transpose([2, 0, 1])
         frames = [imresize(img, 0.25) for img in frames]
-        imageio.mimsave(img_filename, frames, duration=0.5)
-        (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
-                                                                   file_title='preview frames',
-                                                                   channel='#pipeline_quality')
+        imageio.mimsave(video_filename, frames, duration=0.5)
+
+        msg = 'posture frames for {animal_id}-{session}-{scan_idx}'.format(**key)
+        slack_user = notify.SlackUser() & (experiment.Session() & key)
+        slack_user.notify(file=video_filename, file_title=msg, channel='#pipeline_quality')
 
     def get_video_path(self):
         video_info = (experiment.Session() * experiment.Scan.PostureVideo() & self).fetch1()
