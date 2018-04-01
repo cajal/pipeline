@@ -71,12 +71,12 @@ class Eye(dj.Imported):
 
         data = read_video_hdf5(hdf_path)
 
-        if float(data['version']) == 2.:
-            cam_key = 'eyecam_ts'
-            eye_time = ts2sec(data[cam_key][0])
-        else:
+        if data['version'] == '1.0':
             cam_key = 'cam1_ts' if info['rig'] == '2P3' else 'cam2_ts'
             eye_time = ts2sec(data[cam_key])
+        else:
+            cam_key = 'eyecam_ts'
+            eye_time = ts2sec(data[cam_key][0])
 
         total_frames = len(eye_time)
 
