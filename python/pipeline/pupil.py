@@ -4,10 +4,8 @@ from scipy.misc import imresize
 import datajoint as dj
 from datajoint.jobs import key_hash
 from tqdm import tqdm
-
 from . import experiment, notify
 from .exceptions import PipelineException
-
 from warnings import warn
 import cv2
 import numpy as np
@@ -15,26 +13,25 @@ import json
 import os
 from commons import lab
 from datajoint.autopopulate import AutoPopulate
-
-
 from .utils.eye_tracking import ROIGrabber, PupilTracker, CVROIGrabber, ManualTracker
 from pipeline.utils import ts2sec, read_video_hdf5
 from . import config
 
 schema = dj.schema('pipeline_eye', locals())
 
-DEFAULT_PARAMETERS = dict(relative_area_threshold=0.002,
-                          ratio_threshold=1.5,
-                          error_threshold=0.1,
-                          min_contour_len=5,
-                          margin=0.02,
-                          contrast_threshold=5,
-                          speed_threshold=0.1,
-                          dr_threshold=0.1,
-                          gaussian_blur=5,
-                          extreme_meso=0,
-                          running_avg=0.4,
-                          exponent=9)
+DEFAULT_PARAMETERS = {'relative_area_threshold': 0.002,
+                      'ratio_threshold': 1.5,
+                      'error_threshold': 0.1,
+                      'min_contour_len': 5,
+                      'margin': 0.02,
+                      'contrast_threshold': 5,
+                      'speed_threshold': 0.1,
+                      'dr_threshold': 0.1,
+                      'gaussian_blur': 5,
+                      'extreme_meso': 0,
+                      'running_avg': 0.4,
+                      'exponent': 9
+                      }
 
 
 @schema
@@ -73,15 +70,14 @@ class Eye(dj.Imported):
         hdf_path = lab.Paths().get_local_path("{behavior_path}/{hdf_file}".format(**info))
 
         data = read_video_hdf5(hdf_path)
-        packet_length = data['analogPacketLen']
-        dat_time, _ = ts2sec(data['ts'], packet_length)
+        dat_time, _ = ts2sec(data['ts'])
 
         if float(data['version']) == 2.:
             cam_key = 'eyecam_ts'
-            eye_time, _ = ts2sec(data[cam_key][0])
+            eye_time = ts2sec(data[cam_key][0])
         else:
-            cam_key = 'cam1ts' if info['rig'] == '2P3' else 'cam2ts'
-            eye_time, _ = ts2sec(data[cam_key])
+            cam_key = 'cam1_ts' if info['rig'] == '2P3' else 'cam2_ts'
+            eye_time = ts2sec(data[cam_key])
 
         total_frames = len(eye_time)
 

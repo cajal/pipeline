@@ -49,7 +49,7 @@ class Posture(dj.Imported):
 
         print('Reading hdf5 files ...')
         data = read_video_hdf5(hdf_path)
-        posture_time, _ = ts2sec(data['posture_ts'][0])
+        posture_time = ts2sec(data['posture_ts'][0])
 
         total_frames = len(posture_time)
         frame_idx = np.floor(np.linspace(0, total_frames - 1, n_sample_frames))
