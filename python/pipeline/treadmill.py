@@ -37,18 +37,17 @@ class Sync(dj.Computed):
         data = h5.read_video_hdf5(full_filename)
 
         # Read counter timestamps and convert to seconds
-        timestamps_in_secs = h5.ts2sec(data['ts'])
+        timestamps_in_secs = h5.ts2sec(data['ts'], is_packeted=True)
 
-
-        dat_fs = 1. / np.median(np.diff(timestamps_in_secs))
-        n = int(np.ceil(0.0002 * dat_fs))
+        fps = 1 / np.median(np.diff(timestamps_in_secs))
+        n = int(np.ceil(0.0002 * fps))
         k = np.hamming(2 * n)
         k /= -k.sum()
         k[:n] = -k[:n]
 
         pulses = np.convolve(data['scanImage'], k, mode='full')[n:-n + 1]  # mode='same' with MATLAB compatibility
 
-        peaks = signal.spaced_max(pulses, 0.005 * dat_fs)
+        peaks = signal.spaced_max(pulses, 0.005 * fps)
         peaks = peaks[pulses[peaks] > 0.1 * np.percentile(pulses[peaks], 90)]
         peaks = signal.longest_contiguous_block(peaks)
 
@@ -85,7 +84,7 @@ class Treadmill(dj.Computed):
         data = h5.read_video_hdf5(full_filename)
 
         # read out counter time stamp and convert to seconds
-        ball_time = h5.ts2sec(data['ball'][1])
+        ball_time = h5.ts2sec(data['wheel'][1])
 
         # read out raw ball counts and integrate by 100ms intervals
         ball_raw = data['wheel'][0]

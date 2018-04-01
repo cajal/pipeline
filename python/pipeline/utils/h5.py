@@ -3,11 +3,13 @@ import numpy as np
 from ..exceptions import PipelineException
 from .eye_tracking import ANALOG_PACKET_LEN
 
-def ts2sec(ts, sampling_rate=1e7):
+def ts2sec(ts, sampling_rate=1e7, is_packeted=False):
     """ Convert timestamps from 2pMaster (ts) to seconds (s)
 
     :param np.array ts: Timestamps from behavior files.
     :param float sampling_rate: Sampling rate of the master clock counter in Hz.
+    :param bool is_packeted: Whether data was recorded in packets of samples with the
+        same timestamp.
 
     :returns: Timestamps converted to seconds.
     """
@@ -16,26 +18,28 @@ def ts2sec(ts, sampling_rate=1e7):
     for wrap_idx in np.where(np.diff(ts) < 0)[0]:
         ts[wrap_idx + 1: ] += 2 ** 32
 
-    # Check that recorded packet sizes have equal length
-    packet_limits = np.where(np.diff([-float('inf'), *ts, float('inf')]))[0]
-    recorded_packet_sizes = np.diff(packet_limits)
-    if not np.all(recorded_packet_sizes == recorded_packet_sizes[0]):
-        raise PipelineException('Unequal packet sizes in signal.')
-    packet_size = recorded_packet_sizes[0] # number of continuous samples with the same timestamp in ts.
-
     # Convert counter timestamps to secs
     ts_secs = ts / sampling_rate
 
-    # Resample timepoints between packets
-    expected_length = np.median(np.diff(ts_secs[packet_limits[:-1]])) # secs between packets
-    xs = np.array([*range(0, len(ts_secs), packet_size), len(ts_secs)])
-    ys = np.array([*ts_secs[xs[:-1]], ts_secs[-1] + expected_length])
-    if np.any(abs(np.diff(ys) - expected_length) > expected_length * 0.1):
-        abnormal_tss = sum(abs(np.diff(ys) - expected_length) > expected_length * 0.1)
-        print('Warning: Unequal spacing between {} continuous packets'.format(abnormal_tss))
-    resampled_ts = np.interp(range(len(ts_secs)), xs, ys)
+    if is_packeted:
+        # Check that recorded packet sizes have equal length
+        packet_limits = np.where(np.diff([-float('inf'), *ts, float('inf')]))[0]
+        recorded_packet_sizes = np.diff(packet_limits)
+        if not np.all(recorded_packet_sizes == recorded_packet_sizes[0]):
+            raise PipelineException('Unequal packet sizes in signal.')
+        packet_size = recorded_packet_sizes[0] # number of continuous samples with the same timestamp in ts.
 
-    return resampled_ts
+        # Resample timepoints between packets
+        expected_length = np.median(np.diff(ts_secs[packet_limits[:-1]])) # secs between packets
+        xs = np.array([*range(0, len(ts_secs), packet_size), len(ts_secs)])
+        ys = np.array([*ts_secs[xs[:-1]], ts_secs[-1] + expected_length])
+        if np.any(abs(np.diff(ys) - expected_length) > expected_length * 0.15):
+            abnormal_tss = sum(abs(np.diff(ys) - expected_length) > expected_length * 0.15)
+            msg = 'Unequal spacing between {} continuous packets'.format(abnormal_tss)
+            raise PipelineException(msg)
+        ts_secs = np.interp(range(len(ts_secs)), xs, ys)
+
+    return ts_secs
 
 
 def read_video_hdf5(hdf5_path):
