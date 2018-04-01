@@ -14,7 +14,7 @@ import os
 from commons import lab
 from datajoint.autopopulate import AutoPopulate
 from .utils.eye_tracking import ROIGrabber, PupilTracker, CVROIGrabber, ManualTracker
-from pipeline.utils import ts2sec, read_video_hdf5
+from pipeline.utils.h5 import ts2sec, read_video_hdf5
 from . import config
 
 schema = dj.schema('pipeline_eye', locals())
@@ -70,7 +70,6 @@ class Eye(dj.Imported):
         hdf_path = lab.Paths().get_local_path("{behavior_path}/{hdf_file}".format(**info))
 
         data = read_video_hdf5(hdf_path)
-        dat_time, _ = ts2sec(data['ts'])
 
         if float(data['version']) == 2.:
             cam_key = 'eyecam_ts'

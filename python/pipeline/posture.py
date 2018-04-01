@@ -10,7 +10,7 @@ import cv2
 import numpy as np
 from commons import lab
 
-from pipeline.utils import ts2sec, read_video_hdf5
+from pipeline.utils.h5 import ts2sec, read_video_hdf5
 
 schema = dj.schema('pipeline_posture', locals())
 
