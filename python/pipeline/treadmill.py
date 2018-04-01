@@ -1,45 +1,46 @@
 import datajoint as dj
 import numpy as np
 from commons import lab
+from scipy import interpolate as interp
+import os
 
-from .utils.signal import spaced_max, longest_contiguous_block
-from .utils.h5 import read_video_hdf5, ts2sec
 from . import experiment, notify
+from .utils import h5, signal
 from .exceptions import PipelineException
 
-from scipy.interpolate import interp1d
 
 schema = dj.schema('pipeline_treadmill', locals())
 
 
 @schema
 class Sync(dj.Computed):
-    definition = """
+    #TODO: Rewrite comments abour frame_times, etc.
+    definition = """ # syncing behavior clock to scanimage times
+
     -> experiment.Scan
     ---
-    frame_times=null                    : longblob                      # times of frames and slices on behavior clock
-    behavior_sync_ts=CURRENT_TIMESTAMP  : timestamp                     # automatic
+    frame_times=null                    : longblob      # times of slices on behavior clock
+    behavior_sync_ts=CURRENT_TIMESTAMP  : timestamp
     """
+    @property
+    def key_source(self):
+        return experiment.Scan() & experiment.Scan.BehaviorFile().proj()
 
     def _make_tuples(self, key):
-        rel = experiment.Session() * experiment.Scan.BehaviorFile().proj(
-            hdf_file='filename')
+        # Get behavior filename
+        behavior_path = (experiment.Session() & key).fetch1('behavior_path')
+        local_path = lab.Paths().get_local_path(behavior_path)
+        filename = (experiment.Scan.BehaviorFile() & key).fetch1('filename')
+        full_filename = os.path.join(local_path, filename)
 
-        info = (rel & key).fetch1()
+        # Read file
+        data = h5.read_video_hdf5(full_filename)
 
-        # replace number by %d for hdf-file reader
-        tmp = info['hdf_file'].split('.')
-        if not '%d' in tmp[0]:
-            info['hdf_file'] = tmp[0][:-1] + '%d.' + tmp[-1]
+        # Read counter timestamps and convert to seconds
+        timestamps_in_secs = h5.ts2sec(data['ts'])
 
-        hdf_path = lab.Paths().get_local_path("{behavior_path}/{hdf_file}".format(**info))
 
-        data = read_video_hdf5(hdf_path)
-        packet_length = data['analogPacketLen']
-        dat_time, _ = ts2sec(data['ts'], packet_length)
-
-        dat_fs = 1. / np.median(np.diff(dat_time))
-
+        dat_fs = 1. / np.median(np.diff(timestamps_in_secs))
         n = int(np.ceil(0.0002 * dat_fs))
         k = np.hamming(2 * n)
         k /= -k.sum()
@@ -47,11 +48,11 @@ class Sync(dj.Computed):
 
         pulses = np.convolve(data['scanImage'], k, mode='full')[n:-n + 1]  # mode='same' with MATLAB compatibility
 
-        peaks = spaced_max(pulses, 0.005 * dat_fs)
+        peaks = signal.spaced_max(pulses, 0.005 * dat_fs)
         peaks = peaks[pulses[peaks] > 0.1 * np.percentile(pulses[peaks], 90)]
-        peaks = longest_contiguous_block(peaks)
+        peaks = signal.longest_contiguous_block(peaks)
 
-        self.insert1(dict(key, frame_times=dat_time[peaks]))
+        self.insert1(dict(key, frame_times=timestamps_in_secs[peaks]))
         self.notify(key)
 
     @notify.ignore_exceptions
@@ -63,7 +64,8 @@ class Sync(dj.Computed):
 
 @schema
 class Treadmill(dj.Computed):
-    definition = """
+    definition = """ # behavior times
+
     -> experiment.Scan
     ---
     treadmill_raw                       :longblob           #raw treadmill counts
@@ -72,29 +74,22 @@ class Treadmill(dj.Computed):
     treadmill_ts = CURRENT_TIMESTAMP    :timestamp          #automatic
     """
 
-    # adapted from Treadmill.m by Paul Fahey, 2017-10-13
     def _make_tuples(self, key):
-        # pull filename for key
-        rel = experiment.Session() * experiment.Scan.BehaviorFile().proj(
-            hdf_file='filename')
-        info = (rel & key).fetch1()
-
-        # replace number by %d for hdf-file reader
-        tmp = info['hdf_file'].split('.')
-        if not '%d' in tmp[0]:
-            info['hdf_file'] = tmp[0][:-1] + '%d.' + tmp[-1]
+        # Get behavior filename
+        behavior_path = (experiment.Session() & key).fetch1('behavior_path')
+        local_path = lab.Paths().get_local_path(behavior_path)
+        filename = (experiment.Scan.BehaviorFile() & key).fetch1('filename')
+        full_filename = os.path.join(local_path, filename)
 
         # read hdf file for ball data
-        hdf_path = lab.Paths().get_local_path("{behavior_path}/{hdf_file}".format(**info))
-        data = read_video_hdf5(hdf_path)
+        data = h5.read_video_hdf5(full_filename)
 
         # read out counter time stamp and convert to seconds
-        packet_length = data['analogPacketLen']
-        ball_time, _ = ts2sec(data['ball'].transpose()[1], packet_length)
+        ball_time = h5.ts2sec(data['ball'][1])
 
         # read out raw ball counts and integrate by 100ms intervals
-        ball_raw = data['ball'].transpose()[0]
-        ball_time_to_raw = interp1d(ball_time, ball_raw - ball_raw[0])
+        ball_raw = data['wheel'][0]
+        ball_time_to_raw = interp.interp1d(ball_time, ball_raw - ball_raw[0])
         bin_times = np.arange(ball_time[0], ball_time[-1], .1)
         bin_times[-1] = ball_time[-1]
         ball_counts = np.append([0], np.diff(ball_time_to_raw(bin_times)))
@@ -108,7 +103,7 @@ class Treadmill(dj.Computed):
 
         # convert ball counts to cm/s for each ball time point
         cmPerCount = np.pi * diam[-1] / counts_per_revolution[-1]
-        ball_time_to_vel = interp1d(bin_times, ball_counts * cmPerCount * 10)
+        ball_time_to_vel = interp.interp1d(bin_times, ball_counts * cmPerCount * 10)
         ball_vel = ball_time_to_vel(ball_time)
 
         # assign calculated properties to key
