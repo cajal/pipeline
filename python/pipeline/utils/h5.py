@@ -33,8 +33,8 @@ def ts2sec(ts, sampling_rate=1e7, is_packeted=False):
         expected_length = np.median(np.diff(ts_secs[packet_limits[:-1]])) # secs between packets
         xs = np.array([*range(0, len(ts_secs), packet_size), len(ts_secs)])
         ys = np.array([*ts_secs[xs[:-1]], ts_secs[-1] + expected_length])
-        if np.any(abs(np.diff(ys) - expected_length) > expected_length * 0.15):
-            abnormal_tss = sum(abs(np.diff(ys) - expected_length) > expected_length * 0.15)
+        if np.any(abs(np.diff(ys) - expected_length) > expected_length * 0.2):
+            abnormal_tss = sum(abs(np.diff(ys) - expected_length) > expected_length * 0.2)
             msg = 'Unequal spacing between {} continuous packets'.format(abnormal_tss)
             raise PipelineException(msg)
         ts_secs = np.interp(range(len(ts_secs)), xs, ys)
