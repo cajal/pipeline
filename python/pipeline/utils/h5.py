@@ -33,8 +33,8 @@ def ts2sec(ts, sampling_rate=1e7, is_packeted=False):
         expected_length = np.median(np.diff(ts_secs[packet_limits[:-1]])) # secs between packets
         xs = np.array([*range(0, len(ts_secs), packet_size), len(ts_secs)])
         ys = np.array([*ts_secs[xs[:-1]], ts_secs[-1] + expected_length])
-        if np.any(abs(np.diff(ys) - expected_length) > expected_length * 0.2):
-            abnormal_tss = sum(abs(np.diff(ys) - expected_length) > expected_length * 0.2)
+        if np.any(abs(np.diff(ys) - expected_length) > expected_length * 0.15):
+            abnormal_tss = sum(abs(np.diff(ys) - expected_length) > expected_length * 0.15)
             msg = 'Unequal spacing between {} continuous packets'.format(abnormal_tss)
             raise PipelineException(msg)
         ts_secs = np.interp(range(len(ts_secs)), xs, ys)
@@ -62,7 +62,7 @@ def read_video_hdf5(hdf5_path):
                 recorded at 100 Hz.
             wheel[1] Timestamps in master clock time of each sample point.
             New to '2.x':
-            wheel[1] Timestamps in  seconds since some reference time.
+            wheel[2] Timestamps in  seconds since some reference time.
 
         ## Specific to version '1.0'
         cam1_ts: 1-d vector. Timestamps for each video frame of camera 1 in master clock time.
@@ -108,8 +108,12 @@ def read_video_hdf5(hdf5_path):
             channel_names = f.attrs['AS_channelNames'].decode('ascii').split(',')
             channel_names = [cn.strip() for cn in channel_names]
             data['syncPd'] = analog_signals[channel_names.index('Photodiode')]
-            data['scanImage'] = analog_signals[channel_names.index('ScanImageFrameSync')]
             data['ts'] = analog_signals[channel_names.index('Time')]
+
+            if str(f.attrs['AS_Version'][0]) == '2.1':
+                data['scanImage'] = analog_signals[channel_names.index('ScanImageFrameSync')]
+            else:
+                data['scanImage'] = analog_signals[channel_names.index('FrameSync')]
 
         else:
             msg = 'Wrong file version {} in file {}'.format(file_version, hdf5_path)
