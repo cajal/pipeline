@@ -1,25 +1,34 @@
 function [new_traces, new_times, traceKeys] = getAdjustedSpikes(key) 
-% function [new_traces, new_times,traceKeys] = getAdjustedSpikes(key) 
-%
+
 % Adjusts traces for time difference between slices in a scan
 
-[traces, slice, traceKey] = fetchn( ...
-    preprocess.SpikesRateTrace * preprocess.Slice & preprocess.ExtractRawGalvoROI ...
-    & key, 'rate_trace', 'slice');
-nslices = fetch1(preprocess.PrepareGalvo & key, 'nslices');
-uslices = unique(slice);
-ca_times = fetch1(preprocess.Sync &  (experiment.Scan & key), 'frame_times');
+% determine pipe
+pipe = fetch1(fuse.Activity & key, 'pipe');
+
+switch pipe
+    case 'meso'
+        rel = meso.ActivityTrace * meso.ScanSetUnitInfo;
+        scaninfo = meso.ScanInfo;
+        [nfields, nrois] = fetch1(scaninfo & key, 'nfields','nrois');
+        ndepth = nfields/nrois;
+    case 'reso'
+        rel = reso.ActivityTrace * reso.ScanSetUnitInfo;
+        scaninfo = reso.ScanInfo;
+        ndepth = fetch1(scaninfo & key, 'nfields');
+end
+[traces, slice, delays, traceKeys] = fetchn( ...
+    rel & key, 'trace', 'field','ms_delay');
+delays = delays ./ 1000;  % convert to seconds
+ca_times = fetch1(stimulus.Sync &  (experiment.Scan & key), 'frame_times');
 traces = [traces{:}];
-new_times = ca_times(1:nslices:end);
-new_traces = nan(length(new_times),size(traces,2));
-traceKeys = traceKey;
-for isl = 1:length(uslices)
-    islice = uslices(isl);
-    slice_ca_times = ca_times(islice:nslices:end);
-    X = traces(:,islice==slice);
-    traceKeys(islice==slice) = traceKey(islice==slice);
-    xm = min([length(slice_ca_times) length(X)]);
-    X = @(t) interp1(slice_ca_times(1:xm), X(1:xm,:), t, 'linear', 'extrap');  % traces indexed by time
-    
-    new_traces(:,islice==slice) = X(new_times);
+new_times = ca_times(1:ndepth:end);
+tm = min([length(new_times) size(traces,1)]);
+new_traces = nan(tm,size(traces,2));
+trace_times = ca_times(1:ndepth:end) + delays;
+
+for itrace = 1:size(traces,2)
+    trace = traces(:,itrace);
+    time = trace_times(itrace,:);
+    X = @(t) interp1(time(1:tm), trace(1:tm), t, 'linear', 'extrap');
+    new_traces(:, itrace) = X(new_times(1:tm));
 end
