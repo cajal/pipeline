@@ -33,11 +33,19 @@ def ts2sec(ts, sampling_rate=1e7, is_packeted=False):
         expected_length = np.median(np.diff(ts_secs[packet_limits[:-1]])) # secs between packets
         xs = np.array([*range(0, len(ts_secs), packet_size), len(ts_secs)])
         ys = np.array([*ts_secs[xs[:-1]], ts_secs[-1] + expected_length])
+        sample_xs = np.arange(len(ts_secs))
+        ts_secs = np.interp(sample_xs, xs, ys)
+
+        # Invalidate timepoints with unequal spacing between packets
         if np.any(abs(np.diff(ys) - expected_length) > expected_length * 0.15):
-            abnormal_tss = sum(abs(np.diff(ys) - expected_length) > expected_length * 0.15)
-            msg = 'Unequal spacing between {} continuous packets'.format(abnormal_tss)
-            raise PipelineException(msg)
-        ts_secs = np.interp(range(len(ts_secs)), xs, ys)
+            abnormal_diffs = abs(np.diff(ys) - expected_length) > expected_length * 0.15
+            abnormal_limits = np.where(np.diff([0, *abnormal_diffs]))[0]
+            for start, stop in zip(abnormal_limits[::2], abnormal_limits[1::2]):
+                abnormal_indices = np.logical_and(sample_xs > xs[start], sample_xs < xs[stop])
+                ts_secs[abnormal_indices] = float('nan')
+
+            print('Warning: Unequal spacing between continuos packets: {} abnormal gaps '
+                  'detected. Signal will have NaNs.'.format(len(abnormal_limits) // 2))
 
     return ts_secs
 
