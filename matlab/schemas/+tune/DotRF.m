@@ -24,7 +24,7 @@ classdef DotRF < dj.Computed
             
             % get stimulus conditions
             trials = (stimulus.Sync * stimulus.Trial * stimulus.SingleDot & key);
-            conds = fetch(stimulus.Condition * stimulus.SingleDot & trials.fetch);
+            conds = fetch(stimulus.Condition * stimulus.SingleDot & proj(trials));
             [locations_x,locations_y,levels] = fetchn(stimulus.SingleDot & conds, 'dot_x', 'dot_y', 'dot_level');
             locations_x = unique(locations_x);
             locations_y = unique(locations_y);
