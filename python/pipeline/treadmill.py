@@ -43,6 +43,9 @@ class Sync(dj.Computed):
         xs = np.arange(len(timestamps_in_secs))
         timestamps_in_secs = np.interp(xs, xs[~nans], timestamps_in_secs[~nans])
 
+        if np.any(nans):
+            raise PipelineException('Temporary exception until experiment.Fixes is set up: Gaps in the ts signal')
+
         # Detect peaks in scanimage clock signal
         fps = 1 / np.median(np.diff(timestamps_in_secs))
         n = int(np.ceil(0.0002 * fps))
