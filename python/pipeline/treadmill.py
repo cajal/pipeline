@@ -14,12 +14,11 @@ schema = dj.schema('pipeline_treadmill', locals())
 
 @schema
 class Sync(dj.Computed):
-    #TODO: Rewrite comments abour frame_times, etc.
-    definition = """ # syncing behavior clock to scanimage times
+    definition = """ # syncing scanimage frame times to behavior clock
 
     -> experiment.Scan
     ---
-    frame_times=null                    : longblob      # times of slices on behavior clock
+    frame_times=null                    : longblob      # times of each slice in behavior clock
     behavior_sync_ts=CURRENT_TIMESTAMP  : timestamp
     """
     @property
@@ -39,6 +38,12 @@ class Sync(dj.Computed):
         # Read counter timestamps and convert to seconds
         timestamps_in_secs = h5.ts2sec(data['ts'], is_packeted=True)
 
+        # Remove NaNs from timestamps
+        nans = np.isnan(timestamps_in_secs)
+        xs = np.arange(len(timestamps_in_secs))
+        timestamps_in_secs = np.interp(xs, xs[~nans], timestamps_in_secs[~nans])
+
+        # Detect peaks in scanimage clock signal
         fps = 1 / np.median(np.diff(timestamps_in_secs))
         n = int(np.ceil(0.0002 * fps))
         k = np.hamming(2 * n)
@@ -46,18 +51,17 @@ class Sync(dj.Computed):
         k[:n] = -k[:n]
 
         pulses = np.convolve(data['scanImage'], k, mode='full')[n:-n + 1]  # mode='same' with MATLAB compatibility
-
         peaks = signal.spaced_max(pulses, 0.005 * fps)
         peaks = peaks[pulses[peaks] > 0.1 * np.percentile(pulses[peaks], 90)]
         peaks = signal.longest_contiguous_block(peaks)
 
-        self.insert1(dict(key, frame_times=timestamps_in_secs[peaks]))
+        self.insert1({**key, 'frame_times': timestamps_in_secs[peaks]})
         self.notify(key)
 
     @notify.ignore_exceptions
     def notify(self, key):
-        msg = 'treadmill.Sync for `{}` has been populated.'.format(key)
-        (notify.SlackUser() & (experiment.Session() & key)).notify(msg)
+        msg = 'treadmill.Sync for {animal_id}-{session}-{scan_idx} has been populated.'
+        (notify.SlackUser() & (experiment.Session() & key)).notify(msg.format(**key))
 
 
 
