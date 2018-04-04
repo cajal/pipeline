@@ -22,6 +22,7 @@ classdef FieldCoordinates < dj.Manual
             params.y_offset = [];
             params.scale = [];
             params.figure = [];
+            params.amp = 1;
 
             params = ne7.mat.getParams(params,varargin);
             
@@ -53,7 +54,7 @@ classdef FieldCoordinates < dj.Manual
             % get information from the scans depending on the setup
             if strcmp(setup,'2P4')
                 [x_pos, y_pos, slice_pos, fieldWidths, fieldHeights, fieldWidthsInMicrons, frames, field_num] = ...
-                    fetchn(meso.ScanInfoField * meso.SummaryImagesAverage & keyI & 'z<300',...
+                    fetchn(meso.ScanInfoField * meso.SummaryImagesAverage & keyI,...
                     'x','y','z','px_width','px_height','um_width','average_image','field');
             else
                 tfp.fliplr = 1;
@@ -91,7 +92,7 @@ classdef FieldCoordinates < dj.Manual
             
             % Align scans
             [x_offset, y_offset, rotation, tfp.scale, go] = ...
-                self.alignImages(ne7.mat.normalize(double(ref_map)),ne7.mat.normalize(im),...
+                self.alignImages(ne7.mat.normalize(abs(double(ref_map).^params.amp)),ne7.mat.normalize(im),...
                 'scale',params.scale,'rotation',params.global_rotation,'x',params.x_offset,'y',params.y_offset,'figure',params.figure);
             tfp.rotation = tfp.rotation + rotation;
             

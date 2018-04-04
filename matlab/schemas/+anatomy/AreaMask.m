@@ -124,7 +124,7 @@ classdef AreaMask < dj.Manual
                 [mask, area, ret_idx] = fetch1(anatomy.AreaMask & map_key, 'mask', 'brain_area', 'ret_idx');
                 
                 % loop through all fields
-                for field_key = fetch(anatomy.FieldCoordinates & keyI)'
+                for field_key = fetch(anatomy.FieldCoordinates  - anatomy.AreaMask & keyI)'
                     
                     % find corresponding mask area
                     fmask = filterMask(anatomy.FieldCoordinates & field_key, mask);
