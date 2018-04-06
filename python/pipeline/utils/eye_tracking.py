@@ -4,6 +4,7 @@ from itertools import count
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
+from tqdm import tqdm
 
 from ..exceptions import PipelineException
 
@@ -485,12 +486,27 @@ class ManualTracker:
 
         self.update_frame = True  # must be true to ensure correct starting conditions
         self.contours_detected = None
+        self.contours = None
         self.area = None
         self._progress_len = 800
         self._progress_height = 100
         self._width = 800
 
         self.dilation_factor = 1.3
+
+    def recompute_area(self):
+        print('Recomputing areas')
+        assert self.contours is not None, 'contours must not be None'
+        assert self.contours_detected is not None, 'contours_detected must not be None'
+
+        self.area = np.zeros(len(self.contours))
+        _, frame = self.read_frame()
+        area = np.zeros(frame.shape[:2], dtype=np.uint8)
+        for i, c, ok  in tqdm(zip(count(), self.contours, self.contours_detected), total=len(self.area)):
+            area = cv2.drawContours(area, [c], -1, (255), thickness=cv2.FILLED)
+            self.area[i] = (area > 0).sum()
+            area *= 0
+        self.plot_area()
 
     def reset(self):
         self.pause = False
@@ -655,7 +671,7 @@ class ManualTracker:
             self.goto_frame(self._frame_number + 1)
         elif key == ord('c'):
             self._mask = np.ones_like(self._mask) * 255
-            self._merge_mask = np.ones_like(self._mask) * 255
+            self._merge_mask = np.zeros_like(self._merge_mask)
         elif key == ord('f'):
             print('Resetting jump frame')
             self.jump_frame = 0
@@ -685,8 +701,9 @@ class ManualTracker:
         else:
             cv2.putText(img, "NOT OK", (200, 30), font, fs, (0, 0, 255), 2)
         cv2.putText(img, "Jump Frame {}".format(self.jump_frame), (300, 30), font, fs, (255, 144, 30), 2)
-        cv2.putText(img, "Mask Mode {}".format('merge' if self.mask_mode == self.MERGE else 'block'), (500, 30), font,
-                    fs, (255, 140, 0), 2)
+        cv2.putText(img, "Mask Mode {}".format('MERGE' if self.mask_mode == self.MERGE else 'BLOCK'),
+                    (500, 30), font,
+                    fs, (0, 140, 255), 2)
         if self.skip:
             cv2.putText(img, "Skip", (10, 70), font, fs, (0, 0, 255), 2)
         if self.help:
@@ -789,12 +806,18 @@ class ManualTracker:
         self._n_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         self._frame_number = 0
         self.update_frame = True  # ensure correct starting conditions
-        self.contours_detected = np.zeros(self._n_frames, dtype=bool)
-        self.contours = np.zeros(self._n_frames, dtype=object)
-        self.area = np.zeros(self._n_frames)
-        self.contours[:] = None
         self.t0 = 0
         self.t1 = self._n_frames
+
+        if self.contours_detected is not None and self.contours_detected is not None:
+            self.recompute_area()
+            self.pause = True
+        else:
+            self.area = np.zeros(self._n_frames)
+            self.contours_detected = np.zeros(self._n_frames, dtype=bool)
+            self.contours = np.zeros(self._n_frames, dtype=object)
+            self.contours[:] = None
+
 
         while cap.isOpened():
             if self._frame_number >= self._n_frames - 1:
