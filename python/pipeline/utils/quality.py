@@ -1,5 +1,6 @@
 import numpy as np
 from sklearn.linear_model import TheilSenRegressor
+from scipy import signal
 
 def compute_quantal_size(scan):
     """ Estimate the unit change in calcium response corresponding to a unit change in
@@ -61,3 +62,50 @@ def compute_quantal_size(scan):
 
     return (min_intensity, max_intensity, unique_pixels, unique_variances,
            quantal_size, zero_level)
+
+def find_peaks(trace):
+    """ Find local peaks in the signal and compute prominence and width at half
+    prominence. Similar to Matlab's findpeaks.
+
+    :param np.array trace: 1-d signal vector.
+
+    :returns: np.array with indices for each peak.
+    :returns: list with prominences per peak.
+    :returns: list with width per peak.
+    """
+    # Get peaks (local maxima)
+    peak_indices = signal.argrelmax(trace)[0]
+
+    # Compute prominence and width per peak
+    prominences = []
+    widths = []
+    for index in peak_indices:
+        # Find the level of the highest valley encircling the peak
+        for left in range(index - 1, -1, -1):
+            if trace[left] > trace[index]:
+                break
+        for right in range(index + 1, len(trace)):
+            if trace[right] > trace[index]:
+                break
+        contour_level = max(min(trace[left: index]), min(trace[index + 1: right + 1]))
+
+        # Compute prominence
+        prominence = trace[index] - contour_level
+        prominences.append(prominence)
+
+        # Find left and right indices at half prominence
+        half_prominence = trace[index] - prominence / 2
+        for k in range(index - 1, -1, -1):
+            if trace[k] <= half_prominence:
+                left = k + (half_prominence - trace[k]) / (trace[k + 1] - trace[k])
+                break
+        for k in range(index + 1, len(trace)):
+            if trace[k] <= half_prominence:
+                right = k - 1 + (half_prominence - trace[k - 1]) / (trace[k] - trace[k - 1])
+                break
+
+        # Compute width
+        width = right - left
+        widths.append(width)
+
+    return peak_indices, prominences, widths
