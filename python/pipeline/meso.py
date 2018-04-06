@@ -127,14 +127,7 @@ class ScanInfo(dj.Imported):
 
         # Fill in CorrectionChannel if only one channel
         if scan.num_channels == 1:
-            CorrectionChannel().fill_in(key)
-
-        self.notify(key)
-
-    @notify.ignore_exceptions
-    def notify(self, key):
-        msg = 'ScanInfo for `{}` has been populated.'.format(key)
-        (notify.SlackUser() & (experiment.Session() & key)).notify(msg)
+            CorrectionChannel().fill(key)
 
 
 @schema
@@ -192,6 +185,20 @@ class Quality(dj.Computed):
         quantal_frame               : longblob      # average frame expressed in quanta
         """
 
+    class EpileptiformEvents(dj.Part):
+        definition = """ # compute frequency of epileptiform events
+
+        -> Quality
+        -> shared.Field
+        -> shared.Channel
+        ---
+        frequency       : float         # (events / sec) frequency of epileptiform events
+        abn_indices     : longblob      # indices of epileptiform events (0-based)
+        peak_indices    : longblob      # indices of all local maxima peaks (0-based)
+        prominences     : longblob      # peak prominence for all peaks
+        widths          : longblob      # (secs) width at half prominence for all peaks
+        """
+
     def _make_tuples(self, key):
         # Read the scan
         scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
@@ -205,10 +212,8 @@ class Quality(dj.Computed):
             for channel in range(scan.num_channels):
                 # Map: Compute quality metrics in parallel
                 results = performance.map_frames(performance.parallel_quality_metrics,
-                                                 scan, field_id=field_id, y=slice(None),
-                                                 x=slice(None), channel=channel,
+                                                 scan, field_id=field_id, channel=channel,
                                                  chunk_size_in_GB=0.5)
-
 
                 # Reduce
                 mean_intensities = np.zeros(scan.num_frames)
@@ -228,6 +233,13 @@ class Quality(dj.Computed):
                 min_intensity, max_intensity, _, _, quantal_size, zero_level = results
                 quantal_frame = (np.mean(mini_scan, axis=-1) - zero_level) / quantal_size
 
+                # Compute abnormal event frequency
+                deviations = (mean_intensities - mean_intensities.mean()) / mean_intensities.mean()
+                peaks, prominences, widths = quality.find_peaks(deviations)
+                widths = [w / scan.fps for w in widths] # in seconds
+                abnormal = peaks[[p > 0.2 and w < 0.4 for p, w in zip(prominences, widths)]]
+                abnormal_freq = len(abnormal) / (scan.num_frames / scan.fps)
+
                 # Insert
                 field_key = {**key, 'field': field_id + 1, 'channel': channel + 1}
                 self.MeanIntensity().insert1({**field_key, 'intensities': mean_intensities})
@@ -238,12 +250,16 @@ class Quality(dj.Computed):
                                             'quantal_size': quantal_size,
                                             'zero_level': zero_level,
                                             'quantal_frame': quantal_frame})
+                self.EpileptiformEvents.insert1({**field_key, 'frequency': abnormal_freq,
+                                                 'abn_indices': abnormal,
+                                                 'peak_indices': peaks,
+                                                 'prominences': prominences,
+                                                 'widths': widths})
 
                 self.notify(field_key, frames, mean_intensities, contrasts)
 
     @notify.ignore_exceptions
     def notify(self, key, summary_frames, mean_intensities, contrasts):
-        """ Sends slack notification for a single slice + channel combination. """
         # Send summary frames
         import imageio
         video_filename = '/tmp/' + key_hash(key) + '.gif'
@@ -252,16 +268,13 @@ class Quality(dj.Computed):
         summary_frames = signal.float2uint8(summary_frames).transpose([2, 0, 1])
         imageio.mimsave(video_filename, summary_frames, duration=0.4)
 
-        msg = 'Quality for `{}` has been populated.'.format(key)
-        (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=video_filename,
-                                                                   file_title='summary frames')
+        msg = ('summary frames for {animal_id}-{session}-{scan_idx} field {field} '
+               'channel {channel}').format(**key)
+        slack_user = notify.SlackUser() & (experiment.Session() & key)
+        slack_user.notify(file=video_filename, file_title=msg)
 
         # Send intensity and contrasts
-        import seaborn as sns
-        with sns.axes_style('white'):
-            fig, axes = plt.subplots(2, 1, figsize=(15, 8), sharex=True)
-
-        fig.suptitle('Field {}, channel {}'.format(key['field'], key['channel']))
+        fig, axes = plt.subplots(2, 1, figsize=(15, 8), sharex=True)
         axes[0].set_title('Mean intensity', size='small')
         axes[0].plot(mean_intensities)
         axes[0].set_ylabel('Pixel intensities')
@@ -272,10 +285,10 @@ class Quality(dj.Computed):
         img_filename = '/tmp/' + key_hash(key) + '.png'
         fig.savefig(img_filename, bbox_inches='tight')
         plt.close(fig)
-        sns.reset_orig()
 
-        (notify.SlackUser() & (experiment.Session() & key)).notify(file=img_filename,
-                                                                   file_title='quality traces')
+        msg = ('quality traces for {animal_id}-{session}-{scan_idx} field {field} '
+               'channel {channel}').format(**key)
+        slack_user.notify(file=img_filename, file_title=msg)
 
 
 @schema
@@ -288,7 +301,7 @@ class CorrectionChannel(dj.Manual):
     -> shared.Channel
     """
 
-    def fill_in(self, key, channel=1):
+    def fill(self, key, channel=1):
         for field_key in (ScanInfo.Field() & key).fetch(dj.key):
             self.insert1({**field_key, 'channel': channel}, ignore_extra_fields=True,
                          skip_duplicates=True)
@@ -355,8 +368,8 @@ class RasterCorrection(dj.Computed):
 
     @notify.ignore_exceptions
     def notify(self, key):
-        msg = 'RasterCorrection for `{}` has been populated.'.format(key)
-        msg += '\nRaster phases: {}'.format((self & key).fetch('raster_phase'))
+        msg = 'raster phases for {animal_id}-{session}-{scan_idx}: {phases}'.format(**key,
+                  phases=(self & key).fetch('raster_phase'))
         (notify.SlackUser() & (experiment.Session() & key)).notify(msg)
 
     def get_correct_raster(self):
@@ -471,14 +484,11 @@ class MotionCorrection(dj.Computed):
 
     @notify.ignore_exceptions
     def notify(self, key, scan):
-        import seaborn as sns
-
         fps = (ScanInfo() & key).fetch1('fps')
         seconds = np.arange(scan.num_frames) / fps
 
-        with sns.axes_style('white'):
-            fig, axes = plt.subplots(scan.num_fields, 1, figsize=(15, 4 * scan.num_fields),
-                                     sharey=True)
+        fig, axes = plt.subplots(scan.num_fields, 1, figsize=(15, 4 * scan.num_fields),
+                                 sharey=True)
         axes = [axes] if scan.num_fields == 1 else axes  # make list if single axis object
         for i in range(scan.num_fields):
             y_shifts, x_shifts = (self & key & {'field': i + 1}).fetch1('y_shifts', 'x_shifts')
@@ -492,11 +502,10 @@ class MotionCorrection(dj.Computed):
         img_filename = '/tmp/' + key_hash(key) + '.png'
         fig.savefig(img_filename, bbox_inches='tight')
         plt.close(fig)
-        sns.reset_orig()
 
-        msg = 'MotionCorrection for `{}` has been populated.'.format(key)
-        (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
-                                                                   file_title='motion shifts')
+        msg = 'motion shifts for {animal_id}-{session}-{scan_idx}'.format(**key)
+        slack_user = notify.SlackUser() & (experiment.Session() & key)
+        slack_user.notify(file=img_filename, file_title=msg)
 
     def save_video(self, filename='galvo_corrections.mp4', channel=1, start_index=0,
                    seconds=30, dpi=250):
@@ -564,11 +573,10 @@ class MotionCorrection(dj.Computed):
 
     def get_correct_motion(self):
         """ Returns a function to perform motion correction on scans. """
-        y_shifts, x_shifts = self.fetch1('y_shifts', 'x_shifts')
-        xy_motion = np.stack([x_shifts, y_shifts])
+        x_shifts, y_shifts = self.fetch1('x_shifts', 'y_shifts')
 
         return lambda scan, indices=slice(None): galvo_corrections.correct_motion(scan,
-                                                 xy_motion[:, indices])
+                                                 x_shifts, y_shifts)
 
 @schema
 class SummaryImages(dj.Computed):
@@ -623,8 +631,7 @@ class SummaryImages(dj.Computed):
                 y_shifts, x_shifts = (MotionCorrection() & key & {'field': field_id + 1}).fetch1('y_shifts', 'x_shifts')
                 kwargs = {'raster_phase': raster_phase, 'fill_fraction': fill_fraction,
                           'y_shifts': y_shifts, 'x_shifts': x_shifts}
-                results = performance.map_frames(f, scan, field_id=field_id, y=slice(None),
-                                                 x=slice(None), channel=channel, kwargs=kwargs)
+                results = performance.map_frames(f, scan, field_id=field_id, channel=channel, kwargs=kwargs)
 
                 # Reduce: Compute average images
                 average_image = np.sum([r[0] for r in results], axis=0) / scan.num_frames
@@ -667,8 +674,6 @@ class SummaryImages(dj.Computed):
     @notify.ignore_exceptions
     def notify(self, key, num_channels):
         fig, axes = plt.subplots(num_channels, 2, squeeze=False, figsize=(12, 5 * num_channels))
-
-        fig.suptitle('Field {}'.format(key['field']))
         axes[0, 0].set_title('L6-Norm', size='small')
         axes[0, 1].set_title('Correlation', size='small')
         for ax in axes.ravel():
@@ -688,10 +693,9 @@ class SummaryImages(dj.Computed):
         fig.savefig(img_filename, bbox_inches='tight')
         plt.close(fig)
 
-        msg = 'SummaryImages for `{}` has been populated.'.format(key)
-        (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
-                                                                   file_title='summary images',
-                                                                   channel='#pipeline_quality')
+        msg = 'summary images for {animal_id}-{session}-{scan_idx} field {field}'.format(**key)
+        slack_user = notify.SlackUser() & (experiment.Session() & key)
+        slack_user.notify(file=img_filename, file_title=msg, channel='#pipeline_quality')
 
 
 @schema
@@ -706,7 +710,7 @@ class SegmentationTask(dj.Manual):
     -> experiment.Compartment
     """
 
-    def fill_in(self, key, channel=1, segmentation_method=3, compartment='soma'):
+    def fill(self, key, channel=1, segmentation_method=3, compartment='soma'):
         for field_key in (ScanInfo.Field() & key).fetch(dj.key):
             tuple_ = {**field_key, 'channel': channel, 'compartment': compartment,
                       'segmentation_method': segmentation_method}
@@ -841,8 +845,8 @@ class Segmentation(dj.Computed):
             y_shifts, x_shifts = (MotionCorrection() & key).fetch1('y_shifts', 'x_shifts')
             kwargs = {'raster_phase': raster_phase, 'fill_fraction': fill_fraction,
                       'y_shifts': y_shifts, 'x_shifts': x_shifts, 'mmap_scan': mmap_scan}
-            results = performance.map_frames(f, scan, field_id=field_id, y=slice(None),
-                                             x=slice(None), channel=channel, kwargs=kwargs)
+            results = performance.map_frames(f, scan, field_id=field_id, channel=channel,
+                                             kwargs=kwargs)
 
             # Reduce: Use the minimum values to make memory mapped scan nonnegative
             mmap_scan -= np.min(results)  # bit inefficient but necessary
@@ -1062,10 +1066,9 @@ class Segmentation(dj.Computed):
         fig.savefig(img_filename, bbox_inches='tight')
         plt.close(fig)
 
-        msg = 'Segmentation for `{}` has been populated.'.format(key)
-        (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
-                                                                   file_title='mask contours',
-                                                                   channel='#pipeline_quality')
+        msg = 'segmentation for {animal_id}-{session}-{scan_idx} field {field}'.format(**key)
+        slack_user = notify.SlackUser() & (experiment.Session() & key)
+        slack_user.notify(file=img_filename, file_title=msg)
 
     @staticmethod
     def reshape_masks(mask_pixels, mask_weights, image_height, image_width):
@@ -1175,8 +1178,7 @@ class Fluorescence(dj.Computed):
         mask_ids, pixels, weights = (Segmentation.Mask() & key).fetch('mask_id', 'pixels', 'weights')
         kwargs = {'raster_phase': raster_phase, 'fill_fraction': fill_fraction, 'y_shifts': y_shifts,
                   'x_shifts': x_shifts, 'mask_pixels': pixels, 'mask_weights': weights}
-        results = performance.map_frames(f, scan, field_id=field_id, y=slice(None),
-                                         x=slice(None), channel=channel, kwargs=kwargs)
+        results = performance.map_frames(f, scan, field_id=field_id, channel=channel, kwargs=kwargs)
 
         # Reduce: Concatenate
         traces = np.zeros((len(mask_ids), scan.num_frames), dtype=np.float32)
@@ -1198,9 +1200,9 @@ class Fluorescence(dj.Computed):
         fig.savefig(img_filename, bbox_inches='tight')
         plt.close(fig)
 
-        msg = 'Fluorescence.Trace for `{}` has been populated.'.format(key)
-        (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
-                                                                   file_title='calcium traces')
+        msg = 'calcium traces for {animal_id}-{session}-{scan_idx} field {field}'.format(**key)
+        slack_user = notify.SlackUser() & (experiment.Session() & key)
+        slack_user.notify(file=img_filename, file_title=msg)
 
     def get_all_traces(self):
         """ Returns a num_traces x num_timesteps matrix with all traces."""
@@ -1274,19 +1276,16 @@ class MaskClassification(dj.Computed):
 
     @notify.ignore_exceptions
     def notify(self, key, mask_types):
-        mask_names = ['soma', 'axon', 'dendrite', 'neuropil', 'artifact', 'unknown']
-        mask_counts = [mask_types.count(name) for name in mask_names]
-
         fig = (MaskClassification() & key).plot_masks()
         img_filename = '/tmp/' + key_hash(key) + '.png'
         fig.savefig(img_filename, bbox_inches='tight')
         plt.close(fig)
 
-        msg = 'MaskClassification for `{}` has been populated.\n'.format(key)
-        msg += ', '.join('{} {}s'.format(c, n) for c, n in zip(mask_counts, mask_names))
-        (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
-                                                                   file_title='mask classes',
-                                                                   channel='#pipeline_quality')
+        msg = ('mask classification for {animal_id}-{session}-{scan_idx} field {field}: '
+               '{somas} somas and {arts} artifacts').format(**key,
+                    somas=mask_types.count('soma'), arts=mask_types.count('artifact'))
+        slack_user = notify.SlackUser() & (experiment.Session() & key)
+        slack_user.notify(file=img_filename, file_title=msg, channel='#pipeline_quality')
 
     def plot_masks(self, threshold=0.99):
         """ Draw contours of masks over the correlation image (if available) with different
@@ -1411,20 +1410,6 @@ class ScanSet(dj.Computed):
                          'um_z': um_z, 'px_x': px_x, 'px_y': px_y, 'ms_delay': delay}
             ScanSet.UnitInfo().insert1(unit_info, ignore_extra_fields=True)  # ignore field and channel
 
-        self.notify(key)
-
-    @notify.ignore_exceptions
-    def notify(self, key):
-        fig = (ScanSet() & key).plot_centroids()
-        img_filename = '/tmp/' + key_hash(key) + '.png'
-        fig.savefig(img_filename, bbox_inches='tight')
-        plt.close(fig)
-
-        msg = 'ScanSet for `{}` has been populated.'.format(key)
-        (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
-                                                                   file_title='unit centroids',
-                                                                   channel='#pipeline_quality')
-
     def plot_centroids(self, first_n=None):
         """ Draw masks centroids over the correlation image. Works on a single field/channel
 
@@ -1493,6 +1478,7 @@ class ScanSet(dj.Computed):
             xs, ys = units_rel.fetch('px_x', 'px_y', order_by='unit_id')
             centroids = np.stack([xs, ys], axis=1)
         return centroids
+
 
 @schema
 class Activity(dj.Computed):
@@ -1581,9 +1567,9 @@ class Activity(dj.Computed):
         fig.savefig(img_filename, bbox_inches='tight')
         plt.close(fig)
 
-        msg = 'Activity.Trace for `{}` has been populated.'.format(key)
-        (notify.SlackUser() & (experiment.Session() & key)).notify(msg, file=img_filename,
-                                                                   file_title='spike traces')
+        msg = 'spike traces for {animal_id}-{session}-{scan_idx} field {field}'.format(**key)
+        slack_user = notify.SlackUser() & (experiment.Session() & key)
+        slack_user.notify(file=img_filename, file_title=msg)
 
     def plot_impulse_responses(self, num_timepoints=100):
         """ Plots the impulse response functions for all traces.
@@ -1668,10 +1654,3 @@ class ScanDone(dj.Computed):
 
         # Insert all processed fields in Partial
         ScanDone.Partial().insert((Activity() & scan_key).proj())
-
-        self.notify(scan_key)
-
-    @notify.ignore_exceptions
-    def notify(self, key):
-        msg = 'ScanDone for `{}` has been populated.'.format(key)
-        (notify.SlackUser() & (experiment.Session() & key)).notify(msg)
