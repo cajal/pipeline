@@ -39,9 +39,9 @@ def ts2sec(ts, sampling_rate=1e7, is_packeted=False):
         # Invalidate timepoints with unequal spacing between packets
         if np.any(abs(np.diff(ys) - expected_length) > 0.15 * expected_length):
             abnormal_diffs = abs(np.diff(ys) - expected_length) > 0.15 * expected_length
-            abnormal_limits = np.where(np.diff([0, *abnormal_diffs]))[0]
+            abnormal_limits = np.where(np.diff([0, *abnormal_diffs, 0]))[0]
             for start, stop in zip(abnormal_limits[::2], abnormal_limits[1::2]):
-                abnormal_indices = np.logical_and(sample_xs > xs[start], sample_xs < xs[stop + 1])
+                abnormal_indices = np.logical_and(sample_xs > xs[start], sample_xs < xs[stop])
                 ts_secs[abnormal_indices] = float('nan')
 
             print('Warning: Unequal spacing between continuos packets: {} abnormal gaps '
@@ -86,6 +86,9 @@ def read_video_hdf5(hdf5_path):
         eyecam_ts: np.array (2 x num_video_frames)
             eyecam_ts[0]: Timestamps in master clock time.
             eyecam_ts[1]: Timestamps in seconds since some reference time.
+        posture_ts: np.array (2 x num_video_frames)
+            posture_ts[0]: Timestamps in master clock time.
+            posture_ts[1]: Timestamps in seconds since some reference time.
 
     ..note:: Master clock time is an integer counter that increases every 0.1 usecs and
         wraps around at 2 ** 32 - 1.
@@ -111,6 +114,7 @@ def read_video_hdf5(hdf5_path):
             data['framenum_ts'] = np.array(f['framenum_ts'])
             data['trialnum_ts'] = np.array(f['trialnum_ts'])
             data['eyecam_ts'] = np.array(f['videotimestamps'])
+            data['posture_ts'] = np.array(f['videotimestamps_posture'])
 
             analog_signals = np.array(f['Analog Signals'])
             channel_names = f.attrs['AS_channelNames'].decode('ascii').split(',')
