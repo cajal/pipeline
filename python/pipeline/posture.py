@@ -1,24 +1,22 @@
 from scipy.misc import imresize
 import datajoint as dj
 from datajoint.jobs import key_hash
-
-from . import experiment, notify
-from .exceptions import PipelineException
-
-from warnings import warn
 import cv2
 import numpy as np
 from commons import lab
+import os
 
-from pipeline.utils.h5 import ts2sec, read_video_hdf5
+from .utils import h5
+from . import experiment, notify
+from .exceptions import PipelineException
+
 
 schema = dj.schema('pipeline_posture', locals())
 
 
 @schema
 class Posture(dj.Imported):
-    definition = """
-    # posture preview and timestamps
+    definition = """ # posture preview and timestamps
 
     -> experiment.Scan
     ---
@@ -27,62 +25,70 @@ class Posture(dj.Imported):
     posture_time                    : longblob  # timestamps of each frame in seconds, with same t=0 as patch and ball data
     posture_ts=CURRENT_TIMESTAMP    : timestamp # automatic
     """
-
     @property
     def key_source(self):
         return experiment.Scan() & experiment.Scan.PostureVideo().proj()
 
-    def grab_timestamps_and_frames(self, key, n_sample_frames=16):
-        rel = experiment.Session() * experiment.Scan.PostureVideo() * experiment.Scan.BehaviorFile().proj(
-            hdf_file='filename')
-
-        info = (rel & key).fetch1()
-
-        avi_path = lab.Paths().get_local_path("{behavior_path}/{filename}".format(**info))
-        # replace number by %d for hdf-file reader
-
-        tmp = info['hdf_file'].split('.')
-        if not '%d' in tmp[0]:
-            info['hdf_file'] = tmp[0][:-1] + '%d.' + tmp[-1]
-
-        hdf_path = lab.Paths().get_local_path("{behavior_path}/{hdf_file}".format(**info))
-
-        print('Reading hdf5 files ...')
-        data = read_video_hdf5(hdf_path)
-        posture_time = ts2sec(data['posture_ts'][0])
-
-        total_frames = len(posture_time)
-        frame_idx = np.floor(np.linspace(0, total_frames - 1, n_sample_frames))
-
-
-        cap = cv2.VideoCapture(avi_path)
-        no_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-
-        if total_frames != no_frames:
-            warn("{total_frames} timestamps, but {no_frames}  movie frames.".format(total_frames=total_frames,
-                                                                                    no_frames=no_frames))
-            if total_frames > no_frames and total_frames and no_frames:
-                total_frames = no_frames
-                posture_time = posture_time[:total_frames]
-                frame_idx = np.round(np.linspace(0, total_frames - 1, n_sample_frames)).astype(int)
-            else:
-                raise PipelineException('Can not reconcile frame count', key)
-        frames = []
-        for frame_pos in frame_idx:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_pos)
-            ret, frame = cap.read()
-
-            frames.append(np.asarray(frame, dtype=float)[..., 0])
-        frames = np.stack(frames, axis=2)
-
-        return posture_time, frames, total_frames
-
     def _make_tuples(self, key):
-        key['posture_time'], key['preview_frames'], key['total_frames'] = self.grab_timestamps_and_frames(key)
+        # Get behavior filename
+        behavior_path = (experiment.Session() & key).fetch1('behavior_path')
+        local_path = lab.Paths().get_local_path(behavior_path)
+        filename = (experiment.Scan.BehaviorFile() & key).fetch1('filename')
+        full_filename = os.path.join(local_path, filename)
 
-        self.insert1(key)
-        del key['posture_time']
-        frames = key.pop('preview_frames')
+        # Read file
+        data = h5.read_behavior_file(full_filename)
+
+        # Read counter timestamps and convert to seconds
+        if data['version'] == '1.0': # older h5 format
+            rig = (experiment.Session() & key).fetch('rig')
+            timestamps_in_secs = h5.ts2sec(data['cam1_ts' if rig == '2P3' else 'cam2_ts'])
+        else:
+            timestamps_in_secs = h5.ts2sec(data['eyecam_ts'][0])
+        ts = h5.ts2sec(data['ts'], is_packeted=True)
+        # edge case when ts and eye ts start in different sides of the master clock max value 2 **32
+        if abs(ts[0] - timestamps_in_secs[0]) > 2 ** 31:
+            timestamps_in_secs += (2 ** 32 if ts[0] > timestamps_in_secs[0] else -2 ** 32)
+
+        # Fill with NaNs for out-of-range data or mistimed packets (NaNs in ts)
+        timestamps_in_secs[timestamps_in_secs < ts[0]] = float('nan')
+        timestamps_in_secs[timestamps_in_secs > ts[-1]] = float('nan')
+        nan_limits = np.where(np.diff([0, *np.isnan(ts), 0]))[0]
+        for start, stop in zip(nan_limits[::2], nan_limits[1::2]):
+            lower_ts = float('-inf') if start == 0 else ts[start - 1]
+            upper_ts = float('inf') if stop == len(ts) else ts[stop]
+            timestamps_in_secs[np.logical_and(timestamps_in_secs > lower_ts,
+                                              timestamps_in_secs < upper_ts)] = float('nan')
+
+        # Read video
+        filename = (experiment.Scan.EyeVideo() & key).fetch1('filename')
+        full_filename = os.path.join(local_path, filename)
+        video = cv2.VideoCapture(full_filename)
+
+        # Fix inconsistent num_video_frames vs num_timestamps
+        num_video_frames = int(video.get(cv2.CAP_PROP_FRAME_COUNT))
+        num_timestamps = len(timestamps_in_secs)
+        if num_timestamps != num_video_frames:
+            if abs(num_timestamps - num_video_frames) > 1:
+                msg = ('Number of movie frames and timestamps differ: {} frames vs {} '
+                       'timestamps'). format(num_video_frames, num_timestamps)
+                raise PipelineException(msg)
+            elif num_timestamps > num_video_frames: # cut timestamps to match video frames
+                timestamps_in_secs = timestamps_in_secs[:-1]
+            else: # fill with NaNs
+                timestamps_in_secs[-1] = float('nan')
+
+        # Get 16 sample frames
+        frames = []
+        for frame_idx in int(round(np.linspace(0, num_video_frames, 16))):
+            video.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
+            _, frame = video.read()
+            frames.append(np.asarray(frame, dtype=float)[..., 0])
+        frames = np.stack(frames, axis=-1)
+
+        # Insert
+        self.insert1({**key, 'posture_time': timestamps_in_secs,
+                      'total_frames': len(timestamps_in_secs), 'preview_frames': frames})
         self.notify(key, frames)
 
     @notify.ignore_exceptions
@@ -90,8 +96,7 @@ class Posture(dj.Imported):
         import imageio
 
         video_filename = '/tmp/' + key_hash(key) + '.gif'
-        frames = frames.transpose([2, 0, 1])
-        frames = [imresize(img, 0.25) for img in frames]
+        frames = [imresize(img, 0.25) for img in frames.transpose([2, 0, 1])]
         imageio.mimsave(video_filename, frames, duration=0.5)
 
         msg = 'posture frames for {animal_id}-{session}-{scan_idx}'.format(**key)
@@ -100,5 +105,6 @@ class Posture(dj.Imported):
 
     def get_video_path(self):
         video_info = (experiment.Session() * experiment.Scan.PostureVideo() & self).fetch1()
-        return lab.Paths().get_local_path("{behavior_path}/{filename}".format(**video_info))
+        video_path = lab.Paths().get_local_path("{behavior_path}/{filename}".format(**video_info))
+        return video_path
 
