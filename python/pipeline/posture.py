@@ -40,11 +40,7 @@ class Posture(dj.Imported):
         data = h5.read_behavior_file(full_filename)
 
         # Read counter timestamps and convert to seconds
-        if data['version'] == '1.0': # older h5 format
-            rig = (experiment.Session() & key).fetch('rig')
-            timestamps_in_secs = h5.ts2sec(data['cam1_ts' if rig == '2P3' else 'cam2_ts'])
-        else:
-            timestamps_in_secs = h5.ts2sec(data['eyecam_ts'][0])
+        timestamps_in_secs = h5.ts2sec(data['posture_ts'][0])
         ts = h5.ts2sec(data['ts'], is_packeted=True)
         # edge case when ts and eye ts start in different sides of the master clock max value 2 **32
         if abs(ts[0] - timestamps_in_secs[0]) > 2 ** 31:
@@ -61,7 +57,7 @@ class Posture(dj.Imported):
                                               timestamps_in_secs < upper_ts)] = float('nan')
 
         # Read video
-        filename = (experiment.Scan.EyeVideo() & key).fetch1('filename')
+        filename = (experiment.Scan.PostureVideo() & key).fetch1('filename')
         full_filename = os.path.join(local_path, filename)
         video = cv2.VideoCapture(full_filename)
 
