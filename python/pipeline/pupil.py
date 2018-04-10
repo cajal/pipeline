@@ -397,6 +397,27 @@ class ManuallyTrackedContours(dj.Manual, AutoPopulate):
                 frame.insert1(dict(key, frame_id=frame_id))
 
 
+    def update(self, key):
+        print("Populating", key)
+
+        avi_path = (Eye() & key).get_video_path()
+
+        tracker = ManualTracker(avi_path)
+        contours = (self.Frame() & key).fetch('contour', order_by='frame_id')
+        tracker.contours = np.array(contours)
+        tracker.contours_detected = np.array([e is not None for e in contours])
+        tracker.run()
+        if input('Do you want to delete and replace the existing entries? Type "YES" for acknowledgement.') == "YES":
+            (self & key).delete()
+            self.insert1(key)
+            frame = self.Frame()
+            for frame_id, ok, contour in tqdm(zip(count(), tracker.contours_detected, tracker.contours),
+                                              total=len(tracker.contours)):
+                if ok:
+                    frame.insert1(dict(key, frame_id=frame_id, contour=contour))
+                else:
+                    frame.insert1(dict(key, frame_id=frame_id))
+
 @schema
 class FittedContour(dj.Computed):
     definition = """
