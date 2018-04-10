@@ -80,7 +80,7 @@ class Posture(dj.Imported):
 
         # Get 16 sample frames
         frames = []
-        for frame_idx in int(round(np.linspace(0, num_video_frames, 16))):
+        for frame_idx in np.round(np.linspace(0, num_video_frames - 1, 16)).astype(int):
             video.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
             _, frame = video.read()
             frames.append(np.asarray(frame, dtype=float)[..., 0])
