@@ -32,7 +32,7 @@ def ts2sec(ts, sampling_rate=1e7, is_packeted=False):
         # Resample timepoints between packets
         expected_length = np.median(np.diff(ts_secs[packet_limits[:-1]])) # secs between packets
         xs = np.array([*range(0, len(ts_secs), packet_size), len(ts_secs)])
-        ys = np.array([*ts_secs[xs[:-1]], ts_secs[-1] + expected_length])
+        ys = np.array([ts_secs[0] - expected_length, *ts_secs[xs[:-1]]])
         sample_xs = np.arange(len(ts_secs))
         ts_secs = np.interp(sample_xs, xs, ys)
 
@@ -50,7 +50,7 @@ def ts2sec(ts, sampling_rate=1e7, is_packeted=False):
     return ts_secs
 
 
-def read_video_hdf5(hdf5_path):
+def read_behavior_file(hdf5_path):
     """ Reads hdf5 file with timestamps and analog signals.
 
     :param hdf5_path: path of the file. Needs a %d where multiple files differ.
