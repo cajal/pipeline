@@ -4,8 +4,8 @@ from . import galvo_corrections
 import time
 
 
-def map_frames(f, scan, field_id, y, x, channel, kwargs={}, chunk_size_in_GB=1,
-               num_processes=8, queue_size=8):
+def map_frames(f, scan, field_id, channel, y=slice(None), x=slice(None), kwargs={},
+               chunk_size_in_GB=1, num_processes=8, queue_size=8):
     """ Apply function f to chunks of the scan (divided in the temporal axis).
 
     :param function f: Function that receives two positional arguments:
@@ -13,10 +13,10 @@ def map_frames(f, scan, field_id, y, x, channel, kwargs={}, chunk_size_in_GB=1,
             scan_chunks is a [height, width, num_frames] object
         results: A list to accumulate new results.
     :param Scan scan: An scan object as returned by scanreader.
-    :param int field_id: Which field to use: 0-indexed.
+    :param int field_id: Which field to use: 0-based.
+    :param int channel: Which channel to read. 0-based.
     :param slice y: How to slice the scan in y.
     :param slice x: How to slice the scan in x.
-    :param int channel: Which channel to read.
     :param dict kwargs: Dictionary with optional kwargs passed to f.
     :param int chunk_size_in_GB: Desired size of each chunk.
     :param int num_processes: Number of processes to use for mapping.
@@ -157,14 +157,9 @@ def parallel_summary_images(chunks, results, raster_phase, fill_fraction, y_shif
 
         print(time.ctime(), 'Processing frames:', frames)
 
-        # Correct raster
-        chunk = chunk.astype(np.float32, copy=False)
-        if abs(raster_phase) > 1e-7:
-            chunk = galvo_corrections.correct_raster(chunk, raster_phase, fill_fraction)
-
-        # Correct motion
-        xy_motion = np.stack([x_shifts[frames], y_shifts[frames]])
-        chunk = galvo_corrections.correct_motion(chunk, xy_motion)
+        # Correct field
+        chunk = _correct_field(chunk, raster_phase, fill_fraction, x_shifts[frames],
+                               y_shifts[frames])
 
         # Compute sum and l6-norm
         chunk_sum = np.sum(chunk, axis=-1, dtype=float)
@@ -217,14 +212,9 @@ def parallel_save_memmap(chunks, results, raster_phase, fill_fraction, y_shifts,
 
         print(time.ctime(), 'Processing frames:', frames)
 
-        # Correct raster
-        chunk = chunk.astype(np.float32, copy=False)
-        if abs(raster_phase) > 1e-7:
-            chunk = galvo_corrections.correct_raster(chunk, raster_phase, fill_fraction)
-
-        # Correct motion
-        xy_motion = np.stack([x_shifts[frames], y_shifts[frames]])
-        chunk = galvo_corrections.correct_motion(chunk, xy_motion)
+        # Correct field
+        chunk = _correct_field(chunk, raster_phase, fill_fraction, x_shifts[frames],
+                               y_shifts[frames])
 
         # Save in mmap scan
         num_frames = chunk.shape[-1]
@@ -259,14 +249,9 @@ def parallel_fluorescence(chunks, results, raster_phase, fill_fraction, y_shifts
 
         print(time.ctime(), 'Processing frames:', frames)
 
-        # Correct raster
-        chunk = chunk.astype(np.float32, copy=False)
-        if abs(raster_phase) > 1e-7:
-            chunk = galvo_corrections.correct_raster(chunk, raster_phase, fill_fraction)
-
-        # Correct motion
-        xy_motion = np.stack([x_shifts[frames], y_shifts[frames]])
-        chunk = galvo_corrections.correct_motion(chunk, xy_motion)
+        # Correct field
+        chunk = _correct_field(chunk, raster_phase, fill_fraction, x_shifts[frames],
+                               y_shifts[frames])
 
         # Prepare some params
         image_height, image_width, num_frames = chunk.shape
@@ -275,14 +260,52 @@ def parallel_fluorescence(chunks, results, raster_phase, fill_fraction, y_shifts
 
         # Extract signal per mask
         traces = np.zeros([num_masks, num_frames], dtype=np.float32)
-        for i, (mp, mw) in enumerate(zip(mask_pixels, mask_weights)):
+        for i, (mp_, mw) in enumerate(zip(mask_pixels, mask_weights)):
             mask_as_vector = np.zeros(image_height * image_width, dtype=np.float32)
-            mask_as_vector[np.squeeze(mp - 1).astype(int)] = np.squeeze(mw)
+            mask_as_vector[np.squeeze(mp_ - 1).astype(int)] = np.squeeze(mw)
             mask = mask_as_vector.reshape(image_height, image_width, order='F')
             traces[i] = np.average(flat_chunk, weights=mask.ravel(), axis=0)
 
         # Save results
         results.append((frames, traces))
+
+
+def parallel_correct_scan(chunks, results, raster_phase, fill_fraction, y_shifts,
+                          x_shifts):
+    """ Correct scan and return corrected chunks.
+
+    :param queue chunks: Queue with inputs to consume.
+    :param list results: Where to put results.
+    :param float raster_phase: Raster phase used for raster correction.
+    :param float fill_fraction: Fill fraction used for raster correction.
+    :param np.array y_shifts, x_shifts: Motion shifts to correct scan.
+
+    :returns: (frames, chunk). Corrected chunk (height x width x num_frames)
+    """
+    while True:
+        # Read next chunk (process locks until something can be read)
+        frames, chunk = chunks.get()
+        if chunk is None:  # stop signal when all chunks have been processed
+            return
+
+        print(time.ctime(), 'Processing frames:', frames)
+
+        # Correct field
+        chunk = _correct_field(chunk, raster_phase, fill_fraction, x_shifts[frames],
+                               y_shifts[frames])
+
+        # Save results
+        results.append((frames, chunk))
+
+
+def _correct_field(field, raster_phase, fill_fraction, x_shifts, y_shifts):
+    """ Correct a single field. Utility function used in some other functions above."""
+    field = field.astype(np.float32, copy=False)
+    if abs(raster_phase) > 1e-7:
+        field = galvo_corrections.correct_raster(field, raster_phase, fill_fraction) # raster
+    field  = galvo_corrections.correct_motion(field, x_shifts, y_shifts) # motion
+
+    return field
 
 
 
@@ -340,7 +363,7 @@ def map_fields(f, scan, field_ids, channel, y=slice(None), x=slice(None),
 
 
 def parallel_quality_stack(chunks, results):
-    """ Compute mean intensity per frame, contrast per frame, mean
+    """ Compute mean intensity per frame, contrast per frame and mean frame
 
     :param queue chunks: Queue with inputs to consume.
     :param list results: Where to put results.
@@ -435,8 +458,8 @@ def parallel_motion_stack(chunks, results, raster_phase, fill_fraction, skip_row
             x_shifts = x_shifts - np.median(x_shifts)
 
             # Create template from corrected scan (for next iteration)
-            xy_shifts = np.stack([x_shifts, y_shifts])
-            corrected = galvo_corrections.correct_motion(field, xy_shifts, in_place=False)
+            corrected = galvo_corrections.correct_motion(field, x_shifts, y_shifts,
+                                                         in_place=False)
             template = ndimage.gaussian_filter(np.mean(corrected, axis=-1), 0.6)
 
         # Add to results
@@ -465,14 +488,9 @@ def parallel_correct_stack(chunks, results, raster_phase, fill_fraction, y_shift
 
         print(time.ctime(), 'Processing field:', field_idx)
 
-        # Correct raster
-        field = field.astype(np.float32, copy=False)
-        if abs(raster_phase) > 1e-7:
-            field = galvo_corrections.correct_raster(field, raster_phase, fill_fraction)
-
-        # Correct motion
-        xy_shifts = np.stack([x_shifts[field_idx], y_shifts[field_idx]])
-        corrected = galvo_corrections.correct_motion(field, xy_shifts)
+        # Correct field
+        corrected = _correct_field(field, raster_phase, fill_fraction, x_shifts[field_idx],
+                                   y_shifts[field_idx])
 
         # Apply anscombe transform
         if apply_anscombe:
