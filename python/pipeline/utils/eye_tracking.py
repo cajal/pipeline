@@ -478,6 +478,9 @@ class ManualTracker:
         cv2.createTrackbar("min contour length", self.main_window,
                            self.min_contour_len, 50,
                            self.set_min_contour)
+        cv2.createTrackbar("10*a in a * old_frame + (1-a) * new_frame", self.main_window,
+                           self._mixing, 10,
+                           self.set_mixing)
         self.videofile = videofile
 
         cv2.setMouseCallback(self.main_window, self.mouse_callback)
@@ -502,7 +505,7 @@ class ManualTracker:
         self.area = np.zeros(len(self.contours))
         _, frame = self.read_frame()
         area = np.zeros(frame.shape[:2], dtype=np.uint8)
-        for i, c, ok  in tqdm(zip(count(), self.contours, self.contours_detected), total=len(self.area)):
+        for i, c, ok in tqdm(zip(count(), self.contours, self.contours_detected), total=len(self.area)):
             area = cv2.drawContours(area, [c], -1, (255), thickness=cv2.FILLED)
             self.area[i] = (area > 0).sum()
             area *= 0
@@ -542,6 +545,9 @@ class ManualTracker:
         self.help = True
         self._scale_factor = None
         self.dsize = None
+
+        self._running_mean = None
+        self._mixing = 10
 
     def mouse_callback(self, event, x, y, flags, param):
         if self._scale_factor is not None:
@@ -594,6 +600,9 @@ class ManualTracker:
                 t0, t1 = self.del_tmp, t1
             self.contours_detected[t0:t1] = False
             self.contours[t0:t1] = None
+
+    def set_mixing(self, mixing):
+        self._mixing = min(max(1, mixing), 10)
 
     def set_brush(self, brush):
         self.brush = brush
@@ -745,10 +754,18 @@ class ManualTracker:
         if self.histogram_equalize:
             cv2.equalizeHist(frame, frame)
 
+        if self._running_mean is None or frame.shape != self._running_mean.shape:
+            self._running_mean = np.array(frame)
+        elif not self.pause:
+            a = self._mixing / 10
+            self._running_mean = np.uint8(a * frame + (1 - a) * self._running_mean)
+            frame = np.array(self._running_mean)
+
         blur = cv2.GaussianBlur(frame, (2 * h + 1, 2 * h + 1), 0)
         _, thres = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
         mask = cv2.erode(thres, self.dilation_kernel, iterations=self.dilation_iter)
         mask = cv2.dilate(mask, self.dilation_kernel, iterations=int(self.dilation_factor * self.dilation_iter))
+
         return thres, blur, mask
 
     def find_contours(self, thres):
@@ -771,7 +788,7 @@ class ManualTracker:
                 else:
                     other.append(contours[i])
 
-            contours = [cv2.convexHull(np.vstack(merge))] + other
+            contours = ([cv2.convexHull(np.vstack(merge))] if len(merge) > 0 else []) + other
 
         contours = [c + self.roi[::-1, 0][None, None, :] for c in contours if len(c) >= self.min_contour_len]
 
@@ -817,7 +834,6 @@ class ManualTracker:
             self.contours_detected = np.zeros(self._n_frames, dtype=bool)
             self.contours = np.zeros(self._n_frames, dtype=object)
             self.contours[:] = None
-
 
         while cap.isOpened():
             if self._frame_number >= self._n_frames - 1:
