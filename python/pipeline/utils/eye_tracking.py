@@ -478,7 +478,7 @@ class ManualTracker:
         cv2.createTrackbar("min contour length", self.main_window,
                            self.min_contour_len, 50,
                            self.set_min_contour)
-        cv2.createTrackbar("10*a in a * old_frame + (1-a) * new_frame", self.main_window,
+        cv2.createTrackbar("10*a in a * new_frame + (1-a) * old_frame", self.main_window,
                            self._mixing, 10,
                            self.set_mixing)
         self.videofile = videofile
@@ -848,8 +848,9 @@ class ManualTracker:
 
                 try:
                     thres, small_gray, dilation_mask = self.preprocess_image(small_gray)
-                except:
+                except Exception as e:
                     print('Problems with processing reversing to frame', self._frame_number - 10, 'Please redraw ROI')
+                    print('Error message is', str(e))
                     self.goto_frame(self._frame_number - 10)
                     self.start = self.end = self.roi = None
                     self.pause = True
