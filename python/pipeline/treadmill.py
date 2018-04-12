@@ -46,7 +46,7 @@ class Sync(dj.Computed):
         # Correct NaN gaps in timestamps (mistimed or dropped packets during recording)
         if np.any(np.isnan(frame_times)):
             # Raise exception if first or last frame pulse was recorded in mistimed packet
-            if np.isnan(frame_times[0]) or np.isnan(frame_times[1]):
+            if np.isnan(frame_times[0]) or np.isnan(frame_times[-1]):
                 msg = ('First or last frame happened during misstamped packets. Pulses '
                        'could have been missed: start/end of scanning is unknown.')
                 raise PipelineException(msg)
