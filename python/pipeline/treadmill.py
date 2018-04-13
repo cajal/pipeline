@@ -39,7 +39,7 @@ class Sync(dj.Computed):
         timestamps_in_secs = h5.ts2sec(data['ts'], is_packeted=True)
 
         # Detect rising edges in scanimage clock signal (start of each frame)
-        binarized_signal = data['scanImage'] > 2.4 # TTL voltage low/high threshold
+        binarized_signal = data['scanImage'] > 2.7 # TTL voltage low/high threshold
         rising_edges = np.where(np.diff(binarized_signal.astype(int)) > 0)[0]
         frame_times = timestamps_in_secs[rising_edges]
 
