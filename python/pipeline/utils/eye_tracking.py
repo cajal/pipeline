@@ -795,6 +795,7 @@ class ManualTracker:
         return contours
 
     def goto_frame(self, no):
+        self._running_mean = None
         self._frame_number = min(max(no, 0), self._n_frames - 1)
         self._cap.set(cv2.CAP_PROP_POS_FRAMES, self._frame_number)
         self.update_frame = True
