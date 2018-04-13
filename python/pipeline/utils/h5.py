@@ -114,7 +114,8 @@ def read_behavior_file(hdf5_path):
             data['framenum_ts'] = np.array(f['framenum_ts'])
             data['trialnum_ts'] = np.array(f['trialnum_ts'])
             data['eyecam_ts'] = np.array(f['videotimestamps'])
-            data['posture_ts'] = np.array(f['videotimestamps_posture'])
+            if 'videotimestamps_posture' in f:
+                data['posture_ts'] = np.array(f['videotimestamps_posture'])
 
             analog_signals = np.array(f['Analog Signals'])
             channel_names = f.attrs['AS_channelNames'].decode('ascii').split(',')
