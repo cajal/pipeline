@@ -155,6 +155,8 @@ class Treadmill(dj.Computed):
         for start, stop in zip(nan_limits[::2], nan_limits[1::2]):
             lower_ts = float('-inf') if start == 0 else ts[start - 1]
             upper_ts = float('inf') if stop == len(ts) else ts[stop]
+            timestamps_in_secs[np.logical_and(timestamps_in_secs > lower_ts,
+                                              timestamps_in_secs < upper_ts)] = float('nan')
             velocity[np.logical_and(timestamps_in_secs > lower_ts,
                                     timestamps_in_secs < upper_ts)] = float('nan')
 
