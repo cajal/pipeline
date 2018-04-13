@@ -39,14 +39,14 @@ class Sync(dj.Computed):
         timestamps_in_secs = h5.ts2sec(data['ts'], is_packeted=True)
 
         # Detect rising edges in scanimage clock signal (start of each frame)
-        binarized_signal = data['scanImage'] > 2.4 # TTL voltage low/high threshold
+        binarized_signal = data['scanImage'] > 2.7 # TTL voltage low/high threshold
         rising_edges = np.where(np.diff(binarized_signal.astype(int)) > 0)[0]
         frame_times = timestamps_in_secs[rising_edges]
 
         # Correct NaN gaps in timestamps (mistimed or dropped packets during recording)
         if np.any(np.isnan(frame_times)):
             # Raise exception if first or last frame pulse was recorded in mistimed packet
-            if np.isnan(frame_times[0]) or np.isnan(frame_times[1]):
+            if np.isnan(frame_times[0]) or np.isnan(frame_times[-1]):
                 msg = ('First or last frame happened during misstamped packets. Pulses '
                        'could have been missed: start/end of scanning is unknown.')
                 raise PipelineException(msg)
@@ -157,6 +157,7 @@ class Treadmill(dj.Computed):
             upper_ts = float('inf') if stop == len(ts) else ts[stop]
             velocity[np.logical_and(timestamps_in_secs > lower_ts,
                                     timestamps_in_secs < upper_ts)] = float('nan')
+        timestamps_in_secs[np.isnan(velocity)] = float('nan')
 
         # Insert
         self.insert1({**key, 'treadmill_time': timestamps_in_secs,
