@@ -37,8 +37,8 @@ def ts2sec(ts, sampling_rate=1e7, is_packeted=False):
         ts_secs = np.interp(sample_xs, xs, ys)
 
         # Invalidate timepoints with unequal spacing between packets
-        if np.any(abs(np.diff(ys) - expected_length) > 0.15 * expected_length):
-            abnormal_diffs = abs(np.diff(ys) - expected_length) > 0.15 * expected_length
+        if np.any(abs(np.diff(ys) - expected_length) > 0.1 * expected_length):
+            abnormal_diffs = abs(np.diff(ys) - expected_length) > 0.1 * expected_length
             abnormal_limits = np.where(np.diff([0, *abnormal_diffs, 0]))[0]
             for start, stop in zip(abnormal_limits[::2], abnormal_limits[1::2]):
                 abnormal_indices = np.logical_and(sample_xs > xs[start], sample_xs < xs[stop])
@@ -114,7 +114,8 @@ def read_behavior_file(hdf5_path):
             data['framenum_ts'] = np.array(f['framenum_ts'])
             data['trialnum_ts'] = np.array(f['trialnum_ts'])
             data['eyecam_ts'] = np.array(f['videotimestamps'])
-            data['posture_ts'] = np.array(f['videotimestamps_posture'])
+            if 'videotimestamps_posture' in f:
+                data['posture_ts'] = np.array(f['videotimestamps_posture'])
 
             analog_signals = np.array(f['Analog Signals'])
             channel_names = f.attrs['AS_channelNames'].decode('ascii').split(',')
