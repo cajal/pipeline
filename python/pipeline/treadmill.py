@@ -104,8 +104,8 @@ class Treadmill(dj.Computed):
     -> experiment.Scan
     ---
     treadmill_raw                       :longblob       # raw treadmill counts
-    treadmill_vel                       :longblob       # (cm/sec) wheel velocity
     treadmill_time                      :longblob       # (secs) velocity timestamps in behavior clock
+    treadmill_vel                       :longblob       # (cm/sec) wheel velocity
     treadmill_ts=CURRENT_TIMESTAMP      :timestamp
     """
 
