@@ -375,6 +375,7 @@ class ManuallyTrackedContours(dj.Manual, AutoPopulate):
     -> Eye
     ---
     tracking_ts=CURRENT_TIMESTAMP    : timestamp  # automatic
+    min_lambda=null                  : float      # minimum mixing weight for current frame in running average computation (1 means no running avg was used)
     """
 
     class Frame(dj.Part):
@@ -392,7 +393,7 @@ class ManuallyTrackedContours(dj.Manual, AutoPopulate):
 
         tracker = ManualTracker(avi_path)
         tracker.run()
-        self.insert1(key)
+        self.insert1(dict(key, min_lambda=tracker._mixing_log[tracker._mixing_log > 0].min()))
         frame = self.Frame()
         for frame_id, ok, contour in tqdm(zip(count(), tracker.contours_detected, tracker.contours),
                                           total=len(tracker.contours)):
