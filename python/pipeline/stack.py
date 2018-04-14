@@ -896,7 +896,7 @@ class RegistrationTask(dj.Manual):
     (scan_channel) -> shared.Channel(channel)
     -> shared.RegistrationMethod
     """
-    def fill(self, stack_key, scan_key, stack_channel=1, scan_channel=1, method=2):
+    def fill(self, stack_key, scan_key, stack_channel=1, scan_channel=1, method=3):
         # Add stack attributes
         stack_rel = CorrectedStack() & stack_key
         if len(stack_rel) > 1:
@@ -1158,7 +1158,6 @@ class FieldRegistration(dj.Computed):
         # * this could differ from original shape but it should be pretty close
 
         # Map back to stack coordinates
-        stack_x, stack_y, stack_z = stack_rel.fetch1('x', 'y', 'z') # z of the first slice (zero is at surface depth)
         final_x = stack_x + x * (common_res / stack_res[2]) # in stack pixels
         final_y = stack_y + y * (common_res / stack_res[1]) # in stack pixels
         final_z = stack_z + (z + stack.shape[0] / 2) * common_res # in microns*
@@ -1193,7 +1192,7 @@ class FieldRegistration(dj.Computed):
                '{animal_id}-{stack_session}-{stack_idx} (method {registration_method})')
         msg = msg.format(**key)
         slack_user = notify.SlackUser() & (experiment.Session() & key &
-                                 {'session': key['stack_session']})
+                                           {'session': key['stack_session']})
         slack_user.notify(file=img_filename, file_title=msg)
 
 
