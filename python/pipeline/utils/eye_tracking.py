@@ -491,6 +491,7 @@ class ManualTracker:
         self.contours_detected = None
         self.contours = None
         self.area = None
+        self._mixing_log = None
         self._progress_len = 800
         self._progress_height = 100
         self._width = 800
@@ -603,6 +604,10 @@ class ManualTracker:
 
     def set_mixing(self, mixing):
         self._mixing = min(max(1, mixing), 10)
+
+    @property
+    def running_avg_mix(self):
+        return self._mixing/10
 
     def set_brush(self, brush):
         self.brush = brush
@@ -757,7 +762,7 @@ class ManualTracker:
         if self._running_mean is None or frame.shape != self._running_mean.shape:
             self._running_mean = np.array(frame)
         elif not self.pause:
-            a = self._mixing / 10
+            a = self.running_avg_mix
             self._running_mean = np.uint8(a * frame + (1 - a) * self._running_mean)
             frame = np.array(self._running_mean)
 
@@ -835,6 +840,7 @@ class ManualTracker:
             self.contours_detected = np.zeros(self._n_frames, dtype=bool)
             self.contours = np.zeros(self._n_frames, dtype=object)
             self.contours[:] = None
+        self._mixing_log = np.zeros(self._n_frames)
 
         while cap.isOpened():
             if self._frame_number >= self._n_frames - 1:
@@ -876,6 +882,7 @@ class ManualTracker:
 
                     cv2.imshow(self.roi_window, small_gray)
                     cv2.imshow(self.thres_window, thres)
+            self._mixing_log[self._frame_number] = self.running_avg_mix
 
             # --- plotting
             if self._merge_mask is not None:
