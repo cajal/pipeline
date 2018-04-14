@@ -108,6 +108,9 @@ class Treadmill(dj.Computed):
     treadmill_vel                       :longblob       # (cm/sec) wheel velocity
     treadmill_ts=CURRENT_TIMESTAMP      :timestamp
     """
+    @property
+    def key_source(self):
+        return experiment.Scan() & experiment.Scan.BehaviorFile().proj()
 
     def _make_tuples(self, key):
         # Get behavior filename
