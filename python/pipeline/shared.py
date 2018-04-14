@@ -106,3 +106,18 @@ class RegistrationMethod(dj.Lookup):
         [4, 'affine2', ('exhaustive search of 3-d rotations + cross-correlation (100 microns'
                         'above and below estimated z)'), 'python']
     ]
+
+@schema
+class CurationMethod(dj.Lookup):
+    definition = """
+    curation_method     : tinyint                   # method to curate the initial registration estimates
+    ---
+    name                : varchar(16)               # short name to identify the curation method
+    details             : varchar(255)              # more details
+    language            : enum('matlab', 'python')  # implementation language
+    """
+
+    contents = [
+        [1, 'none', 'estimates are left unchanged', 'python'],
+        [2, 'manual', 'manually inspect each field estimate', 'matlab'],
+    ]
