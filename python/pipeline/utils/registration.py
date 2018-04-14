@@ -19,8 +19,7 @@ def register_rigid(stack, field, px_estimate, px_range, angles=(0, 0, 0)):
     :param np.array: 3-d stack (depth, height, width).
     :param np.array field: 2-d field to register in the stack.
     :param triplet px_estimate: Initial estimate in x, y, z. (0, 0, 0) in center of stack.
-    :param triplet px_range: How many pixels to search around the initial estimate in x,
-        y, and z.
+    :param triplet px_range: How many pixels to search around the initial estimate.
     :param triplet angles: Angle in degrees for rotation over z, y and x axis, i.e.
         (yaw, pitch, roll)
 
