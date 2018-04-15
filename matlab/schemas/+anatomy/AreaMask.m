@@ -124,7 +124,7 @@ classdef AreaMask < dj.Manual
                 [mask, area, ret_idx] = fetch1(anatomy.AreaMask & map_key, 'mask', 'brain_area', 'ret_idx');
                 
                 % loop through all fields
-                for field_key = fetch(anatomy.FieldCoordinates  - anatomy.AreaMask & keyI)'
+                for field_key = fetch(anatomy.FieldCoordinates & keyI)'
                     
                     % find corresponding mask area
                     fmask = filterMask(anatomy.FieldCoordinates & field_key, mask);
@@ -132,10 +132,12 @@ classdef AreaMask < dj.Manual
                     % insert if overlap exists
                     if ~all(~fmask(:))
                         tuple = rmfield(field_key,'ref_idx');
-                        tuple.brain_area = area;
-                        tuple.mask = fmask;
-                        tuple.ret_idx = ret_idx;
-                        insert(obj,tuple)
+                        tuple.brain_area =   area;
+                        if ~exists(obj & tuple)
+                            tuple.mask = fmask;
+                            tuple.ret_idx = ret_idx;
+                            insert(obj,tuple)
+                        end
                     end
                 end
             end
