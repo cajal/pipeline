@@ -54,7 +54,7 @@ classdef FieldCoordinates < dj.Manual
             % get information from the scans depending on the setup
             if strcmp(setup,'2P4')
                 [x_pos, y_pos, slice_pos, fieldWidths, fieldHeights, fieldWidthsInMicrons, frames, field_num] = ...
-                    fetchn(meso.ScanInfoField * meso.SummaryImagesAverage & keyI,...
+                    fetchn(meso.ScanInfoField * meso.SummaryImagesAverage & keyI & 'channel = 1',...
                     'x','y','z','px_width','px_height','um_width','average_image','field');
             else
                 tfp.fliplr = 1;
@@ -74,7 +74,7 @@ classdef FieldCoordinates < dj.Manual
                 x_pos = (x_pos - min(x_pos))/pxpitch;
                 y_pos = (y_pos - min(y_pos))/pxpitch;
                 im = zeros(ceil(max(y_pos+fieldHeights)),ceil(max(x_pos+fieldWidths)));
-                for islice =length(frames):-1:1
+                for islice =length(frames):-1:(length(frames)-1)%length(frames):-1:1
                     frame = self.filterImage(ne7.mat.normalize(frames{islice}),self.createTform(tfp));
                     im(ceil(y_pos(islice)+1):ceil(y_pos(islice))+size(frame,1), ...
                         ceil(x_pos(islice)+1):ceil(x_pos(islice))+size(frame,2)) = ...
@@ -235,7 +235,7 @@ classdef FieldCoordinates < dj.Manual
             % fetch images
             setup = fetch1(experiment.Session & self, 'rig');
             if strcmp(setup,'2P4')
-                [frame,x_offset,y_offset,tform] = fetch1(meso.SummaryImagesAverage * self,...
+                [frame,x_offset,y_offset,tform] = fetch1(meso.SummaryImagesAverage * self & 'channel = 1',...
                     'average_image','x_offset','y_offset','tform');
             else
                 [frame,x_offset,y_offset,tform] = fetch1(reso.SummaryImagesAverage * self & fuse.ScanSet,...
