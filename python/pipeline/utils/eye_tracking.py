@@ -507,9 +507,13 @@ class ManualTracker:
         _, frame = self.read_frame()
         area = np.zeros(frame.shape[:2], dtype=np.uint8)
         for i, c, ok in tqdm(zip(count(), self.contours, self.contours_detected), total=len(self.area)):
-            area = cv2.drawContours(area, [c], -1, (255), thickness=cv2.FILLED)
-            self.area[i] = (area > 0).sum()
-            area *= 0
+            if c is None:
+                self.contours_detected[i] = False
+                self.area[i] = 0
+            else:
+                area = cv2.drawContours(area, [c], -1, (255), thickness=cv2.FILLED)
+                self.area[i] = (area > 0).sum()
+                area *= 0
         self.plot_area()
 
     def reset(self):
