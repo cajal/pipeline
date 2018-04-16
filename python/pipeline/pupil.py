@@ -423,16 +423,17 @@ class ManuallyTrackedContours(dj.Manual, AutoPopulate):
             if answer == 'n':
                 raise
         if input('Do you want to delete and replace the existing entries? Type "YES" for acknowledgement.') == "YES":
-            with self.connection.transaction:
-                (self & key).delete()
-                self.insert1(dict(key, min_lambda=tracker._mixing_log[tracker._mixing_log > 0].min()))
-                frame = self.Frame()
-                for frame_id, ok, contour in tqdm(zip(count(), tracker.contours_detected, tracker.contours),
-                                                  total=len(tracker.contours)):
-                    if ok:
-                        frame.insert1(dict(key, frame_id=frame_id, contour=contour))
-                    else:
-                        frame.insert1(dict(key, frame_id=frame_id))
+            with dj.config(safe__mode=False):
+                with self.connection.transaction:
+                    (self & key).delete()
+                    self.insert1(dict(key, min_lambda=tracker._mixing_log[tracker._mixing_log > 0].min()))
+                    frame = self.Frame()
+                    for frame_id, ok, contour in tqdm(zip(count(), tracker.contours_detected, tracker.contours),
+                                                          total=len(tracker.contours)):
+                        if ok:
+                            frame.insert1(dict(key, frame_id=frame_id, contour=contour))
+                        else:
+                            frame.insert1(dict(key, frame_id=frame_id))
 
 @schema
 class FittedContour(dj.Computed):
