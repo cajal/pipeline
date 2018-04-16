@@ -1,126 +1,181 @@
 import datajoint as dj
+from datajoint.jobs import key_hash
 import numpy as np
 from commons import lab
+import os
 
-from .utils.signal import spaced_max, longest_contiguous_block
-from .utils.h5 import read_video_hdf5, ts2sec
 from . import experiment, notify
+from .utils import h5
 from .exceptions import PipelineException
 
-from scipy.interpolate import interp1d
 
 schema = dj.schema('pipeline_treadmill', locals())
 
 
 @schema
 class Sync(dj.Computed):
-    definition = """
+    definition = """ # syncing scanimage frame times to behavior clock
+
     -> experiment.Scan
     ---
-    frame_times=null                    : longblob                      # times of frames and slices on behavior clock
-    behavior_sync_ts=CURRENT_TIMESTAMP  : timestamp                     # automatic
+    frame_times                         : longblob      # times of each slice in behavior clock
+    behavior_sync_ts=CURRENT_TIMESTAMP  : timestamp
     """
+    @property
+    def key_source(self):
+        return experiment.Scan() & experiment.Scan.BehaviorFile().proj()
 
     def _make_tuples(self, key):
-        rel = experiment.Session() * experiment.Scan.BehaviorFile().proj(
-            hdf_file='filename')
+        # Get behavior filename
+        behavior_path = (experiment.Session() & key).fetch1('behavior_path')
+        local_path = lab.Paths().get_local_path(behavior_path)
+        filename = (experiment.Scan.BehaviorFile() & key).fetch1('filename')
+        full_filename = os.path.join(local_path, filename)
 
-        info = (rel & key).fetch1()
+        # Read file
+        data = h5.read_behavior_file(full_filename)
 
-        # replace number by %d for hdf-file reader
-        tmp = info['hdf_file'].split('.')
-        if not '%d' in tmp[0]:
-            info['hdf_file'] = tmp[0][:-1] + '%d.' + tmp[-1]
+        # Read counter timestamps and convert to seconds
+        timestamps_in_secs = h5.ts2sec(data['ts'], is_packeted=True)
 
-        hdf_path = lab.Paths().get_local_path("{behavior_path}/{hdf_file}".format(**info))
+        # Detect rising edges in scanimage clock signal (start of each frame)
+        binarized_signal = data['scanImage'] > 2.7 # TTL voltage low/high threshold
+        rising_edges = np.where(np.diff(binarized_signal.astype(int)) > 0)[0]
+        frame_times = timestamps_in_secs[rising_edges]
 
-        data = read_video_hdf5(hdf_path)
-        packet_length = data['analogPacketLen']
-        dat_time, _ = ts2sec(data['ts'], packet_length)
+        # Correct NaN gaps in timestamps (mistimed or dropped packets during recording)
+        if np.any(np.isnan(frame_times)):
+            # Raise exception if first or last frame pulse was recorded in mistimed packet
+            if np.isnan(frame_times[0]) or np.isnan(frame_times[-1]):
+                msg = ('First or last frame happened during misstamped packets. Pulses '
+                       'could have been missed: start/end of scanning is unknown.')
+                raise PipelineException(msg)
 
-        dat_fs = 1. / np.median(np.diff(dat_time))
+            # Fill each gap of nan values with correct number of timepoints
+            frame_period = np.nanmedian(np.diff(frame_times)) # approx
+            nan_limits = np.where(np.diff(np.isnan(frame_times)))[0]
+            nan_limits[1::2] += 1 # limits are indices of the last valid point before the nan gap and first after it
+            correct_fts = []
+            for i, (start, stop) in enumerate(zip(nan_limits[::2], nan_limits[1::2])):
+                correct_fts.extend(frame_times[0 if i == 0 else nan_limits[2 * i - 1]: start + 1])
+                num_missing_points = int(round((frame_times[stop] - frame_times[start]) /
+                                                frame_period - 1))
+                correct_fts.extend(np.linspace(frame_times[start], frame_times[stop],
+                                               num_missing_points + 2)[1:-1])
+            correct_fts.extend(frame_times[nan_limits[-1]:])
+            frame_times = correct_fts
 
-        n = int(np.ceil(0.0002 * dat_fs))
-        k = np.hamming(2 * n)
-        k /= -k.sum()
-        k[:n] = -k[:n]
+            # Record the NaN fix
+            num_gaps = int(len(nan_limits) / 2)
+            nan_length = sum(nan_limits[1::2] - nan_limits[::2]) * frame_period # secs
+            experiment.Fixes.insert1(key, skip_duplicates=True)
+            experiment.Fixes.IrregularTimestamps.insert1({**key, 'num_gaps': num_gaps,
+                                                          'num_secs': nan_length})
 
-        pulses = np.convolve(data['scanImage'], k, mode='full')[n:-n + 1]  # mode='same' with MATLAB compatibility
+        # Check that frame times occur at the same period
+        frame_intervals = np.diff(frame_times)
+        frame_period = np.median(frame_intervals)
+        if np.any(abs(frame_intervals - frame_period) > 0.15 * frame_period):
+            raise PipelineException('Frame time period is irregular')
 
-        peaks = spaced_max(pulses, 0.005 * dat_fs)
-        peaks = peaks[pulses[peaks] > 0.1 * np.percentile(pulses[peaks], 90)]
-        peaks = longest_contiguous_block(peaks)
+        # Drop last frame time if scan crashed or was stopped before completion
+        valid_times = ~np.isnan(timestamps_in_secs[rising_edges[0]: rising_edges[-1]]) # restricted to scan period
+        binarized_valid = binarized_signal[rising_edges[0]: rising_edges[-1]][valid_times]
+        frame_duration = np.mean(binarized_valid) * frame_period
+        falling_edges = np.where(np.diff(binarized_signal.astype(int)) < 0)[0]
+        last_frame_duration = timestamps_in_secs[falling_edges[-1]] - frame_times[-1]
+        if (np.isnan(last_frame_duration) or last_frame_duration < 0 or
+            abs(last_frame_duration - frame_duration) > 0.15 * frame_duration):
+            frame_times = frame_times[:-1]
 
-        self.insert1(dict(key, frame_times=dat_time[peaks]))
+        self.insert1({**key, 'frame_times': frame_times})
         self.notify(key)
 
     @notify.ignore_exceptions
     def notify(self, key):
-        msg = 'treadmill.Sync for `{}` has been populated.'.format(key)
-        (notify.SlackUser() & (experiment.Session() & key)).notify(msg)
-
+        msg = 'treadmill.Sync for {animal_id}-{session}-{scan_idx} has been populated.'
+        (notify.SlackUser() & (experiment.Session() & key)).notify(msg.format(**key))
 
 
 @schema
 class Treadmill(dj.Computed):
-    definition = """
+    definition = """ # treadmill velocity synchronized to behavior clock
+
     -> experiment.Scan
     ---
-    treadmill_raw                       :longblob           #raw treadmill counts
-    treadmill_vel                       :longblob           #ball velocity integrated over 100ms bins in cm/sec
-    treadmill_time                      :longblob           #timestamps of each sample in seconds on behavior clock
-    treadmill_ts = CURRENT_TIMESTAMP    :timestamp          #automatic
+    treadmill_raw                       :longblob       # raw treadmill counts
+    treadmill_vel                       :longblob       # (cm/sec) wheel velocity
+    treadmill_time                      :longblob       # (secs) velocity timestamps in behavior clock
+    treadmill_ts=CURRENT_TIMESTAMP      :timestamp
     """
 
-    # adapted from Treadmill.m by Paul Fahey, 2017-10-13
     def _make_tuples(self, key):
-        # pull filename for key
-        rel = experiment.Session() * experiment.Scan.BehaviorFile().proj(
-            hdf_file='filename')
-        info = (rel & key).fetch1()
+        # Get behavior filename
+        behavior_path = (experiment.Session() & key).fetch1('behavior_path')
+        local_path = lab.Paths().get_local_path(behavior_path)
+        filename = (experiment.Scan.BehaviorFile() & key).fetch1('filename')
+        full_filename = os.path.join(local_path, filename)
 
-        # replace number by %d for hdf-file reader
-        tmp = info['hdf_file'].split('.')
-        if not '%d' in tmp[0]:
-            info['hdf_file'] = tmp[0][:-1] + '%d.' + tmp[-1]
+        # Read file
+        data = h5.read_behavior_file(full_filename)
 
-        # read hdf file for ball data
-        hdf_path = lab.Paths().get_local_path("{behavior_path}/{hdf_file}".format(**info))
-        data = read_video_hdf5(hdf_path)
+        # Read counter timestamps and convert to seconds
+        timestamps_in_secs = h5.ts2sec(data['wheel'][1])
+        ts = h5.ts2sec(data['ts'], is_packeted=True)
+        # edge case when ts and wheel ts start in different sides of the master clock max value 2 **32
+        if abs(ts[0] - timestamps_in_secs[0]) > 2 ** 31:
+            timestamps_in_secs += (2 ** 32 if ts[0] > timestamps_in_secs[0] else -2 ** 32)
 
-        # read out counter time stamp and convert to seconds
-        packet_length = data['analogPacketLen']
-        ball_time, _ = ts2sec(data['ball'].transpose()[1], packet_length)
+        # Read wheel position counter and fix wrap around at 2 ** 32
+        wheel_position = data['wheel'][0]
+        wheel_diffs = np.diff(wheel_position)
+        for wrap_idx in np.where(abs(wheel_diffs) > 2 ** 31)[0]:
+            wheel_position[wrap_idx + 1:] += (2 ** 32 if wheel_diffs[wrap_idx] < 0 else -2 ** 32)
+        wheel_position -= wheel_position[0] # start counts at zero
 
-        # read out raw ball counts and integrate by 100ms intervals
-        ball_raw = data['ball'].transpose()[0]
-        ball_time_to_raw = interp1d(ball_time, ball_raw - ball_raw[0])
-        bin_times = np.arange(ball_time[0], ball_time[-1], .1)
-        bin_times[-1] = ball_time[-1]
-        ball_counts = np.append([0], np.diff(ball_time_to_raw(bin_times)))
+        # Compute wheel velocity
+        num_samples = int(round((timestamps_in_secs[-1] - timestamps_in_secs[0]) * 10)) # every 100 msecs
+        sample_times = np.linspace(timestamps_in_secs[0], timestamps_in_secs[-1], num_samples)
+        sample_position = np.interp(sample_times, timestamps_in_secs, wheel_position)
+        counter_velocity = np.gradient(sample_position) * 10 # counts / sec
 
-        # pull Treadmill specs, warn if more than one Treadmill fits session key
-        diam, counts_per_revolution = (
-                experiment.TreadmillSpecs() * experiment.Session() & key & 'treadmill_start_date <= session_date').fetch(
-            'diameter', 'counts_per_revolution')
-        if len(diam) != 1:
-            raise PipelineException('Unclear which treadmill fits session key')
+        # Transform velocity from counts/sec to cm/sec
+        wheel_specs = experiment.TreadmillSpecs() * experiment.Session() & key
+        diameter, counts_per_rev = wheel_specs.fetch1('diameter', 'counts_per_revolution')
+        wheel_perimeter = np.pi * diameter # 1 rev = xx cms
+        velocity = (counter_velocity / counts_per_rev) * wheel_perimeter # cm /sec
 
-        # convert ball counts to cm/s for each ball time point
-        cmPerCount = np.pi * diam[-1] / counts_per_revolution[-1]
-        ball_time_to_vel = interp1d(bin_times, ball_counts * cmPerCount * 10)
-        ball_vel = ball_time_to_vel(ball_time)
+        # Resample at initial timestamps
+        velocity = np.interp(timestamps_in_secs, sample_times, velocity)
 
-        # assign calculated properties to key
-        key['treadmill_time'] = ball_time
-        key['treadmill_raw'] = ball_raw
-        key['treadmill_vel'] = ball_vel
+        # Fill with NaNs for out-of-range data or mistimed packets
+        velocity[timestamps_in_secs < ts[0]] = float('nan')
+        velocity[timestamps_in_secs > ts[-1]] = float('nan')
+        nan_limits = np.where(np.diff([0, *np.isnan(ts), 0]))[0]
+        for start, stop in zip(nan_limits[::2], nan_limits[1::2]):
+            lower_ts = float('-inf') if start == 0 else ts[start - 1]
+            upper_ts = float('inf') if stop == len(ts) else ts[stop]
+            velocity[np.logical_and(timestamps_in_secs > lower_ts,
+                                    timestamps_in_secs < upper_ts)] = float('nan')
+        timestamps_in_secs[np.isnan(velocity)] = float('nan')
 
-        # insert and notify user
-        self.insert1(key)
-        self.notify({k: key[k] for k in self.heading.primary_key})
+        # Insert
+        self.insert1({**key, 'treadmill_time': timestamps_in_secs,
+                      'treadmill_raw': data['wheel'][0], 'treadmill_vel': velocity})
+        self.notify(key)
 
     @notify.ignore_exceptions
     def notify(self, key):
-        msg = 'treadmill.Treadmill for `{}` has been populated.'.format(key)
-        (notify.SlackUser() & (experiment.Session() & key)).notify(msg)
+        import matplotlib.pyplot as plt
+        time, velocity = (self & key).fetch1('treadmill_time', 'treadmill_vel')
+        fig = plt.figure()
+        plt.plot(time, velocity)
+        plt.ylabel('Treadmill velocity (cm/sec)')
+        plt.xlabel('Seconds')
+        img_filename = '/tmp/' + key_hash(key) + '.png'
+        fig.savefig(img_filename)
+        plt.close(fig)
+
+        msg = 'treadmill velocity for {animal_id}-{session}-{scan_idx}'.format(**key)
+        slack_user = notify.SlackUser() & (experiment.Session() & key)
+        slack_user.notify(file=img_filename, file_title=msg)
