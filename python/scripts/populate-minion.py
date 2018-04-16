@@ -1,5 +1,5 @@
 #!/usr/local/bin/python3
-from pipeline import reso, meso, fuse, stack, pupil, treadmill
+from pipeline import reso, meso, fuse, stack, pupil, treadmill, posture
 from pipeline import experiment
 import time
 
@@ -17,12 +17,15 @@ while True:
     for priority in range(120, -130, -10): # highest to lowest priority
         next_scans = experiment.AutoProcessing() & 'priority > {}'.format(priority)
 
-        # pupil
-        pupil.Eye().populate(next_scans, reserve_jobs=True, suppress_errors=True)
-
         # treadmill
         treadmill.Sync().populate(next_scans, reserve_jobs=True, suppress_errors=True)
         treadmill.Treadmill().populate(next_scans, reserve_jobs=True, suppress_errors=True)
+
+        # pupil
+        pupil.Eye().populate(next_scans, reserve_jobs=True, suppress_errors=True)
+
+        # posture
+        posture.Posture().populate(next_scans, reserve_jobs=True, suppress_errors=True)
 
         # Stacks
         stack.StackInfo().populate(stack.CorrectionChannel(), reserve_jobs=True, suppress_errors=True) #TODO: stackAutoProcessing

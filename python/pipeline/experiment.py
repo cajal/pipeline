@@ -9,11 +9,6 @@ from commons import lab
 schema = dj.schema('pipeline_experiment', locals(), create_tables=False)
 
 
-def erd():
-    """for convenience"""
-    dj.ERD(schema).draw()
-
-
 @schema
 class Fluorophore(dj.Lookup):
     definition = """  # calcium-sensitive indicators
@@ -449,6 +444,7 @@ class Scan(dj.Manual, HasFilename):
         gdd                 : float                         # gdd setting
         """
 
+
 @schema
 class Stack(dj.Manual):
     definition = """ # structural stack information
@@ -486,10 +482,26 @@ class Stack(dj.Manual):
         gdd                 : float                 # gdd setting
         """
 
+
 @schema
 class ScanIgnored(dj.Manual):
     definition = """  # scans to ignore
     -> Scan
     """
 
+
+@schema
+class Fixes(dj.Manual):
+    definition = """ # any fixes or known problems for a scan
+    -> Scan
+    """
+
+    class IrregularTimestamps(dj.Part):
+        definition = """ # produced by packets dropped or not read fast enough (slow computer)
+
+        -> master
+        ----
+        num_gaps      :int          # number of gaps of bad data in the signal
+        num_secs      :float        # number of seconds of bad data in the signal
+        """
 schema.spawn_missing_classes()
