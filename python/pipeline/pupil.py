@@ -46,6 +46,7 @@ class Eye(dj.Imported):
     preview_frames              : longblob  # 16 preview frames
     eye_ts=CURRENT_TIMESTAMP    : timestamp
     """
+
     @property
     def key_source(self):
         return experiment.Scan() & experiment.Scan.EyeVideo().proj()
@@ -416,7 +417,8 @@ class ManuallyTrackedContours(dj.Manual, AutoPopulate):
         tracker.contours_detected = np.array([e is not None for e in contours])
         try:
             tracker.run()
-        except:
+        except Exception as e:
+            print(str(e))
             answer = input('Tracker crashed. Do you want to save the content anyway [y/n]?').lower()
             while answer not in ['y', 'n']:
                 answer = input('Tracker crashed. Do you want to save the content anyway [y/n]?').lower()
