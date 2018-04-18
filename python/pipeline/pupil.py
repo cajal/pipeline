@@ -382,29 +382,47 @@ class ManuallyTrackedContours(dj.Manual, AutoPopulate):
         contour=NULL             : longblob      # eye contour relative to ROI
         """
 
+    class Parameter(dj.Part):
+        definition = """
+        -> master.Frame
+        ---
+        roi=NULL                : longblob  # roi of eye
+        gauss_blur=NULL         : float     # bluring of ROI
+        exponent=NULL           : tinyint   # exponent for contrast enhancement
+        dilation_iter=NULL      : tinyint   # number of dilation and erosion operations
+        min_contour_len=NULL    : tinyint   # minimal contour length
+        running_avg_mix=NULL    : float     # weight a in a * current_frame + (1-a) * running_avg 
+        """
+
     def make(self, key):
         print("Populating", key)
 
         avi_path = (Eye() & key).get_video_path()
 
         tracker = ManualTracker(avi_path)
-        # try:
-        tracker.run()
-        # except:
-        #     answer = input('Tracker crashed. Do you want to save the content anyway [y/n]?').lower()
-        #     while answer not in ['y', 'n']:
-        #         answer = input('Tracker crashed. Do you want to save the content anyway [y/n]?').lower()
-        #     if answer == 'n':
-        #         raise
-        # TODO: fix mixing log
-        self.insert1(dict(key, min_lambda=tracker._mixing_log[tracker._mixing_log > 0].min()))
+        try:
+            tracker.run()
+        except:
+            answer = input('Tracker crashed. Do you want to save the content anyway [y/n]?').lower()
+            while answer not in ['y', 'n']:
+                answer = input('Tracker crashed. Do you want to save the content anyway [y/n]?').lower()
+            if answer == 'n':
+                raise
+
+        logtrace = tracker.mixing_constant.logtrace.astype(float)
+        self.insert1(dict(key, min_lambda=logtrace[logtrace > 0].min()))
         frame = self.Frame()
-        for frame_id, ok, contour in tqdm(zip(count(), tracker.contours_detected, tracker.contours),
+        parameters = self.Parameter()
+        for frame_id, ok, contour, params in tqdm(zip(count(), tracker.contours_detected, tracker.contours,
+                                              tracker.parameter_iter()),
                                           total=len(tracker.contours)):
+            assert frame_id == params['frame_id']
             if ok:
                 frame.insert1(dict(key, frame_id=frame_id, contour=contour))
             else:
                 frame.insert1(dict(key, frame_id=frame_id))
+            parameters.insert1(dict(key, **params), ignore_extra_fields=True)
+
 
 
     def update(self, key):
@@ -429,15 +447,20 @@ class ManuallyTrackedContours(dj.Manual, AutoPopulate):
             with dj.config(safe__mode=False):
                 with self.connection.transaction:
                     (self & key).delete()
-                    self.insert1(dict(key, min_lambda=tracker._mixing_log[tracker._mixing_log > 0].min()))
+
+                    logtrace = tracker.mixing_constant.logtrace.astype(float)
+                    self.insert1(dict(key, min_lambda=logtrace[logtrace > 0].min()))
                     frame = self.Frame()
-                    for frame_id, ok, contour in tqdm(zip(count(), tracker.contours_detected, tracker.contours),
-                                                          total=len(tracker.contours)):
+                    parameters = self.Parameter()
+                    for frame_id, ok, contour, params in tqdm(zip(count(), tracker.contours_detected, tracker.contours,
+                                                                  tracker.parameter_iter()),
+                                                              total=len(tracker.contours)):
+                        assert frame_id == params['frame_id']
                         if ok:
                             frame.insert1(dict(key, frame_id=frame_id, contour=contour))
                         else:
                             frame.insert1(dict(key, frame_id=frame_id))
-
+                        parameters.insert1(dict(key, **params), ignore_extra_fields=True)
 @schema
 class FittedContour(dj.Computed):
     definition = """
