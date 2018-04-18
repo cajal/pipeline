@@ -1,5 +1,6 @@
 from collections import defaultdict
 from itertools import count
+from operator import attrgetter
 
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -472,8 +473,11 @@ class Parameter:
         print(self.name, 'new value:', self._value)
 
     def log(self, i):
-        print(self.name, i, self.value)
         self._log[i] = self.value
+
+    @property
+    def logtrace(self):
+        return np.array(self._log)
 
     def flush_log(self):
         if self.log_size is not None:
@@ -565,7 +569,7 @@ class ManualTracker:
         self.power = Parameter(name='exponent', value=3, min=1, max=10)
         self.dilation_iter = Parameter(name='dilation_iter', value=7, min=1, max=20)
         self.min_contour_len = Parameter(name='min_contour_len', value=10, min=5, max=50)
-        self.mixing_constant = Parameter(name='current_mean_weight', value=1., min=.1, max=1.,
+        self.mixing_constant = Parameter(name='running_avg_mix', value=1., min=.1, max=1.,
                                          set_transform=lambda x: x/10)
 
         self.roi_start = None
@@ -573,6 +577,8 @@ class ManualTracker:
 
         self.t0 = 0
         self.t1 = None
+        self.window_size = 1000
+        self.scroll_window = False
 
         self.dilation_kernel = np.ones((3, 3))
 
@@ -688,6 +694,11 @@ class ManualTracker:
         elif key == ord('t'):
             self.focus_window()
             return True
+        elif key == ord('w'):
+            self.scroll_window = ~self.scroll_window
+            self.t0 = max(0, self._frame_number - self.window_size)
+            self.t1 = min(self._n_frames, self.t0 + self.window_size)
+            return True
 
         return True
 
@@ -705,6 +716,7 @@ class ManualTracker:
         h       : toggle help
         m       : toggle mask mode
         t       : focus window on cursor
+        w       : toggle scrolling window
         
         MOUSE:  
         middle drag               : drag ROI
@@ -847,6 +859,14 @@ class ManualTracker:
             graph = cv2.line(graph, (x, 0), (x, height), (0, 255, 0), 2)
         cv2.imshow(self.GRAPH_WINDOW, graph)
 
+    def parameter_names(self):
+        return tuple(p.name for p in self.parameters)
+
+    def parameter_iter(self):
+        names = self.parameter_names()
+        for frame_number, *params in zip(count(), *map(attrgetter('logtrace'), self.parameters)):
+            yield dict(zip(names, params), frame_id=frame_number)
+
     def run(self):
         self._cap = cap = cv2.VideoCapture(self.videofile)
 
@@ -868,7 +888,6 @@ class ManualTracker:
             self.contours_detected = np.zeros(self._n_frames, dtype=bool)
             self.contours = np.zeros(self._n_frames, dtype=object)
             self.contours[:] = None
-        self._mixing_log = np.zeros(self._n_frames)
 
         while cap.isOpened():
             if self._frame_number >= self._n_frames - 1:
@@ -878,6 +897,10 @@ class ManualTracker:
 
             self.log_parameters(self._frame_number)
             ret, frame = self.read_frame()
+
+            if self.scroll_window and not self.pause:
+                self.t0 += 1
+                self.t1 += 1
 
             if ret and not self.skip and self.roi_start is not None and self.roi_end is not None:
                 cv2.rectangle(frame, self.roi_start, self.roi_end, (0, 255, 255), 2)
