@@ -511,6 +511,7 @@ class ManualTracker:
         cv2.namedWindow(self.MAIN_WINDOW)
         cv2.namedWindow(self.GRAPH_WINDOW)
         self.add_track_bar("mask brush size", self.brush)
+        self.add_track_bar("frame tolerance", self.frame_tolerance)
         self.add_track_bar("Gaussian blur filter half width", self.blur)
         self.add_track_bar("Exponent", self.power)
         self.add_track_bar("erosion/dilation iterations", self.dilation_iter)
@@ -571,6 +572,9 @@ class ManualTracker:
         self.min_contour_len = Parameter(name='min_contour_len', value=10, min=5, max=50)
         self.mixing_constant = Parameter(name='running_avg_mix', value=1., min=.1, max=1.,
                                          set_transform=lambda x: x/10)
+        self.frame_tolerance = Parameter(name='frame_tolerance', value=0, min=0, max=5)
+
+        self._skipped_frames = 0
 
         self.roi_start = None
         self.roi_end = None
@@ -739,6 +743,9 @@ class ManualTracker:
         cv2.putText(img, "Mask Mode {}".format('MERGE' if self.mask_mode == self.MERGE else 'BLOCK'),
                     (500, 30), font,
                     fs, (0, 140, 255), 2)
+        cv2.putText(img, "Skipped Frames {}/{}".format(self._skipped_frames, self.frame_tolerance.value),
+                    (700, 30), font,
+                    fs, (127, 255, 127), 2)
         if self.skip:
             cv2.putText(img, "Skip", (10, 70), font, fs, (0, 0, 255), 2)
         if self.help:
@@ -928,14 +935,20 @@ class ManualTracker:
                     cv2.drawContours(small_gray, contours, -1, (127, 127, 127), 3,
                                      offset=tuple(-self.roi.value[::-1, 0]))
                     if len(contours) > 1:
-                        self.pause = True
+                        if not self.pause:
+                            self._skipped_frames += 1
+                        if self._skipped_frames > self.frame_tolerance.value:
+                            self.pause = True
                     elif len(contours) == 1:
+                        self._skipped_frames = 0
                         area = np.zeros_like(small_gray)
                         area = cv2.drawContours(area, contours, -1, (255), thickness=cv2.FILLED,
                                                 offset=tuple(-self.roi.value[::-1, 0]))
                         self.area[self._frame_number] = (area > 0).sum()
                         self.contours_detected[self._frame_number] = True
                         self.contours[self._frame_number] = contours[0]
+                    else:
+                        self._skipped_frames = 0
 
                     cv2.imshow(self.ROI_WINDOW, small_gray)
                     cv2.imshow(self.THRESHOLDED_WINDOW, thres)
