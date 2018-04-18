@@ -351,7 +351,6 @@ class PupilTracker:
     def track(self, videofile, eye_roi, display=False):
         contrast_low = self._params['contrast_threshold']
         mask_kernel = np.ones((3, 3))
-        dilation_iter = 10
 
         print("Tracking videofile", videofile)
         cap = cv2.VideoCapture(videofile)
@@ -401,7 +400,7 @@ class PupilTracker:
                 mask = np.zeros(small_mask.shape, dtype=np.uint8)
                 cv2.ellipse(mask, tuple(self._last_ellipse), (255), thickness=cv2.FILLED)
                 # cv2.drawContours(mask, [self._last_contour], -1, (255), thickness=cv2.FILLED)
-                mask = cv2.dilate(mask, mask_kernel, iterations=dilation_iter)
+                mask = cv2.dilate(mask, mask_kernel, iterations=self.dilation_iter.value)
                 thres *= mask
             thres *= small_mask
 
@@ -449,15 +448,15 @@ def adjust_gamma(image, gamma=1.0):
 
 
 class Parameter:
-    def __init__(self, name, value, min=None, max=None, log_size=None, set_transform=None, get_transform=None):
+    def __init__(self, name, value, min=None, max=None, log_size=None,
+                 set_transform=None, get_transform=None):
         self._value = value
         self.name = name
         self.min = min
         self.max = max
         self.log_size = log_size
         self.set_transform = set_transform if set_transform is not None else lambda x: x
-        self.get_transform = get_transform if set_transform is not None else lambda x: x
-
+        self.get_transform = get_transform if get_transform is not None else lambda x: x
         self.flush_log()
 
     @property
@@ -470,8 +469,10 @@ class Parameter:
             self._value = max(self.min, self._value)
         if self.max is not None:
             self._value = min(self._value, self.max)
+        print(self.name, 'new value:', self._value)
 
     def log(self, i):
+        print(self.name, i, self.value)
         self._log[i] = self.value
 
     def flush_log(self):
@@ -491,22 +492,27 @@ class ManualTracker:
     MERGE = 1
     BLOCK = 0
 
+    DEBUG = True
+
+    def add_track_bar(self, description, parameter, window=None):
+        cv2.createTrackbar(description,
+                           window if window is not None else self.MAIN_WINDOW,
+                           parameter.value, parameter.max, parameter.set)
+
     def __init__(self, videofile):
         self.reset()
 
         self.videofile = videofile
 
-
         cv2.namedWindow(self.MAIN_WINDOW)
         cv2.namedWindow(self.GRAPH_WINDOW)
-        cv2.createTrackbar("mask brush", self.MAIN_WINDOW, self.brush.value, self.brush.max, self.brush.set)
-        cv2.createTrackbar("Gaussian blur half width", self.MAIN_WINDOW, self.blur, 20, self.set_blur)
-        cv2.createTrackbar("exponent", self.MAIN_WINDOW, self.power, 15, self.set_power)
-        cv2.createTrackbar("erosion/dilation iterations", self.MAIN_WINDOW, self.dilation_iter, 30, self.set_dilation)
-        cv2.createTrackbar("min contour length", self.MAIN_WINDOW, self.min_contour_len, 50, self.set_min_contour)
-        cv2.createTrackbar("10*a in a * new_frame + (1-a) * old_frame", self.MAIN_WINDOW, self._mixing, 10,
-                           self.set_mixing)
-
+        self.add_track_bar("mask brush size", self.brush)
+        self.add_track_bar("Gaussian blur filter half width", self.blur)
+        self.add_track_bar("Exponent", self.power)
+        self.add_track_bar("erosion/dilation iterations", self.dilation_iter)
+        self.add_track_bar("min contour length", self.min_contour_len)
+        cv2.createTrackbar("10x weight of current frame in running avg.", self.MAIN_WINDOW,
+                           int(self.mixing_constant.value*10), 10, self.mixing_constant.set)
 
         cv2.setMouseCallback(self.MAIN_WINDOW, self.mouse_callback)
         cv2.setMouseCallback(self.GRAPH_WINDOW, self.graph_mouse_callback)
@@ -553,24 +559,25 @@ class ManualTracker:
         self.mask_mode = self.BLOCK
 
         # Parameters
-        self.brush = Parameter(name='mouse_wheel', value=20, min=1, max=100)
+        self.brush = Parameter(name='mask_brush_size', value=20, min=1, max=100)
+        self.roi = Parameter(name='roi', value=None)
+        self.blur = Parameter(name='gauss_blur', value=3, min=1, max=20, get_transform=int)
+        self.power = Parameter(name='exponent', value=3, min=1, max=10)
+        self.dilation_iter = Parameter(name='dilation_iter', value=7, min=1, max=20)
+        self.min_contour_len = Parameter(name='min_contour_len', value=10, min=5, max=50)
+        self.mixing_constant = Parameter(name='current_mean_weight', value=1., min=.1, max=1.,
+                                         set_transform=lambda x: x/10)
 
         self.roi_start = None
         self.roi_end = None
-        self.roi = Parameter(name='roi', value=None)
 
         self.t0 = 0
         self.t1 = None
 
-        self.blur = 3
-        self.power = 3
-
-        self.dilation_iter = 7
         self.dilation_kernel = np.ones((3, 3))
 
         self.histogram_equalize = False
 
-        self.min_contour_len = 10
         self.skip = False
 
         self.help = True
@@ -578,10 +585,24 @@ class ManualTracker:
         self.dsize = None
 
         self._running_mean = None
-        self._mixing_resolution = 10
-        self._mixing = self._mixing_resolution
 
-        self._blink_thres = 3
+        self.parameters = []
+        for e in self.__dict__.values():
+            if isinstance(e, Parameter):
+                self.parameters.append(e)
+
+    def set_log_size(self, n):
+        for p in self.parameters:
+            p.log_size = n
+
+    def flush_parameter_log(self):
+        for p in self.parameters:
+            p.flush_log()
+
+    def log_parameters(self, i):
+        for p in self.parameters:
+            p.log(i)
+
 
     def mouse_callback(self, event, x, y, flags, param):
         if self._scale_factor is not None:
@@ -603,8 +624,6 @@ class ManualTracker:
             x = np.vstack((self.roi_start, self.roi_end))
             tmp = np.hstack((x.min(axis=0), x.max(axis=0)))
             self.roi.set(np.asarray([[tmp[1], tmp[3]], [tmp[0], tmp[2]]], dtype=int) + 1)
-            print('Set ROI to', self.roi.value)
-
 
     def graph_mouse_callback(self, event, x, y, flags, param):
         t0, t1 = self.t0, self.t1
@@ -671,32 +690,6 @@ class ManualTracker:
             return True
 
         return True
-
-    def set_mixing(self, mixing):
-        self._mixing = min(max(1, mixing), 10)
-
-    @property
-    def running_avg_mix(self):
-        return self._mixing / 10
-
-    def set_brush(self, brush):
-        self.brush = brush
-
-    def set_blur(self, blur):
-        self.blur = blur
-
-    def set_power(self, power):
-        self.power = power
-
-    def set_blink_threshold(self, d):
-        self._blink_thres = max(1, d)
-
-    def set_dilation(self, d):
-        self.dilation_iter = d
-
-    def set_min_contour(self, m):
-        self.min_contour_len = max(m, 5)
-        print('Setting min contour length to', self.min_contour_len)
 
     help_text = """
         KEYBOARD:
@@ -766,10 +759,10 @@ class ManualTracker:
             return ret, frame.copy()
 
     def preprocess_image(self, frame):
-        h = int(self.blur)
+        h = self.blur.value
 
-        if self.power > 1:
-            frame = np.array(frame / 255) ** self.power * 255
+        if self.power.value > 1:
+            frame = np.array(frame / 255) ** self.power.value * 255
             frame = frame.astype(np.uint8)
 
         if self.histogram_equalize:
@@ -778,14 +771,14 @@ class ManualTracker:
         if self._running_mean is None or frame.shape != self._running_mean.shape:
             self._running_mean = np.array(frame)
         elif not self.pause:
-            a = self.running_avg_mix
+            a = self.mixing_constant.value
             self._running_mean = np.uint8(a * frame + (1 - a) * self._running_mean)
             frame = np.array(self._running_mean)
 
         blur = cv2.GaussianBlur(frame, (2 * h + 1, 2 * h + 1), 0)
         _, thres = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        mask = cv2.erode(thres, self.dilation_kernel, iterations=self.dilation_iter)
-        mask = cv2.dilate(mask, self.dilation_kernel, iterations=int(self.dilation_factor * self.dilation_iter))
+        mask = cv2.erode(thres, self.dilation_kernel, iterations=self.dilation_iter.value)
+        mask = cv2.dilate(mask, self.dilation_kernel, iterations=int(self.dilation_factor * self.dilation_iter.value))
 
         return thres, blur, mask
 
@@ -811,7 +804,7 @@ class ManualTracker:
 
             contours = ([cv2.convexHull(np.vstack(merge))] if len(merge) > 0 else []) + other
 
-        contours = [c + self.roi.value[::-1, 0][None, None, :] for c in contours if len(c) >= self.min_contour_len]
+        contours = [c + self.roi.value[::-1, 0][None, None, :] for c in contours if len(c) >= self.min_contour_len.value]
 
         return contours
 
@@ -842,7 +835,6 @@ class ManualTracker:
         graph = (self.contours_detected[idx].astype(np.float) * 255)[None, :, None]
         graph = np.tile(graph, (height, 1, 3)).astype(np.uint8)
 
-
         area = self.normalize_graph(self.area[idx])
 
         detected = self.contours_detected[idx]
@@ -859,6 +851,10 @@ class ManualTracker:
         self._cap = cap = cv2.VideoCapture(self.videofile)
 
         self._n_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+
+        self.set_log_size(self._n_frames)
+        self.flush_parameter_log()
+
         self._frame_number = 0
         self.update_frame = True  # ensure correct starting conditions
         self.t0 = 0
@@ -880,11 +876,13 @@ class ManualTracker:
                     print("Reached end of videofile. Press Q to exit. Or go back to fix stuff.", self.videofile)
                 self.pause = True
 
+            self.log_parameters(self._frame_number)
             ret, frame = self.read_frame()
 
             if ret and not self.skip and self.roi_start is not None and self.roi_end is not None:
                 cv2.rectangle(frame, self.roi_start, self.roi_end, (0, 255, 255), 2)
-                small_gray = cv2.cvtColor(frame[slice(*self.roi.value[0]), slice(*self.roi.value[1]), :], cv2.COLOR_BGR2GRAY)
+                small_gray = cv2.cvtColor(frame[slice(*self.roi.value[0]), slice(*self.roi.value[1]), :],
+                                          cv2.COLOR_BGR2GRAY)
 
                 try:
                     thres, small_gray, dilation_mask = self.preprocess_image(small_gray)
@@ -894,6 +892,8 @@ class ManualTracker:
                     self.goto_frame(self._frame_number - 10)
                     self.roi_start = self.roi_end = self.roi = None
                     self.pause = True
+                    if self.DEBUG:
+                        raise
                 else:
                     if self._mask is not None:
                         small_mask = self._mask[slice(*self.roi.value[0]), slice(*(self.roi.value[1] + 1)), 0]
@@ -902,7 +902,8 @@ class ManualTracker:
 
                     contours = self.find_contours(thres)
                     cv2.drawContours(frame, contours, -1, (0, 255, 0), 3)
-                    cv2.drawContours(small_gray, contours, -1, (127, 127, 127), 3, offset=tuple(-self.roi.value[::-1, 0]))
+                    cv2.drawContours(small_gray, contours, -1, (127, 127, 127), 3,
+                                     offset=tuple(-self.roi.value[::-1, 0]))
                     if len(contours) > 1:
                         self.pause = True
                     elif len(contours) == 1:
@@ -915,7 +916,6 @@ class ManualTracker:
 
                     cv2.imshow(self.ROI_WINDOW, small_gray)
                     cv2.imshow(self.THRESHOLDED_WINDOW, thres)
-            self._mixing_log[self._frame_number] = self.running_avg_mix
 
             # --- plotting
             if self._merge_mask is not None:
@@ -933,7 +933,6 @@ class ManualTracker:
             frame = cv2.resize(frame, self.dsize)
             cv2.imshow(self.MAIN_WINDOW, frame)
             self.plot_area()
-
 
             if not self.process_key(cv2.waitKey(5) & 0xFF):
                 break
