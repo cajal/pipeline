@@ -4,6 +4,7 @@ from itertools import count
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
+from tqdm import tqdm
 
 from ..exceptions import PipelineException
 
@@ -454,6 +455,9 @@ class ManualTracker:
     progress_window = "Progress"
     graph_window = "Area"
 
+    MERGE = 1
+    BLOCK = 0
+
     def __init__(self, videofile):
         self.reset()
 
@@ -482,6 +486,7 @@ class ManualTracker:
 
         self.update_frame = True  # must be true to ensure correct starting conditions
         self.contours_detected = None
+        self.contours = None
         self.area = None
         self._progress_len = 800
         self._progress_height = 100
@@ -489,15 +494,68 @@ class ManualTracker:
 
         self.dilation_factor = 1.3
 
+    def recompute_area(self):
+        print('Recomputing areas')
+        assert self.contours is not None, 'contours must not be None'
+        assert self.contours_detected is not None, 'contours_detected must not be None'
+
+        self.area = np.zeros(len(self.contours))
+        _, frame = self.read_frame()
+        area = np.zeros(frame.shape[:2], dtype=np.uint8)
+        for i, c, ok  in tqdm(zip(count(), self.contours, self.contours_detected), total=len(self.area)):
+            area = cv2.drawContours(area, [c], -1, (255), thickness=cv2.FILLED)
+            self.area[i] = (area > 0).sum()
+            area *= 0
+        self.plot_area()
+
+    def reset(self):
+        self.pause = False
+        self.step = 50
+        self._cap = None
+        self._frame_number = None
+        self._n_frames = None
+        self._last_frame = None
+        self._mask = None
+        self._merge_mask = None
+        self.mask_mode = self.BLOCK
+        self.brush = 20
+        self.jump_frame = 0
+
+        self.start = None
+        self.end = None
+        self.roi = None
+
+        self.t0 = 0
+        self.t1 = None
+
+        self.blur = 3
+        self.power = 3
+
+        self.dilation_iter = 7
+        self.dilation_kernel = np.ones((3, 3))
+
+        self.histogram_equalize = False
+
+        self.min_contour_len = 10
+        self.skip = False
+
+        self.help = True
+        self._scale_factor = None
+        self.dsize = None
+
     def mouse_callback(self, event, x, y, flags, param):
         if self._scale_factor is not None:
             x, y = map(int, (i / self._scale_factor for i in (x, y)))
         if event == cv2.EVENT_MBUTTONDOWN:
-            if self._mask is not None:
-                cv2.circle(self._mask, (x, y), self.brush, (0, 0, 0), -1)
+            mask = self._mask if self.mask_mode == self.BLOCK else self._merge_mask
+            color = (0, 0, 0) if self.mask_mode == self.BLOCK else (255, 255, 255)
+            if mask is not None:
+                cv2.circle(mask, (x, y), self.brush, color, -1)
         elif event == cv2.EVENT_RBUTTONDOWN:
-            if self._mask is not None:
-                cv2.circle(self._mask, (x, y), self.brush, (255, 255, 255), -1)
+            mask = self._mask if self.mask_mode == self.BLOCK else self._merge_mask
+            color = (0, 0, 0) if self.mask_mode == self.MERGE else (255, 255, 255)
+            if mask is not None:
+                cv2.circle(mask, (x, y), self.brush, color, -1)
         elif event == cv2.EVENT_LBUTTONDOWN:
             self.start = (x, y)
         elif event == cv2.EVENT_LBUTTONUP:
@@ -537,39 +595,6 @@ class ManualTracker:
             self.contours_detected[t0:t1] = False
             self.contours[t0:t1] = None
 
-    def reset(self):
-        self.pause = False
-        self.step = 50
-        self._cap = None
-        self._frame_number = None
-        self._n_frames = None
-        self._last_frame = None
-        self._mask = None
-        self.brush = 20
-        self.jump_frame = 0
-
-        self.start = None
-        self.end = None
-        self.roi = None
-
-        self.t0 = 0
-        self.t1 = None
-
-        self.blur = 3
-        self.power = 3
-
-        self.dilation_iter = 7
-        self.dilation_kernel = np.ones((3, 3))
-
-        self.histogram_equalize = False
-
-        self.min_contour_len = 10
-        self.skip = False
-
-        self.help = True
-        self._scale_factor = None
-        self.dsize = None
-
     def set_brush(self, brush):
         self.brush = brush
 
@@ -603,6 +628,7 @@ class ManualTracker:
         j       : jump to jump frame
         e       : toggle histogram equalization
         h       : toggle help
+        m       : toggle mask mode
         
         MOUSE:  
         drag                      : drag ROI
@@ -645,6 +671,7 @@ class ManualTracker:
             self.goto_frame(self._frame_number + 1)
         elif key == ord('c'):
             self._mask = np.ones_like(self._mask) * 255
+            self._merge_mask = np.zeros_like(self._merge_mask)
         elif key == ord('f'):
             print('Resetting jump frame')
             self.jump_frame = 0
@@ -657,6 +684,9 @@ class ManualTracker:
             self.goto_frame(self.jump_frame)
         elif key == ord('h'):
             self.help = not self.help
+            return True
+        elif key == ord('m'):
+            self.mask_mode = self.MERGE if self.mask_mode == self.BLOCK else self.BLOCK
             return True
 
         return True
@@ -671,6 +701,9 @@ class ManualTracker:
         else:
             cv2.putText(img, "NOT OK", (200, 30), font, fs, (0, 0, 255), 2)
         cv2.putText(img, "Jump Frame {}".format(self.jump_frame), (300, 30), font, fs, (255, 144, 30), 2)
+        cv2.putText(img, "Mask Mode {}".format('MERGE' if self.mask_mode == self.MERGE else 'BLOCK'),
+                    (500, 30), font,
+                    fs, (0, 140, 255), 2)
         if self.skip:
             cv2.putText(img, "Skip", (10, 70), font, fs, (0, 0, 255), 2)
         if self.help:
@@ -690,6 +723,8 @@ class ManualTracker:
             self._last_frame = ret, frame
             if self._mask is None:
                 self._mask = np.ones_like(frame) * 255
+            if self._merge_mask is None:
+                self._merge_mask = np.zeros_like(frame)
 
             self._last_frame = ret, frame
             if ret and frame is not None:
@@ -721,8 +756,25 @@ class ManualTracker:
                                                   cv2.CHAIN_APPROX_SIMPLE)  # remove copy when cv2=3.2 is installed
         if len(contours) > 1:
             contours = [c for i, c in enumerate(contours) if hierarchy[0, i, 3] == -1]
-        contours = [c + self.roi[::-1, 0][None, None, :] for c in contours if len(c) >= self.min_contour_len]
         contours = [cv2.convexHull(c) for c in contours]
+
+        if len(contours) > 1 and self._merge_mask is not None and np.any(self._merge_mask > 0):
+            small_merge_mask = self._merge_mask[slice(*self.roi[0]), slice(*(self.roi[1] + 1)), 0]
+            merge = []
+            other = []
+            for i in range(len(contours)):
+                tmp = np.zeros_like(thres)
+                cv2.drawContours(tmp, contours, i, (255), thickness=cv2.FILLED)
+                cv2.bitwise_and(tmp, small_merge_mask, dst=tmp)
+                if tmp.sum() > 0:
+                    merge.append(contours[i])
+                else:
+                    other.append(contours[i])
+
+            contours = [cv2.convexHull(np.vstack(merge))] + other
+
+        contours = [c + self.roi[::-1, 0][None, None, :] for c in contours if len(c) >= self.min_contour_len]
+
         return contours
 
     def goto_frame(self, no):
@@ -754,12 +806,18 @@ class ManualTracker:
         self._n_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         self._frame_number = 0
         self.update_frame = True  # ensure correct starting conditions
-        self.contours_detected = np.zeros(self._n_frames, dtype=bool)
-        self.contours = np.zeros(self._n_frames, dtype=object)
-        self.area = np.zeros(self._n_frames)
-        self.contours[:] = None
         self.t0 = 0
         self.t1 = self._n_frames
+
+        if self.contours_detected is not None and self.contours_detected is not None:
+            self.recompute_area()
+            self.pause = True
+        else:
+            self.area = np.zeros(self._n_frames)
+            self.contours_detected = np.zeros(self._n_frames, dtype=bool)
+            self.contours = np.zeros(self._n_frames, dtype=object)
+            self.contours[:] = None
+
 
         while cap.isOpened():
             if self._frame_number >= self._n_frames - 1:
@@ -801,8 +859,14 @@ class ManualTracker:
                     cv2.imshow(self.roi_window, small_gray)
                     cv2.imshow(self.thres_window, thres)
 
-
             # --- plotting
+            if self._merge_mask is not None:
+                if np.any(self._merge_mask > 0):
+                    tm = cv2.cvtColor(self._merge_mask, cv2.COLOR_BGR2GRAY)
+                    _, tm = cv2.threshold(tm, 127, 255, cv2.THRESH_BINARY)
+                    _, mcontours, _ = cv2.findContours(tm, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+                    cv2.drawContours(frame, mcontours, -1, (0, 140, 255), thickness=3)
+
             self.display_frame_number(frame)
             cv2.bitwise_and(frame, self._mask, dst=frame)
             if self._scale_factor is None:
