@@ -1,11 +1,12 @@
 from collections import defaultdict
 from itertools import count
 from operator import attrgetter
-
+from os import path as op
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
 from tqdm import tqdm
+import pickle
 
 from ..exceptions import PipelineException
 
@@ -76,8 +77,6 @@ class CVROIGrabber:
                 self.mask = 0 * self.mask + 1
 
         elif event == cv2.EVENT_MBUTTONDOWN:
-            img = np.asarray(self.img / self.img.max(), dtype=float)
-
             self.mask[(self.X - y) ** 2 + (self.Y - x) ** 2 < self.r ** 2] = 0.
             self.draw_img[(self.X - y) ** 2 + (self.Y - x) ** 2 < self.r ** 2] = 0.
             cv2.imshow('real image', self.draw_img)
@@ -447,6 +446,11 @@ def adjust_gamma(image, gamma=1.0):
     # apply gamma correction using the lookup table
     return cv2.LUT(image, table)
 
+def identity(x):
+    return x
+
+def div10(x):
+    return x/10
 
 class Parameter:
     def __init__(self, name, value, min=None, max=None, log_size=None,
@@ -456,8 +460,8 @@ class Parameter:
         self.min = min
         self.max = max
         self.log_size = log_size
-        self.set_transform = set_transform if set_transform is not None else lambda x: x
-        self.get_transform = get_transform if get_transform is not None else lambda x: x
+        self.set_transform = set_transform if set_transform is not None else identity
+        self.get_transform = get_transform if get_transform is not None else identity
         self.flush_log()
 
     @property
@@ -503,11 +507,31 @@ class ManualTracker:
                            window if window is not None else self.MAIN_WINDOW,
                            parameter.value, parameter.max, parameter.set)
 
+    @staticmethod
+    def from_backup(file):
+        trk = pickle.load(open(file, 'rb'))
+        trk.register_callbacks()
+        return trk
+
     def __init__(self, videofile):
         self.reset()
 
         self.videofile = videofile
 
+        self.register_callbacks()
+
+        self.update_frame = True  # must be true to ensure correct starting conditions
+        self.contours_detected = None
+        self.contours = None
+        self.area = None
+        self._mixing_log = None
+        self._progress_len = 800
+        self._progress_height = 100
+        self._width = 800
+
+        self.dilation_factor = 1.3
+
+    def register_callbacks(self):
         cv2.namedWindow(self.MAIN_WINDOW)
         cv2.namedWindow(self.GRAPH_WINDOW)
         self.add_track_bar("mask brush size", self.brush)
@@ -522,16 +546,6 @@ class ManualTracker:
         cv2.setMouseCallback(self.MAIN_WINDOW, self.mouse_callback)
         cv2.setMouseCallback(self.GRAPH_WINDOW, self.graph_mouse_callback)
 
-        self.update_frame = True  # must be true to ensure correct starting conditions
-        self.contours_detected = None
-        self.contours = None
-        self.area = None
-        self._mixing_log = None
-        self._progress_len = 800
-        self._progress_height = 100
-        self._width = 800
-
-        self.dilation_factor = 1.3
 
     def recompute_area(self):
         print('Recomputing areas')
@@ -571,7 +585,7 @@ class ManualTracker:
         self.dilation_iter = Parameter(name='dilation_iter', value=7, min=1, max=20)
         self.min_contour_len = Parameter(name='min_contour_len', value=10, min=5, max=50)
         self.mixing_constant = Parameter(name='running_avg_mix', value=1., min=.1, max=1.,
-                                         set_transform=lambda x: x/10)
+                                         set_transform=div10)
         self.frame_tolerance = Parameter(name='frame_tolerance', value=0, min=0, max=5)
 
         self._skipped_frames = 0
@@ -595,6 +609,11 @@ class ManualTracker:
         self.dsize = None
 
         self._running_mean = None
+
+        self.backup_interval = 1000
+        self.backup_file = '/tmp/tracker.pkl'
+
+        self._drag = False
 
         self.parameters = []
         for e in self.__dict__.values():
@@ -629,11 +648,19 @@ class ManualTracker:
                 cv2.circle(mask, (x, y), self.brush.value, color, -1)
         elif event == cv2.EVENT_MBUTTONDOWN:
             self.roi_start = (x, y)
+            self._drag = True
+        elif event == cv2.EVENT_MOUSEMOVE and self._drag:
+            self.roi_end = (x, y)
         elif event == cv2.EVENT_MBUTTONUP:
             self.roi_end = (x, y)
-            x = np.vstack((self.roi_start, self.roi_end))
-            tmp = np.hstack((x.min(axis=0), x.max(axis=0)))
-            self.roi.set(np.asarray([[tmp[1], tmp[3]], [tmp[0], tmp[2]]], dtype=int) + 1)
+            self._drag = False
+            if self.roi_end[0] != self.roi_start[0] and self.roi_end[1] != self.roi_start[1]:
+                x = np.vstack((self.roi_start, self.roi_end))
+                tmp = np.hstack((x.min(axis=0), x.max(axis=0)))
+                self.roi.set(np.asarray([[tmp[1], tmp[3]], [tmp[0], tmp[2]]], dtype=int) + 1)
+            else:
+                print('ROI endpoints are not different Paul! Setting ROI to None!')
+                self.roi.set(None)
 
     def graph_mouse_callback(self, event, x, y, flags, param):
         t0, t1 = self.t0, self.t1
@@ -874,7 +901,15 @@ class ManualTracker:
         for frame_number, *params in zip(count(), *map(attrgetter('logtrace'), self.parameters)):
             yield dict(zip(names, params), frame_id=frame_number)
 
+    def backup(self):
+        cap = self._cap
+        self._cap = None
+        print('Saving tracker to', self.backup_file)
+        pickle.dump(self, open(self.backup_file, 'wb'), pickle.HIGHEST_PROTOCOL)
+        self._cap = cap
+
     def run(self):
+        iterations = 0
         self._cap = cap = cv2.VideoCapture(self.videofile)
 
         self._n_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
@@ -897,6 +932,11 @@ class ManualTracker:
             self.contours[:] = None
 
         while cap.isOpened():
+            if not self.pause:
+                iterations += 1
+                if iterations % self.backup_interval == self.backup_interval - 1:
+                    self.backup()
+
             if self._frame_number >= self._n_frames - 1:
                 if not self.pause:
                     print("Reached end of videofile. Press Q to exit. Or go back to fix stuff.", self.videofile)
@@ -909,8 +949,10 @@ class ManualTracker:
                 self.t0 += 1
                 self.t1 += 1
 
-            if ret and not self.skip and self.roi_start is not None and self.roi_end is not None:
+            if ret and self.roi_start is not None and self.roi_end is not None:
                 cv2.rectangle(frame, self.roi_start, self.roi_end, (0, 255, 255), 2)
+
+            if ret and not self.skip and self.roi.value is not None:
                 small_gray = cv2.cvtColor(frame[slice(*self.roi.value[0]), slice(*self.roi.value[1]), :],
                                           cv2.COLOR_BGR2GRAY)
 
