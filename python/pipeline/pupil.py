@@ -396,6 +396,7 @@ class ManuallyTrackedContours(dj.Manual, AutoPopulate):
         #         answer = input('Tracker crashed. Do you want to save the content anyway [y/n]?').lower()
         #     if answer == 'n':
         #         raise
+        # TODO: fix mixing log
         self.insert1(dict(key, min_lambda=tracker._mixing_log[tracker._mixing_log > 0].min()))
         frame = self.Frame()
         for frame_id, ok, contour in tqdm(zip(count(), tracker.contours_detected, tracker.contours),
