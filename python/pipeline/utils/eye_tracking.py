@@ -448,13 +448,45 @@ def adjust_gamma(image, gamma=1.0):
     return cv2.LUT(image, table)
 
 
+class Parameter:
+    def __init__(self, name, value, min=None, max=None, log_size=None, set_transform=None, get_transform=None):
+        self._value = value
+        self.name = name
+        self.min = min
+        self.max = max
+        self.log_size = log_size
+        self.set_transform = set_transform if set_transform is not None else lambda x: x
+        self.get_transform = get_transform if set_transform is not None else lambda x: x
+
+        self.flush_log()
+
+    @property
+    def value(self):
+        return self.get_transform(self._value)
+
+    def set(self, val):
+        self._value = self.set_transform(val)
+        if self.min is not None:
+            self._value = max(self.min, self._value)
+        if self.max is not None:
+            self._value = min(self._value, self.max)
+
+    def log(self, i):
+        self._log[i] = self.value
+
+    def flush_log(self):
+        if self.log_size is not None:
+            self._log = [None] * self.log_size
+        else:
+            self._log = None
+
+
 class ManualTracker:
-    main_window = "Main Window"
-    roi_window = "ROI"
-    thres_window = "Thresholded"
-    progress_window = "Progress"
-    graph_window = "Area"
-    gradient_window = "Area Gradient"
+    MAIN_WINDOW = "Main Window"
+    ROI_WINDOW = "ROI"
+    THRESHOLDED_WINDOW = "Thresholded"
+    PROGRESS_WINDOW = "Progress"
+    GRAPH_WINDOW = "Area"
 
     MERGE = 1
     BLOCK = 0
@@ -462,36 +494,22 @@ class ManualTracker:
     def __init__(self, videofile):
         self.reset()
 
-        cv2.namedWindow(self.main_window)
-        cv2.namedWindow(self.graph_window)
-        cv2.namedWindow(self.gradient_window)
-        cv2.createTrackbar("mask brush", self.main_window,
-                           self.brush, 100,
-                           self.set_brush)
-        cv2.createTrackbar("Gaussian blur half width", self.main_window,
-                           self.blur, 20,
-                           self.set_blur)
-        cv2.createTrackbar("exponent", self.main_window,
-                           self.power, 15,
-                           self.set_power)
-        cv2.createTrackbar("erosion/dilation iterations", self.main_window,
-                           self.dilation_iter, 30,
-                           self.set_dilation)
-        cv2.createTrackbar("min contour length", self.main_window,
-                           self.min_contour_len, 50,
-                           self.set_min_contour)
-        cv2.createTrackbar("10*a in a * new_frame + (1-a) * old_frame", self.main_window,
-                           self._mixing, 10,
-                           self.set_mixing)
-        cv2.createTrackbar("blink threshold in std gradient", self.main_window,
-                           self._blink_thres, 8,
-                           self.set_blink_threshold)
         self.videofile = videofile
 
-        cv2.setMouseCallback(self.main_window, self.mouse_callback)
-        cv2.setMouseCallback(self.graph_window, self.graph_mouse_callback)
-        cv2.setMouseCallback(self.gradient_window, self.grad_graph_mouse_callback)
-        # cv2.setMouseCallback(self.progress_window, self.progress_mouse_callback)
+
+        cv2.namedWindow(self.MAIN_WINDOW)
+        cv2.namedWindow(self.GRAPH_WINDOW)
+        cv2.createTrackbar("mask brush", self.MAIN_WINDOW, self.brush.value, self.brush.max, self.brush.set)
+        cv2.createTrackbar("Gaussian blur half width", self.MAIN_WINDOW, self.blur, 20, self.set_blur)
+        cv2.createTrackbar("exponent", self.MAIN_WINDOW, self.power, 15, self.set_power)
+        cv2.createTrackbar("erosion/dilation iterations", self.MAIN_WINDOW, self.dilation_iter, 30, self.set_dilation)
+        cv2.createTrackbar("min contour length", self.MAIN_WINDOW, self.min_contour_len, 50, self.set_min_contour)
+        cv2.createTrackbar("10*a in a * new_frame + (1-a) * old_frame", self.MAIN_WINDOW, self._mixing, 10,
+                           self.set_mixing)
+
+
+        cv2.setMouseCallback(self.MAIN_WINDOW, self.mouse_callback)
+        cv2.setMouseCallback(self.GRAPH_WINDOW, self.graph_mouse_callback)
 
         self.update_frame = True  # must be true to ensure correct starting conditions
         self.contours_detected = None
@@ -529,15 +547,17 @@ class ManualTracker:
         self._frame_number = None
         self._n_frames = None
         self._last_frame = None
+
         self._mask = None
         self._merge_mask = None
         self.mask_mode = self.BLOCK
-        self.brush = 20
-        self.jump_frame = 0
 
-        self.start = None
-        self.end = None
-        self.roi = None
+        # Parameters
+        self.brush = Parameter(name='mouse_wheel', value=20, min=1, max=100)
+
+        self.roi_start = None
+        self.roi_end = None
+        self.roi = Parameter(name='roi', value=None)
 
         self.t0 = 0
         self.t1 = None
@@ -570,20 +590,21 @@ class ManualTracker:
             mask = self._mask if self.mask_mode == self.BLOCK else self._merge_mask
             color = (0, 0, 0) if self.mask_mode == self.BLOCK else (255, 255, 255)
             if mask is not None:
-                cv2.circle(mask, (x, y), self.brush, color, -1)
+                cv2.circle(mask, (x, y), self.brush.value, color, -1)
         elif event == cv2.EVENT_RBUTTONDOWN:
             mask = self._mask if self.mask_mode == self.BLOCK else self._merge_mask
             color = (0, 0, 0) if self.mask_mode == self.MERGE else (255, 255, 255)
             if mask is not None:
-                cv2.circle(mask, (x, y), self.brush, color, -1)
+                cv2.circle(mask, (x, y), self.brush.value, color, -1)
         elif event == cv2.EVENT_MBUTTONDOWN:
-            self.start = (x, y)
+            self.roi_start = (x, y)
         elif event == cv2.EVENT_MBUTTONUP:
-            self.end = (x, y)
-            x = np.vstack((self.start, self.end))
+            self.roi_end = (x, y)
+            x = np.vstack((self.roi_start, self.roi_end))
             tmp = np.hstack((x.min(axis=0), x.max(axis=0)))
-            self.roi = np.asarray([[tmp[1], tmp[3]], [tmp[0], tmp[2]]], dtype=int) + 1
-            print('Set ROI to', self.roi)
+            self.roi.set(np.asarray([[tmp[1], tmp[3]], [tmp[0], tmp[2]]], dtype=int) + 1)
+            print('Set ROI to', self.roi.value)
+
 
     def graph_mouse_callback(self, event, x, y, flags, param):
         t0, t1 = self.t0, self.t1
@@ -591,7 +612,6 @@ class ManualTracker:
         sanitize = lambda t: int(max(min(t, self._n_frames - 1), 0))
         if event == cv2.EVENT_MBUTTONDOWN:
             frame = sanitize(t0 + x / self._progress_len * dt)
-            print('Jumping to frame', frame)
             self.goto_frame(frame)
         elif event == cv2.EVENT_LBUTTONDOWN:
             self.t0_tmp = sanitize(t0 + x / self._progress_len * dt)
@@ -614,40 +634,6 @@ class ManualTracker:
             self.contours_detected[t0:t1] = False
             self.contours[t0:t1] = None
 
-    def grad_graph_mouse_callback(self, event, x, y, flags, param):
-        t0, t1 = self.t0, self.t1
-        dt = t1 - t0
-        sanitize = lambda t: int(max(min(t, self._n_frames - 1), 0))
-        if event == cv2.EVENT_MBUTTONDOWN:
-            frame = sanitize(t0 + x / self._progress_len * dt)
-
-            print('Jumping to frame', frame)
-            self.goto_frame(frame)
-        elif event == cv2.EVENT_LBUTTONDOWN:
-            self.t0_tmp = sanitize(t0 + x / self._progress_len * dt)
-        elif event == cv2.EVENT_LBUTTONUP:
-            t1 = sanitize(t0 + x / self._progress_len * dt)
-            if t1 < self.t0_tmp:
-                self.t0, self.t1 = t1, self.t0_tmp
-            elif self.t0_tmp == t1:
-                self.t0, self.t1 = self.t0_tmp, self.t0_tmp + 1
-            else:
-                self.t0, self.t1 = self.t0_tmp, t1
-        elif event == cv2.EVENT_RBUTTONDOWN:
-            self.del_tmp = sanitize(t0 + x / self._progress_len * dt)
-        elif event == cv2.EVENT_RBUTTONUP:
-            t1 = sanitize(t0 + x / self._progress_len * dt)
-            if t1 < self.del_tmp:
-                t0, t1 = t1, self.del_tmp
-            else:
-                t0, t1 = self.del_tmp, t1
-            self.blink_ignore[t0:t1] = ~np.any(self.blink_ignore[t0:t1])
-            self.blinks[t0:t1] = False
-
-    @property
-    def unprocessed_blinks(self):
-        return self.blinks & ~self.blink_ignore & self.contours_detected
-
     def process_key(self, key):
         if key == ord('q'):
             return False
@@ -663,41 +649,17 @@ class ManualTracker:
         elif key == ord('b'):
             self.goto_frame(self._frame_number - self.step)
             return True
-        elif key == ord('n'):
-            self.goto_frame(self._frame_number + 1)
-            return True
-        elif key == ord('i'):
-            condition = self.unprocessed_blinks
-            if np.any(condition):
-                j = np.where(condition)[0][0]
-                self.t0 = j - 50
-                self.t1 = j + 50
-            return True
         elif key == ord('e'):
             self.histogram_equalize = not self.histogram_equalize
             return True
         elif key == ord('r'):
-            self.start = None
-            self.end = None
+            self.roi_start = None
+            self.roi_end = None
             self.roi = None
             return True
-        elif key == ord('d'):
-            self.contours_detected[self._frame_number] = False
-            self.contours[self._frame_number] = None
-            self.goto_frame(self._frame_number + 1)
         elif key == ord('c'):
             self._mask = np.ones_like(self._mask) * 255
             self._merge_mask = np.zeros_like(self._merge_mask)
-        elif key == ord('f'):
-            print('Resetting jump frame')
-            self.jump_frame = 0
-        elif 48 <= key < 58:
-            self.jump_frame *= 10
-            self.jump_frame += key - 48
-            self.jump_frame = min(self._n_frames, self.jump_frame)
-            print('Jump frame is', self.jump_frame)
-        elif key == ord('j'):
-            self.goto_frame(self.jump_frame)
         elif key == ord('h'):
             self.help = not self.help
             return True
@@ -744,22 +706,16 @@ class ManualTracker:
         a       : reset area
         s       : toggle skip
         b       : jump back 10 frames
-        n       : jump to next frame
         r       : delete roi
-        d       : drop frame
         c       : delete mask
-        f       : reset jump frame
-        [0-9]   : enter number for jump frame
-        j       : jump to jump frame
         e       : toggle histogram equalization
         h       : toggle help
         m       : toggle mask mode
-        i       : jump to first blink
         t       : focus window on cursor
         
         MOUSE:  
-        drag                      : drag ROI
-        middle click              : add to mask
+        middle drag               : drag ROI
+        left click                : add to mask
         right click               : delete from mask 
         middle click in area      : jump to location 
         drag and drop in area     : zoom in 
@@ -775,12 +731,9 @@ class ManualTracker:
             cv2.putText(img, "OK", (200, 30), font, fs, (0, 255, 0), 2)
         else:
             cv2.putText(img, "NOT OK", (200, 30), font, fs, (0, 0, 255), 2)
-        cv2.putText(img, "Jump Frame {}".format(self.jump_frame), (300, 30), font, fs, (255, 144, 30), 2)
         cv2.putText(img, "Mask Mode {}".format('MERGE' if self.mask_mode == self.MERGE else 'BLOCK'),
                     (500, 30), font,
                     fs, (0, 140, 255), 2)
-        if np.any(self.unprocessed_blinks):
-            cv2.putText(img, "Blinks!!!", (700, 30), font, fs, (0, 0, 255), 2)
         if self.skip:
             cv2.putText(img, "Skip", (10, 70), font, fs, (0, 0, 255), 2)
         if self.help:
@@ -844,7 +797,7 @@ class ManualTracker:
         contours = [cv2.convexHull(c) for c in contours]
 
         if len(contours) > 1 and self._merge_mask is not None and np.any(self._merge_mask > 0):
-            small_merge_mask = self._merge_mask[slice(*self.roi[0]), slice(*(self.roi[1] + 1)), 0]
+            small_merge_mask = self._merge_mask[slice(*self.roi.value[0]), slice(*(self.roi.value[1] + 1)), 0]
             merge = []
             other = []
             for i in range(len(contours)):
@@ -858,7 +811,7 @@ class ManualTracker:
 
             contours = ([cv2.convexHull(np.vstack(merge))] if len(merge) > 0 else []) + other
 
-        contours = [c + self.roi[::-1, 0][None, None, :] for c in contours if len(c) >= self.min_contour_len]
+        contours = [c + self.roi.value[::-1, 0][None, None, :] for c in contours if len(c) >= self.min_contour_len]
 
         return contours
 
@@ -881,18 +834,6 @@ class ManualTracker:
             signal = signal / (signal.max() + 1)
         return (height - signal * height).astype(int)
 
-    def detect_blinks(self):
-        gradient = np.hstack((np.diff(self.area), [0]))
-        compute_threshold = np.abs(gradient) > 0
-        if compute_threshold.sum() > 10:
-            thres = self._blink_thres * np.std(gradient[compute_threshold])
-            h = np.ones(11, dtype=bool)
-            h3 = np.ones(3, dtype=bool)
-            self.blinks = np.convolve(gradient < -thres, h, mode='same') & np.convolve(gradient > thres, h, mode='same')
-            idx = np.convolve((self.area == 0) | ~self.contours_detected, h3, mode='same')
-            gradient[idx] = 0
-            self.gradient = gradient
-
     def plot_area(self):
         t0, t1 = self.t0, self.t1
         dt = t1 - t0
@@ -901,36 +842,18 @@ class ManualTracker:
         graph = (self.contours_detected[idx].astype(np.float) * 255)[None, :, None]
         graph = np.tile(graph, (height, 1, 3)).astype(np.uint8)
 
-        grad_graph = np.ones_like(graph) * 255
-        grad_graph[:, self.blink_ignore[idx], :] = 127
 
         area = self.normalize_graph(self.area[idx])
-        gradient = self.normalize_graph(self.gradient[idx], min_zero=False)
-
-        notokblinks = (self.contours_detected & self.blinks & ~self.blink_ignore)[idx]
-        okblinks = (self.contours_detected & self.blinks & self.blink_ignore)[idx]
-        grad_graph[:, notokblinks, 1] = 0
-        grad_graph[:, okblinks, -1] = 0
-        graph[:, notokblinks, -1] = 255
-        graph[:, notokblinks, :-1] = 0
-        graph[:, okblinks, :] = 0
-        graph[:, okblinks, 1] = 255
 
         detected = self.contours_detected[idx]
         for x, y1, y2, det1, det2 in zip(count(), area[:-1], area[1:], detected[:-1], detected[1:]):
             if det1 and det2:
                 graph = cv2.line(graph, (x, y1), (x + 1, y2), (209, 133, 4), thickness=2)
 
-        for x, y1, y2 in zip(count(), gradient[:-1], gradient[1:]):
-            if not np.any(np.isnan([y1, y2])):
-                grad_graph = cv2.line(grad_graph, (x, y1), (x + 1, y2), (144, 128, 112), thickness=2)
-
         if t0 <= self._frame_number <= t1:
             x = int((self._frame_number - t0) / dt * self._progress_len)
             graph = cv2.line(graph, (x, 0), (x, height), (0, 255, 0), 2)
-            grad_graph = cv2.line(grad_graph, (x, 0), (x, height), (0, 255, 0), 2)
-        cv2.imshow(self.graph_window, graph)
-        cv2.imshow(self.gradient_window, grad_graph)
+        cv2.imshow(self.GRAPH_WINDOW, graph)
 
     def run(self):
         self._cap = cap = cv2.VideoCapture(self.videofile)
@@ -946,10 +869,7 @@ class ManualTracker:
             self.pause = True
         else:
             self.area = np.zeros(self._n_frames)
-            self.gradient = np.zeros(self._n_frames)
-            self.blinks = np.zeros(self._n_frames, dtype=bool)
             self.contours_detected = np.zeros(self._n_frames, dtype=bool)
-            self.blink_ignore = np.zeros(self._n_frames, dtype=bool)
             self.contours = np.zeros(self._n_frames, dtype=object)
             self.contours[:] = None
         self._mixing_log = np.zeros(self._n_frames)
@@ -962,9 +882,9 @@ class ManualTracker:
 
             ret, frame = self.read_frame()
 
-            if ret and not self.skip and self.start is not None and self.end is not None:
-                cv2.rectangle(frame, self.start, self.end, (0, 255, 255), 2)
-                small_gray = cv2.cvtColor(frame[slice(*self.roi[0]), slice(*self.roi[1]), :], cv2.COLOR_BGR2GRAY)
+            if ret and not self.skip and self.roi_start is not None and self.roi_end is not None:
+                cv2.rectangle(frame, self.roi_start, self.roi_end, (0, 255, 255), 2)
+                small_gray = cv2.cvtColor(frame[slice(*self.roi.value[0]), slice(*self.roi.value[1]), :], cv2.COLOR_BGR2GRAY)
 
                 try:
                     thres, small_gray, dilation_mask = self.preprocess_image(small_gray)
@@ -972,29 +892,29 @@ class ManualTracker:
                     print('Problems with processing reversing to frame', self._frame_number - 10, 'Please redraw ROI')
                     print('Error message is', str(e))
                     self.goto_frame(self._frame_number - 10)
-                    self.start = self.end = self.roi = None
+                    self.roi_start = self.roi_end = self.roi = None
                     self.pause = True
                 else:
                     if self._mask is not None:
-                        small_mask = self._mask[slice(*self.roi[0]), slice(*(self.roi[1] + 1)), 0]
+                        small_mask = self._mask[slice(*self.roi.value[0]), slice(*(self.roi.value[1] + 1)), 0]
                         cv2.bitwise_and(thres, small_mask, dst=thres)
                         cv2.bitwise_and(thres, dilation_mask, dst=thres)
 
                     contours = self.find_contours(thres)
                     cv2.drawContours(frame, contours, -1, (0, 255, 0), 3)
-                    cv2.drawContours(small_gray, contours, -1, (127, 127, 127), 3, offset=tuple(-self.roi[::-1, 0]))
+                    cv2.drawContours(small_gray, contours, -1, (127, 127, 127), 3, offset=tuple(-self.roi.value[::-1, 0]))
                     if len(contours) > 1:
                         self.pause = True
                     elif len(contours) == 1:
                         area = np.zeros_like(small_gray)
                         area = cv2.drawContours(area, contours, -1, (255), thickness=cv2.FILLED,
-                                                offset=tuple(-self.roi[::-1, 0]))
+                                                offset=tuple(-self.roi.value[::-1, 0]))
                         self.area[self._frame_number] = (area > 0).sum()
                         self.contours_detected[self._frame_number] = True
                         self.contours[self._frame_number] = contours[0]
 
-                    cv2.imshow(self.roi_window, small_gray)
-                    cv2.imshow(self.thres_window, thres)
+                    cv2.imshow(self.ROI_WINDOW, small_gray)
+                    cv2.imshow(self.THRESHOLDED_WINDOW, thres)
             self._mixing_log[self._frame_number] = self.running_avg_mix
 
             # --- plotting
@@ -1011,9 +931,10 @@ class ManualTracker:
                 self._scale_factor = self._width / frame.shape[1]
                 self.dsize = tuple(int(self._scale_factor * s) for s in frame.shape[:2])[::-1]
             frame = cv2.resize(frame, self.dsize)
-            cv2.imshow(self.main_window, frame)
-            self.detect_blinks()
+            cv2.imshow(self.MAIN_WINDOW, frame)
             self.plot_area()
+
+
             if not self.process_key(cv2.waitKey(5) & 0xFF):
                 break
 
