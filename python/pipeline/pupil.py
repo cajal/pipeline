@@ -388,14 +388,14 @@ class ManuallyTrackedContours(dj.Manual, AutoPopulate):
         avi_path = (Eye() & key).get_video_path()
 
         tracker = ManualTracker(avi_path)
-        try:
-            tracker.run()
-        except:
-            answer = input('Tracker crashed. Do you want to save the content anyway [y/n]?').lower()
-            while answer not in ['y', 'n']:
-                answer = input('Tracker crashed. Do you want to save the content anyway [y/n]?').lower()
-            if answer == 'n':
-                raise
+        # try:
+        tracker.run()
+        # except:
+        #     answer = input('Tracker crashed. Do you want to save the content anyway [y/n]?').lower()
+        #     while answer not in ['y', 'n']:
+        #         answer = input('Tracker crashed. Do you want to save the content anyway [y/n]?').lower()
+        #     if answer == 'n':
+        #         raise
         self.insert1(dict(key, min_lambda=tracker._mixing_log[tracker._mixing_log > 0].min()))
         frame = self.Frame()
         for frame_id, ok, contour in tqdm(zip(count(), tracker.contours_detected, tracker.contours),
