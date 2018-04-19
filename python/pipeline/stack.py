@@ -985,7 +985,7 @@ class InitialRegistration(dj.Computed):
         field = mean_image[skip_dims[0] : -skip_dims[0], skip_dims[1]: -skip_dims[1]]
 
         # Apply local contrast normalization (improves contrast and gets rid of big vessels)
-        norm_stack = registration.lcn(stack, np.array([25, 25, 3]) / stack_res)
+        norm_stack = registration.lcn(stack, np.array([3, 25, 25]) / stack_res)
         norm_field = registration.lcn(field, 20 / field_res)
 
         # Rescale to match lowest resolution  (isotropic pixels/voxels)
@@ -1146,7 +1146,7 @@ class FieldRegistration(dj.Computed):
         field = mean_image[skip_dims[0] : -skip_dims[0], skip_dims[1]: -skip_dims[1]]
 
         # Apply local contrast normalization (improves contrast and gets rid of big vessels)
-        norm_stack = registration.lcn(stack, np.array([25, 25, 3]) / stack_res)
+        norm_stack = registration.lcn(stack, np.array([3, 25, 25]) / stack_res)
         norm_field = registration.lcn(field, 20 / field_res)
 
         # Rescale to match lowest resolution  (isotropic pixels/voxels)
