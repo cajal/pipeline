@@ -971,21 +971,27 @@ class InitialRegistration(dj.Computed):
         pipe = reso if reso.ScanInfo() & field_key else meso if meso.ScanInfo() & field_key else None
         mean_image = (pipe.SummaryImages.Average() & field_key).fetch1('average_image')
 
-        # Drop some edges (only y and x) to avoid artifacts
-        skip_dims = [max(1, int(round(s * 0.025))) for s in stack.shape]
-        stack = stack[:, skip_dims[1] : -skip_dims[1], skip_dims[2]: -skip_dims[2]]
-        skip_dims = [max(1, int(round(s * 0.025))) for s in mean_image.shape]
-        field = mean_image[skip_dims[0] : -skip_dims[0], skip_dims[1]: -skip_dims[1]]
-
-        # Rescale to match lowest resolution  (isotropic pixels/voxels)
+        # Get field and stack resolution
         field_res = ((reso.ScanInfo() & field_key).microns_per_pixel if pipe == reso else
                      (meso.ScanInfo.Field() & field_key).microns_per_pixel)
         dims = stack_rel.fetch1('um_depth', 'px_depth', 'um_height', 'px_height',
                                 'um_width', 'px_width')
         stack_res = np.array([dims[0] / dims[1], dims[2] / dims[3], dims[4] / dims[5]])
+
+        # Drop some edges (only x and y) to avoid artifacts and black edges
+        skip_dims = [max(1, int(round(s * 0.025))) for s in stack.shape]
+        stack = stack[:, skip_dims[1] : -skip_dims[1], skip_dims[2]: -skip_dims[2]]
+        skip_dims = [max(1, int(round(s * 0.025))) for s in mean_image.shape]
+        field = mean_image[skip_dims[0] : -skip_dims[0], skip_dims[1]: -skip_dims[1]]
+
+        # Apply local contrast normalization (improves contrast and gets rid of big vessels)
+        norm_stack = registration.lcn(stack, np.array([25, 25, 3]) / stack_res)
+        norm_field = registration.lcn(field, 20 / field_res)
+
+        # Rescale to match lowest resolution  (isotropic pixels/voxels)
         common_res = max(*field_res, *stack_res) # minimum available resolution
-        stack = ndimage.zoom(stack, stack_res / common_res, order=1)
-        field = ndimage.zoom(field, field_res / common_res, order=1)
+        common_stack = ndimage.zoom(norm_stack, stack_res / common_res, order=1)
+        common_field = ndimage.zoom(norm_field, field_res / common_res, order=1)
 
         # Get estimated depth of the field (from experimenters)
         stack_x, stack_y, stack_z = stack_rel.fetch1('x', 'y', 'z') # z of the first slice (zero is at surface depth)
@@ -996,12 +1002,13 @@ class InitialRegistration(dj.Computed):
         estimated_px_z = (field_z - stack_z + 0.5) / common_res # in pixels
 
         # Run rigid registration with no rotations searching 100 microns up and down
-        px_estimate = (0, 0, estimated_px_z - stack.shape[0] / 2) # (0, 0, 0) in center of stack
-        px_range = (0.45 * stack.shape[2], 0.45 * stack.shape[1], 100 / common_res)
-        result = registration.register_rigid(stack, field, px_estimate, px_range)
+        px_estimate = (0, 0, estimated_px_z - common_stack.shape[0] / 2) # (0, 0, 0) in center of stack
+        px_range = (0.45 * common_stack.shape[2], 0.45 * common_stack.shape[1], 100 / common_res)
+        result = registration.register_rigid(common_stack, common_field, px_estimate, px_range)
         score, (x, y, z), _ = result
 
         # Get field in stack (after registration)
+        stack = ndimage.zoom(stack, stack_res / common_res, order=1)
         common_shape = np.round(np.array(mean_image.shape) * field_res / common_res).astype(int)
         reg_field = registration.find_field_in_stack(stack, *common_shape, x, y, z)
         reg_field = ndimage.zoom(reg_field, common_res / field_res, order=1) # *
@@ -1010,13 +1017,35 @@ class InitialRegistration(dj.Computed):
         # Map back to stack coordinates
         final_x = stack_x + x * (common_res / stack_res[2]) # in stack pixels
         final_y = stack_y + y * (common_res / stack_res[1]) # in stack pixels
-        final_z = stack_z + (z + stack.shape[0] / 2) * common_res # in microns*
+        final_z = stack_z + (z + common_stack.shape[0] / 2) * common_res # in microns*
         #* Best match in slice 0 will not result in z = 0 but 0.5 * z_step.
 
         # Insert
         self.insert1({**key,'init_x': final_x, 'init_y': final_y, 'init_z': final_z,
                       'score': score, 'common_res': common_res,})
         self.FieldInStack().insert1({**key, 'init_field': reg_field})
+
+        self.notify(key, mean_image, reg_field)
+
+    @notify.ignore_exceptions
+    def notify(self, key, original_field, registered_field):
+        import imageio
+        from pipeline.utils import signal
+
+        orig_clipped = np.clip(original_field, *np.percentile(original_field, [1, 99.8]))
+        reg_clipped = np.clip(registered_field, *np.percentile(registered_field, [1, 99.8]))
+
+        overlay = np.zeros([*original_field.shape, 3], dtype=np.uint8)
+        overlay[:, :, 0] = signal.float2uint8(-reg_clipped) # stack in red
+        overlay[:, :, 1] = signal.float2uint8(-orig_clipped) # original in green
+        img_filename = '/tmp/{}.png'.format(key_hash(key))
+        imageio.imwrite(img_filename, overlay)
+
+        msg = ('initial registration of {animal_id}-{scan_session}-{scan_idx} field '
+               '{field} to {animal_id}-{stack_session}-{stack_idx}').format(**key)
+        slack_user = notify.SlackUser() & (experiment.Session() & key &
+                                           {'session': key['stack_session']})
+        slack_user.notify(file=img_filename, file_title=msg)
 
 
 @schema
@@ -1103,28 +1132,34 @@ class FieldRegistration(dj.Computed):
         pipe = reso if reso.ScanInfo() & field_key else meso if meso.ScanInfo() & field_key else None
         mean_image = (pipe.SummaryImages.Average() & field_key).fetch1('average_image')
 
-        # Drop some edges (only y and x) to avoid artifacts
-        skip_dims = [max(1, int(round(s * 0.025))) for s in stack.shape]
-        stack = stack[:, skip_dims[1] : -skip_dims[1], skip_dims[2]: -skip_dims[2]]
-        skip_dims = [max(1, int(round(s * 0.025))) for s in mean_image.shape]
-        field = mean_image[skip_dims[0] : -skip_dims[0], skip_dims[1]: -skip_dims[1]]
-
-        # Rescale to match lowest resolution  (isotropic pixels/voxels)
+        # Get field and stack resolution
         field_res = ((reso.ScanInfo() & field_key).microns_per_pixel if pipe == reso else
                      (meso.ScanInfo.Field() & field_key).microns_per_pixel)
         dims = stack_rel.fetch1('um_depth', 'px_depth', 'um_height', 'px_height',
                                 'um_width', 'px_width')
         stack_res = np.array([dims[0] / dims[1], dims[2] / dims[3], dims[4] / dims[5]])
+
+        # Drop some edges (only x and y) to avoid artifacts and black edges
+        skip_dims = [max(1, int(round(s * 0.025))) for s in stack.shape]
+        stack = stack[:, skip_dims[1] : -skip_dims[1], skip_dims[2]: -skip_dims[2]]
+        skip_dims = [max(1, int(round(s * 0.025))) for s in mean_image.shape]
+        field = mean_image[skip_dims[0] : -skip_dims[0], skip_dims[1]: -skip_dims[1]]
+
+        # Apply local contrast normalization (improves contrast and gets rid of big vessels)
+        norm_stack = registration.lcn(stack, np.array([25, 25, 3]) / stack_res)
+        norm_field = registration.lcn(field, 20 / field_res)
+
+        # Rescale to match lowest resolution  (isotropic pixels/voxels)
         common_res = max(*field_res, *stack_res) # minimum available resolution
-        stack = ndimage.zoom(stack, stack_res / common_res, order=1)
-        field = ndimage.zoom(field, field_res / common_res, order=1)
+        common_stack = ndimage.zoom(norm_stack, stack_res / common_res, order=1)
+        common_field = ndimage.zoom(norm_field, field_res / common_res, order=1)
 
         # Get initial estimate from CuratedRegistration
         stack_x, stack_y, stack_z = stack_rel.fetch1('x', 'y', 'z') # z of the first slice (zero is at surface depth)
         cur_x, cur_y, cur_z = (CuratedRegistration() & key).fetch1('cur_x', 'cur_y', 'cur_z')
         estimated_px_x = (cur_x - stack_x) * stack_res[2] / common_res # in pixels
         estimated_px_y = (cur_y - stack_y) * stack_res[1] / common_res
-        estimated_px_z = (cur_z - stack_z) / common_res - stack.shape[0] / 2
+        estimated_px_z = (cur_z - stack_z) / common_res - common_stack.shape[0] / 2
 
         # Register
         px_estimate = (estimated_px_x, estimated_px_y, estimated_px_z) # (0, 0, 0) in center of stack
@@ -1132,35 +1167,34 @@ class FieldRegistration(dj.Computed):
         px_range = (um_range / common_res, ) * 3
         if key['registration_method'] in [1, 2]: # rigid
             # Run rigid registration with no rotations
-            result = registration.register_rigid(stack, field, px_estimate, px_range)
+            result = registration.register_rigid(common_stack, common_field, px_estimate, px_range)
             score, (x, y, z), (yaw, pitch, roll) = result
 
-        elif key['registration_method'] in [3, 4]: # rigid plus 3-d rotation
-            max_angle = 7
-
+        elif key['registrsation_method'] in [3, 4]: # rigid plus 3-d rotation
             # Run parallel registration searching for best rotation angles
-            results = performance.map_angles(stack, field, px_estimate, px_range, max_angle)
+            angles = np.linspace(-4, 4, 4 * 4 + 1) # -4, -3.5, -3, ... 3.5, 4
+            results = performance.map_angles(common_stack, common_field, px_estimate, px_range, angles)
             score, (x, y, z), (yaw, pitch, roll) = sorted(results)[-1]
 
             # Create some intermediate results (inserted below)
-            num_angles = 2 * max_angle + 1
-            score_map = np.zeros([num_angles, num_angles, num_angles])
-            position_map = np.zeros([num_angles, num_angles, num_angles, 3])
+            score_map = np.zeros([len(angles), len(angles), len(angles)])
+            position_map = np.zeros([len(angles), len(angles), len(angles), 3])
             for rho, position, angles in results:
-                idx1, idx2, idx3 = (a + max_angle for a in angles)
+                idx1, idx2, idx3 = (np.where(angles == a)[0][0] for a in angles)
                 score_map[idx1, idx2, idx3] = rho
                 position_map[idx1, idx2, idx3] = position
 
         # Get field in stack (after registration)
+        stack = ndimage.zoom(stack, stack_res / common_res, order=1)
         common_shape = np.round(np.array(mean_image.shape) * field_res / common_res).astype(int)
-        reg_field = registration.find_field_in_stack(stack, *common_shape, x, y, z, yaw, pitch, roll)
+        reg_field = registration.find_field_in_stack(stack, *common_shape, x, y, z)
         reg_field = ndimage.zoom(reg_field, common_res / field_res, order=1) # *
         # * this could differ from original shape but it should be pretty close
 
         # Map back to stack coordinates
         final_x = stack_x + x * (common_res / stack_res[2]) # in stack pixels
         final_y = stack_y + y * (common_res / stack_res[1]) # in stack pixels
-        final_z = stack_z + (z + stack.shape[0] / 2) * common_res # in microns*
+        final_z = stack_z + (z + common_stack.shape[0] / 2) * common_res # in microns*
         #* Best match in slice 0 will not result in z = 0 but 0.5 * z_step.
 
         # Insert
