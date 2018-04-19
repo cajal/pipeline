@@ -947,7 +947,7 @@ class ManualTracker:
 
             if self.scroll_window and not self.pause:
                 self.t0 += 1
-                self.t1 += 1
+                self.t1 = min(self.t1 + 1, self._n_frames)
 
             if ret and self.roi_start is not None and self.roi_end is not None:
                 cv2.rectangle(frame, self.roi_start, self.roi_end, (0, 255, 255), 2)
