@@ -946,7 +946,7 @@ class ManualTracker:
             ret, frame = self.read_frame()
 
             if self.scroll_window and not self.pause:
-                self.t0 += 1
+                self.t0 += min(self.t0 + 1, self._n_frames - self.scroll_window)
                 self.t1 = min(self.t1 + 1, self._n_frames)
 
             if ret and self.roi_start is not None and self.roi_end is not None:
