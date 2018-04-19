@@ -74,7 +74,7 @@ classdef FieldCoordinates < dj.Manual
                 x_pos = (x_pos - min(x_pos))/pxpitch;
                 y_pos = (y_pos - min(y_pos))/pxpitch;
                 im = zeros(ceil(max(y_pos+fieldHeights)),ceil(max(x_pos+fieldWidths)));
-                for islice =length(frames):-1:(length(frames)-1)%length(frames):-1:1
+                for islice =length(frames):-1:1
                     frame = self.filterImage(ne7.mat.normalize(frames{islice}),self.createTform(tfp));
                     im(ceil(y_pos(islice)+1):ceil(y_pos(islice))+size(frame,1), ...
                         ceil(x_pos(islice)+1):ceil(x_pos(islice))+size(frame,2)) = ...
@@ -246,6 +246,7 @@ classdef FieldCoordinates < dj.Manual
             imS = self.filterImage(ne7.mat.normalize(frame),tform);            % apply rotation/flips 
             YY = round(y_offset + size(ref_mask,1)/2 - size(imS,1)/2); % convert center coordinates to 0,0 coordinates
             XX = round(x_offset + size(ref_mask,2)/2 - size(imS,2)/2); % convert center coordinates to 0,0 coordinates
+            XX = round(x_offset + 1200/2 - size(imS,2)/2);
             fmask = ref_mask(YY+1:size(imS,1)+YY-1,XX+1:size(imS,2)+XX-1);
             fmask = self.filterImage(ne7.mat.normalize(fmask),tform,1)>0;
             fmask = fmask(...
