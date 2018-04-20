@@ -1,8 +1,9 @@
 import numpy as np
 from skimage import feature
 from scipy import ndimage
-
 import time
+
+from . import enhancement
 
 def register_rigid(stack, field, px_estimate, px_range, angles=(0, 0, 0)):
     """ Registers using skimage.feature match_template.
@@ -89,8 +90,8 @@ def register_rigid(stack, field, px_estimate, px_range, angles=(0, 0, 0)):
     field = field[cut_rows:-cut_rows, cut_cols:-cut_cols]
 
     # Sharpen images
-    norm_field = sharpen_2pimage(field)
-    norm_stack = np.stack(sharpen_2pimage(s) for s in mini_rotated)
+    norm_field = enhancement.sharpen_2pimage(field)
+    norm_stack = np.stack(enhancement.sharpen_2pimage(s) for s in mini_rotated)
 
     # 3-d match_template
     corrs = np.stack(feature.match_template(s, norm_field, pad_input=True) for s in norm_stack)
@@ -169,42 +170,6 @@ def create_rotation_matrix(yaw, pitch, roll):
         [-sin(v),       sin(u)*cos(v),                        cos(u)*cos(v)]
     ]
     return rotation_matrix
-
-
-def lcn(image, sigmas=(7, 7)):
-    """ Local contrast normalization.
-
-    Normalize each pixel using mean and stddev computed on a local neighborhood.
-
-    We use gaussian filters rather than uniform filters to compute the local mean and std
-    to soften the effect of edges. Essentially we are using a fuzzy local neighborhood.
-    Equivalent using a hard defintion of neighborhood will be:
-        local_mean = ndimage.uniform_filter(image, size=(32, 32))
-
-    :param np.array image: Array with raw two-photon images.
-    :param tuple sigmas: List with sigmas per axes to use for the gaussian filter.
-        Smaller values result in more local neighborhoods. 15-30 microns should work fine
-    """
-    local_mean = ndimage.gaussian_filter(image, sigmas)
-    local_std = np.sqrt(ndimage.gaussian_filter((image - local_mean)**2, sigmas))
-    norm = (image - local_mean) / (local_std + 1e-7)
-
-    return norm
-
-
-def sharpen_2pimage(image, laplace_sigma=0.7, low_percentile=3, high_percentile=99.9):
-    """ Apply a laplacian filter, clip pixel range and normalize.
-
-    :param np.array image: Array with raw two-photon images.
-    :param float laplace_sigma: Sigma of the gaussian used in the laplace filter.
-    :param float low_percentile, high_percentile: Percentiles at which to clip.
-
-    :returns: Array of same shape as input. Sharpened image.
-    """
-    sharpened = image - ndimage.gaussian_laplace(image, laplace_sigma)
-    clipped = np.clip(sharpened, *np.percentile(sharpened, [low_percentile, high_percentile]))
-    norm = (clipped - clipped.mean()) / (clipped.max() - clipped.min() + 1e-7)
-    return norm
 
 
 def find_field_in_stack(stack, height, width, x, y, z, yaw=0, pitch=0, roll=0):
