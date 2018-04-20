@@ -707,8 +707,6 @@ class Stitching(dj.Computed):
                        '{volume_id} roi {roi_id}').format(**roi_coord)
                 slack_user.notify(file=img_filename, file_title=msg)
 
-            slack_user.notify(msg)
-
 
 @schema
 class CorrectedStack(dj.Computed):
