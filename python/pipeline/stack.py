@@ -642,7 +642,7 @@ class Stitching(dj.Computed):
             # Fix outliers
             max_y_shift, max_x_shift = 15 / (StackInfo.ROI() & roi_key).microns_per_pixel
             y_fixed, x_fixed, _ = galvo_corrections.fix_outliers(y_aligns, x_aligns,
-                                              max_y_shift, max_x_shift)
+                                                                 max_y_shift, max_x_shift)
 
             # Accumulate shifts so shift i is shift in i -1 plus shift to align i to i-1
             y_cumsum, x_cumsum = np.cumsum(y_fixed), np.cumsum(x_fixed)
