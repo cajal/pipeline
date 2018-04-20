@@ -525,9 +525,11 @@ class ManualTracker:
         self.contours = None
         self.area = None
         self._mixing_log = None
-        self._progress_len = 800
+        self._progress_len = 1600
         self._progress_height = 100
         self._width = 800
+        self.window_size = 2000
+
 
         self.dilation_factor = 1.3
 
@@ -595,7 +597,6 @@ class ManualTracker:
 
         self.t0 = 0
         self.t1 = None
-        self.window_size = 1000
         self.scroll_window = False
 
         self.dilation_kernel = np.ones((3, 3))
@@ -946,7 +947,7 @@ class ManualTracker:
             ret, frame = self.read_frame()
 
             if self.scroll_window and not self.pause:
-                self.t0 += min(self.t0 + 1, self._n_frames - self.scroll_window)
+                self.t0 = min(self.t0 + 1, self._n_frames - self.scroll_window)
                 self.t1 = min(self.t1 + 1, self._n_frames)
 
             if ret and self.roi_start is not None and self.roi_end is not None:
