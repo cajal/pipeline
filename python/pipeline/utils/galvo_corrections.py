@@ -165,9 +165,11 @@ def fix_outliers(y_shifts, x_shifts, max_y_shift=20, max_x_shift=20, method='med
     # Interpolate outliers
     num_outliers = np.sum(outliers)
     if num_outliers < num_frames - 1: # at least two good points needed for interpolation
-        indices = np.arange(len(x_shifts))
-        y_shifts = np.interp(indices, indices[~outliers], y_shifts[~outliers], left=0, right=0)
-        x_shifts = np.interp(indices, indices[~outliers], x_shifts[~outliers], left=0, right=0)
+        #indices = np.arange(len(x_shifts))
+        #y_shifts = np.interp(indices, indices[~outliers], y_shifts[~outliers], left=0, right=0)
+        #x_shifts = np.interp(indices, indices[~outliers], x_shifts[~outliers], left=0, right=0)
+        y_shifts[outliers] = 0
+        x_shifts[outliers] = 0
     else:
         print('Warning: {} out of {} frames were outliers.'.format(num_outliers, num_frames))
         y_shifts = 0
