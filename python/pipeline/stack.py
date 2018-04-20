@@ -8,7 +8,7 @@ from scipy import signal
 import itertools
 
 from . import experiment, notify, shared, reso, meso
-from .utils import galvo_corrections, stitching, performance
+from .utils import galvo_corrections, stitching, performance, enhancement
 from .utils.signal import mirrconv, float2uint8
 from .exceptions import PipelineException
 
@@ -562,6 +562,10 @@ class Stitching(dj.Computed):
             rois.append(stitching.StitchedROI(corrected_roi, x=px_x, y=px_y,
                                               z=roi_tuple['roi_z'], id_=roi_tuple['roi_id']))
 
+        def enhance(image, sigmas):
+            """ Enhance 2p image. See enhancement.py for details."""
+            return enhancement.sharpen_2pimage(enhancement.lcn(image, sigmas))
+
         def join_rows(rois_):
             """ Iteratively join all rois that overlap in the same row."""
             sorted_rois = sorted(rois_, key=lambda roi: (roi.x, roi.y))
@@ -572,18 +576,23 @@ class Stitching(dj.Computed):
 
                 for left, right in itertools.combinations(sorted_rois, 2):
                     if left.is_aside_to(right):
+                        roi_key = {**key, 'roi_id': left.roi_coordinates[0].id}
+
                         # Compute stitching shifts
+                        neighborhood_size = 25 / (StackInfo.ROI() & roi_key).microns_per_pixel
                         left_ys, left_xs = [], []
                         for l, r in zip(left.slices, right.slices):
-                            delta_y, delta_x = stitching.linear_stitch(l.slice, r.slice, r.x - l.x)
+                            left_slice = enhance(l.slice, neighborhood_size)
+                            right_slice = enhance(r.slice, neighborhood_size)
+                            delta_y, delta_x = stitching.linear_stitch(left_slice, right_slice,
+                                                                       r.x - l.x)
                             left_ys.append(r.y - delta_y)
                             left_xs.append(r.x - delta_x)
 
                         # Fix outliers
-                        roi_key = {**key, 'roi_id': left.roi_coordinates[0].id}
-                        max_y_shift, max_x_shift = 15 / (StackInfo.ROI() & roi_key).microns_per_pixel
+                        max_y_shift, max_x_shift = 10 / (StackInfo.ROI() & roi_key).microns_per_pixel
                         left_ys, left_xs, _ = galvo_corrections.fix_outliers(np.array(left_ys),
-                                np.array(left_xs), max_y_shift, max_x_shift, method='trend')
+                                np.array(left_xs), max_y_shift, max_x_shift, method='linear')
 
                         # Stitch together
                         right.join_with(left, left_xs, left_ys)
@@ -611,6 +620,12 @@ class Stitching(dj.Computed):
         for roi in rois:
             big_volume = roi.volume
             num_slices, image_height, image_width = big_volume.shape
+            roi_key = {**key, 'roi_id': roi.roi_coordinates[0].id}
+
+            # Enhance
+            neighborhood_size = 25 / (StackInfo.ROI() & roi_key).microns_per_pixel
+            for i in range(num_slices):
+                big_volume[i] = enhance(big_volume[i], neighborhood_size)
 
             # Drop 10% of the image borders
             skip_rows = int(round(image_height * 0.1))
@@ -625,10 +640,9 @@ class Stitching(dj.Computed):
                                                                  big_volume[i-1], in_place=False)
 
             # Fix outliers
-            roi_key = {**key, 'roi_id': roi.roi_coordinates[0].id}
-            max_y_shift, max_x_shift = 20 / (StackInfo.ROI() & roi_key).microns_per_pixel
+            max_y_shift, max_x_shift = 15 / (StackInfo.ROI() & roi_key).microns_per_pixel
             y_fixed, x_fixed, _ = galvo_corrections.fix_outliers(y_aligns, x_aligns,
-                                              max_y_shift, max_x_shift, method='trend')
+                                              max_y_shift, max_x_shift)
 
             # Accumulate shifts so shift i is shift in i -1 plus shift to align i to i-1
             y_cumsum, x_cumsum = np.cumsum(y_fixed), np.cumsum(x_fixed)
@@ -985,8 +999,8 @@ class InitialRegistration(dj.Computed):
         field = mean_image[skip_dims[0] : -skip_dims[0], skip_dims[1]: -skip_dims[1]]
 
         # Apply local contrast normalization (improves contrast and gets rid of big vessels)
-        norm_stack = registration.lcn(stack, np.array([3, 25, 25]) / stack_res)
-        norm_field = registration.lcn(field, 20 / field_res)
+        norm_stack = enhancement.lcn(stack, np.array([3, 25, 25]) / stack_res)
+        norm_field = enhancement.lcn(field, 20 / field_res)
 
         # Rescale to match lowest resolution  (isotropic pixels/voxels)
         common_res = max(*field_res, *stack_res) # minimum available resolution
@@ -1146,8 +1160,8 @@ class FieldRegistration(dj.Computed):
         field = mean_image[skip_dims[0] : -skip_dims[0], skip_dims[1]: -skip_dims[1]]
 
         # Apply local contrast normalization (improves contrast and gets rid of big vessels)
-        norm_stack = registration.lcn(stack, np.array([3, 25, 25]) / stack_res)
-        norm_field = registration.lcn(field, 20 / field_res)
+        norm_stack = enhancement.lcn(stack, np.array([3, 25, 25]) / stack_res)
+        norm_field = enhancement.lcn(field, 20 / field_res)
 
         # Rescale to match lowest resolution  (isotropic pixels/voxels)
         common_res = max(*field_res, *stack_res) # minimum available resolution
