@@ -514,3 +514,5 @@ class AutoProcessing(dj.Manual):
     priority=0          :tinyint       # highest priority is processed first
     autosegment=false   :boolean       # segment somas in the first channel with default method
     """
+
+schema.spawn_missing_classes()
