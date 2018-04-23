@@ -64,8 +64,8 @@ classdef DotRF < dj.Computed
             sfl_resp_map_p = nan(map_size(1),map_size(2),length(levels),shuffle);
             for iloc = unique(index)'
                 [x, y] = ind2sub(map_size, iloc);
-                response_map(x,y,:,:) = nanmean(response(index==iloc,:,:));
-                sfl_resp_map_p(x,y,:,:) = nanmean(sfl_resp_p(index==iloc,:,:));
+                response_map(x,y,:,:) = nanmean(response(index==iloc,:,:),1);
+                sfl_resp_map_p(x,y,:,:) = nanmean(sfl_resp_p(index==iloc,:,:),1);
             end
             
             % insert
@@ -99,13 +99,14 @@ classdef DotRF < dj.Computed
                 sfl_response_map = nan(map_size(1),map_size(2),length(levels),shuffle);
                 for iloc = unique(index)'
                     [x,y] = ind2sub(map_size, iloc);
-                    sfl_response_map(x,y,:,:) = nanmean(sfl(index==iloc,:,:));
+                    sfl_response_map(x,y,:,:) = nanmean(sfl(index==iloc,:,:),1);
                 end
                 
                 tuple.p_value = mean(tuple.snr<squeeze(...
                     self.rfSNR(tuple.gauss_fit, max(sfl_response_map(:,:,:,:),[],3),sd, snr_method)));
-                tuple.center_y = (tuple.gauss_fit(1) - map_size(2)/2 - 0.5) / map_size(1);
-                tuple.center_x = (tuple.gauss_fit(2) - map_size(1)/2 - 0.5) / map_size(1);
+                tuple.center_y = ((tuple.gauss_fit(1) / map_size(2))-0.5)*map_size(2)/map_size(1);
+                tuple.center_x = (tuple.gauss_fit(2) / map_size(1))-0.5;
+
                 tuples = [tuples; tuple];
             end
             
@@ -119,10 +120,10 @@ classdef DotRF < dj.Computed
         function par = fitGauss(~,z,deg2dot,gaussW)
             
             % apply smoothing
-            w = window(@gausswin,round(gaussW*deg2dot));
-            w = w * w';
-            w = w / sum(w(:));
-            z = imfilter(z,w,'circular');
+%             w = window(@gausswin,round(gaussW*deg2dot));
+%             w = w * w';
+%             w = w / sum(w(:));
+%             z = imfilter(z,w,'circular');
             sz = size(z);
             
             % initialize fit parameters
@@ -182,14 +183,20 @@ classdef DotRF < dj.Computed
     
     methods
         
-        function plot(self, gaussfit, map)
+        function plot(self, gaussfit, map, varargin)
             
             params.color = [0 0 1];
             params.line = '-';
             params.linewidth = 1;
             params.npts = 50;
+            params.scale = 1;
+            
+            params = ne7.mat.getParams(params, varargin);
             
             % plot response map
+            if params.scale~=1
+                map = imresize(map,params.scale);
+            end
             imagesc(map');
             hold on
             colormap gray
@@ -213,8 +220,8 @@ classdef DotRF < dj.Computed
             bp = (v*d*ap) + repmat(m, 1, size(ap,2));
             
             % plot rf
-            plot(bp(2,:), bp(1,:),params.line,'Color',params.color,'linewidth',params.linewidth);
-            plot(m(2),m(1),'*r','markersize',5)
+            plot(bp(2,:)*params.scale, bp(1,:)*params.scale,params.line,'Color',params.color,'linewidth',params.linewidth);
+            plot(m(2)*params.scale,m(1)*params.scale,'*r','markersize',5)
             
             % adjust labels as a fraction of x
             yrange = size(map,2)/2/size(map,1);
@@ -224,6 +231,8 @@ classdef DotRF < dj.Computed
             grid on
             axis image
         end
+        
+
     end
 
 end

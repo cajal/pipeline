@@ -243,10 +243,10 @@ classdef FieldCoordinates < dj.Manual
             end
             
             sz = size(frame);
+            ref_mask = padarray(ref_mask,[100 100]); % pad image in case the ref_mask is not large enough
             imS = self.filterImage(ne7.mat.normalize(frame),tform);            % apply rotation/flips 
             YY = round(y_offset + size(ref_mask,1)/2 - size(imS,1)/2); % convert center coordinates to 0,0 coordinates
             XX = round(x_offset + size(ref_mask,2)/2 - size(imS,2)/2); % convert center coordinates to 0,0 coordinates
-            XX = round(x_offset + 1200/2 - size(imS,2)/2);
             fmask = ref_mask(YY+1:size(imS,1)+YY-1,XX+1:size(imS,2)+XX-1);
             fmask = self.filterImage(ne7.mat.normalize(fmask),tform,1)>0;
             fmask = fmask(...

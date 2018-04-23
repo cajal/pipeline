@@ -117,30 +117,44 @@ classdef AreaMask < dj.Manual
         function extractMasks(obj, keyI)
             
             % fetch all area masks
+            area_masks = [];areas = [];
             map_keys = fetch(anatomy.AreaMask & (anatomy.RefMap & (proj(anatomy.RefMap) & (anatomy.FieldCoordinates & keyI))));
+            if false
+                for map_key = map_keys'
+                    [mask, area, ret_idx] = fetch1(anatomy.AreaMask & map_key, 'mask', 'brain_area', 'ret_idx');
+                    area_masks{end+1} = mask;
+                    areas{end+1} = area;
+                end
+            else % if contiguous
+                [area_map, keys] = getContiguousMask(obj,map_keys,0);
+                areas = unique({keys(:).brain_area}');
+                un_areas = unique(area_map(:));
+                for iarea = 2:length(un_areas)
+                    area_masks{end+1} = area_map==un_areas(iarea);
+                end
+            end
             
             % loop through all masks
-            for map_key = map_keys'
-                [mask, area, ret_idx] = fetch1(anatomy.AreaMask & map_key, 'mask', 'brain_area', 'ret_idx');
-                
+            for imask = 1:length(area_masks)
                 % loop through all fields
                 for field_key = fetch(anatomy.FieldCoordinates & keyI)'
-                    
+
                     % find corresponding mask area
-                    fmask = filterMask(anatomy.FieldCoordinates & field_key, mask);
-                    
+                    fmask = filterMask(anatomy.FieldCoordinates & field_key, area_masks{imask});
+
                     % insert if overlap exists
                     if ~all(~fmask(:))
                         tuple = rmfield(field_key,'ref_idx');
-                        tuple.brain_area =   area;
+                        tuple.brain_area =   areas{imask};
                         if ~exists(obj & tuple)
                             tuple.mask = fmask;
-                            tuple.ret_idx = ret_idx;
+                            tuple.ret_idx = keyI.ret_idx;
                             insert(obj,tuple)
                         end
                     end
                 end
             end
+            
         end
         
         function [fmasks, fields] = splitContiguousMask(~, key, ref_mask)
