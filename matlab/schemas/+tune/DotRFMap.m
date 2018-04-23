@@ -40,18 +40,26 @@ classdef DotRFMap < dj.Computed
             end
         end
         
-        function [xdeg, ydeg] = getDegrees(obj)
-              % [xdeg, ydeg] = getDegrees(obj)
+        function [xdeg, ydeg, keys] = getDegrees(obj,flat_corrected)
+              % [xdeg, ydeg, keys] = getDegrees(obj)
               % 
               % getDegrees converts rf distances from the center to degress
               % from center
+              % flat_corrected accounts for flat monitor with shortest
+              % distance to the eye in the center of the monitor
               
-              [x,y] = fetchn( obj,'center_x','center_y');
+              [x,y, keys] = fetchn( obj,'center_x','center_y');
               [aspect, distance, diag_size] = fetch1(experiment.DisplayGeometry & obj,'monitor_aspect','monitor_distance','monitor_size');
-              x_size = cosd(atand(aspect))*diag_size;
-              x2deg = @(x) atand(x_size*x/distance);
-              xdeg = x2deg(x);
-              ydeg = x2deg(y);
+              x_size = sind(atand(aspect))*diag_size;
+              if nargin>1 && flat_corrected
+                  x2deg = @(xx) atand(x_size*xx/distance);
+                  xdeg = x2deg(x);
+                  ydeg = x2deg(y);
+              else
+                  max_deg = atand(x_size/2/distance)*2;
+                  xdeg = x*max_deg;
+                  ydeg = y*max_deg;
+              end
         end
 
 
