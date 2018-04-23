@@ -1182,7 +1182,7 @@ class FieldRegistration(dj.Computed):
             result = registration.register_rigid(common_stack, common_field, px_estimate, px_range)
             score, (x, y, z), (yaw, pitch, roll) = result
 
-        elif key['registrsation_method'] in [3, 4]: # rigid plus 3-d rotation
+        elif key['registration_method'] in [3, 4]: # rigid plus 3-d rotation
             # Run parallel registration searching for best rotation angles
             angles = np.linspace(-4, 4, 4 * 4 + 1) # -4, -3.5, -3, ... 3.5, 4
             results = performance.map_angles(common_stack, common_field, px_estimate, px_range, angles)
