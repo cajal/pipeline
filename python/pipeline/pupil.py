@@ -1,4 +1,6 @@
 from itertools import count
+
+from .utils.decorators import gitlog
 from scipy.misc import imresize
 import datajoint as dj
 from datajoint.jobs import key_hash
@@ -366,6 +368,7 @@ class TrackedVideo(dj.Computed):
 
 
 @schema
+@gitlog
 class ManuallyTrackedContours(dj.Manual, AutoPopulate):
     definition = """
     -> Eye
@@ -413,6 +416,7 @@ class ManuallyTrackedContours(dj.Manual, AutoPopulate):
 
         logtrace = tracker.mixing_constant.logtrace.astype(float)
         self.insert1(dict(key, min_lambda=logtrace[logtrace > 0].min()))
+        self.log_key(key)
         frame = self.Frame()
         parameters = self.Parameter()
         for frame_id, ok, contour, params in tqdm(zip(count(), tracker.contours_detected, tracker.contours,
@@ -459,6 +463,8 @@ class ManuallyTrackedContours(dj.Manual, AutoPopulate):
 
                     logtrace = tracker.mixing_constant.logtrace.astype(float)
                     self.insert1(dict(key, min_lambda=logtrace[logtrace > 0].min()))
+                    self.log_key(key)
+
                     frame = self.Frame()
                     parameters = self.Parameter()
                     for frame_id, ok, contour, params in tqdm(zip(count(), tracker.contours_detected, tracker.contours,
