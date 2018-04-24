@@ -44,9 +44,7 @@ while True:
             pipe.SummaryImages().populate(next_scans, reserve_jobs=True, suppress_errors=True)
 
         # Field Registration
-        priority_methods = [{'registration_method': 1}, {'registration_method': 2}]
-        stack.FieldRegistration().populate(next_scans, priority_methods, reserve_jobs=True,
-                                           suppress_errors=True)
+        stack.InitialRegistration().populate(next_scans, reserve_jobs=True, suppress_errors=True)
         stack.FieldRegistration().populate(next_scans, reserve_jobs=True, suppress_errors=True)
 
         # fuse
@@ -72,6 +70,7 @@ while True:
             tune.OriMapQuality().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
 
             tune.OracleMap().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
+            tune.MovieOracle().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
 
             tune.CaTimes().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
             tune.Ori().populate(tune_scans, reserve_jobs=True, suppress_errors=True)

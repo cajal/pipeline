@@ -2,6 +2,7 @@ import numpy as np
 from sklearn.linear_model import TheilSenRegressor
 from scipy import signal
 
+
 def compute_quantal_size(scan):
     """ Estimate the unit change in calcium response corresponding to a unit change in
     pixel intensity (dubbed quantal size, lower is better).
@@ -62,6 +63,7 @@ def compute_quantal_size(scan):
 
     return (min_intensity, max_intensity, unique_pixels, unique_variances,
            quantal_size, zero_level)
+
 
 def find_peaks(trace):
     """ Find local peaks in the signal and compute prominence and width at half
