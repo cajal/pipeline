@@ -1,10 +1,11 @@
 import numpy as np
 from skimage import feature
 from scipy import ndimage
-
 import time
 
-def register_rigid(stack, field, z_estimate, z_range, yaw=0, pitch=0, roll=0):
+from . import enhancement
+
+def register_rigid(stack, field, px_estimate, px_range, angles=(0, 0, 0)):
     """ Registers using skimage.feature match_template.
 
     Rotates the stack, cross-correlates the field at each position and returns the score,
@@ -16,69 +17,72 @@ def register_rigid(stack, field, z_estimate, z_range, yaw=0, pitch=0, roll=0):
     some slack above and below the desired slices to avoid black spaces after rotation.
     After rotation, we cut any black spaces in x and y and then run the cross-correlation.
 
-    Note on ndimage.rotate: Assuming our coordinate system; axes=(1, 2) will do a left
-    handed rotation in z, (0, 2) a right handed rotation in y and (0, 1) a left handed
-    rotation in x.
-
     :param np.array: 3-d stack (depth, height, width).
     :param np.array field: 2-d field to register in the stack.
-    :param float z_estimate: Initial estimate of best z.
-    :param float z_range: How many slices to search above (and below) z_estimate.
-    :param float yaw: Angle in degrees for rotation over z axis.
-    :param float pitch: Angle in degrees for rotation over y axis.
-    :param float roll: Angle in degrees for rotation over x axis.
+    :param triplet px_estimate: Initial estimate in x, y, z. (0, 0, 0) in center of stack.
+    :param triplet px_range: How many pixels to search around the initial estimate.
+    :param triplet angles: Angle in degrees for rotation over z, y and x axis, i.e.
+        (yaw, pitch, roll)
 
     : returns best_score, (x, y, z), (yaw, pitch, roll). Best score is the highest
         correlation found. (x, y, z) are expressed as distances to the center of the
         stack. And yaw, pitch, roll are the same as the input.
     """
-    print(time.ctime(), 'Processing angles', (yaw, pitch, roll))
+    print(time.ctime(), 'Processing angles', angles)
+
+    # Basic checks
+    if len(px_estimate) != 3 or len(px_range) != 3 or len(angles) != 3:
+        raise ValueError('px_estimate, px_range and angles need to have length 3')
+    if np.any(np.array(angles) > 10):
+        raise ValueError('register_rigid only works for small angles.')
 
     # Get rotation matrix
-    R = create_rotation_matrix(yaw, pitch, roll)
+    R = create_rotation_matrix(*angles)
     R_inv = np.linalg.inv(R)
 
-    # Compute how high in z we'll need to cut the rotated stack to account for z = z_range
-    h, w = stack.shape[1] / 2, stack.shape[2] / 2 # y, x
-    corners_at_zrange = [[-w, -h, z_range], [w, -h, z_range], [w, h, z_range], [-w, h, z_range]] # clockwise, starting at upper left
-    rot_corners_at_zrange = np.dot(R_inv, np.array(corners_at_zrange).T)
-    rot_ztop = np.max(rot_corners_at_zrange[2])
+    # Compute the limits of our desired ROI in the rotated stack
+    w, h, d = px_range # coordinates of the higher x, y, z in the original stack
+    roi_corners = [[-w, -h, -d], [w, -h, -d], [w, h, -d], [-w, h, -d], [-w, -h, d],
+                   [w, -h, d], [w, h, d], [-w, h, d]] # clockwise, starting at upper left
+    rot_roi_corners = np.dot(R_inv, np.array(roi_corners).T)
+    rot_xlim = np.max(rot_roi_corners[0, [1, 2, 5, 6]]) # x that sticks furthest to the right
+    rot_ylim = np.max(rot_roi_corners[1, [2, 3, 6, 7]]) # y that sticks furthest down
+    rot_zlim = np.max(rot_roi_corners[2, [4, 5, 6, 7]]) # z that sticks furthest away from you
+    rot_xlim += field.shape[1] / 2 # add half the field width to still see the full field in the corners
+    rot_ylim += field.shape[0] / 2 # add half the field height to still see the full field in the corners
 
-    # Calculate amount of slack in the initial stack needed to avoid black voxels after rotation.
-    corners_at_zero = [[-w, -h, 0], [w, -h, 0], [w, h, 0], [-w, h, 0]]
-    corners_at_100= [[-w, -h, 100], [w, -h, 100], [w, h, 100], [-w, h, 100]]
-    rot_corners_at_zero = np.dot(R_inv, np.array(corners_at_zero).T) #
-    rot_corners_at_100 = np.dot(R_inv, np.array(corners_at_100).T)
-    rot_corners_at_ztop = find_intersecting_point(rot_corners_at_zero, rot_corners_at_100, rot_ztop)
-    corners_at_ztop = np.dot(R, rot_corners_at_ztop) # map back to original stack coordinates
-    z_slack = np.max(corners_at_ztop[2])
+    # Compute how much we can cut of original ROI (for efficiency) but avoiding black spaces
+    w, h, d = rot_xlim, rot_ylim, rot_zlim
+    rot_big_corners = [[-w, -h, -d], [w, -h, -d], [w, h, -d], [-w, h, -d], [-w, -h, d],
+                       [w, -h, d], [w, h, d], [-w, h, d]] # clockwise, starting at upper left
+    big_corners = np.dot(R, np.array(rot_big_corners).T)
+    x_slack = np.max(big_corners[0, [1, 2, 5, 6]]) # x that sticks furthest to the right
+    y_slack = np.max(big_corners[1, [2, 3, 6, 7]]) # y that sticks furthest down
+    z_slack = np.max(big_corners[2, [4, 5, 6, 7]]) # z that sticks furthest away from you
 
-    # Restrict stack to relevant part in z
-    mini_stack = stack[max(0, int(round(z_estimate - z_slack))): int(round(z_estimate + z_slack))]
+    # Cut original stack
+    slices = [slice(int(round(max(0, s/2 + p - sl))), int(round(s/2 + p + sl))) for s, p, sl
+              in zip(stack.shape, px_estimate[::-1], [z_slack, y_slack, x_slack])]
+    mini_stack = stack[slices]
 
     # Rotate stack (inverse of intrinsic yaw-> pitch -> roll)
-    rotated = ndimage.rotate(mini_stack, yaw, axes=(1, 2), order=1) # yaw(-w)
-    rotated = ndimage.rotate(rotated, -pitch, axes=(0, 2), order=1) # pitch(-v)
-    rotated = ndimage.rotate(rotated, roll, axes=(0, 1), order=1) # roll(-u)
+    rotated = _inverse_rot3d(mini_stack, *angles) # rotates around center
 
-    # Calculate where to cut rotated stack (at z_est)
-    z_est = (z_estimate - max(0, int(round(z_estimate - z_slack)))) - mini_stack.shape[0] / 2
-    rot_z_est = np.dot(R_inv, [0, 0, z_est])[2]
-    min_z, max_z = rot_z_est - rot_ztop, rot_z_est + rot_ztop
-    top_corners = find_intersecting_point(rot_corners_at_zero, rot_corners_at_100, max(-rotated.shape[0] / 2, min_z))
-    bottom_corners = find_intersecting_point(rot_corners_at_zero, rot_corners_at_100, min(rotated.shape[0] / 2, max_z))
-    min_x = max(*top_corners[0, [0, 3]], *bottom_corners[0, [0, 3]])
-    max_x = min(*top_corners[0, [1, 2]], *bottom_corners[0, [1, 2]])
-    min_y = max(*top_corners[1, [0, 1]], *bottom_corners[1, [0, 1]])
-    max_y = min(*top_corners[1, [2, 3]], *bottom_corners[1, [2, 3]])
+    # Cut rotated stack (using the limits calculated above)
+    px_estimate_ms = [s/2 + p - (sli.start + ms/2) for s, p, sli, ms in # px_estimate with (0, 0, 0) in center of mini_stack
+                      zip(stack.shape, px_estimate[::-1], slices, mini_stack.shape)][::-1] # x, y, z
+    rot_px_estimate = np.dot(R_inv, px_estimate_ms)
+    rot_slices = [slice(int(round(max(0, s/2 + p - sl))), int(round(s/2 + p + sl))) for s, p, sl
+                  in zip(rotated.shape, rot_px_estimate[::-1], [rot_zlim, rot_ylim, rot_xlim])]
+    mini_rotated = rotated[rot_slices]
 
-    # Cut rotated stack
-    mini_rotated = rotated[max(0, int(round(rotated.shape[0] / 2 + min_z))): int(round(rotated.shape[0] / 2 + max_z)),
-                           max(0, int(round(rotated.shape[1] / 2 + min_y))): int(round(rotated.shape[1] / 2 + max_y)),
-                           max(0, int(round(rotated.shape[2] / 2 + min_x))): int(round(rotated.shape[2] / 2 + max_x))]
-    z_center = rotated.shape[0] / 2 - max(0, int(round(rotated.shape[0] / 2 + min_z)))
-    y_center = rotated.shape[1] / 2 - max(0, int(round(rotated.shape[1] / 2 + min_y)))
-    x_center = rotated.shape[2] / 2 - max(0, int(round(rotated.shape[2] / 2 + min_x)))
+    # Create mask to restrict correlations to appropiate range
+    mini_mask = np.zeros_like(mini_stack)
+    mask_slices = [slice(int(round(max(0, s/2 + p - r))), int(round(s/2 + p + r))) for s, p, r
+                   in zip(mini_stack.shape, px_estimate_ms[::-1], px_range[::-1])]
+    mini_mask[mask_slices] = 1 # only consider positions initially in the range
+    rot_mask = _inverse_rot3d(mini_mask, *angles)
+    mr_mask = rot_mask[rot_slices]
 
     # Crop field FOV to be smaller than the stack's
     cut_rows = max(1, int(np.ceil((field.shape[0] - mini_rotated.shape[1]) / 2)))
@@ -86,25 +90,62 @@ def register_rigid(stack, field, z_estimate, z_range, yaw=0, pitch=0, roll=0):
     field = field[cut_rows:-cut_rows, cut_cols:-cut_cols]
 
     # Sharpen images
-    norm_field = sharpen_2pimage(field)
-    norm_stack = np.stack(sharpen_2pimage(s) for s in mini_rotated)
+    norm_field = enhancement.sharpen_2pimage(field)
+    norm_stack = np.stack(enhancement.sharpen_2pimage(s) for s in mini_rotated)
 
     # 3-d match_template
     corrs = np.stack(feature.match_template(s, norm_field, pad_input=True) for s in norm_stack)
     smooth_corrs = ndimage.gaussian_filter(corrs, 0.7)
-    best_score = np.max(smooth_corrs)
-    z, y, x = np.unravel_index(np.argmax(smooth_corrs), smooth_corrs.shape)
+    masked_corrs = smooth_corrs * mr_mask
+    best_score = np.max(masked_corrs)
+    rot_z, rot_y, rot_x = np.unravel_index(np.argmax(masked_corrs), masked_corrs.shape)
 
-    # Express coordinates as distances to mini_stack/rotated center
-    x_offset = (x + 0.5) - x_center
-    y_offset = (y + 0.5) - y_center
-    z_offset = (z + 0.5) - z_center
+    # Express coordinates as distances to rotated center
+    rot_xp = rot_slices[2].start + (rot_x + 0.5) - rotated.shape[2] / 2
+    rot_yp = rot_slices[1].start + (rot_y + 0.5) - rotated.shape[1] / 2
+    rot_zp = rot_slices[0].start + (rot_z + 0.5) - rotated.shape[0] / 2
+
+    # Apply inverse rotation to transform it into distances to mini_stack center
+    xp, yp, zp = np.dot(R, (rot_xp, rot_yp, rot_zp))
 
     # Map back to original stack coordinates
-    xp, yp, zp = np.dot(R, [x_offset, y_offset, z_offset])
-    zp = ((max(0, int(round(z_estimate - z_slack))) + mini_stack.shape[0] / 2 + zp) - stack.shape[0] / 2) # with respect to original z center
+    x_final = (slices[2].start + mini_stack.shape[2] / 2 + xp) - stack.shape[2] / 2 # with respect to original center
+    y_final = (slices[1].start + mini_stack.shape[1] / 2 + yp) - stack.shape[1] / 2 # with respect to original center
+    z_final = (slices[0].start + mini_stack.shape[0] / 2 + zp) - stack.shape[0] / 2 # with respect to original center
 
-    return best_score, (xp, yp, zp), (yaw, pitch, roll)
+    return best_score, (x_final, y_final, z_final), angles
+
+
+# TODO: All rotations could be done in a single step using map_coordinates
+def _inverse_rot3d(stack, yaw, pitch, roll):
+    """ Apply the inverse of an intrinsic yaw -> pitch -> roll rotation.
+    inv(yaw(w) -> pitch(v) -> roll(u)) = roll(-u) -> pitch(-v) -> yaw(-w) = extrinsic
+        yaw(-w) -> extrinsic pitch(-v) -> extrinsic roll(-u).
+
+    Rotations are applied around the center, thus center of original and rotated stack
+    are the same. Shape, however, will not be the same in general, rotated stack could be
+    bigger.
+
+    :param np.array stack: 3-d volume to rotate
+    :param float yaw: Angle in degrees for rotation over z axis.
+    :param float pitch: Angle in degrees for rotation over y axis.
+    :param float roll: Angle in degrees for rotation over x axis.
+
+    :returns: 3-d array. Rotated stack.
+
+    ..ref:: danceswithcode.net/engineeringnotes/rotations_in_3d/rotations_in_3d_part1.html
+    """
+    if yaw == 0 and pitch == 0 and roll == 0:
+        rotated = stack.astype(float, copy=True)
+    else:
+        # Note on ndimage.rotate: Assuming our coordinate system; axes=(1, 2) will do a left
+        # handed rotation in z, (0, 2) a right handed rotation in y and (0, 1) a left handed
+        # rotation in x.
+        rotated = ndimage.rotate(stack, yaw, axes=(1, 2), order=1) # extrinsic yaw(-w)
+        rotated = ndimage.rotate(rotated, -pitch, axes=(0, 2), order=1) # extrinsic pitch(-v)
+        rotated = ndimage.rotate(rotated, roll, axes=(0, 1), order=1) # extrinsic roll(-u)
+
+    return rotated
 
 
 def create_rotation_matrix(yaw, pitch, roll):
@@ -131,55 +172,19 @@ def create_rotation_matrix(yaw, pitch, roll):
     return rotation_matrix
 
 
-def find_intersecting_point(p1, p2, z):
-    """ Find a point at a given z in the line that crosses p1 and p2.
-
-    :param np.array p1: A point (1-d array of size 3) or a matrix of points (3 x n).
-    :param np.array p2: A point (1-d array of size 3) or a matrix of points (3 x n).
-        Number of points in p2 needs to match p1.
-    :param float z: z to insersect the line.
-
-    :returns: A point (1-d array of size 3) or a matrix of points (3 x n).
-
-    ..ref:: https://brilliant.org/wiki/3d-coordinate-geometry-equation-of-a-line/
-    """
-    direction_vector = p2 - p1
-    if any(abs(direction_vector[2]) < 1e-10):
-        raise ArithmeticError('Line is parallel to the z-plane. Infinite or no solutions.')
-    q = p1 + ((z - p1[2]) / direction_vector[2]) * direction_vector # p1 + ((z-z1)/ n) * d
-    return q
-
-
-def sharpen_2pimage(image, laplace_sigma=0.7, low_percentile=3, high_percentile=99.9):
-    """ Apply a laplacian filter, clip pixel range and normalize.
-
-    :param np.array image: Array with raw two-photon images.
-    :param float laplace_sigma: Sigma of the gaussian used in the laplace filter.
-    :param float low_percentile, high_percentile: Percentiles at which to clip.
-
-    :returns: Array of same shape as input. Sharpened image.
-    """
-    sharpened = image - ndimage.gaussian_laplace(image, laplace_sigma)
-    clipped = np.clip(sharpened, *np.percentile(sharpened, [low_percentile, high_percentile]))
-    norm = (clipped - clipped.mean()) / (clipped.max() - clipped.min())
-    return norm
-
-
-def find_field_in_stack(stack, x, y, z, yaw, pitch, roll, height, width):
+def find_field_in_stack(stack, height, width, x, y, z, yaw=0, pitch=0, roll=0):
     """ Get a cutout of the given height, width dimensions in the rotated stack at x, y, z.
 
     :param np.array stack: 3-d stack (depth, height, width)
+    :param height, width: Height and width of the cutout from the stack.
     :param float x, y, z: Center of field measured as distance from the center in the
         original stack (before rotation).
     :param yaw, pitch, roll: Rotation angles to apply to the field.
-    :param height, width: Height and width of the cutout from the stack.
 
     :returns: A height x width np.array at the desired location.
     """
     # Rotate stack (inverse of intrinsic yaw-> pitch -> roll)
-    rotated = ndimage.rotate(stack, yaw, axes=(1, 2), order=1) # yaw(-w)
-    rotated = ndimage.rotate(rotated, -pitch, axes=(0, 2), order=1) # pitch(-v)
-    rotated = ndimage.rotate(rotated, roll, axes=(0, 1), order=1) # roll(-u)
+    rotated = _inverse_rot3d(stack, yaw, pitch, roll)
 
     # Compute center of field in the rotated stack
     R_inv = np.linalg.inv(create_rotation_matrix(yaw, pitch, roll))

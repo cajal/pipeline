@@ -8,12 +8,12 @@ from scipy import signal
 import itertools
 
 from . import experiment, notify, shared, reso, meso
-from .utils import galvo_corrections, stitching, performance
+from .utils import galvo_corrections, stitching, performance, enhancement
 from .utils.signal import mirrconv, float2uint8
 from .exceptions import PipelineException
 
 
-schema = dj.schema('pipeline_stack', locals(), create_tables=True)
+schema = dj.schema('pipeline_stack', locals(), create_tables=False)
 CURRENT_VERSION = 1
 
 
@@ -562,6 +562,10 @@ class Stitching(dj.Computed):
             rois.append(stitching.StitchedROI(corrected_roi, x=px_x, y=px_y,
                                               z=roi_tuple['roi_z'], id_=roi_tuple['roi_id']))
 
+        def enhance(image, sigmas):
+            """ Enhance 2p image. See enhancement.py for details."""
+            return enhancement.sharpen_2pimage(enhancement.lcn(image, sigmas))
+
         def join_rows(rois_):
             """ Iteratively join all rois that overlap in the same row."""
             sorted_rois = sorted(rois_, key=lambda roi: (roi.x, roi.y))
@@ -572,18 +576,23 @@ class Stitching(dj.Computed):
 
                 for left, right in itertools.combinations(sorted_rois, 2):
                     if left.is_aside_to(right):
+                        roi_key = {**key, 'roi_id': left.roi_coordinates[0].id}
+
                         # Compute stitching shifts
+                        neighborhood_size = 25 / (StackInfo.ROI() & roi_key).microns_per_pixel
                         left_ys, left_xs = [], []
                         for l, r in zip(left.slices, right.slices):
-                            delta_y, delta_x = stitching.linear_stitch(l.slice, r.slice, r.x - l.x)
+                            left_slice = enhance(l.slice, neighborhood_size)
+                            right_slice = enhance(r.slice, neighborhood_size)
+                            delta_y, delta_x = stitching.linear_stitch(left_slice, right_slice,
+                                                                       r.x - l.x)
                             left_ys.append(r.y - delta_y)
                             left_xs.append(r.x - delta_x)
 
                         # Fix outliers
-                        roi_key = {**key, 'roi_id': left.roi_coordinates[0].id}
-                        max_y_shift, max_x_shift = 15 / (StackInfo.ROI() & roi_key).microns_per_pixel
+                        max_y_shift, max_x_shift = 10 / (StackInfo.ROI() & roi_key).microns_per_pixel
                         left_ys, left_xs, _ = galvo_corrections.fix_outliers(np.array(left_ys),
-                                np.array(left_xs), max_y_shift, max_x_shift, method='trend')
+                                np.array(left_xs), max_y_shift, max_x_shift, method='linear')
 
                         # Stitch together
                         right.join_with(left, left_xs, left_ys)
@@ -611,6 +620,12 @@ class Stitching(dj.Computed):
         for roi in rois:
             big_volume = roi.volume
             num_slices, image_height, image_width = big_volume.shape
+            roi_key = {**key, 'roi_id': roi.roi_coordinates[0].id}
+
+            # Enhance
+            neighborhood_size = 25 / (StackInfo.ROI() & roi_key).microns_per_pixel
+            for i in range(num_slices):
+                big_volume[i] = enhance(big_volume[i], neighborhood_size)
 
             # Drop 10% of the image borders
             skip_rows = int(round(image_height * 0.1))
@@ -625,10 +640,9 @@ class Stitching(dj.Computed):
                                                                  big_volume[i-1], in_place=False)
 
             # Fix outliers
-            roi_key = {**key, 'roi_id': roi.roi_coordinates[0].id}
-            max_y_shift, max_x_shift = 20 / (StackInfo.ROI() & roi_key).microns_per_pixel
+            max_y_shift, max_x_shift = 15 / (StackInfo.ROI() & roi_key).microns_per_pixel
             y_fixed, x_fixed, _ = galvo_corrections.fix_outliers(y_aligns, x_aligns,
-                                              max_y_shift, max_x_shift, method='trend')
+                                                                 max_y_shift, max_x_shift)
 
             # Accumulate shifts so shift i is shift in i -1 plus shift to align i to i-1
             y_cumsum, x_cumsum = np.cumsum(y_fixed), np.cumsum(x_fixed)
@@ -677,7 +691,7 @@ class Stitching(dj.Computed):
                 first_z, num_slices = (StackInfo.ROI() & roi_coord).fetch1('roi_z', 'roi_px_depth')
                 depths = first_z + z_step * np.arange(num_slices)
 
-                fig, axes = plt.subplots(2, 1, figsize=(15, 8), sharex=True, sharey=True)
+                fig, axes = plt.subplots(2, 1, figsize=(15, 8), sharex=True)
                 axes[0].set_title('Center position (x)')
                 axes[0].plot(depths, roi_coord['stitch_xs'])
                 axes[1].set_title('Center position (y)')
@@ -692,8 +706,6 @@ class Stitching(dj.Computed):
                 msg = ('stitch traces for {animal_id}-{session}-{stack_idx} volume '
                        '{volume_id} roi {roi_id}').format(**roi_coord)
                 slack_user.notify(file=img_filename, file_title=msg)
-
-            slack_user.notify(msg)
 
 
 @schema
@@ -718,6 +730,7 @@ class CorrectedStack(dj.Computed):
 
     class Slice(dj.Part):
         definition = """ # single slice of one stack
+
         -> CorrectedStack
         -> shared.Channel
         islice              : smallint          # index of slice in volume
@@ -825,7 +838,8 @@ class CorrectedStack(dj.Computed):
         video_filename = '/tmp/' + key_hash(key) + '.gif'
         imageio.mimsave(video_filename, float2uint8(volume), duration=1)
 
-        msg = 'corrected stack for {animal_id}-{session}-{stack_idx} volume {volume_id}'.format(**key)
+        msg = ('corrected stack for {animal_id}-{session}-{stack_idx} volume {volume_id} '
+               'channel {channel}').format(**key)
         slack_user = notify.SlackUser() & (experiment.Session() & key)
         slack_user.notify(file=video_filename, file_title=msg, channel='#pipeline_quality')
 
@@ -886,6 +900,7 @@ class CorrectedStack(dj.Computed):
 @schema
 class RegistrationTask(dj.Manual):
     definition = """ # declare scan fields to register to a stack as well as channels and method used
+
     (stack_session) -> CorrectedStack(session)  # animal_id, stack_session, stack_idx, pipe_version, volume_id
     (scan_session) -> experiment.Scan(session)  # animal_id, scan_session, scan_idx
     -> shared.Field
@@ -893,7 +908,7 @@ class RegistrationTask(dj.Manual):
     (scan_channel) -> shared.Channel(channel)
     -> shared.RegistrationMethod
     """
-    def fill(self, stack_key, scan_key, stack_channel=1, scan_channel=1, method=2):
+    def fill(self, stack_key, scan_key, stack_channel=1, scan_channel=1, method=3):
         # Add stack attributes
         stack_rel = CorrectedStack() & stack_key
         if len(stack_rel) > 1:
@@ -917,6 +932,154 @@ class RegistrationTask(dj.Manual):
 
 
 @schema
+class InitialRegistration(dj.Computed):
+    definition = """ # register a 2-d scan field to a stack (rigid registration with 100 microns range)
+
+    (stack_session) -> CorrectedStack(session)  # animal_id, stack_session, stack_idx, pipe_version, volume_id
+    (scan_session) -> experiment.Scan(session)  # animal_id, scan_session, scan_idx
+    -> shared.Field
+    (stack_channel) -> shared.Channel(channel)
+    (scan_channel) -> shared.Channel(channel)
+    ---
+    init_x          : float         # (px) center of scan in stack coordinates
+    init_y          : float         # (px) center of scan in stack coordinates
+    init_z          : float         # (um) depth of scan in stack coordinates
+    score           : float         # cross-correlation score (-1 to 1)
+    common_res      : float         # (um/px) common resolution used for registration
+    """
+    @property
+    def key_source(self):
+        all_stacks = (CorrectedStack() * shared.Channel()).proj(stack_session='session',
+                                                                stack_channel='channel')
+        all_fields = experiment.Scan() * shared.Field() * shared.Channel()
+        processed_fields = reso.SummaryImages() + meso.SummaryImages()
+        fields = (all_fields & processed_fields).proj(scan_session='session',
+                                                      scan_channel='channel')
+        keys = (all_stacks * fields) & RegistrationTask() & {'pipe_version': CURRENT_VERSION}
+
+        return keys
+
+    class FieldInStack(dj.Part):
+        definition = """ # cut out of the field in the stack after registration
+        -> master
+        ---
+        init_field  : longblob    # 2-d field taken from the stack
+        """
+
+    def _make_tuples(self, key):
+        from scipy import ndimage
+        from .utils import registration
+
+        print('Registering', key)
+
+        # Get stack
+        stack_rel = (CorrectedStack() & key & {'session': key['stack_session']})
+        stack = stack_rel.get_stack(key['stack_channel'])
+
+        # Get average field
+        field_key = {'animal_id': key['animal_id'], 'session': key['scan_session'],
+                     'scan_idx': key['scan_idx'], 'field': key['field'],
+                     'channel': key['scan_channel']} # no pipe_version
+        pipe = reso if reso.ScanInfo() & field_key else meso if meso.ScanInfo() & field_key else None
+        mean_image = (pipe.SummaryImages.Average() & field_key).fetch1('average_image')
+
+        # Get field and stack resolution
+        field_res = ((reso.ScanInfo() & field_key).microns_per_pixel if pipe == reso else
+                     (meso.ScanInfo.Field() & field_key).microns_per_pixel)
+        dims = stack_rel.fetch1('um_depth', 'px_depth', 'um_height', 'px_height',
+                                'um_width', 'px_width')
+        stack_res = np.array([dims[0] / dims[1], dims[2] / dims[3], dims[4] / dims[5]])
+
+        # Drop some edges (only x and y) to avoid artifacts and black edges
+        skip_dims = [max(1, int(round(s * 0.025))) for s in stack.shape]
+        stack = stack[:, skip_dims[1] : -skip_dims[1], skip_dims[2]: -skip_dims[2]]
+        skip_dims = [max(1, int(round(s * 0.025))) for s in mean_image.shape]
+        field = mean_image[skip_dims[0] : -skip_dims[0], skip_dims[1]: -skip_dims[1]]
+
+        # Apply local contrast normalization (improves contrast and gets rid of big vessels)
+        norm_stack = enhancement.lcn(stack, np.array([3, 25, 25]) / stack_res)
+        norm_field = enhancement.lcn(field, 20 / field_res)
+
+        # Rescale to match lowest resolution  (isotropic pixels/voxels)
+        common_res = max(*field_res, *stack_res) # minimum available resolution
+        common_stack = ndimage.zoom(norm_stack, stack_res / common_res, order=1)
+        common_field = ndimage.zoom(norm_field, field_res / common_res, order=1)
+
+        # Get estimated depth of the field (from experimenters)
+        stack_x, stack_y, stack_z = stack_rel.fetch1('x', 'y', 'z') # z of the first slice (zero is at surface depth)
+        field_z = (pipe.ScanInfo.Field() & field_key).fetch1('z') # measured in microns (zero is at surface depth)
+        if field_z < stack_z or field_z > stack_z + dims[0]:
+            msg_template = 'Warning: Estimated depth ({}) outside stack range ({}-{}).'
+            print(msg_template.format(field_z, stack_z , stack_z + dims[0]))
+        estimated_px_z = (field_z - stack_z + 0.5) / common_res # in pixels
+
+        # Run rigid registration with no rotations searching 100 microns up and down
+        px_estimate = (0, 0, estimated_px_z - common_stack.shape[0] / 2) # (0, 0, 0) in center of stack
+        px_range = (0.45 * common_stack.shape[2], 0.45 * common_stack.shape[1], 100 / common_res)
+        result = registration.register_rigid(common_stack, common_field, px_estimate, px_range)
+        score, (x, y, z), _ = result
+
+        # Get field in stack (after registration)
+        stack = ndimage.zoom(stack, stack_res / common_res, order=1)
+        common_shape = np.round(np.array(mean_image.shape) * field_res / common_res).astype(int)
+        reg_field = registration.find_field_in_stack(stack, *common_shape, x, y, z)
+        reg_field = ndimage.zoom(reg_field, common_res / field_res, order=1) # *
+        # * this could differ from original shape but it should be pretty close
+
+        # Map back to stack coordinates
+        final_x = stack_x + x * (common_res / stack_res[2]) # in stack pixels
+        final_y = stack_y + y * (common_res / stack_res[1]) # in stack pixels
+        final_z = stack_z + (z + common_stack.shape[0] / 2) * common_res # in microns*
+        #* Best match in slice 0 will not result in z = 0 but 0.5 * z_step.
+
+        # Insert
+        self.insert1({**key,'init_x': final_x, 'init_y': final_y, 'init_z': final_z,
+                      'score': score, 'common_res': common_res,})
+        self.FieldInStack().insert1({**key, 'init_field': reg_field})
+
+        self.notify(key, mean_image, reg_field)
+
+    @notify.ignore_exceptions
+    def notify(self, key, original_field, registered_field):
+        import imageio
+        from pipeline.utils import signal
+
+        orig_clipped = np.clip(original_field, *np.percentile(original_field, [1, 99.8]))
+        reg_clipped = np.clip(registered_field, *np.percentile(registered_field, [1, 99.8]))
+
+        overlay = np.zeros([*original_field.shape, 3], dtype=np.uint8)
+        overlay[:, :, 0] = signal.float2uint8(-reg_clipped) # stack in red
+        overlay[:, :, 1] = signal.float2uint8(-orig_clipped) # original in green
+        img_filename = '/tmp/{}.png'.format(key_hash(key))
+        imageio.imwrite(img_filename, overlay)
+
+        msg = ('initial registration of {animal_id}-{scan_session}-{scan_idx} field '
+               '{field} to {animal_id}-{stack_session}-{stack_idx}').format(**key)
+        slack_user = notify.SlackUser() & (experiment.Session() & key &
+                                           {'session': key['stack_session']})
+        slack_user.notify(file=img_filename, file_title=msg)
+
+
+@schema
+class CuratedRegistration(dj.Computed):
+    definition = """ # curate the initial registration estimates before final registration
+
+    -> InitialRegistration
+    -> shared.CurationMethod
+    ---
+    cur_x          : float         # (px) center of scan in stack coordinates
+    cur_y          : float         # (px) center of scan in stack coordinates
+    cur_z          : float         # (um) depth of scan in stack coordinates
+    """
+    def make_tuples(self, key):
+        if key['curation_method'] == 'none':
+            x, y, z = (InitialRegistration & key).fetch1('init_x', 'init_y', 'init_z')
+            self.insert1({'cur_x': x, 'cur_y': y, 'cur_z': z})
+        if key['curation_method'] == 'manual':
+            print('Warning: Interface for manual curation written in Matlab.')
+
+
+@schema
 class FieldRegistration(dj.Computed):
     """
     Note: We stick with this conventions to define rotations:
@@ -936,6 +1099,8 @@ class FieldRegistration(dj.Computed):
         3. Translate to final x, y, z position (accounting for the previous stack scaling).
     """
     definition = """ # align a 2-d scan field to a stack
+
+    -> CuratedRegistration
     -> RegistrationTask
     ---
     reg_x       : float         # (px) center of scan in stack coordinates
@@ -947,11 +1112,6 @@ class FieldRegistration(dj.Computed):
     score       : float         # cross-correlation score (-1 to 1)
     common_res  : float         # (um/px) common resolution used for registration
     """
-    @property
-    def key_source(self):
-        processed_fields = (reso.SummaryImages() + meso.SummaryImages()).proj(scan_session='session')
-        return RegistrationTask() & processed_fields & {'pipe_version': CURRENT_VERSION}
-
     class FieldInStack(dj.Part):
         definition = """ # cut out of the field in the stack after registration
         -> master
@@ -984,68 +1144,74 @@ class FieldRegistration(dj.Computed):
         pipe = reso if reso.ScanInfo() & field_key else meso if meso.ScanInfo() & field_key else None
         mean_image = (pipe.SummaryImages.Average() & field_key).fetch1('average_image')
 
-        # Drop some edges (only y and x) to avoid artifacts
-        skip_dims = [max(1, int(round(s * 0.025))) for s in stack.shape]
-        stack = stack[:, skip_dims[1] : -skip_dims[1], skip_dims[2]: -skip_dims[2]]
-        skip_dims = [max(1, int(round(s * 0.025))) for s in mean_image.shape]
-        field = mean_image[skip_dims[0] : -skip_dims[0], skip_dims[1]: -skip_dims[1]]
-
-        # Rescale to match lowest resolution  (isotropic pixels/voxels)
+        # Get field and stack resolution
         field_res = ((reso.ScanInfo() & field_key).microns_per_pixel if pipe == reso else
                      (meso.ScanInfo.Field() & field_key).microns_per_pixel)
         dims = stack_rel.fetch1('um_depth', 'px_depth', 'um_height', 'px_height',
                                 'um_width', 'px_width')
         stack_res = np.array([dims[0] / dims[1], dims[2] / dims[3], dims[4] / dims[5]])
-        common_res = max(*field_res, *stack_res) # minimum available resolution
-        stack = ndimage.zoom(stack, stack_res / common_res, order=1)
-        field = ndimage.zoom(field, field_res / common_res, order=1)
 
-        # Get estimated depth of the field (from experimenters)
+        # Drop some edges (only x and y) to avoid artifacts and black edges
+        skip_dims = [max(1, int(round(s * 0.025))) for s in stack.shape]
+        stack = stack[:, skip_dims[1] : -skip_dims[1], skip_dims[2]: -skip_dims[2]]
+        skip_dims = [max(1, int(round(s * 0.025))) for s in mean_image.shape]
+        field = mean_image[skip_dims[0] : -skip_dims[0], skip_dims[1]: -skip_dims[1]]
+
+        # Apply local contrast normalization (improves contrast and gets rid of big vessels)
+        norm_stack = enhancement.lcn(stack, np.array([3, 25, 25]) / stack_res)
+        norm_field = enhancement.lcn(field, 20 / field_res)
+
+        # Rescale to match lowest resolution  (isotropic pixels/voxels)
+        common_res = max(*field_res, *stack_res) # minimum available resolution
+        common_stack = ndimage.zoom(norm_stack, stack_res / common_res, order=1)
+        common_field = ndimage.zoom(norm_field, field_res / common_res, order=1)
+
+        # Get initial estimate from CuratedRegistration
         stack_x, stack_y, stack_z = stack_rel.fetch1('x', 'y', 'z') # z of the first slice (zero is at surface depth)
-        field_z = (pipe.ScanInfo.Field() & field_key).fetch1('z') # measured in microns (zero is at surface depth)
-        if field_z < stack_z or field_z > stack_z + dims[0]:
-            msg_template = 'Warning: Estimated depth ({}) outside stack range ({}-{}).'
-            print(msg_template.format(field_z, stack_z , stack_z + dims[0]))
-        estimated_px_z = (field_z - stack_z + 0.5) / common_res # in pixels
+        cur_x, cur_y, cur_z = (CuratedRegistration() & key).fetch1('cur_x', 'cur_y', 'cur_z')
+        estimated_px_x = (cur_x - stack_x) * stack_res[2] / common_res # in pixels
+        estimated_px_y = (cur_y - stack_y) * stack_res[1] / common_res
+        estimated_px_z = (cur_z - stack_z) / common_res - common_stack.shape[0] / 2
 
         # Register
-        z_range = (40 if key['registration_method'] in [1, 3] else 100) / common_res # search 40/100 microns up and down
+        px_estimate = (estimated_px_x, estimated_px_y, estimated_px_z) # (0, 0, 0) in center of stack
+        um_range = 40 if key['registration_method'] in [1, 3] else 100 # search 40/100 microns up and down
+        px_range = (um_range / common_res, ) * 3
         if key['registration_method'] in [1, 2]: # rigid
             # Run rigid registration with no rotations
-            result = registration.register_rigid(stack, field, estimated_px_z, z_range)
+            result = registration.register_rigid(common_stack, common_field, px_estimate, px_range)
             score, (x, y, z), (yaw, pitch, roll) = result
 
         elif key['registration_method'] in [3, 4]: # rigid plus 3-d rotation
-            max_angle = 5
-
             # Run parallel registration searching for best rotation angles
-            results = performance.map_angles(stack, field, estimated_px_z, z_range, max_angle)
+            angles = np.linspace(-4, 4, 4 * 4 + 1) # -4, -3.5, -3, ... 3.5, 4
+            results = performance.map_angles(common_stack, common_field, px_estimate, px_range, angles)
             score, (x, y, z), (yaw, pitch, roll) = sorted(results)[-1]
 
             # Create some intermediate results (inserted below)
-            num_angles = 2 * max_angle + 1
-            score_map = np.zeros([num_angles, num_angles, num_angles])
-            position_map = np.zeros([num_angles, num_angles, num_angles, 3])
+            score_map = np.zeros([len(angles), len(angles), len(angles)])
+            position_map = np.zeros([len(angles), len(angles), len(angles), 3])
             for rho, position, angles in results:
-                idx1, idx2, idx3 = (a + max_angle for a in angles)
+                idx1, idx2, idx3 = (np.where(angles == a)[0][0] for a in angles)
                 score_map[idx1, idx2, idx3] = rho
                 position_map[idx1, idx2, idx3] = position
 
         # Get field in stack (after registration)
+        stack = ndimage.zoom(stack, stack_res / common_res, order=1)
         common_shape = np.round(np.array(mean_image.shape) * field_res / common_res).astype(int)
-        reg_field = registration.find_field_in_stack(stack, x, y, z, yaw, pitch, roll, *common_shape)
+        reg_field = registration.find_field_in_stack(stack, *common_shape, x, y, z)
         reg_field = ndimage.zoom(reg_field, common_res / field_res, order=1) # *
-        # * this could not be the same as the original shape but it should be pretty close
+        # * this could differ from original shape but it should be pretty close
 
         # Map back to stack coordinates
         final_x = stack_x + x * (common_res / stack_res[2]) # in stack pixels
         final_y = stack_y + y * (common_res / stack_res[1]) # in stack pixels
-        final_z = stack_z + (z + stack.shape[0] / 2) * common_res # in microns*
+        final_z = stack_z + (z + common_stack.shape[0] / 2) * common_res # in microns*
         #* Best match in slice 0 will not result in z = 0 but 0.5 * z_step.
 
         # Insert
-        self.insert1({**key, 'common_res': common_res, 'reg_x': final_x, 'reg_y': final_y,
-                      'reg_z': final_z, 'yaw': yaw, 'pitch': pitch, 'roll': roll,
+        self.insert1({**key,  'reg_x': final_x, 'reg_y': final_y, 'reg_z': final_z,
+                      'yaw': yaw, 'pitch': pitch, 'roll': roll, 'common_res': common_res,
                       'score': score})
         self.FieldInStack().insert1({**key, 'reg_field': reg_field})
         if key['registration_method'] in [3, 4]: # store correlation values
@@ -1072,7 +1238,7 @@ class FieldRegistration(dj.Computed):
                '{animal_id}-{stack_session}-{stack_idx} (method {registration_method})')
         msg = msg.format(**key)
         slack_user = notify.SlackUser() & (experiment.Session() & key &
-                                 {'session': key['stack_session']})
+                                           {'session': key['stack_session']})
         slack_user.notify(file=img_filename, file_title=msg)
 
 
@@ -1080,6 +1246,7 @@ class FieldRegistration(dj.Computed):
 class StackSet(dj.Computed):
     definition=""" # give a unique id to segmented masks in the stack
     (stack_session) -> CorrectedStack(session)  # animal_id, stack_session, stack_idx, pipe_version, volume_id
+    -> shared.CurationMethod
     -> shared.RegistrationMethod
     ---
     min_distance            :tinyint        # distance used as threshold to accept two masks as the same
