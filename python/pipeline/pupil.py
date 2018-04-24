@@ -416,7 +416,7 @@ class ManuallyTrackedContours(dj.Manual, AutoPopulate):
 
         logtrace = tracker.mixing_constant.logtrace.astype(float)
         self.insert1(dict(key, min_lambda=logtrace[logtrace > 0].min()))
-        self.log_key(key)
+        self.log_git(key)
         frame = self.Frame()
         parameters = self.Parameter()
         for frame_id, ok, contour, params in tqdm(zip(count(), tracker.contours_detected, tracker.contours,
