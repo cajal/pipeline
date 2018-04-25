@@ -1191,8 +1191,8 @@ class FieldRegistration(dj.Computed):
             # Create some intermediate results (inserted below)
             score_map = np.zeros([len(angles), len(angles), len(angles)])
             position_map = np.zeros([len(angles), len(angles), len(angles), 3])
-            for rho, position, angles in results:
-                idx1, idx2, idx3 = (np.where(angles == a)[0][0] for a in angles)
+            for rho, position, res_angles in results:
+                idx1, idx2, idx3 = (np.where(angles == a)[0][0] for a in res_angles)
                 score_map[idx1, idx2, idx3] = rho
                 position_map[idx1, idx2, idx3] = position
 
