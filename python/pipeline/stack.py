@@ -1255,7 +1255,7 @@ class StackSet(dj.Computed):
     #TODO: Make it automatic to delete itself and repopulate if a new field is registered to the stack
     @property
     def key_source(self):
-        all_keys = CorrectedStack() * shared.RegistrationMethod()
+        all_keys = CorrectedStack() * shared.CurationMethod() * shared.RegistrationMethod()
         return all_keys.proj(stack_session='session') & FieldRegistration()
 
     class Unit(dj.Part):
