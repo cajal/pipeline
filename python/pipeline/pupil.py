@@ -1,4 +1,6 @@
 from itertools import count
+
+from .utils.decorators import gitlog
 from scipy.misc import imresize
 import datajoint as dj
 from datajoint.jobs import key_hash
@@ -46,6 +48,7 @@ class Eye(dj.Imported):
     preview_frames              : longblob  # 16 preview frames
     eye_ts=CURRENT_TIMESTAMP    : timestamp
     """
+
     @property
     def key_source(self):
         return experiment.Scan() & experiment.Scan.EyeVideo().proj()
@@ -365,11 +368,13 @@ class TrackedVideo(dj.Computed):
 
 
 @schema
+@gitlog
 class ManuallyTrackedContours(dj.Manual, AutoPopulate):
     definition = """
     -> Eye
     ---
     tracking_ts=CURRENT_TIMESTAMP    : timestamp  # automatic
+    min_lambda=null                  : float      # minimum mixing weight for current frame in running average computation (1 means no running avg was used)
     """
 
     class Frame(dj.Part):
@@ -380,21 +385,55 @@ class ManuallyTrackedContours(dj.Manual, AutoPopulate):
         contour=NULL             : longblob      # eye contour relative to ROI
         """
 
-    def make(self, key):
+    class Parameter(dj.Part):
+        definition = """
+        -> master.Frame
+        ---
+        roi=NULL                : longblob  # roi of eye
+        gauss_blur=NULL         : float     # bluring of ROI
+        exponent=NULL           : tinyint   # exponent for contrast enhancement
+        dilation_iter=NULL      : tinyint   # number of dilation and erosion operations
+        min_contour_len=NULL    : tinyint   # minimal contour length
+        running_avg_mix=NULL    : float     # weight a in a * current_frame + (1-a) * running_avg 
+        """
+
+    def make(self, key, backup_file=None):
         print("Populating", key)
 
-        avi_path = (Eye() & key).get_video_path()
 
-        tracker = ManualTracker(avi_path)
-        tracker.run()
-        self.insert1(key)
+        if backup_file is None:
+            avi_path = (Eye() & key).get_video_path()
+            tracker = ManualTracker(avi_path)
+            tracker.backup_file = '/tmp/tracker_state{animal_id}-{session}-{scan_idx}.pkl'.format(**key)
+        else:
+            tracker = ManualTracker.from_backup(backup_file)
+
+        try:
+            tracker.run()
+        except:
+            tracker.backup()
+            raise
+
+        logtrace = tracker.mixing_constant.logtrace.astype(float)
+        self.insert1(dict(key, min_lambda=logtrace[logtrace > 0].min()))
+        self.log_git(key)
         frame = self.Frame()
-        for frame_id, ok, contour in tqdm(zip(count(), tracker.contours_detected, tracker.contours),
+        parameters = self.Parameter()
+        for frame_id, ok, contour, params in tqdm(zip(count(), tracker.contours_detected, tracker.contours,
+                                              tracker.parameter_iter()),
                                           total=len(tracker.contours)):
+            assert frame_id == params['frame_id']
             if ok:
                 frame.insert1(dict(key, frame_id=frame_id, contour=contour))
             else:
                 frame.insert1(dict(key, frame_id=frame_id))
+            parameters.insert1(dict(key, **params), ignore_extra_fields=True)
+
+
+    def warm_start(self, key, backup_file):
+        assert not key in self, '{} should not be in the table already!'
+        with self.connection.transaction:
+            self.make(key, backup_file)
 
 
     def update(self, key):
@@ -406,18 +445,37 @@ class ManuallyTrackedContours(dj.Manual, AutoPopulate):
         contours = (self.Frame() & key).fetch('contour', order_by='frame_id')
         tracker.contours = np.array(contours)
         tracker.contours_detected = np.array([e is not None for e in contours])
-        tracker.run()
-        if input('Do you want to delete and replace the existing entries? Type "YES" for acknowledgement.') == "YES":
-            (self & key).delete()
-            self.insert1(key)
-            frame = self.Frame()
-            for frame_id, ok, contour in tqdm(zip(count(), tracker.contours_detected, tracker.contours),
-                                              total=len(tracker.contours)):
-                if ok:
-                    frame.insert1(dict(key, frame_id=frame_id, contour=contour))
-                else:
-                    frame.insert1(dict(key, frame_id=frame_id))
+        tracker.backup_file = '/tmp/tracker_update_state{animal_id}-{session}-{scan_idx}.pkl'.format(**key)
 
+        try:
+            tracker.run()
+        except Exception as e:
+            print(str(e))
+            answer = input('Tracker crashed. Do you want to save the content anyway [y/n]?').lower()
+            while answer not in ['y', 'n']:
+                answer = input('Tracker crashed. Do you want to save the content anyway [y/n]?').lower()
+            if answer == 'n':
+                raise
+        if input('Do you want to delete and replace the existing entries? Type "YES" for acknowledgement.') == "YES":
+            with dj.config(safemode=False):
+                with self.connection.transaction:
+                    (self & key).delete()
+
+                    logtrace = tracker.mixing_constant.logtrace.astype(float)
+                    self.insert1(dict(key, min_lambda=logtrace[logtrace > 0].min()))
+                    self.log_key(key)
+
+                    frame = self.Frame()
+                    parameters = self.Parameter()
+                    for frame_id, ok, contour, params in tqdm(zip(count(), tracker.contours_detected, tracker.contours,
+                                                                  tracker.parameter_iter()),
+                                                              total=len(tracker.contours)):
+                        assert frame_id == params['frame_id']
+                        if ok:
+                            frame.insert1(dict(key, frame_id=frame_id, contour=contour))
+                        else:
+                            frame.insert1(dict(key, frame_id=frame_id))
+                        parameters.insert1(dict(key, **params), ignore_extra_fields=True)
 @schema
 class FittedContour(dj.Computed):
     definition = """
