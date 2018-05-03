@@ -1,5 +1,42 @@
 import numpy as np
-from itertools import product
+from scipy import ndimage
+
+
+def lcn(image, sigmas=(7, 7)):
+    """ Local contrast normalization.
+
+    Normalize each pixel using mean and stddev computed on a local neighborhood.
+
+    We use gaussian filters rather than uniform filters to compute the local mean and std
+    to soften the effect of edges. Essentially we are using a fuzzy local neighborhood.
+    Equivalent using a hard defintion of neighborhood will be:
+        local_mean = ndimage.uniform_filter(image, size=(32, 32))
+
+    :param np.array image: Array with raw two-photon images.
+    :param tuple sigmas: List with sigmas per axes to use for the gaussian filter.
+        Smaller values result in more local neighborhoods. 15-30 microns should work fine
+    """
+    local_mean = ndimage.gaussian_filter(image, sigmas)
+    local_std = np.sqrt(ndimage.gaussian_filter((image - local_mean)**2, sigmas))
+    norm = (image - local_mean) / (local_std + 1e-7)
+
+    return norm
+
+
+def sharpen_2pimage(image, laplace_sigma=0.7, low_percentile=3, high_percentile=99.9):
+    """ Apply a laplacian filter, clip pixel range and normalize.
+
+    :param np.array image: Array with raw two-photon images.
+    :param float laplace_sigma: Sigma of the gaussian used in the laplace filter.
+    :param float low_percentile, high_percentile: Percentiles at which to clip.
+
+    :returns: Array of same shape as input. Sharpened image.
+    """
+    sharpened = image - ndimage.gaussian_laplace(image, laplace_sigma)
+    clipped = np.clip(sharpened, *np.percentile(sharpened, [low_percentile, high_percentile]))
+    norm = (clipped - clipped.mean()) / (clipped.max() - clipped.min() + 1e-7)
+    return norm
+
 
 def compute_correlation_image(scan):
     """ Compute the correlation image for the given scan.
@@ -16,6 +53,8 @@ def compute_correlation_image(scan):
     next iteration it is as efficient in time and (slightly better in) memory than the
     dynamic programming implementation below. It may be due to vectorization usage.
     """
+    from itertools import product
+
      # Get image dimensions
     image_height, image_width, num_frames = scan.shape
 

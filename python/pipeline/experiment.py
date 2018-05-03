@@ -504,4 +504,15 @@ class Fixes(dj.Manual):
         num_gaps      :int          # number of gaps of bad data in the signal
         num_secs      :float        # number of seconds of bad data in the signal
         """
+
+
+@schema
+class AutoProcessing(dj.Manual):
+    definition = """ # scans that should enter automatic processing
+    -> Scan
+    ---
+    priority=0          :tinyint       # highest priority is processed first
+    autosegment=false   :boolean       # segment somas in the first channel with default method
+    """
+
 schema.spawn_missing_classes()
