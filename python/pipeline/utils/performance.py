@@ -503,15 +503,15 @@ def parallel_correct_stack(chunks, results, raster_phase, fill_fraction, y_shift
         results.append((field_idx, averaged))
 
 
-def map_angles(stack, field, z_estimate, z_range, max_angle, num_processes=8):
+def map_angles(stack, field, px_estimate, px_range, angles, num_processes=8):
     """ Parallel brute force search over all possible angle combinations of the highest
     correlating position.
 
     :param np.array: 3-d stack (depth, height, width).
     :param np.array field: 2-d field to register in the stack.
-    :param float z_estimate: Initial estimate of best z.
-    :param float z_range: How many slices to search above (and below) z_estimate.
-    :param max_angle: Max angle to try for rotations (in degrees).
+    :param triplet px_estimate: Initial estimate in x, y, z. (0, 0, 0) in center of stack.
+    :param triplet px_range: How many pixels to search around the initial estimate.
+    :param list angles: Angles to try for each rotation (in degrees).
     :param int num_processes: Number of processes to use for mapping.
     """
     from itertools import product
@@ -523,11 +523,9 @@ def map_angles(stack, field, z_estimate, z_range, max_angle, num_processes=8):
 
     # Over each angle combination
     print('Initial time:', time.ctime())
-    angles = product(range(-max_angle, max_angle + 1), range(-max_angle, max_angle + 1),
-                     range(-max_angle, max_angle + 1))
-    f = partial(parallel_register_rigid, field, z_estimate, z_range)
+    f = partial(parallel_register_rigid, field, px_estimate, px_range)
     with mp.Pool(num_processes, _reg_init, initargs=(stack,)) as pool:
-        results = pool.map(f, angles)
+        results = pool.map(f, product(angles, angles, angles))
 
     return results
 
@@ -537,7 +535,7 @@ def _reg_init(stack):
     shared_stack = stack
 
 
-def parallel_register_rigid(field, z_estimate, z_range, angles):
+def parallel_register_rigid(field, px_estimate, px_range, angles):
     """ A wrapper around registration.register_rigid """
     from .registration import register_rigid
-    return register_rigid(shared_stack, field, z_estimate, z_range, *angles)
+    return register_rigid(shared_stack, field, px_estimate, px_range, angles)
