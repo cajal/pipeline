@@ -144,7 +144,7 @@ classdef FieldCoordinates < dj.Manual
  
             % fetch images
             if strcmp(setup,'2P4')
-                [frames,x,y,tforms] = fetchn(meso.SummaryImagesAverage * self & fuse.ScanSet,...
+                [frames,x,y,tforms] = fetchn(meso.SummaryImagesAverage * self ,...
                     'average_image','x_offset','y_offset','tform');
             else
                 [frames,x,y,tforms,keys] = fetchn(reso.SummaryImagesAverage * self & fuse.ScanSet,...
@@ -176,7 +176,7 @@ classdef FieldCoordinates < dj.Manual
             
             % construct image
             im = zeros(y_range,x_range,3);
-            im(1+mnY:size(ref_map,1)+mnY,1+mnX:size(ref_map,2)+mnX,1) = ref_map;
+%             im(1+mnY:size(ref_map,1)+mnY,1+mnX:size(ref_map,2)+mnX,1) = ref_map;
 
             % put frames
             for islice = 1:length(frames)
@@ -193,8 +193,9 @@ classdef FieldCoordinates < dj.Manual
                 axis image
                 axis off
             else
-                im(:,:,3) = (im(:,:,2)>0)*0.33;
-                out_im = hsv2rgb(im(:,:,[3 2 1]));
+%                 im(:,:,3) = (im(:,:,2)>0)*0.33;
+%                 out_im = hsv2rgb(im(:,:,[3 2 1]));
+                out_im = im;
             end
         end
         
@@ -250,8 +251,8 @@ classdef FieldCoordinates < dj.Manual
             fmask = ref_mask(YY+1:size(imS,1)+YY-1,XX+1:size(imS,2)+XX-1);
             fmask = self.filterImage(ne7.mat.normalize(fmask),tform,1)>0;
             fmask = fmask(...
-                round(size(fmask,1)/2)-floor(sz(1)/2)+1:round(size(fmask,1)/2)+floor(sz(1)/2),...
-                round(size(fmask,2)/2)-floor(sz(2)/2)+1:round(size(fmask,2)/2)+floor(sz(2)/2));
+                round(size(fmask,1)/2)-floor(sz(1)/2)+1:floor(size(fmask,1)/2)+floor(sz(1)/2),...
+                round(size(fmask,2)/2)-floor(sz(2)/2)+1:floor(size(fmask,2)/2)+floor(sz(2)/2));
         end
     end
     
@@ -381,8 +382,8 @@ classdef FieldCoordinates < dj.Manual
                 im1 = (imrotate(imresize(vessels,1/scale),-rot,'crop'));
                 im3 = zeros(size(im1,1),size(im1,2),3);
                 im3(:,:,1) = im1;
-                im3(round((x+1)/scale):size(im2,1)+round((x+1)/scale) - 1,...
-                    round((y+1)/scale):size(im2,2)+round((y+1)/scale) - 1,2) = im2;
+                im3(ceil((x+1)/scale):size(im2,1)+ceil((x+1)/scale) - 1,...
+                    ceil((y+1)/scale):size(im2,2)+ceil((y+1)/scale) - 1,2) = im2;
                 set(gcf,'name',['X:' num2str(x/params.resize) ' Y:' num2str(y/params.resize) 'rot:' num2str(rot) ' scale:' num2str(scale)])
                 imh.CData = (im3);
             end

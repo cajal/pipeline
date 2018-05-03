@@ -80,14 +80,12 @@ classdef RetMap < dj.Manual
             end
         end
         
-        
         function ret_key = getRetKey(self, key)
             if ~exists(self & key)
                 createRet(map.RetMap,fetch(mice.Mice & key));
             end
             ret_key = rmfield(fetch(map.RetMapScan & (self & key) & 'axis="horizontal"'),'axis');
         end
-        
         
         function background = getBackground(self, varargin)
             

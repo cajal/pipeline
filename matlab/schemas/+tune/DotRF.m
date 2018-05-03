@@ -224,14 +224,26 @@ classdef DotRF < dj.Computed
             plot(m(2)*params.scale,m(1)*params.scale,'*r','markersize',5)
             
             % adjust labels as a fraction of x
-            yrange = size(map,2)/2/size(map,1);
-            roundall = @(x) round(x*100)/100;
-            set(gca,'xtick',linspace(0.5,size(map,1)+0.5,10),'xticklabel',roundall(linspace(-0.5,0.5,10)))
-            set(gca,'ytick',linspace(0.5,size(map,2)+0.5,10),'yticklabel',roundall(linspace(-yrange,yrange,10)))
+            steps = 5;
+            x_idx = loc2deg(self,linspace(-0.5,0.5,steps),1);
+            y_idx = loc2deg(self,linspace(-0.33,0.33,steps),1);
+            set(gca,'xtick',linspace(1,size(map,1),steps),'xticklabel',round(x_idx))
+            set(gca,'ytick',linspace(1,size(map,2),steps),'yticklabel',round(y_idx))
             grid on
             axis image
         end
         
+        function deg = loc2deg(obj,loc,flat_corrected)
+            [aspect, distance, diag_size] = fetch1(experiment.DisplayGeometry & obj,'monitor_aspect','monitor_distance','monitor_size');
+            x_size = sind(atand(aspect))*diag_size;
+            if nargin>1 && flat_corrected
+                x2deg = @(xx) atand(x_size*xx/distance);
+                deg = x2deg(loc);
+            else
+                max_deg = atand(x_size/2/distance)*2;
+                deg = loc*max_deg;
+            end
+        end
 
     end
 
