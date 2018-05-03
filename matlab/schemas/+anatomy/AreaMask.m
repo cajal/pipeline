@@ -120,7 +120,7 @@ classdef AreaMask < dj.Manual
             % fetch all area masks
             area_masks = [];areas = [];
             map_keys = fetch(anatomy.AreaMask & (anatomy.RefMap & (proj(anatomy.RefMap) & (anatomy.FieldCoordinates & keyI))));
-            if nargin >2 & contiguous
+            if nargin >2 && contiguous
                 % if contiguous
                 [area_map, keys] = getContiguousMask(obj,map_keys,0);
                 areas = unique({keys(:).brain_area}');
