@@ -14,10 +14,11 @@ classdef AreaMask < dj.Manual
             
             params.exp = 1.5;
             params.sigma = 2;
+            params.amp = 1;
             
             params = ne7.mat.getParams(params,varargin);
             
-            if strcmp(fetch1(experiment.Scan & key,'aim'),'widefield')
+            if strcmp(fetch1(experiment.Scan & key,'aim'),'widefield') || strcmp(fetch1(experiment.Scan & key,'aim'),'intrinsic')
                 contiguous = 1;
             else
                 contiguous = 0;
@@ -54,7 +55,8 @@ classdef AreaMask < dj.Manual
             figure;
             masks = ne7.mat.normalize(area_map);
             masks(:,:,2) = 0.2*(area_map>0);
-            masks(:,:,3) = background(:,:,1,1);
+            %             masks(:,:,3) = background(:,:,1,1);
+            masks(:,:,3) = ones(size(masks(:,:,2)));
             ih = image(hsv2rgb(masks));
             axis image
             axis off
@@ -113,31 +115,49 @@ classdef AreaMask < dj.Manual
             end
         end
         
-        function extractMasks(obj, keyI)
+        function extractMasks(obj, keyI, contiguous)
             
             % fetch all area masks
+            area_masks = [];areas = [];
             map_keys = fetch(anatomy.AreaMask & (anatomy.RefMap & (proj(anatomy.RefMap) & (anatomy.FieldCoordinates & keyI))));
+            if nargin >2 && contiguous
+                % if contiguous
+                [area_map, keys] = getContiguousMask(obj,map_keys,0);
+                areas = unique({keys(:).brain_area}');
+                un_areas = unique(area_map(:));
+                for iarea = 2:length(un_areas)
+                    area_masks{end+1} = area_map==un_areas(iarea);
+                end
+            else
+                for map_key = map_keys'
+                    [mask, area, ret_idx] = fetch1(anatomy.AreaMask & map_key, 'mask', 'brain_area', 'ret_idx');
+                    area_masks{end+1} = mask;
+                    areas{end+1} = area;
+                end
+                
+            end
             
             % loop through all masks
-            for map_key = map_keys'
-                [mask, area, ret_idx] = fetch1(anatomy.AreaMask & map_key, 'mask', 'brain_area', 'ret_idx');
-                
+            for imask = 1:length(area_masks)
                 % loop through all fields
                 for field_key = fetch(anatomy.FieldCoordinates & keyI)'
                     
                     % find corresponding mask area
-                    fmask = filterMask(anatomy.FieldCoordinates & field_key, mask);
+                    fmask = filterMask(anatomy.FieldCoordinates & field_key, area_masks{imask});
                     
                     % insert if overlap exists
                     if ~all(~fmask(:))
                         tuple = rmfield(field_key,'ref_idx');
-                        tuple.brain_area = area;
-                        tuple.mask = fmask;
-                        tuple.ret_idx = ret_idx;
-                        insert(obj,tuple)
+                        tuple.brain_area =   areas{imask};
+                        if ~exists(obj & tuple)
+                            tuple.mask = fmask;
+                            tuple.ret_idx = keyI.ret_idx;
+                            insert(obj,tuple)
+                        end
                     end
                 end
             end
+            
         end
         
         function [fmasks, fields] = splitContiguousMask(~, key, ref_mask)
@@ -211,6 +231,7 @@ classdef AreaMask < dj.Manual
             
             params.back_idx = [];
             params.exp = 0.4;
+            params.contrast = 1;
             
             params = ne7.mat.getParams(params,varargin);
             
@@ -250,7 +271,7 @@ classdef AreaMask < dj.Manual
             if nargin<2 || isempty(params.back_idx) || params.back_idx > size(background,4)
                 image((im));
             else
-                imshowpair(im,background(:,:,:,params.back_idx),'blend')
+                imshowpair(im,background(:,:,:,params.back_idx)*params.contrast,'blend')
             end
             axis image;
             key = fetch(proj(experiment.Scan) & obj);
@@ -260,7 +281,7 @@ classdef AreaMask < dj.Manual
             un_areas = unique(areas);
             for iarea = 1:length(un_areas)
                 s = regionprops(area_map==iarea,'Centroid');
-                text(s(1).Centroid(1),s(1).Centroid(2),un_areas{iarea},'color',[1 0 0],'fontsize',16)
+                text(s(1).Centroid(1),s(1).Centroid(2),un_areas{iarea},'color',[1 0 0],'fontsize',16,'rotation',0)
             end
         end
         
