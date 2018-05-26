@@ -12,7 +12,8 @@ classdef Masks < dj.Lookup
             
             set(gcf,'name','Visual Areas')
             hold on
-            set(gca,'ydir','reverse')
+             set(gca,'ydir','reverse')
+                set(gca,'xdir','reverse')
             axis image
             axis off
             

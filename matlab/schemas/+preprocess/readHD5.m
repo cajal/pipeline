@@ -129,7 +129,7 @@ switch version
         
         H5F.close(fp);
         
-    case 2
+    case {2, 2.1}
         % WH_channelNames = Position,Counter,Time
         % IM_channelNames = CTR Time, Real Time
 
@@ -162,7 +162,7 @@ switch version
                 data.scanImage = wf(:,2);
                 data.ts = wf(:,3);
             case 2.1
-                assert(strcmp(deblank(waveformDescStr),'Photodiode, ScanImageFrameSync, LaserPower ,Time'),...
+                assert(strcmp(deblank(waveformDescStr),'Photodiode, ScanImageFrameSync, LaserPower, Time'),...
             'waveform Channels Description is wrong for this file version');
                 wf = H5Tools.readDataset(fp,'Analog Signals') ;
                 data.syncPd = wf(:,1);

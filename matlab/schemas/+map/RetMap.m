@@ -13,6 +13,8 @@ classdef RetMap < dj.Manual
             tuple = fetch(mice.Mice & keys);
             assert(length(tuple)==1,'Specify one animal_id!')
             
+         
+            
             % find opt maps if not provided
             if ~isfield(keys(1),'scan_idx')
                 keys = [];
@@ -44,6 +46,8 @@ classdef RetMap < dj.Manual
                     disp 'No maps found, please specify...'
                     return
                 end
+            else
+                keys = fetch(map.OptImageBar & keys);
             end
             
             % set reference index
@@ -76,7 +80,6 @@ classdef RetMap < dj.Manual
             end
         end
         
-        
         function ret_key = getRetKey(self, key)
             if ~exists(self & key)
                 createRet(map.RetMap,fetch(mice.Mice & key));
@@ -84,11 +87,11 @@ classdef RetMap < dj.Manual
             ret_key = rmfield(fetch(map.RetMapScan & (self & key) & 'axis="horizontal"'),'axis');
         end
         
-        
         function background = getBackground(self, varargin)
             
             params.exp = 1.5;
             params.sigma = 2;
+            params.amp = 1;
             
             params = ne7.mat.getParams(params,varargin);
             
@@ -100,6 +103,7 @@ classdef RetMap < dj.Manual
             vessels = single(vessels);
             [Hor(:,:,1),Hor(:,:,2),Hor(:,:,3)] = plot(map.OptImageBar & (map.RetMapScan & self) ...
                 & 'axis="horizontal"','exp',params.exp,'sigma',params.sigma);
+            Hor(:,:,2) = ne7.mat.normalize(abs(Hor(:,:,2).^params.amp));
             background = cat(4,repmat(vessels/max(vessels(:)),1,1,3),hsv2rgb(Hor));
            
             % get vertical map
@@ -107,6 +111,7 @@ classdef RetMap < dj.Manual
                 Ver = [];
                 [Ver(:,:,1),Ver(:,:,2),Ver(:,:,3)] = plot(map.OptImageBar & (map.RetMapScan & self) ...
                     & 'axis="vertical"','exp',params.exp,'sigma',params.sigma);
+                Ver(:,:,2) = ne7.mat.normalize(abs(Ver(:,:,2).^params.amp));
                 background = cat(4,background,hsv2rgb(Ver));
             end
             
