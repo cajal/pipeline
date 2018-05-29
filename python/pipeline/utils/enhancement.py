@@ -38,7 +38,7 @@ def sharpen_2pimage(image, laplace_sigma=0.7, low_percentile=3, high_percentile=
     return norm
 
 
-def compute_correlation_image(scan):
+def create_correlation_image(scan):
     """ Compute the correlation image for the given scan.
 
     At each pixel, we compute the correlation (over time) with each of its eight
