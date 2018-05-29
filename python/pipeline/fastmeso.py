@@ -69,8 +69,7 @@ class RegistrationOverTime(dj.Computed):
                 experiment.Scan().proj(scan_session='session') * shared.Field().proj() *
                 shared.Channel().proj(stack_channel='channel') *
                 shared.Channel().proj(scan_channel='channel'))
-        animals = [{'animal_id': 17977}]
-        return keys & animals & {'stack_channel': 1} & {'scan_channel': 1} & meso.Quality.SummaryFrames().proj(scan_session='session')
+        return keys & stack.RegistrationTask() & meso.Quality.SummaryFrames().proj(scan_session='session')
 
     def _make_tuples(self, key):
         from scipy import ndimage
