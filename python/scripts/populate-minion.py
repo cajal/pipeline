@@ -37,6 +37,7 @@ while True:
             pipe.MotionCorrection().populate(next_scans, reserve_jobs=True, suppress_errors=True)
             pipe.SummaryImages().populate(next_scans, reserve_jobs=True, suppress_errors=True)
             pipe.Segmentation().populate(next_scans, reserve_jobs=True, suppress_errors=True)
+            pipe.Fluorescence().populate(next_scans, reserve_jobs=True, suppress_errors=True)
             pipe.MaskClassification().populate(next_scans, {'classification_method': 2},
                                                reserve_jobs=True, suppress_errors=True)
             pipe.ScanSet().populate(next_scans, reserve_jobs=True, suppress_errors=True)
