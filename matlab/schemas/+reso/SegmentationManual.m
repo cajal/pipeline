@@ -14,6 +14,8 @@ classdef SegmentationManual < dj.Computed
     methods(Access=protected)
         function makeTuples(self, key)
             images = fetch1(reso.SummaryImagesAverage & key, 'average_image');
+            % remove baseline
+            images = images - min(images(:));
             masks = ne7.ui.paintMasks(images);
             assert(~isempty(masks), 'user aborted segmentation')
             key.segmentation_method = 1;
