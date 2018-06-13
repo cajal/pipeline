@@ -200,19 +200,19 @@ class ConditionTraces(dj.Computed):
     """
     @property
     def key_source(self):
-        animal = {'animal_id': 17886}
         conditions = (stimulus.Clip().aggr(stimulus.Trial() & animal, 'movie_name',
                                            nscans='count(DISTINCT scan_idx)')
                       & 'nscans>=10' & {'movie_name': 'matrixrl'}).proj().fetch(as_dict=True)
+                      # clips from Matrix Reloaded (choosen because of good oracle performance) presented in more than 10 scans
 
-        return (stack.StackSet() & animal) * (stimulus.Condition() & conditions)
+        return stack.StackSet() * (stimulus.Condition() & conditions)
 
     class Trace(dj.Part):
         definition = """
         -> master
         -> stack.StackSet.Unit
         ---
-        num_masks           :int         # num_masks averaged to get this trace
+        num_masks           : int        # num_masks averaged to get this trace
         trace               : longblob   # 10-secs trace
         corr=NULL           : float      # Mean correlation across traces for masks forming this unit
         """
