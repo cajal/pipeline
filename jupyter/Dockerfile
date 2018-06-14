@@ -3,7 +3,7 @@ FROM ninai/pipeline:latest
 MAINTAINER Fabian Sinz <sinz@bcm.edu>
 
 RUN pip3 install jupyter && \
-    cp /data/pipeline/jupyter/jupyter_notebook_config.py /root/.jupyter/
+    cp /data/pipeline/jupyter/jupyter_notebook_config.py /root/.jupyter/jupyter_notebook_config.py 
 EXPOSE 8888
 
 WORKDIR /notebooks
