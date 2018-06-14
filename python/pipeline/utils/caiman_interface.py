@@ -225,7 +225,7 @@ def extract_masks(scan, mmap_scan, num_components=200, num_background_components
     background_traces = f  # num_background_components x num_frames
     raw_traces = C + YrA  # num_components x num_frames
 
-    # Rescale traces to match scan range (~ np.average(trace*mask, weights=mask))
+    # Rescale traces to match scan range
     scaling_factor = np.sum(masks**2, axis=(0, 1)) / np.sum(masks, axis=(0, 1))
     traces = traces * np.expand_dims(scaling_factor, -1)
     raw_traces = raw_traces * np.expand_dims(scaling_factor, -1)

@@ -855,14 +855,20 @@ class CorrectedStack(dj.Computed):
         slices = slice_rel.fetch('slice', order_by='islice')
         return np.stack(slices)
 
-    def save_as_tiff(self, filename='stack.tif', channel=1):
-        """ Save current stack as a tiff file.
-
-        :param int channel: What channel to use. Starts at 1
-        """
+    def save_as_tiff(self, filename='stack.tif'):
+        """ Save current stack as a tiff file."""
         from tifffile import imsave
+
+        # Create a composite interleaving channels
+        height, width, depth = self.fetch1('px_height', 'px_width', 'px_depth')
+        num_channels = (StackInfo() & self).fetch1('nchannels')
+        composite = np.zeros([num_channels * depth, height, width], dtype=np.float32)
+        for i in range(num_channels):
+            composite[i::num_channels] = self.get_stack(i + 1)
+
+        # Save
         print('Saving file at:', filename)
-        imsave(filename, self.get_stack(channel=channel))
+        imsave(filename, composite)
 
     def save_video(self, filename='stack.mp4', channel=1, fps=10, dpi=250):
         """ Creates an animation video showing a fly-over of the stack (top to bottom).
@@ -1255,7 +1261,7 @@ class StackSet(dj.Computed):
     #TODO: Make it automatic to delete itself and repopulate if a new field is registered to the stack
     @property
     def key_source(self):
-        all_keys = CorrectedStack() * shared.RegistrationMethod()
+        all_keys = CorrectedStack() * shared.CurationMethod().proj() * shared.RegistrationMethod()
         return all_keys.proj(stack_session='session') & FieldRegistration()
 
     class Unit(dj.Part):
