@@ -18,13 +18,9 @@ classdef AreaMask < dj.Manual
             
             params = ne7.mat.getParams(params,varargin);
             
-            if strcmp(fetch1(experiment.Scan & key,'aim'),'widefield') || strcmp(fetch1(experiment.Scan & key,'aim'),'intrinsic')
-                contiguous = 1;
-            else
-                contiguous = 0;
-            end
             % populate if retinotopy map doesn't exist
             ret_key = getRetKey(map.RetMap, key);
+            key = rmfield(ret_key,'ret_idx');
             
             % get maps
             background = getBackground(map.RetMap & ret_key, params);
@@ -36,8 +32,14 @@ classdef AreaMask < dj.Manual
             end
             
             % get masks already extracted
-            if exists(obj & rmfield(key,'ret_idx'))
-                [area_map, keys] = getContiguousMask(obj, rmfield(key,'ret_idx'),contiguous);
+            if strcmp(fetch1(experiment.Scan & key,'aim'),'widefield') || strcmp(fetch1(experiment.Scan & key,'aim'),'intrinsic')
+                contiguous = 1;
+            else
+                contiguous = 0;
+            end
+            
+            if exists(obj & key)
+                [area_map, keys] = getContiguousMask(obj, key,contiguous);
             else
                 area_map = zeros(size(background,1),size(background,2));
             end
@@ -47,7 +49,7 @@ classdef AreaMask < dj.Manual
             if isempty(area_map); disp 'No masks created!'; return; end
             
             % delete previous keys if existed
-            if exists(obj & rmfield(key,'ret_idx'))
+            if exists(obj & key)
                 del(anatomy.AreaMask & keys)
             end
             
@@ -119,6 +121,7 @@ classdef AreaMask < dj.Manual
             
             % fetch all area masks
             area_masks = [];areas = [];
+            keyI.ret_idx = fetch1(map.RetMap & keyI,'ret_idx');
             map_keys = fetch(anatomy.AreaMask & (anatomy.RefMap & (proj(anatomy.RefMap) & (anatomy.FieldCoordinates & keyI))));
             if nargin >2 && contiguous
                 % if contiguous
@@ -215,7 +218,7 @@ classdef AreaMask < dj.Manual
                     x_idx = ceil(x_pos(islice)+1):ceil(x_pos(islice))+size(mask,2);
                     back = area_map(y_idx, x_idx);
                     area_map(y_idx, x_idx) = max(cat(3,mask,back),[],3);
-                    background(y_idx, x_idx) = avg_image{islice};
+                    background(y_idx, x_idx) = avg_image{islice}(1:size(mask,1),1:size(mask,2));
                 end
                 
             else
@@ -265,6 +268,7 @@ classdef AreaMask < dj.Manual
             background = ne7.mat.normalize(abs(background.^ params.exp));
             
             % merge masks with background
+            figure
             sat = background(:,:,1,1);
             sat(area_map==0) = 0;
             im = hsv2rgb(cat(3,ne7.mat.normalize(area_map),sat,background(:,:,1,1)));
