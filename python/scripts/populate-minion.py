@@ -26,8 +26,8 @@ while True:
         stack.MotionCorrection().populate(reserve_jobs=True, suppress_errors=True)
         stack.Stitching().populate(reserve_jobs=True, suppress_errors=True)
         stack.CorrectedStack().populate(reserve_jobs=True, suppress_errors=True)
-        stack.InitialRegistration().populate(next_scans, reserve_jobs=True, suppress_errors=True)
-        stack.FieldRegistration().populate(next_scans, reserve_jobs=True, suppress_errors=True)
+        stack.InitialRegistration().populate(reserve_jobs=True, suppress_errors=True)
+        stack.FieldRegistration().populate(reserve_jobs=True, suppress_errors=True)
 
         # reso/meso
         for pipe in [reso, meso]:
