@@ -15,6 +15,7 @@ classdef AreaMask < dj.Manual
             params.exp = 1.5;
             params.sigma = 2;
             params.amp = 1;
+            params.downsample = 1;
             
             params = ne7.mat.getParams(params,varargin);
             
@@ -44,9 +45,20 @@ classdef AreaMask < dj.Manual
                 area_map = zeros(size(background,1),size(background,2));
             end
             
+            % donwscale
+            if params.downsample ~= 1
+                background = imresize(background,params.downsample);
+                area_map = (uint8(imresize(area_map,params.downsample,'nearest')));
+            end
+            
             % create masks
             area_map = ne7.ui.paintMasks(abs(background),area_map);
             if isempty(area_map); disp 'No masks created!'; return; end
+            
+            % upscale
+            if params.downsample ~= 1
+                area_map = single(uint8(imresize(area_map,1/params.downsample,'nearest')));
+            end
             
             % delete previous keys if existed
             if exists(obj & key)
@@ -233,8 +245,9 @@ classdef AreaMask < dj.Manual
         function plot(obj, varargin)
             
             params.back_idx = [];
-            params.exp = 0.4;
+            params.bcontrast = 0.4;
             params.contrast = 1;
+            params.exp = 1;
             
             params = ne7.mat.getParams(params,varargin);
             
@@ -251,11 +264,13 @@ classdef AreaMask < dj.Manual
             % get maps
             if exists(map.RetMap & (map.RetMapScan &  obj))
                 background = getBackground(map.RetMap & (map.RetMapScan &  obj));
-                
+                for iback = 1:size(background,4);
+                   background(:,:,:,iback) = imadjust(background(:,:,:,iback),[.2 .3 0.2; .65 .65 .65],[0 0 0; 1 1 1]); 
+                end
                 % if FieldCoordinates exists add it to the background
                 if exists(anatomy.FieldCoordinates & proj(anatomy.RefMap & obj))
                     background = cat(4,background,plot(anatomy.FieldCoordinates & ...
-                        proj(anatomy.RefMap & obj)));
+                        proj(anatomy.RefMap & obj),params));
                     if isempty(params.back_idx)
                         params.back_idx = size(background,4);
                     end
@@ -265,7 +280,7 @@ classdef AreaMask < dj.Manual
             end
             
             % adjust background contrast
-            background = ne7.mat.normalize(abs(background.^ params.exp));
+            background = ne7.mat.normalize(abs(background.^ params.bcontrast));
             
             % merge masks with background
             figure

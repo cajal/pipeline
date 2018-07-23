@@ -8,7 +8,9 @@ mask                     : mediumblob                       # area mask
 classdef Masks < dj.Lookup
     methods
         function plotMask(obj,color,n)
-            [masks,areas]= fetchn(obj & 'brain_area!="MAP"' & 'brain_area!="unknown"','mask','brain_area');
+            params.fontsize = 10;
+            
+            [masks,areas]= fetchn(obj & 'brain_area!="MAP"' & 'brain_area!="unknown"' & 'brain_area<>"A"','mask','brain_area');
             
             set(gcf,'name','Visual Areas')
             hold on
@@ -28,11 +30,11 @@ classdef Masks < dj.Lookup
                 if nargin<3
                     text(stats.Centroid(1),stats.Centroid(2),...
                         sprintf('%s',areas{imask}),...
-                        'horizontalalignment','center')
+                        'horizontalalignment','center','fontsize',params.fontsize)
                 else
                     text(stats.Centroid(1),stats.Centroid(2),...
                         sprintf('%s\n(%d)',areas{imask},n),...
-                        'horizontalalignment','center')
+                        'horizontalalignment','center','fontsize',params.fontsize)
                 end
             end
             
