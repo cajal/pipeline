@@ -130,6 +130,7 @@ classdef FieldCoordinates < dj.Manual
             
             params.exp = 1;
             params.inv = 0;
+            params.vcontrast = 1;
             
             params = ne7.mat.getParams(params,varargin);
             
@@ -137,7 +138,7 @@ classdef FieldCoordinates < dj.Manual
 
             % get the ref_map
             ref_map = fetchn(proj(anatomy.RefMap,'ref_map') & self,'ref_map');
-            ref_map = ref_map{1};
+            ref_map = single(ref_map{1});
             
             % get the setup
             setups = fetchn(experiment.Session & self, 'rig');
@@ -145,15 +146,21 @@ classdef FieldCoordinates < dj.Manual
  
             % fetch images
             if strcmp(setup,'2P4')
-                [frames,x,y,tforms] = fetchn(meso.SummaryImagesAverage * self ,...
+                [frames1,x,y,tforms] = fetchn(meso.SummaryImagesAverage * self ,...
                     'average_image','x_offset','y_offset','tform');
+                
+                  [frames2,x,y,tforms] = fetchn(meso.SummaryImagesCorrelation * self ,...
+                    'correlation_image','x_offset','y_offset','tform');
+                for iframe = 1:length(frames1);
+                    frames{iframe} = frames1{iframe}.*frames2{iframe};
+                end
             else
                 [frames,x,y,tforms,keys] = fetchn(reso.SummaryImagesAverage * self & fuse.ScanSet,...
                     'average_image','x_offset','y_offset','tform');
             end
             
             % apply field transformations
-            ref_map = ne7.mat.normalize(ref_map.^params.exp);
+            ref_map = ne7.mat.normalize(abs(ref_map.^params.vcontrast));
             if params.inv; ref_map = 1-ref_map;end
             idxX = [];idxY = []; frame = [];
             for islice = 1:length(frames)
@@ -177,7 +184,7 @@ classdef FieldCoordinates < dj.Manual
             
             % construct image
             im = zeros(y_range,x_range,3);
-%             im(1+mnY:size(ref_map,1)+mnY,1+mnX:size(ref_map,2)+mnX,1) = ref_map;
+             im(1+mnY:size(ref_map,1)+mnY,1+mnX:size(ref_map,2)+mnX,1) = ref_map;
 
             % put frames
             for islice = 1:length(frames)
