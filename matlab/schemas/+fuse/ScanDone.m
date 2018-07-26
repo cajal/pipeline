@@ -17,6 +17,20 @@ classdef ScanDone < dj.Computed
 		%!!! compute missing fields for key here
 % 			 self.insert(key)
 		end
-	end
+    end
+    
+    methods
+        function [average_images,keys] = getSummaryImageAverage(self)
+           average_images = [];
+           keys = [];
+           if exists(reso.SummaryImagesAverage & self)
+               [average_images,keys] = fetchn(reso.SummaryImagesAverage & self,'average_image');
+           elseif meso.SummaryImagesAverage & self
+               [average_images,keys] = fetchn(meso.SummaryImagesAverage & self,'average_image');
+           end
+            
+        end
+        
+    end
 
 end
