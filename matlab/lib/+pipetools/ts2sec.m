@@ -12,7 +12,9 @@ assert(max(diff(timed))==min(diff(timed)), 'unequal packet sizes')
 packet_duration = median(diff(ts(timed)));
 ix = find(diff(ts(timed)) < packet_duration / 1.1 | ...
     diff(ts(timed)) > packet_duration * 1.1);
-warning('Found %d interruptions in packets', length(ix))
+if ~isempty(ix)
+    warning('Found %d interruptions in packets', length(ix))
+end
 ts(timed(ix))=nan;
 ts(timed(ix+1))=nan;
 ts = interp1(timed, ts(timed), 1:length(ts));
