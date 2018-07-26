@@ -67,7 +67,7 @@ while True:
 
         tune.OracleMap().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
         tune.MovieOracle().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
-        tune.MovieOracleTimeCourse().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
+        #tune.MovieOracleTimeCourse().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
 
         tune.CaTimes().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
         tune.Ori().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
