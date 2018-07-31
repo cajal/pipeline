@@ -1205,7 +1205,8 @@ class FieldRegistration(dj.Computed):
         # Get field in stack (after registration)
         stack = ndimage.zoom(stack, stack_res / common_res, order=1)
         common_shape = np.round(np.array(mean_image.shape) * field_res / common_res).astype(int)
-        reg_field = registration.find_field_in_stack(stack, *common_shape, x, y, z)
+        reg_field = registration.find_field_in_stack(stack, *common_shape, x, y, z, yaw,
+                                                     pitch, roll)
         reg_field = ndimage.zoom(reg_field, common_res / field_res, order=1) # *
         # * this could differ from original shape but it should be pretty close
 
