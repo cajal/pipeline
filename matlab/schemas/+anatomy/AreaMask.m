@@ -256,6 +256,7 @@ classdef AreaMask < dj.Manual
             else
                 contiguous = 0;
             end
+            contiguous = 0;
             
             % get masks
             [area_map, keys, mask_background] = getContiguousMask(obj,fetch(obj),contiguous);
