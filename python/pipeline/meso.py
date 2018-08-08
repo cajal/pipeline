@@ -580,7 +580,7 @@ class MotionCorrection(dj.Computed):
         x_shifts, y_shifts = self.fetch1('x_shifts', 'y_shifts')
 
         return lambda scan, indices=slice(None): galvo_corrections.correct_motion(scan,
-                                                 x_shifts, y_shifts)
+                                                 x_shifts[indices], y_shifts[indices])
 
 @schema
 class SummaryImages(dj.Computed):
@@ -1042,7 +1042,7 @@ class Segmentation(dj.Computed):
             print('If this takes too long, stop it and call again with dpi <', dpi, '(default)')
             video.save(filename, dpi=dpi)
 
-            return fig
+            return fig,video
 
     class CNMFBackground(dj.Part):
         definition = """ # inferred background components
