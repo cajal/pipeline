@@ -24,19 +24,32 @@ classdef DotRFMap < dj.Computed
     methods
         function plot(obj, varargin)
             params.fun = @(x) nanmax(x,[],3);
+            params.hold = true;
+            params.area = false;
             params = ne7.mat.getParams(params,varargin);
             
             keys = fetch(obj);
-            figure
             for ikey =1:length(keys)
+                if ~params.hold
+                    figure
+                end
                 key = keys(ikey);
                 [gaussfit, map, p, x_loc,y_loc] = fetch1(tune.DotRFMap & key,...
                     'gauss_fit','response_map','p_value','center_x','center_y');
                 plot(tune.DotRF & key, gaussfit, params.fun(map),params)
-                title(sprintf('cell:%d animal:%d session:%d scan:%d \n p:%.3f x:%.2f y:%.2f',...
+            
+                if ~params.hold && params.area
+                    area = fetch1(anatomy.AreaMembership & key,'brain_area');
+                        title(sprintf('area:%s cell:%d animal:%d session:%d scan:%d',...
+                    area,key.unit_id, key.animal_id,key.session,key.scan_idx))
+                	set(gcf,'name',sprintf('RF cell:%d animal:%d session:%d scan:%d',...
+                       key.unit_id, key.animal_id,key.session,key.scan_idx))
+                else
+                        title(sprintf('cell:%d animal:%d session:%d scan:%d \n p:%.3f x:%.2f y:%.2f',...
                     key.unit_id, key.animal_id,key.session,key.scan_idx, p,x_loc,y_loc))
-                set(gcf,'name','Cell RF')
-                if ikey~=length(keys)
+                    set(gcf,'name',sprintf('RF area:%s cell:%d animal:%d session:%d scan:%d',key.unit_id, key.animal_id,key.session,key.scan_idx))
+                end
+                if ikey~=length(keys) && params.hold
                     pause
                     clf
                 end
@@ -64,7 +77,7 @@ classdef DotRFMap < dj.Computed
                 ydeg = y*max_deg;
             end
         end
-       
+        
         
     end
     

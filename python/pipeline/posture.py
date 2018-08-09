@@ -39,7 +39,7 @@ class Posture(dj.Imported):
         # Read file
         data = h5.read_behavior_file(full_filename)
 
-        # Read counter timestamps and convert to seconds
+        # Get counter timestamps and convert to seconds
         timestamps_in_secs = h5.ts2sec(data['posture_ts'][0])
         ts = h5.ts2sec(data['ts'], is_packeted=True)
         # edge case when ts and eye ts start in different sides of the master clock max value 2 **32

@@ -48,3 +48,20 @@ def float2uint8(scan):
     scan = (scan - scan.min()) / (scan.max() - scan.min())
     scan = (scan * 255).astype(np.uint8, copy=False)
     return scan
+
+
+def spaced_max(x, min_interval):
+    """ Find all local peaks that are at least min_interval indices apart."""
+    from scipy.signal import argrelmax
+
+    peaks = argrelmax(x)[0]
+    if len(peaks) != 0:
+        new_peaks = [peaks[0]]
+        for next_candidate in peaks[1:]:
+            if next_candidate - new_peaks[-1] >= min_interval:
+                new_peaks.append(next_candidate)
+            elif x[next_candidate] > x[new_peaks[-1]]:
+                new_peaks[-1] = next_candidate
+        peaks = np.array(new_peaks)
+
+    return peaks
