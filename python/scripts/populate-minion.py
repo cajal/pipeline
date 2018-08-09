@@ -65,13 +65,11 @@ while True:
         tune.Cos2Map().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
         tune.OriMapQuality().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
 
-        tune.OracleMap().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
-        tune.MovieOracle().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
+        #tune.OracleMap().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
+        #tune.MovieOracle().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
         #tune.MovieOracleTimeCourse().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
 
         tune.CaTimes().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
         tune.Ori().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
-
-        xcorr.ConditionCovariance().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
 
     time.sleep(600) # wait 10 minutes before trying to process things again
