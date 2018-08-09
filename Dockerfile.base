@@ -147,6 +147,6 @@ RUN pip3 install git+https://github.com/datajoint/datajoint-python.git && \
 RUN apt-get install -y python3-git
 
 # Optional
-RUN pip3 install nano nose2
+RUN pip3 install nano nose2 jupyterlab
 
 ENTRYPOINT ["/bin/bash"]
