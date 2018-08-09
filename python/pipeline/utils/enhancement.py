@@ -2,7 +2,7 @@ import numpy as np
 from scipy import ndimage
 
 
-def lcn(image, sigmas=(7, 7)):
+def lcn(image, sigmas=(12, 12)):
     """ Local contrast normalization.
 
     Normalize each pixel using mean and stddev computed on a local neighborhood.
@@ -17,7 +17,8 @@ def lcn(image, sigmas=(7, 7)):
         Smaller values result in more local neighborhoods. 15-30 microns should work fine
     """
     local_mean = ndimage.gaussian_filter(image, sigmas)
-    local_std = np.sqrt(ndimage.gaussian_filter((image - local_mean)**2, sigmas))
+    local_std = np.sqrt(ndimage.gaussian_filter(image ** 2, sigmas) -
+                        ndimage.gaussian_filter(image, sigmas) ** 2)
     norm = (image - local_mean) / (local_std + 1e-7)
 
     return norm
@@ -38,7 +39,7 @@ def sharpen_2pimage(image, laplace_sigma=0.7, low_percentile=3, high_percentile=
     return norm
 
 
-def compute_correlation_image(scan):
+def create_correlation_image(scan):
     """ Compute the correlation image for the given scan.
 
     At each pixel, we compute the correlation (over time) with each of its eight
