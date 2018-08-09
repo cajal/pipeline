@@ -211,7 +211,7 @@ class ConditionTraces(dj.Computed):
         ---
         num_masks           : int        # num_masks averaged to get this trace
         trace               : longblob   # 10-secs trace
-        corr=NULL           : float      # Mean correlation across traces for masks forming this unit
+        corr=NULL           : float      # mean correlation across traces for masks forming this unit
         """
 
     class Trials(dj.Part):
@@ -220,6 +220,7 @@ class ConditionTraces(dj.Computed):
         -> meso.ScanSet.Unit
         ---
         trial_traces    : longblob    # num_trials x num_frames traces
+        corr            : float       # mean correlation across trials
         """
 
     def make(self, key):
@@ -262,10 +263,14 @@ class ConditionTraces(dj.Computed):
                 interp_traces =  np.interp(trial_times, frame_times + ms_delay / 1000, trace) # num_trials x trial_duration
                 traces['{}-{}'.format(scan_name, unit_id)] = np.mean(interp_traces, axis=0)
 
+                if len(interp_traces) > 1:
+                    corr = np.mean(np.corrcoef(interp_traces)[np.triu_indices(len(interp_traces), k=1)])
+                else:
+                    corr = None
                 self.Trials().insert1({**key, 'session': field_key['session'],
                                        'scan_idx': field_key['scan_idx'],
                                        'segmentation_method': 3, 'unit_id': unit_id,
-                                       'trial_traces': interp_traces})
+                                       'trial_traces': interp_traces, 'corr': corr})
             #TODO: Deal with frame_numbers wrapping around after 2**32
             #TODO: Deal with trial times being outside range of frame times
         print('Traces created')
