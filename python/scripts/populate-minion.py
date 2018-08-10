@@ -3,7 +3,7 @@ import time
 
 from pipeline import experiment, reso, meso, fuse, stack, pupil, treadmill, posture
 from stimulus import stimulus
-from stimline import tune, xcorr
+from stimline import tune
 
 while True:
     # Scans
