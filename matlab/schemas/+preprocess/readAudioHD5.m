@@ -1,4 +1,4 @@
-function data = readHD5(F,varargin)
+function data = readAudioHD5(F,varargin)
 % F: Key structure or full filename including path (for example '/path/Patchfile10.h5')
 %
 % data: audio data extracted from file
