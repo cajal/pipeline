@@ -86,6 +86,42 @@ classdef UnitCoordinates < dj.Computed
             end
         end
         
+        function plotRepeats(self,varargin)
+            params.markersize = 10;
+            params.sigma = 5;
+            params.vcontrast = 0.5;
+            params.exp = 2;
+            params = ne7.mat.getParams(params,varargin);
+            
+            [x, y, keys] = fetchn(self,'xloc','yloc');
+
+            r= nan(length(keys),1);
+            ikey= 0;
+            for key = keys'
+                ikey = ikey+1;
+                r(ikey) = nanmean(fetchn(obj.RepeatsUnit & key,'r'));
+            end
+            r(isnan(r)) = 0;
+            colors = ([ones(size(r)) 1-normalize(r) 1-normalize(r)]);
+            ref_key = fetch(anatomy.RefMap & ( proj(anatomy.RefMap) & self),'*');
+            retmap = eval([ref_key.ref_table,'&ref_key']);
+            [h,s,v] = plot(retmap,params);
+            for imap = 1:retmap.count
+                figure
+                im(:,:,1) = h{imap};
+                im(:,:,2) = s{imap};
+                im(:,:,3) = v{imap};
+                imagesc(hsv2rgb(im))
+                axis off
+                hold on
+                for icell = 1:length(r)
+                 
+                    plot(x(icell)/ref_key.pxpitch + size(ref_key.ref_map,1)/2,y(icell)/ref_key.pxpitch + size(ref_key.ref_map,2)/2,...
+                        '.','color',colors(icell,:),'markersize',params.markersize)
+                end
+            end
+            end
+        
         function plot3d(self)
             plot3d(anatomy.FieldCoordinates & self)
         end
