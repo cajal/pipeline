@@ -63,7 +63,7 @@ class Eye(dj.Imported):
         # Read file
         data = h5.read_behavior_file(full_filename)
 
-        # Read counter timestamps and convert to seconds
+        # Get counter timestamps and convert to seconds
         if data['version'] == '1.0': # older h5 format
             rig = (experiment.Session() & key).fetch('rig')
             timestamps_in_secs = h5.ts2sec(data['cam1_ts' if rig == '2P3' else 'cam2_ts'])
