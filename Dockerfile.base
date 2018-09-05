@@ -1,4 +1,4 @@
-FROM ubuntu
+FROM ubuntu:18.04
 
 LABEL maintainer="Erick Cobos <ecobos@bcm.edu>"
 ARG DEBIAN_FRONTEND=noninteractive
