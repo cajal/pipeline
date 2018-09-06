@@ -582,7 +582,7 @@ class MotionCorrection(dj.Computed):
         x_shifts, y_shifts = self.fetch1('x_shifts', 'y_shifts')
 
         return lambda scan, indices=slice(None): galvo_corrections.correct_motion(scan,
-                                                 x_shifts, y_shifts)
+                                                 x_shifts[indices], y_shifts[indices])
 
 @schema
 class SummaryImages(dj.Computed):
@@ -726,7 +726,7 @@ class SegmentationTask(dj.Manual):
         """ Estimates the number of components per field using simple rules of thumb.
 
         For somatic scans, estimate number of neurons based on:
-        (100x100x100)um^3 = 1e6 um^3 -> 1e2 neurons; (1x1x1)mm^3 = 1e9 um^3 -> 1e5 neurons
+        (100x100x100)um^3 = 1e6 um^3 -> 100 neurons; (1x1x1)mm^3 = 1e9 um^3 -> 100K neurons
 
         For axonal/dendritic scans, just ten times our estimate of neurons.
 
