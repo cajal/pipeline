@@ -200,21 +200,27 @@ class ConditionTraces(dj.Computed):
     """
     @property
     def key_source(self):
-        conditions = (stimulus.Clip().aggr(stimulus.Trial() & animal, 'movie_name',
-                                           nscans='count(DISTINCT scan_idx)')
-                      & 'nscans>=10' & {'movie_name': 'matrixrl'}).proj().fetch(as_dict=True)
-                      # clips from Matrix Reloaded (choosen because of good oracle performance) presented in more than 10 scans
-
+        netflix = dj.create_virtual_module('netflix', 'pipeline_netflix')
+        conditions = stimulus.Clip() & netflix.OracleSet()
         return stack.StackSet() * (stimulus.Condition() & conditions)
 
     class Trace(dj.Part):
-        definition = """
+        definition = """ # averaged trace for the given unit
         -> master
         -> stack.StackSet.Unit
         ---
         num_masks           : int        # num_masks averaged to get this trace
         trace               : longblob   # 10-secs trace
-        corr=NULL           : float      # Mean correlation across traces for masks forming this unit
+        corr=NULL           : float      # mean correlation across traces for masks forming this unit
+        """
+
+    class Trials(dj.Part):
+        definition=""" # save traces per trial before averaging
+        -> master
+        -> meso.ScanSet.Unit
+        ---
+        trial_traces    : longblob    # num_trials x num_frames traces
+        corr            : float       # mean correlation across trials
         """
 
     def make(self, key):
@@ -226,10 +232,12 @@ class ConditionTraces(dj.Computed):
 
         # Create list of scan units
         traces = {} # dictionary with unit-name -> trace pairs
+        self.insert1({**key, 'common_fps': common_fps})
         for field_key in reg_fields.fetch('KEY'):
             # Get some field info
             scan_name = '{animal_id}-{session}-{scan_idx}'.format(**field_key)
-            pipe = reso if reso.ScanInfo() & field_key else meso if meso.ScanInfo() & field_key else None
+            pipe = meso if meso.ScanInfo() & field_key else None
+            #pipe = reso if reso.ScanInfo() & field_key else meso if meso.ScanInfo() & field_key else None
 
             # Get flip_times at common_fps resolution
             if len(stimulus.Trial() & key & field_key) == 0:
@@ -254,12 +262,20 @@ class ConditionTraces(dj.Computed):
             for unit_id, ms_delay, trace in zip(*spikes.fetch('unit_id', 'ms_delay', 'trace')):
                 interp_traces =  np.interp(trial_times, frame_times + ms_delay / 1000, trace) # num_trials x trial_duration
                 traces['{}-{}'.format(scan_name, unit_id)] = np.mean(interp_traces, axis=0)
+
+                if len(interp_traces) > 1:
+                    corr = np.mean(np.corrcoef(interp_traces)[np.triu_indices(len(interp_traces), k=1)])
+                else:
+                    corr = None
+                self.Trials().insert1({**key, 'session': field_key['session'],
+                                       'scan_idx': field_key['scan_idx'],
+                                       'segmentation_method': 3, 'unit_id': unit_id,
+                                       'trial_traces': interp_traces, 'corr': corr})
             #TODO: Deal with frame_numbers wrapping around after 2**32
             #TODO: Deal with trial times being outside range of frame times
         print('Traces created')
 
         # Create the mean traces per munit_id
-        self.insert1({**key, 'common_fps': common_fps})
         concat_query = 'CONCAT_WS("-", animal_id, scan_session, scan_idx, unit_id)'
         match_rel = (stack.StackSet.Match() & key).proj('munit_id', unit_name=concat_query)
         munit_ids, unit_names = match_rel.fetch('munit_id', 'unit_name', order_by='munit_id')

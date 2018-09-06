@@ -1077,11 +1077,11 @@ class CuratedRegistration(dj.Computed):
     cur_y          : float         # (px) center of scan in stack coordinates
     cur_z          : float         # (um) depth of scan in stack coordinates
     """
-    def make_tuples(self, key):
-        if key['curation_method'] == 'none':
+    def _make_tuples(self, key):
+        if key['curation_method'] == 1:
             x, y, z = (InitialRegistration & key).fetch1('init_x', 'init_y', 'init_z')
-            self.insert1({'cur_x': x, 'cur_y': y, 'cur_z': z})
-        if key['curation_method'] == 'manual':
+            self.insert1({**key, 'cur_x': x, 'cur_y': y, 'cur_z': z})
+        if key['curation_method'] == 2:
             print('Warning: Interface for manual curation written in Matlab.')
 
 
@@ -1205,7 +1205,8 @@ class FieldRegistration(dj.Computed):
         # Get field in stack (after registration)
         stack = ndimage.zoom(stack, stack_res / common_res, order=1)
         common_shape = np.round(np.array(mean_image.shape) * field_res / common_res).astype(int)
-        reg_field = registration.find_field_in_stack(stack, *common_shape, x, y, z)
+        reg_field = registration.find_field_in_stack(stack, *common_shape, x, y, z, yaw,
+                                                     pitch, roll)
         reg_field = ndimage.zoom(reg_field, common_res / field_res, order=1) # *
         # * this could differ from original shape but it should be pretty close
 
@@ -1216,7 +1217,7 @@ class FieldRegistration(dj.Computed):
         #* Best match in slice 0 will not result in z = 0 but 0.5 * z_step.
 
         # Insert
-        self.insert1({**key,  'reg_x': final_x, 'reg_y': final_y, 'reg_z': final_z,
+        self.insert1({**key, 'reg_x': final_x, 'reg_y': final_y, 'reg_z': final_z,
                       'yaw': yaw, 'pitch': pitch, 'roll': roll, 'common_res': common_res,
                       'score': score})
         self.FieldInStack().insert1({**key, 'reg_field': reg_field})
