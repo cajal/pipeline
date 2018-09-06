@@ -56,7 +56,7 @@ while True:
 
         tune.STA().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
         tune.STAQual().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
-        tune.STAExtent().populate(tune_scans, reserve_jobs=True)
+        tune.STAExtent().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
 
         tune.CaMovie().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
         tune.Drift().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
