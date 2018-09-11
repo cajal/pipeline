@@ -193,7 +193,7 @@ def find_flips(signal, fps, monitor_fps):
     """
     # Find flips
     samples_per_frame = fps / monitor_fps
-    flip_detector = np.sin(np.linspace(0, 2 * np.pi, int(round(2 * samples_per_frame))))
+    flip_detector = np.sin(np.linspace(0, 2 * np.pi, 2 * int(round(samples_per_frame)) + 1))
     filtered = mirrconv(signal, flip_detector)
     flip_indices = spaced_max(abs(filtered), 0.5 * samples_per_frame)
 
