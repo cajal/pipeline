@@ -1,6 +1,7 @@
-FROM ubuntu:17.10
+FROM ubuntu:18.04
 
 LABEL maintainer="Erick Cobos <ecobos@bcm.edu>"
+ARG DEBIAN_FRONTEND=noninteractive
 
 ###############################################################################
 # Install some optimization libraries (used by many libraries below)
@@ -143,8 +144,9 @@ RUN apt-get install autoconf automake libtool && \
 RUN pip3 install git+https://github.com/datajoint/datajoint-python.git && \
     pip3 install git+https://github.com/atlab/scanreader.git && \
     pip3 install seaborn slacker imreg_dft pandas imageio
+RUN apt-get install -y python3-git
 
 # Optional
-RUN pip3 install nano nose2
+RUN pip3 install nano nose2 jupyterlab
 
 ENTRYPOINT ["/bin/bash"]

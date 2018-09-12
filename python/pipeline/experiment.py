@@ -128,7 +128,9 @@ class Person(dj.Lookup):
         ['Paul', 'hey paul'],
         ['shan', 'Shan Shen'],
         ['shuang', 'Shuang Li'],
-        ['xiaolong', 'Xiaolong Jiang']
+        ['xiaolong', 'Xiaolong Jiang'],
+        ['taliah', 'Taliah Muhammad'],
+        ['zhiwei',  'Zhiwei Ding']
     ]
 
 
