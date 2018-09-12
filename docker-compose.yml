@@ -1,0 +1,47 @@
+version: '2'
+
+services:
+  notebook:
+    image: ninai/pipeline
+    ports:
+      - "8888:8888"
+    volumes:
+      - /mnt/:/mnt/
+      - /home/pipeline_data/:/tmp/
+      - .:/data/pipeline/
+    env_file: .env
+    environment:
+      - DISPLAY=$DISPLAY
+    entrypoint:
+      - jupyter 
+      - lab
+      - --ip=0.0.0.0
+      - --allow-root
+      - --NotebookApp.token=''
+      - --no-browser 
+
+
+  minion:
+    image: ninai/stimulus-pipeline
+    volumes:
+      - /mnt/:/mnt/
+      - /home/pipeline_data:/tmp/
+      - .:/data/pipeline
+    env_file: .env
+    entrypoint:
+      - python3 
+      - /data/pipeline/python/scripts/populate-minion.py
+
+  
+  bash:
+    image: ninai/stimulus-pipeline
+    volumes:
+      - /mnt/:/mnt/
+      - /home/pipeline_data/:/tmp/
+      - .:/data/pipeline/
+      - /tmp/.X11-unix:/tmp/.X11-unix
+    env_file: .env
+    environment:
+      - DISPLAY=$DISPLAY
+    entrypoint:
+      - /bin/bash
