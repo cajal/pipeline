@@ -896,10 +896,10 @@ class Segmentation(dj.Computed):
                     kwargs['patch_size'] = tuple(20 / (ScanInfo.Field() & key).microns_per_pixel) # 20 x 20 microns
                     kwargs['soma_diameter'] = tuple(2 / (ScanInfo.Field() & key).microns_per_pixel)
                 else: # soma
-                    kwargs['num_components_per_patch'] = 5
+                    kwargs['num_components_per_patch'] = 6
                     kwargs['init_method'] = 'greedy_roi'
                     kwargs['patch_size'] = tuple(50 / (ScanInfo.Field() & key).microns_per_pixel)
-                    kwargs['soma_diameter'] = tuple(14 / (ScanInfo.Field() & key).microns_per_pixel)
+                    kwargs['soma_diameter'] = tuple(8 / (ScanInfo.Field() & key).microns_per_pixel)
 
             ## Set performance/execution parameters (heuristically), decrease if memory overflows
             kwargs['num_processes'] = 8  # Set to None for all cores available
