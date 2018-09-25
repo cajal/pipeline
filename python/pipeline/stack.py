@@ -960,7 +960,7 @@ class Segmentation(dj.Computed):
         seg_threshold = 0.8
         min_voxels = 65 # sphere of diameter 5
         max_voxels = 4186 # sphere of diameter 20
-        compactness_factor = 0.1
+        compactness_factor = 0.05
         pad_mode = 'reflect' # any valid mode in np.pad
 
         # Resize to be 1 um**3 voxels
