@@ -338,7 +338,7 @@ class Session(dj.Manual):
     definition = """  # imaging session
 
     -> mice.Mice
-    session                       : smallint            # session index for the mouse
+    session                      : smallint            # session index for the mouse
     ---
     -> Rig
     session_date                  : date                # date
