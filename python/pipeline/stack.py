@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scanreader
 from scipy import signal
+from scipy import ndimage
 import itertools
 
 from . import experiment, notify, shared, reso, meso
@@ -14,6 +15,7 @@ from .exceptions import PipelineException
 
 
 schema = dj.schema('pipeline_stack', locals(), create_tables=False)
+dj.config['external-stack'] = {'protocol': 'file', 'location': '/mnt/scratch07/pipeline-externals'}
 CURRENT_VERSION = 1
 
 
@@ -670,14 +672,13 @@ class Stitching(dj.Computed):
         self.insert1(key)
 
         # Insert each stitched volume
-        for volume_id, roi in enumerate(rois):
-            self.Volume().insert1({**key, 'volume_id': volume_id + 1})
+        for volume_id, roi in enumerate(rois, start=1):
+            self.Volume().insert1({**key, 'volume_id': volume_id})
 
             # Insert coordinates of each ROI forming this volume
             for roi_coord in roi.roi_coordinates:
-                tuple_ = {**key, 'roi_id': roi_coord.id, 'volume_id': volume_id + 1,
-                          'stitch_xs': roi_coord.xs, 'stitch_ys': roi_coord.ys,
-                          'stitch_z': roi.z}
+                tuple_ = {**key, 'roi_id': roi_coord.id, 'volume_id': volume_id,
+                          'stitch_xs': roi_coord.xs, 'stitch_ys': roi_coord.ys, 'stitch_z': roi.z}
                 self.ROICoordinates().insert1(tuple_)
 
         self.notify(key)
@@ -904,6 +905,121 @@ class CorrectedStack(dj.Computed):
 
 
 @schema
+class SegmentationTask(dj.Manual):
+   definition = """ # defines the target, the method and the channel to use for segmentation
+
+   -> CorrectedStack
+   -> shared.Channel
+   -> shared.StackSegmMethod
+   ---
+   -> experiment.Compartment
+   """
+   def fill(self, key, channel=1, segmentation_method=2, compartment='soma'):
+       for stack_key in (CorrectedStack() & key).fetch(dj.key):
+           tuple_ = {**stack_key, 'channel': channel, 'stacksegm_method': segmentation_method,
+                     'compartment': compartment}
+           self.insert1(tuple_, ignore_extra_fields=True, skip_duplicates=True)
+
+
+@schema
+class Segmentation(dj.Computed):
+    definition="""
+    -> SegmentationTask
+    ---
+    nobjects                : int            # numbef of objects found in the image              
+    """
+
+    class ConvNet(dj.Part):
+        definition = """ # attributes particualr to convnet based methods
+        -> master
+        ---
+        centroids           : external-stack # voxel-wise probability of centroids
+        probs               : external-stack # voxel-wise probability of cell nuclei 
+        seg_threshold       : float          # threshold used for the probability maps
+        min_voxels          : int            # minimum number of voxels (in cubic microns)
+        max_voxels          : int            # maximum number of voxels (in cubic microns)
+        compactness_factor  : float          # compactness factor used for the watershed segmentation
+        """
+
+    class Slice(dj.Part):
+        definition = """ # single slice of segmentation (voxel-wise cell ids, 0 for background)
+        
+        -> master
+        islice              : smallint      # index of slice in volume
+        ---
+        segmentation        : blob          # single slice of segmentation (height x width)
+        """
+
+    def _make_tuples(self, key):
+        from .utils import segmentation3d
+
+        # Get stack
+        original = (CorrectedStack & key).get_stack(key['channel'])
+
+        # Set params
+        seg_threshold = 0.8
+        min_voxels = 65 # sphere of diameter 5
+        max_voxels = 4186 # sphere of diameter 20
+        compactness_factor = 0.1
+        pad_mode = 'reflect' # any valid mode in np.pad
+
+        # Resize to be 1 um**3 voxels
+        dims = (CorrectedStack & key).fetch1()
+        um_per_px = (dims['um_depth'] / dims['px_depth'], dims['um_height'] / dims['px_height'],
+                     dims['um_width'] / dims['px_width'])
+        resized = ndimage.zoom(original, um_per_px, order=1, output=np.float32)
+
+        # Segment
+        if key['stacksegm_method'] not in [1, 2]:
+            msg = 'Unrecognized stack segmentation method: {}'.format(key['stacksegm_method'])
+            raise PipelineException(msg)
+        method = 'single' if key['stacksegm_method'] == 1 else 'ensemble'
+        centroids, probs, segmentation = segmentation3d.segment(resized, method, pad_mode,
+                                                                seg_threshold, min_voxels,
+                                                                max_voxels, compactness_factor)
+
+        # Resize to original size
+        zoom = np.array(original.shape) / np.array(resized.shape)
+        centroids = ndimage.zoom(centroids, zoom, order=1, output=np.float32)
+        probs = ndimage.zoom(probs, zoom, order=1, output=np.float32)
+        segmentation = ndimage.zoom(segmentation, zoom, order=0, output=np.int32)
+        # Note: ndimage.zoom computes output_shape as input_shape * zoom and results is the same for
+        # any zoom that produces the same output_shape so small zoom variations don't matter
+
+        # Insert
+        self.insert1({**key, 'nobjects': segmentation.max()})
+        self.ConvNet().insert1({**key, 'centroids': centroids, 'probs': probs,
+                                'seg_threshold': seg_threshold, 'min_voxels': min_voxels,
+                                'max_voxels': max_voxels, 'compactness_factor': compactness_factor})
+        for i, slice in enumerate(segmentation, start=1):
+            self.Slice().insert1({**key, 'islice': i, 'segmentation': slice})
+        self.notify(key)
+
+    @notify.ignore_exceptions
+    def notify(self, key):
+        import imageio
+        from bl3d import utils
+
+        volume = (self & key).get_stack()
+        volume = volume[:: int(volume.shape[0] / 8)]  # volume at 8 diff depths
+        colored = utils.colorize_label(volume)
+        video_filename = '/tmp/' + key_hash(key) + '.gif'
+        imageio.mimsave(video_filename, colored, duration=1)
+
+        msg = 'segmentation for {animal_id}-{session}-{stack_idx}'.format(**key)
+        slack_user = notify.SlackUser() & (experiment.Session() & key)
+        slack_user.notify(file=video_filename, file_title=msg, channel='#pipeline_quality')
+
+    def get_stack(self):
+        """ Get full stack (num_slices, height, width).
+
+        :returns The stack: a (num_slices, image_height, image_width) array.
+        :rtype: np.array (float32)
+        """
+        return np.stack((Segmentation.Slice() & self).fetch('segmentation', order_by='islice'))
+
+
+@schema
 class RegistrationTask(dj.Manual):
     definition = """ # declare scan fields to register to a stack as well as channels and method used
 
@@ -973,7 +1089,6 @@ class InitialRegistration(dj.Computed):
         """
 
     def _make_tuples(self, key):
-        from scipy import ndimage
         from .utils import registration
 
         print('Registering', key)
@@ -1134,7 +1249,6 @@ class FieldRegistration(dj.Computed):
         """
 
     def _make_tuples(self, key):
-        from scipy import ndimage
         from .utils import registration
 
         print('Registering', key)
@@ -1454,24 +1568,3 @@ class StackSet(dj.Computed):
         ax.set_zlabel('z (um)')
 
         return fig
-
-
-
-# TODO: Add this in shared
-#class SegmentationMethod(dj.Lookup):
-#    defintion = """ # 3-d segmentation methods
-#    """
-#    # threshold: Just threshold the scan and postprocess (nuclear labels)
-#    # blob: Gaussian blob detection
-#    # covnent: 3-d convnet
-#
-#@schema
-#class SegmentationTask(dj.Manual):
-#    definition = """ # defines the target of segmentation and the channel to use
-#
-#    -> experiment.Stack
-#    -> shared.Channel
-#    -> shared.SegmentationMethod
-#    ---
-#    -> experiment.Compartment
-#    """
