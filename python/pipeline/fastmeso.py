@@ -8,13 +8,10 @@ from stimulus import stimulus
 from datajoint.jobs import key_hash
 
 
-dj.config['external-analysis'] = dict(
-    protocol='file',
-    location='/mnt/lab/users/ecobost/fastmeso')
-dj.config['cache'] = '/tmp/dj-cache'
-
 schema = dj.schema('pipeline_fastmeso', locals(), create_tables=True)
-
+dj.config['external-fastmeso'] = {'protocol': 'file',
+                                  'location': '/mnt/scratch07/pipeline-externals'}
+dj.config['cache'] = '/tmp/dj-cache'
 
 @schema
 class PreprocessedStack(dj.Computed):
@@ -22,7 +19,7 @@ class PreprocessedStack(dj.Computed):
     (stack_session) -> stack.CorrectedStack(session)  # animal_id, stack_session, stack_idx, pipe_version, volume_id
     (stack_channel) -> shared.Channel(channel)
     ---
-    stack :     external-analysis   # motion corrected uint16
+    stack :     external-fastmeso   # motion corrected uint16
     """
     @property
     def key_source(self):
