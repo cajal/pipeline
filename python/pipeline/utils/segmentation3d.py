@@ -5,7 +5,7 @@ import numpy as np
 from os import path
 
 
-torch.backends.cudnn.benchmark=True # for efficiency
+#torch.backends.cudnn.benchmark=True # time efficient but memory inefficient
 
 
 def segment(stack, method='ensemble', pad_mode='reflect', seg_threshold=0.8, min_voxels=65,
@@ -32,7 +32,7 @@ def segment(stack, method='ensemble', pad_mode='reflect', seg_threshold=0.8, min
     # Prepare input
     lcned = utils.lcn(np.pad(stack, 20, mode=pad_mode), (3, 25, 25))
     norm = (lcned - lcned.mean()) / lcned.std()
-    input_ = torch.as_tensor(norm[np.newaxis, np.newaxis, ...]).to(device)  # 1 x 1 x D x H x W
+    input_ = torch.as_tensor(norm[np.newaxis, np.newaxis, ...])  # 1 x 1 x D x H x W
 
     # Declare models
     net = models.QCANet()
