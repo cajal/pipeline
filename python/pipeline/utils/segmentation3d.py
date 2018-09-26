@@ -30,9 +30,11 @@ def segment(stack, method='ensemble', pad_mode='reflect', seg_threshold=0.8, min
         print('Running 3-d segmentation in the CPU will take more time.')
 
     # Prepare input
-    lcned = utils.lcn(np.pad(stack, 20, mode=pad_mode), (3, 25, 25))
+    padded = np.pad(stack, 20, mode=pad_mode)
+    lcned= utils.lcn(padded, (3, 25, 25))
     norm = (lcned - lcned.mean()) / lcned.std()
     input_ = torch.as_tensor(norm[np.newaxis, np.newaxis, ...])  # 1 x 1 x D x H x W
+    del padded, lcned, norm # release memory
 
     # Declare models
     net = models.QCANet()
@@ -44,8 +46,8 @@ def segment(stack, method='ensemble', pad_mode='reflect', seg_threshold=0.8, min
                        'bestndn_1-8-17261.pth']  # we'll ensemble all of these
 
     # Create detection and segmentation probabilities
-    detection_sum = np.empty_like(lcned)
-    segmentation_sum = np.empty_like(lcned)
+    detection_sum = np.empty(input_.shape[-3:], dtype=np.float32)
+    segmentation_sum = np.empty(input_.shape[-3:], dtype=np.float32)
     with torch.no_grad():
         for model_name in model_names:
             # Import model from file
@@ -59,6 +61,7 @@ def segment(stack, method='ensemble', pad_mode='reflect', seg_threshold=0.8, min
             segmentation_sum += torch.sigmoid(segmentation).squeeze().numpy()
         detection = detection_sum / len(model_names)
         segmentation = segmentation_sum / len(model_names)
+    del input_, detection_sum, segmentation_sum # release memory
 
     # Drop padding (added above)
     detection = detection[20:-20, 20:-20, 20:-20]
