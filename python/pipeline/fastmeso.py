@@ -1,10 +1,10 @@
 """ Schemas specific to platinum mice. Not the cleanest design/code"""
 import datajoint as dj
 import numpy as np
+from scipy import ndimage
 
 from . import reso, meso, stack, notify, shared, experiment
-from .utils import enhancement
-from stimulus import stimulus
+from .utils import enhancement, registration
 from datajoint.jobs import key_hash
 
 
@@ -69,9 +69,6 @@ class RegistrationOverTime(dj.Computed):
         return keys & stack.RegistrationTask() & meso.Quality.SummaryFrames().proj(scan_session='session')
 
     def _make_tuples(self, key):
-        from scipy import ndimage
-        from .utils import registration
-
         print('Registering', key)
 
         # Get stack
@@ -188,99 +185,150 @@ class RegistrationPlot(dj.Computed):
 
 
 @schema
-class ConditionTraces(dj.Computed):
-    definition=""" # 10-secs traces for each unit in stack during some condition (used for visualization)
-    -> stack.StackSet
-    -> stimulus.Condition
+class FieldSegmInStack(dj.Computed):
+    definition = """ # find the respective segmentation from the stack for a registered field
+    -> RegistrationOverTime
     ---
-    common_fps              :float          #
+    common_res              : float                     # common resolution stack and field were downsampled to
+    stack_field             : blob                      # field (image x height) of cell ids
+    caiman_field            : blob                      # field created from caiman maks 
     """
     @property
     def key_source(self):
-        netflix = dj.create_virtual_module('netflix', 'pipeline_netflix')
-        conditions = stimulus.Clip() & netflix.OracleSet()
-        return stack.StackSet() * (stimulus.Condition() & conditions)
+        return RegistrationOverTime() & stack.Segmentation().proj(stack_session='session')
 
-    class Trace(dj.Part):
-        definition = """ # averaged trace for the given unit
+    class StackUnit(dj.Part):
+        definition = """
         -> master
-        -> stack.StackSet.Unit
+        sunit_id                : int                  # id in the stack segmentation
         ---
-        num_masks           : int        # num_masks averaged to get this trace
-        trace               : longblob   # 10-secs trace
-        corr=NULL           : float      # mean correlation across traces for masks forming this unit
+        depth                   : int                  # (um) size in z   
+        height                  : int                  # (um) size in y
+        width                   : int                  # (um) size in x
+        volume                  : float                # (um) volume of the 3-d unit
+        area                    : float                # (um) area of the 2-d mask  
+        sunit_z                 : float                # (um) centroid in z for the 3d unit
+        sunit_y                 : float                # (um) centroid in y for the 3d unit
+        sunit_x                 : float                # (um) centroid in x for the 3d unit
+        mask_z                  : float                # (um) centroid in z for the 2d mask
+        mask_y                  : float                # (um) centroid in y for the 2d mask
+        mask_x                  : float                # (um) centroid in x for the 2d mask
+        distance                : float                # (um) euclidean distance between centroid of 2-d mask and 3-d unit
         """
 
-    class Trials(dj.Part):
-        definition=""" # save traces per trial before averaging
-        -> master
-        -> meso.ScanSet.Unit
+    class CaimanMask(dj.Part):
+        definition = """ # CNMF mask corresponding to sunit_id (if any overlap)
+        -> FieldSegmInStack.StackUnit
         ---
-        trial_traces    : longblob    # num_trials x num_frames traces
-        corr            : float       # mean correlation across trials
+        caiman_id               : int                  # mask id from 2-d caiman segmentation
+        caiman_iou              : float                # iou between the 2-d stack and caiman mask
+        caiman_z                : float                # (um) centroid in z
+        caiman_y                : float                # (um) centroid in y
+        caiman_x                : float                # (um) centroid in x
+        distance                : float                # (um) distance in the 2-d plane between caiman and 2-d mask
         """
 
-    def make(self, key):
-        import itertools
+    def _make_tuples(self, key):
+        from skimage import measure
 
-        # Compute common fps to which traces will be downsampled
-        reg_fields = (stack.FieldRegistration() & key).proj(session='scan_session')
-        common_fps = min([*(reso.ScanInfo() & reg_fields).fetch('fps'), *(meso.ScanInfo() & reg_fields).fetch('fps')])
+        print('Field segmentation: ', key)
 
-        # Create list of scan units
-        traces = {} # dictionary with unit-name -> trace pairs
-        self.insert1({**key, 'common_fps': common_fps})
-        for field_key in reg_fields.fetch('KEY'):
-            # Get some field info
-            scan_name = '{animal_id}-{session}-{scan_idx}'.format(**field_key)
-            pipe = meso if meso.ScanInfo() & field_key else None
-            #pipe = reso if reso.ScanInfo() & field_key else meso if meso.ScanInfo() & field_key else None
+        # Get instance segmentation
+        instance = (stack.Segmentation() & key & {'session': key['stack_session']}).get_stack()
 
-            # Get flip_times at common_fps resolution
-            if len(stimulus.Trial() & key & field_key) == 0:
-                print('No trials. Skipping', field_key)
-                continue
-            trial_times = (stimulus.Trial() & key & field_key).fetch('flip_times')
-            trial_times = [np.linspace(ft.min(), ft.max(), int(round((ft.max() - ft.min()) * common_fps))) for ft in trial_times]
+        # Get masks and binarize them (same way as used for plotting)
+        masks = (meso.Segmentation() & key & {'session': key['scan_session']}).get_all_masks()
+        masks = np.moveaxis(masks, -1, 0) # num_masks x height x width
 
-            # Get scan frame times
-            if len(stimulus.Sync() & field_key) == 0:
-                print('No Sync. Skipping', field_key)
-                continue
-            num_frames = (pipe.ScanInfo() & field_key).fetch1('nframes')
-            num_slices = len(np.unique((pipe.ScanInfo.Field().proj('z', nomatch='field') & field_key).fetch('z')))
-            frame_times = (stimulus.Sync() & field_key).fetch1('frame_times', squeeze=True) # one per depth
-            frame_times = frame_times[:num_slices * num_frames:num_slices] # one per volume
+        # Get field and stack resolution
+        field_res = (meso.ScanInfo.Field() & key & {'session': key['scan_session']}).microns_per_pixel
+        dims = (stack.CorrectedStack() & key & {'session': key['stack_session']}).fetch1(
+            'um_depth', 'px_depth', 'um_height', 'px_height', 'um_width', 'px_width')
+        stack_res = np.array([dims[0] / dims[1], dims[2] / dims[3], dims[4] / dims[5]])
 
-            # Get unit traces
-            somas = (pipe.MaskClassification.Type() & {'type': 'soma'})
-            units = pipe.ScanSet.Unit() & field_key & somas
-            spikes = pipe.Activity.Trace() * pipe.ScanSet.UnitInfo() & units.proj()
-            for unit_id, ms_delay, trace in zip(*spikes.fetch('unit_id', 'ms_delay', 'trace')):
-                interp_traces =  np.interp(trial_times, frame_times + ms_delay / 1000, trace) # num_trials x trial_duration
-                traces['{}-{}'.format(scan_name, unit_id)] = np.mean(interp_traces, axis=0)
+        # Rescale to match lowest resolution  (isotropic pixels/voxels)
+        common_res = max(*field_res, *stack_res) # minimum available resolution
+        instance = ndimage.zoom(instance, stack_res / common_res, order=0)
+        masks = np.stack(ndimage.zoom(f, field_res / common_res, order=1) for f in masks)
 
-                if len(interp_traces) > 1:
-                    corr = np.mean(np.corrcoef(interp_traces)[np.triu_indices(len(interp_traces), k=1)])
-                else:
-                    corr = None
-                self.Trials().insert1({**key, 'session': field_key['session'],
-                                       'scan_idx': field_key['scan_idx'],
-                                       'segmentation_method': 3, 'unit_id': unit_id,
-                                       'trial_traces': interp_traces, 'corr': corr})
-            #TODO: Deal with frame_numbers wrapping around after 2**32
-            #TODO: Deal with trial times being outside range of frame times
-        print('Traces created')
+        # TODO: I could dilate em herre to make em more round
 
-        # Create the mean traces per munit_id
-        concat_query = 'CONCAT_WS("-", animal_id, scan_session, scan_idx, unit_id)'
-        match_rel = (stack.StackSet.Match() & key).proj('munit_id', unit_name=concat_query)
-        munit_ids, unit_names = match_rel.fetch('munit_id', 'unit_name', order_by='munit_id')
-        for munit_id, unit_group in itertools.groupby(zip(munit_ids, unit_names), lambda x: x[0]):
-            unit_traces = list(filter(lambda x: x is not None, [traces.get(un, None) for _, un in unit_group]))
-            num_traces = len(unit_traces) # traces coming from diff cells+
-            if num_traces > 0:
-                munit_trace = np.mean(unit_traces, axis=0)
-                corr = np.mean(np.corrcoef(unit_traces)[np.triu_indices(num_traces, k=1)]) if num_traces > 1 else None
-                self.Trace.insert1({**key, 'munit_id': munit_id, 'num_masks': num_traces,
-                                    'trace': munit_trace, 'corr': corr})
+        # Binarize masks
+        binary_masks = np.zeros(masks.shape, dtype=bool)
+        for i, mask in enumerate(masks):
+            ## Compute cumulative mass (similar to caiman)
+            indices = np.unravel_index(np.flip(np.argsort(mask, axis=None), axis=0),
+                                       mask.shape)  # max to min value in mask
+            cumsum_mask = np.cumsum(mask[indices] ** 2) / np.sum(mask ** 2)
+            binary_masks[i][indices] = cumsum_mask < 0.9
+
+        # Compute z, y, x of field as distances to the center of the stack
+        reg_x, reg_y, reg_z = (RegistrationOverTime() & key).fetch1('reg_x', 'reg_y',
+                                                                    'reg_z')
+        orig_x, orig_y, orig_z = (stack.CorrectedStack() & key &
+                                  {'session': key['stack_session']}).fetch1('x', 'y', 'z')
+        z = (reg_z - orig_z) / common_res - instance.shape[0] / 2
+        y = (reg_y - orig_y) * stack_res[1] / common_res
+        x = (reg_x - orig_x) * stack_res[2] / common_res
+
+        # Get field segmentation from the stack segmentation
+        field_height, field_width = binary_masks.shape[1:]
+        reg_segmentation = registration.find_field_in_stack(instance, field_height,
+                                                            field_width, x, y, z,
+                                                            order=0).astype(np.int32)
+
+        # Insert
+        caiman_field = np.argmax(binary_masks, axis=0)
+        self.insert1({**key, 'common_res': common_res, 'stack_field': reg_segmentation,
+                      'caiman_field': caiman_field})
+
+        instance_props =  measure.regionprops(instance)
+        instance_labels = np.array([p.label for p in instance_props])
+        for prop in measure.regionprops(reg_segmentation):
+            sunit_id = prop.label
+            instance_prop = instance_props[np.argmax(instance_labels == sunit_id)]
+
+            depth = (instance_prop.bbox[3] - instance_prop.bbox[0]) * common_res
+            height = (instance_prop.bbox[4] - instance_prop.bbox[1]) * common_res
+            width = (instance_prop.bbox[5] - instance_prop.bbox[2]) * common_res
+            volume = instance_prop.area * common_res ** 3
+            sunit_z, sunit_y, sunit_x = [x * common_res for x in instance_prop.centroid]
+
+            binary_sunit = reg_segmentation == sunit_id
+            area = np.count_nonzero(binary_sunit) * common_res ** 2
+            mask_z = (z + instance.shape[0] / 2) * common_res
+            mask_y, mask_x = ndimage.measurements.center_of_mass(binary_sunit)
+            mask_y = (mask_y + y + instance.shape[1] / 2 - field_height/2) * common_res
+            mask_x = (mask_x + x + instance.shape[2] / 2 - field_width/2) * common_res
+            #TODO: This won't hold when there's yaw pitch roll in the registration.
+
+            distance = np.sqrt((sunit_z - mask_z) ** 2 + (sunit_y - mask_y) ** 2 +
+                               (sunit_x - mask_x) ** 2)
+
+            # Insert in StackUnit
+            self.StackUnit().insert1({**key, 'sunit_id': sunit_id, 'depth': depth,
+                                      'height': height, 'width': width, 'volume': volume,
+                                      'area': area, 'sunit_z': sunit_z,
+                                      'sunit_y': sunit_y, 'sunit_x': sunit_x,
+                                      'mask_z': mask_z, 'mask_y': mask_y,
+                                      'mask_x': mask_x, 'distance': distance})
+
+            # Find closest caiman mask
+            intersection = np.logical_and(binary_masks, binary_sunit).sum(axis=(1, 2)) # num_masks
+            union = np.logical_or(binary_masks, binary_sunit).sum(axis=(1, 2)) # num_masks
+            ious = intersection / union
+            if np.any(ious > 0):
+                caiman_id = np.argmax(ious) + 1
+                caiman_iou = ious[caiman_id - 1]
+                caiman_z = (z + instance.shape[0] / 2) * common_res
+                caiman_y, caiman_x = ndimage.measurements.center_of_mass(binary_masks[caiman_id -1])
+                caiman_y = (caiman_y + y + instance.shape[1] / 2 - field_height / 2) * common_res
+                caiman_x = (caiman_x + x + instance.shape[2] / 2 - field_width / 2) * common_res
+
+                distance = np.sqrt((caiman_y - mask_y) ** 2 + (caiman_x - mask_x) ** 2)
+
+                self.CaimanMask().insert1({**key, 'sunit_id': sunit_id,
+                                           'caiman_id': caiman_id,
+                                           'caiman_iou': caiman_iou, 'caiman_z': caiman_z,
+                                           'caiman_y': caiman_y, 'caiman_x': caiman_x,
+                                           'distance': distance})
