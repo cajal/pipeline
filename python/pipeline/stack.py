@@ -990,7 +990,8 @@ class Segmentation(dj.Computed):
         self.insert1({**key, 'nobjects': segmentation.max()})
         self.ConvNet().insert1({**key, 'centroids': centroids, 'probs': probs,
                                 'seg_threshold': seg_threshold, 'min_voxels': min_voxels,
-                                'max_voxels': max_voxels, 'compactness_factor': compactness_factor})
+                                'max_voxels': max_voxels,
+                                'compactness_factor': compactness_factor})
         for i, slice in enumerate(segmentation, start=1):
             self.Slice().insert1({**key, 'islice': i, 'segmentation': slice})
         self.notify(key)
