@@ -117,7 +117,7 @@ def register_rigid(stack, field, px_estimate, px_range, angles=(0, 0, 0)):
 
 
 # TODO: All rotations could be done in a single step using map_coordinates
-def _inverse_rot3d(stack, yaw, pitch, roll):
+def _inverse_rot3d(stack, yaw, pitch, roll, order=1):
     """ Apply the inverse of an intrinsic yaw -> pitch -> roll rotation.
     inv(yaw(w) -> pitch(v) -> roll(u)) = roll(-u) -> pitch(-v) -> yaw(-w) = extrinsic
         yaw(-w) -> extrinsic pitch(-v) -> extrinsic roll(-u).
@@ -130,20 +130,21 @@ def _inverse_rot3d(stack, yaw, pitch, roll):
     :param float yaw: Angle in degrees for rotation over z axis.
     :param float pitch: Angle in degrees for rotation over y axis.
     :param float roll: Angle in degrees for rotation over x axis.
+    :param int order: Order of the spline interpolation used in ndimage.zoom.
 
     :returns: 3-d array. Rotated stack.
 
     ..ref:: danceswithcode.net/engineeringnotes/rotations_in_3d/rotations_in_3d_part1.html
     """
     if yaw == 0 and pitch == 0 and roll == 0:
-        rotated = stack.astype(float, copy=True)
+        rotated = stack.copy()
     else:
         # Note on ndimage.rotate: Assuming our coordinate system; axes=(1, 2) will do a left
         # handed rotation in z, (0, 2) a right handed rotation in y and (0, 1) a left handed
         # rotation in x.
-        rotated = ndimage.rotate(stack, yaw, axes=(1, 2), order=1) # extrinsic yaw(-w)
-        rotated = ndimage.rotate(rotated, -pitch, axes=(0, 2), order=1) # extrinsic pitch(-v)
-        rotated = ndimage.rotate(rotated, roll, axes=(0, 1), order=1) # extrinsic roll(-u)
+        rotated = ndimage.rotate(stack, yaw, axes=(1, 2), order=order) # extrinsic yaw(-w)
+        rotated = ndimage.rotate(rotated, -pitch, axes=(0, 2), order=order) # extrinsic pitch(-v)
+        rotated = ndimage.rotate(rotated, roll, axes=(0, 1), order=order) # extrinsic roll(-u)
 
     return rotated
 
@@ -172,7 +173,7 @@ def create_rotation_matrix(yaw, pitch, roll):
     return rotation_matrix
 
 
-def find_field_in_stack(stack, height, width, x, y, z, yaw=0, pitch=0, roll=0):
+def find_field_in_stack(stack, height, width, x, y, z, yaw=0, pitch=0, roll=0, order=1):
     """ Get a cutout of the given height, width dimensions in the rotated stack at x, y, z.
 
     :param np.array stack: 3-d stack (depth, height, width)
@@ -180,11 +181,12 @@ def find_field_in_stack(stack, height, width, x, y, z, yaw=0, pitch=0, roll=0):
     :param float x, y, z: Center of field measured as distance from the center in the
         original stack (before rotation).
     :param yaw, pitch, roll: Rotation angles to apply to the field.
+    :param order: Order of the spline used for the interpolation.
 
     :returns: A height x width np.array at the desired location.
     """
     # Rotate stack (inverse of intrinsic yaw-> pitch -> roll)
-    rotated = _inverse_rot3d(stack, yaw, pitch, roll)
+    rotated = _inverse_rot3d(stack, yaw, pitch, roll, order=order)
 
     # Compute center of field in the rotated stack
     R_inv = np.linalg.inv(create_rotation_matrix(yaw, pitch, roll))
@@ -197,7 +199,7 @@ def find_field_in_stack(stack, height, width, x, y, z, yaw=0, pitch=0, roll=0):
     x_coords = np.arange(width)  - width / 2 + center_ind[2]
     coords = np.meshgrid(z_coords, y_coords, x_coords)
     out = ndimage.map_coordinates(rotated, [coords[0].reshape(-1), coords[1].reshape(-1),
-                                            coords[2].reshape(-1)], order=1)
+                                            coords[2].reshape(-1)], order=order)
     field = out.reshape([height, width])
 
     return field
