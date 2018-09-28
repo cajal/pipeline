@@ -1109,7 +1109,7 @@ class Segmentation(dj.Computed):
 
         return masks
 
-    def plot_masks(self, threshold=0.99, first_n=None):
+    def plot_masks(self, threshold=0.97, first_n=None):
         """ Draw contours of masks over the correlation image (if available).
 
         :param threshold: Threshold on the cumulative mass to define mask contours. Lower
