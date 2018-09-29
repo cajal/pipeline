@@ -61,8 +61,9 @@ def register_rigid(stack, field, px_estimate, px_range, angles=(0, 0, 0)):
     z_slack = np.max(big_corners[2, [4, 5, 6, 7]]) # z that sticks furthest away from you
 
     # Cut original stack
-    slices = [slice(int(round(max(0, s/2 + p - sl))), int(round(s/2 + p + sl))) for s, p, sl
-              in zip(stack.shape, px_estimate[::-1], [z_slack, y_slack, x_slack])]
+    slices = tuple(slice(int(round(max(0, s/2 + p - sl))), int(round(s/2 + p + sl))) for
+                   s, p, sl in zip(stack.shape, px_estimate[::-1], [z_slack, y_slack,
+                                                                    x_slack]))
     mini_stack = stack[slices]
 
     # Rotate stack (inverse of intrinsic yaw-> pitch -> roll)
@@ -72,14 +73,16 @@ def register_rigid(stack, field, px_estimate, px_range, angles=(0, 0, 0)):
     px_estimate_ms = [s/2 + p - (sli.start + ms/2) for s, p, sli, ms in # px_estimate with (0, 0, 0) in center of mini_stack
                       zip(stack.shape, px_estimate[::-1], slices, mini_stack.shape)][::-1] # x, y, z
     rot_px_estimate = np.dot(R_inv, px_estimate_ms)
-    rot_slices = [slice(int(round(max(0, s/2 + p - sl))), int(round(s/2 + p + sl))) for s, p, sl
-                  in zip(rotated.shape, rot_px_estimate[::-1], [rot_zlim, rot_ylim, rot_xlim])]
+    rot_slices = tuple(slice(int(round(max(0, s/2 + p - sl))), int(round(s/2 + p + sl)))
+                       for s, p, sl in zip(rotated.shape, rot_px_estimate[::-1],
+                                           [rot_zlim, rot_ylim, rot_xlim]))
     mini_rotated = rotated[rot_slices]
 
     # Create mask to restrict correlations to appropiate range
     mini_mask = np.zeros_like(mini_stack)
-    mask_slices = [slice(int(round(max(0, s/2 + p - r))), int(round(s/2 + p + r))) for s, p, r
-                   in zip(mini_stack.shape, px_estimate_ms[::-1], px_range[::-1])]
+    mask_slices = tuple(slice(int(round(max(0, s/2 + p - r))), int(round(s/2 + p + r)))
+                        for s, p, r in zip(mini_stack.shape, px_estimate_ms[::-1],
+                                           px_range[::-1]))
     mini_mask[mask_slices] = 1 # only consider positions initially in the range
     rot_mask = _inverse_rot3d(mini_mask, *angles)
     mr_mask = rot_mask[rot_slices]
@@ -94,7 +97,8 @@ def register_rigid(stack, field, px_estimate, px_range, angles=(0, 0, 0)):
     norm_stack = np.stack(enhancement.sharpen_2pimage(s) for s in mini_rotated)
 
     # 3-d match_template
-    corrs = np.stack(feature.match_template(s, norm_field, pad_input=True) for s in norm_stack)
+    corrs = np.stack(feature.match_template(s, norm_field, pad_input=True) for s in
+                     norm_stack)
     smooth_corrs = ndimage.gaussian_filter(corrs, 0.7)
     masked_corrs = smooth_corrs * mr_mask
     best_score = np.max(masked_corrs)
