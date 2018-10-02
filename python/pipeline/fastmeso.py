@@ -43,6 +43,7 @@ class PreprocessedStack(dj.Computed):
         self.insert1({**key, 'stack': stack_})
 
 
+#TODO: Drop, replacement in stack.RegistrationOverTime
 @schema
 class RegistrationOverTime(dj.Computed):
     """ Simplified version of stack.FieldRegistration, see original for details"""
@@ -125,7 +126,7 @@ class RegistrationOverTime(dj.Computed):
             self.insert1({**key, 'frame_id': i + 1, 'common_res': common_res, 'reg_x': final_x,
                           'reg_y': final_y, 'reg_z': final_z, 'score': score})
 
-
+#TODO: Drop, replaced as a method of stack.RegistrationOverTime
 # Call once after all sessions are done
 @schema
 class RegistrationPlot(dj.Computed):
