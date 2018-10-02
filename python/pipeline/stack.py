@@ -1418,7 +1418,7 @@ class RegistrationOverTime(dj.Computed):
         dims = stack_rel.fetch1('um_depth', 'px_depth', 'um_height', 'px_height',
                                 'um_width', 'px_width')
         stack_res = np.array([dims[0] / dims[1], dims[2] / dims[3], dims[4] / dims[5]])
-        common_res = min(*field_res, *stack_res[:-1])  # maximum available resolution ignoring stack z resolution
+        common_res = min(*field_res, *stack_res[1:])  # maximum available resolution ignoring stack z resolution
 
         # Prepare stack (drop edges, local contrast normalization and rescale)
         print('Preprocessing stack')
