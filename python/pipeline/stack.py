@@ -1365,6 +1365,260 @@ class FieldRegistration(dj.Computed):
 
 
 @schema
+class RegistrationOverTime(dj.Computed):
+    definition = """ # register a field at different timepoints of recording
+    
+    (stack_session) -> CorrectedStack(session)  # animal_id, stack_session, stack_idx, pipe_version, volume_id
+    (scan_session) -> experiment.Scan(session)  # animal_id, scan_session, scan_idx
+    -> shared.Field
+    (stack_channel) -> shared.Channel(channel)
+    (scan_channel) -> shared.Channel(channel)
+    ---
+    common_res      : float         # (um/px) common resolution used for registration    
+    """
+    @property
+    def key_source(self):
+        return InitialRegistration().key_source
+
+    class Chunk(dj.Part):
+        definition = """ # single registered chunk
+        
+        -> master
+        frame_num       : int           # frame number of the frame in the middle of this chunk
+        ---
+        initial_frame   : int           # initial frame used in this chunk (1-based)
+        final_frame     : int           # final frame used in this chunk (1-based)
+        regot_x         : float         # (px) center of scan in stack coordinates
+        regot_y         : float         # (px) center of scan in stack coordinates
+        regot_z         : float         # (um) depth of scan in stack coordinates
+        score           : float         # cross-correlation score (-1 to 1)
+        avg_chunk       : longblob      # average field (from scan) used for registration (before any enhancement)
+        """
+
+    def _make_tuples(self, key):
+        from .utils import registration
+
+        print('Registering over time:', key)
+
+        # Get stack
+        print('Loading stack')
+        stack_rel = (CorrectedStack() & key & {'session': key['stack_session']})
+        stack = stack_rel.get_stack(key['stack_channel'])
+
+        # Get field and stack resolution
+        field_key = {'animal_id': key['animal_id'], 'session': key['scan_session'],
+                     'scan_idx': key['scan_idx'], 'field': key['field'],
+                     'channel': key['scan_channel']}
+        pipe  = (reso if reso.ScanInfo() & field_key else meso if meso.ScanInfo() &
+                                                                  field_key else None)
+        if pipe is None:
+            raise PipelineException('Scan has not been processed through reso/meso')
+        field_res = ((reso.ScanInfo() & field_key).microns_per_pixel if pipe == reso else
+                     (meso.ScanInfo.Field() & field_key).microns_per_pixel)
+        dims = stack_rel.fetch1('um_depth', 'px_depth', 'um_height', 'px_height',
+                                'um_width', 'px_width')
+        stack_res = np.array([dims[0] / dims[1], dims[2] / dims[3], dims[4] / dims[5]])
+        common_res = min(*field_res, *stack_res[:-1])  # maximum available resolution ignoring stack z resolution
+
+        # Prepare stack (drop edges, local contrast normalization and rescale)
+        print('Preprocessing stack')
+        skip_dims = [max(1, int(round(s * 0.025))) for s in stack.shape]
+        stack = stack[:, skip_dims[1]: -skip_dims[1], skip_dims[2]: -skip_dims[2]]
+        stack = ndimage.zoom(enhancement.lcn(stack, np.array([3, 25, 25]) / stack_res),
+                             stack_res / common_res, order=1)
+
+        # Get corrected scan
+        print('Loading scan')
+        scan = RegistrationOverTime._get_corrected_scan(field_key)
+
+        # Get estimated depth of the field (from experimenters)
+        stack_x, stack_y, stack_z = stack_rel.fetch1('x', 'y', 'z')  # z of the first slice (zero is at surface depth)
+        field_z = (pipe.ScanInfo.Field() & field_key).fetch1('z')  # measured in microns (zero is at surface depth)
+        if field_z < stack_z or field_z > stack_z + dims[0]:
+            msg_template = 'Warning: Estimated depth ({}) outside stack range ({}-{}).'
+            print(msg_template.format(field_z, stack_z, stack_z + dims[0]))
+        estimated_px_z = (field_z - stack_z + 0.5) / common_res  # in pixels
+
+        # Insert in RegistrationOverTime
+        self.insert1({**key, 'common_res': common_res})
+
+        # Compute best chunk size: each lasts the same (~10 minutes)
+        fps = (pipe.ScanInfo() & field_key).fetch1('fps')
+        num_frames = scan.shape[-1]
+        overlap = int(round(2 * 60 * fps)) # ~ 2 minutes
+        num_chunks = int(np.ceil((num_frames - overlap) / (10 * 60 * fps - overlap)))
+        chunk_size = int(np.floor((num_frames - overlap) / num_chunks + overlap)) # *
+        # * distributes frames in the last (incomplete) chunk to the other chunks
+
+        # Registration: Iterate over chunks
+        print('Registering', num_chunks, 'chunk(s)')
+        px_estimate = (0, 0, estimated_px_z - stack.shape[0] / 2)  # (0, 0, 0) in center of stack
+        px_range = (0.45 * stack.shape[2], 0.45 * stack.shape[1], 100 / common_res)
+        for initial_frame in range(0, num_frames - chunk_size, chunk_size - overlap):
+            # Get next chunk
+            final_frame = initial_frame + chunk_size
+            chunk = scan[..., initial_frame: final_frame]
+
+            # Prepare field (drop edges, local contrast normalization and rescaling)
+            skip_dims = [max(1, int(round(s * 0.025))) for s in chunk.shape[:-1]]
+            small_chunk = chunk[skip_dims[0]: -skip_dims[0], skip_dims[1]: -skip_dims[1]]
+            field = ndimage.zoom(enhancement.lcn(small_chunk.mean(-1), 20 / field_res),
+                                 field_res / common_res, order=1)
+
+            # Run rigid registration with no rotations searching 100 microns up and down
+            score, (x, y, z), _ = registration.register_rigid(stack, field, px_estimate,
+                                                              px_range)
+
+            # Map back to stack coordinates
+            final_x = stack_x + x * (common_res / stack_res[2]) # in stack pixels
+            final_y = stack_y + y * (common_res / stack_res[1]) # in stack pixels
+            final_z = stack_z + (z + stack.shape[0] / 2) * common_res # in microns*
+            #* Best match in slice 0 will not result in z = 0 but 0.5 * z_step.
+
+            # Insert
+            frame_num = int(round((initial_frame + final_frame) / 2))
+            self.Chunk().insert1({**key, 'frame_num': frame_num + 1,
+                                  'initial_frame': initial_frame,
+                                  'final_frame': final_frame,
+                                  'regot_x': final_x, 'regot_y': final_y,
+                                  'regot_z': final_z, 'score': score,
+                                  'avg_chunk': chunk.mean(-1)})
+
+        self.notify(key)
+
+    @notify.ignore_exceptions
+    def notify(self, key):
+        frame_num, zs, scores = (self.Chunk() & key).fetch('frame_num', 'regot_z',
+                                                           'score')
+
+        plt.plot(frame_num, -zs, zorder=1)
+        plt.scatter(frame_num, -zs, marker='*', s=scores * 70, zorder=2, color='r')
+        plt.title('Registration over time (star size represents confidence)')
+        plt.ylabel('z (surface at 0)')
+        plt.xlabel('Frames')
+        img_filename = '/tmp/{}.png'.format(key_hash(key))
+        plt.savefig(img_filename)
+
+        msg = ('registration over time of {animal_id}-{scan_session}-{scan_idx} field '
+               '{field} to {animal_id}-{stack_session}-{stack_idx}')
+        msg = msg.format(**key)
+        slack_user = notify.SlackUser() & (experiment.Session() & key &
+                                           {'session': key['stack_session']})
+        slack_user.notify(file=img_filename, file_title=msg)
+
+    def _get_corrected_scan(key):
+        # Read scan
+        scan_filename = (experiment.Scan & key).local_filenames_as_wildcard
+        scan = scanreader.read_scan(scan_filename)
+
+        # Get some params
+        pipe = reso if (reso.ScanInfo() & key) else meso
+
+        # Map: Correct scan in parallel
+        f = performance.parallel_correct_scan  # function to map
+        raster_phase = (pipe.RasterCorrection() & key).fetch1('raster_phase')
+        fill_fraction = (pipe.ScanInfo() & key).fetch1('fill_fraction')
+        y_shifts, x_shifts = (pipe.MotionCorrection() & key).fetch1('y_shifts',
+                                                                    'x_shifts')
+        kwargs = {'raster_phase': raster_phase, 'fill_fraction': fill_fraction,
+                  'y_shifts': y_shifts, 'x_shifts': x_shifts}
+        results = performance.map_frames(f, scan, field_id=key['field'] - 1,
+                                         channel=key['channel'] - 1, kwargs=kwargs)
+
+        # Reduce: Make a single array (height x width x num_frames)
+        height, width, _ = results[0][1].shape
+        corrected_scan = np.zeros([height, width, scan.num_frames], dtype=np.float32)
+        for frames, chunk in results:
+            corrected_scan[..., frames] = chunk
+
+        return corrected_scan
+
+    def registration_plot(self):
+        """ Create a registration plot for the session"""
+        import matplotlib.pyplot as plt
+        import matplotlib.ticker as ticker
+
+        # Check that plot is restricted to a single stack and a single session
+        regot_key = self.fetch('KEY', limit=1)[0]
+        stack_key = {n: regot_key[n] for n in ['animal_id', 'stack_session', 'stack_idx',
+                                               'pipe_version', 'volume_id']}
+        session_key = {n: regot_key[n] for n in ['animal_id', 'scan_session']}
+        if len(self & stack_key) != len(self):
+            raise PipelineException('Plot can only be generated for one stack at a time')
+        if len(self & session_key) != len(self):
+            raise PipelineException('Plot can only be generated for one session at a '
+                                    'time')
+
+        # Get field times and depths
+        ts = []
+        zs = []
+        session_ts = (experiment.Session() & regot_key &
+                      {'session': regot_key['scan_session']}).fetch1('session_ts')
+        for key in self.fetch('KEY'):
+            field_key = {'animal_id': key['animal_id'], 'session': key['scan_session'],
+                         'scan_idx': key['scan_idx'], 'field': key['field']}
+            scan_ts = (experiment.Scan() & field_key).fetch1('scan_ts')
+            fps = (reso.ScanInfo() & field_key or meso.ScanInfo() & field_key).fetch1('fps')
+
+            frame_nums, field_zs = (RegistrationOverTime.Chunk() & key).fetch('frame_num',
+                                                                              'regot_z')
+            field_ts = (scan_ts - session_ts).seconds + frame_nums / fps  # in seconds
+
+            ts.append(field_ts)
+            zs.append(field_zs)
+
+        # Plot
+        fig = plt.figure(figsize=(20, 8))
+        for ts_, zs_ in zip(ts, zs):
+            plt.plot(ts_ / 3600, zs_)
+        plt.title('Registered zs for {animal_id}-{scan_session} into {animal_id}-'
+                  '{stack_session}-{stack_idx} starting at {t}'.format(t=session_ts,
+                                                                       **regot_key))
+        plt.ylabel('Registered zs')
+        plt.xlabel('Hours')
+
+        # Plot formatting
+        plt.gca().invert_yaxis()
+        plt.gca().yaxis.set_major_locator(ticker.MultipleLocator(10))
+        plt.grid(linestyle='--', alpha=0.8)
+
+        return fig
+
+
+@schema
+class ZDrift(dj.Computed):
+    definition = """ # assuming a linear drift in z, compute the slope of this line
+    
+    -> RegistrationOverTime
+    ---
+    z_slope                 : float            # (um/hour) drift in z
+    rmse                    : float            # (um) root mean squared error of the fit
+    """
+
+    def _make_tuples(self, key):
+
+
+        # Get all drifts (in z)
+        frame_nums, zs = (RegistrationOverTime.Chunk() & key).fetch('frame_num',
+                                                                    'regot_z')
+
+        # Fit a line (robust regression)
+        from sklearn import linear_model
+        X = frame_nums.reshape(-1, 1)
+        y = zs
+        model = linear_model.TheilSenRegressor()
+        model.fit(X, y)
+
+        #  Get results
+        field_key = {**key, 'session': key['scan_session']}
+        fps = (reso.ScanInfo() & field_key or meso.ScanInfo() & field_key).fetch1('fps')
+        z_slope = model.coef_[0] * fps * 3600 # um/hour
+        rmse = np.sqrt(np.mean((zs - model.predict(X)) ** 2))
+
+        self.insert1({**key, 'z_slope': z_slope, 'rmse': rmse})
+
+
+@schema
 class StackSet(dj.Computed):
     definition=""" # give a unique id to segmented masks in the stack
     (stack_session) -> CorrectedStack(session)  # animal_id, stack_session, stack_idx, pipe_version, volume_id
