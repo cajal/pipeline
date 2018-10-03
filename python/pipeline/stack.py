@@ -1478,7 +1478,7 @@ class RegistrationOverTime(dj.Computed):
             # Insert
             frame_num = int(round((initial_frame + final_frame) / 2))
             self.Chunk().insert1({**key, 'frame_num': frame_num + 1,
-                                  'initial_frame': initial_frame,
+                                  'initial_frame': initial_frame + 1,
                                   'final_frame': final_frame,
                                   'regot_x': final_x, 'regot_y': final_y,
                                   'regot_z': final_z, 'score': score,
@@ -1596,8 +1596,6 @@ class ZDrift(dj.Computed):
     """
 
     def _make_tuples(self, key):
-
-
         # Get all drifts (in z)
         frame_nums, zs = (RegistrationOverTime.Chunk() & key).fetch('frame_num',
                                                                     'regot_z')
@@ -1641,7 +1639,7 @@ class ZDrift(dj.Computed):
             z_slopes.append(scan_slopes)
 
         # Plot
-        fig = plt.figure(figsize=(20, 8))
+        fig = plt.figure(figsize=(7, 4))
         plt.boxplot(z_slopes)
         plt.title('Z drift for {animal_id}-{scan_session} into {animal_id}-'
                   '{stack_session}-{stack_idx}'.format(**regot_key))
