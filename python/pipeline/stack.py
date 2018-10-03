@@ -1533,7 +1533,7 @@ class RegistrationOverTime(dj.Computed):
 
         return corrected_scan
 
-    def registration_plot(self):
+    def session_plot(self):
         """ Create a registration plot for the session"""
         import matplotlib.pyplot as plt
         import matplotlib.ticker as ticker
@@ -1616,6 +1616,44 @@ class ZDrift(dj.Computed):
         rmse = np.sqrt(np.mean((zs - model.predict(X)) ** 2))
 
         self.insert1({**key, 'z_slope': z_slope, 'rmse': rmse})
+
+    def session_plot(self):
+        """ Create boxplots for the session (one per scan)."""
+        import matplotlib.pyplot as plt
+        import matplotlib.ticker as ticker
+
+        # Check that plot is restricted to a single stack and a single session
+        regot_key = self.fetch('KEY', limit=1)[0]
+        stack_key = {n: regot_key[n] for n in ['animal_id', 'stack_session', 'stack_idx',
+                                               'pipe_version', 'volume_id']}
+        session_key = {n: regot_key[n] for n in ['animal_id', 'scan_session']}
+        if len(self & stack_key) != len(self):
+            raise PipelineException('Plot can only be generated for one stack at a time')
+        if len(self & session_key) != len(self):
+            raise PipelineException('Plot can only be generated for one session at a '
+                                    'time')
+
+        # Get field times and depths
+        z_slopes = []
+        scan_idxs = np.unique(self.fetch('scan_idx'))
+        for scan_idx in scan_idxs:
+            scan_slopes = (self & {**session_key, 'scan_idx': scan_idx}).fetch('z_slope')
+            z_slopes.append(scan_slopes)
+
+        # Plot
+        fig = plt.figure(figsize=(20, 8))
+        plt.boxplot(z_slopes)
+        plt.title('Z drift for {animal_id}-{scan_session} into {animal_id}-'
+                  '{stack_session}-{stack_idx}'.format(**regot_key))
+        plt.ylabel('Z drift (um/hour)')
+        plt.xlabel('Scans')
+
+        # Plot formatting
+        plt.gca().invert_yaxis()
+        plt.gca().yaxis.set_major_locator(ticker.MultipleLocator(5))
+        plt.grid(linestyle='--', alpha=0.8)
+
+        return fig
 
 
 @schema
