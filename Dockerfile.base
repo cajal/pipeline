@@ -67,7 +67,7 @@ RUN apt-get install wget && \
 # Install CaImAn
 # Install dependencies
 RUN apt-get install -y python3-tk && \
-    pip3 install future cvxpy scikit-learn scikit-image tensorflow-gpu keras \
+    pip3 install future cvxpy scikit-learn scikit-image tensorflow keras \
                  peakutils \
     # Unused but required (imported in code)
                  ipyparallel Cython h5py tqdm psutil
