@@ -1017,7 +1017,8 @@ class Segmentation(dj.Computed):
         :returns The stack: a (num_slices, image_height, image_width) array.
         :rtype: np.array (float32)
         """
-        return np.stack((Segmentation.Slice() & self).fetch('segmentation', order_by='islice'))
+        slices = (Segmentation.Slice() & self).fetch('segmentation', order_by='islice')
+        return np.stack(slices)
 
 
 @schema
@@ -1393,6 +1394,7 @@ class RegistrationOverTime(dj.Computed):
         regot_z         : float         # (um) depth of scan in stack coordinates
         score           : float         # cross-correlation score (-1 to 1)
         avg_chunk       : longblob      # average field (from scan) used for registration (before any enhancement)
+        reg_field       : longblob      # registered field in stack
         """
 
     def _make_tuples(self, key):
@@ -1422,6 +1424,7 @@ class RegistrationOverTime(dj.Computed):
 
         # Prepare stack (drop edges, local contrast normalization and rescale)
         print('Preprocessing stack')
+        common_stack = ndimage.zoom(stack, stack_res / common_res, order=1) # used to find reg_field
         skip_dims = [max(1, int(round(s * 0.025))) for s in stack.shape]
         stack = stack[:, skip_dims[1]: -skip_dims[1], skip_dims[2]: -skip_dims[2]]
         stack = ndimage.zoom(enhancement.lcn(stack, np.array([3, 25, 25]) / stack_res),
@@ -1475,6 +1478,14 @@ class RegistrationOverTime(dj.Computed):
             final_z = stack_z + (z + stack.shape[0] / 2) * common_res # in microns*
             #* Best match in slice 0 will not result in z = 0 but 0.5 * z_step.
 
+            # Get field in stack (after registration)
+            field_shape = np.array(chunk.shape[:-1])
+            common_shape = np.round(field_shape * field_res / common_res).astype(int)
+            reg_field = registration.find_field_in_stack(common_stack, *common_shape, x,
+                                                         y, z)
+            #reg_field = ndimage.zoom(reg_field, common_res / field_res, order=1)
+            reg_field = ndimage.zoom(reg_field, field_shape / common_shape, order=1)
+
             # Insert
             frame_num = int(round((initial_frame + final_frame) / 2))
             self.Chunk().insert1({**key, 'frame_num': frame_num + 1,
@@ -1482,7 +1493,7 @@ class RegistrationOverTime(dj.Computed):
                                   'final_frame': final_frame,
                                   'regot_x': final_x, 'regot_y': final_y,
                                   'regot_z': final_z, 'score': score,
-                                  'avg_chunk': chunk.mean(-1)})
+                                  'avg_chunk': chunk.mean(-1), 'reg_field': reg_field})
 
         self.notify(key)
 
@@ -1645,6 +1656,7 @@ class ZDrift(dj.Computed):
                   '{stack_session}-{stack_idx}'.format(**regot_key))
         plt.ylabel('Z drift (um/hour)')
         plt.xlabel('Scans')
+        plt.xticks(range(1, len(scan_idxs) + 1), scan_idxs)
 
         # Plot formatting
         plt.gca().invert_yaxis()
