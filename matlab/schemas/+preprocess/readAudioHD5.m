@@ -50,14 +50,19 @@ try
             src_ptr = 1 ;
             dest_ptr = 1 ;
             samples_needed = data.audio_blocksize ;
+            sample_remaining = total_samples_needed ;
             data.mic_data = single(zeros(ceil(total_samples_needed/down_sample_factor),1)) ;
             data.mic_ts = data.mic_data ;
             while ~done
                 wf = H5Tools.readDataset(fp,'Audio Signals', 'range', [1 src_ptr], [2 src_ptr+samples_needed-1]) ;
-                tmic = single(downsample(wf(:,1),down_sample_factor)) ;
+                try
+                	tmic = single(decimate(wf(:,1),down_sample_factor,'FIR')) ;
+                catch
+                    tmic = 0 ;
+                end
                 data.mic_data(dest_ptr:dest_ptr+length(tmic)-1) = tmic ;
                 data.mic_ts(dest_ptr:dest_ptr+length(tmic)-1) = single(downsample(wf(:,2),down_sample_factor)) ;
-                samples_remaining = total_samples_needed - samples_needed ;
+                samples_remaining = sample_remaining - samples_needed ;
                 src_ptr = src_ptr+samples_needed ;
                 dest_ptr = dest_ptr+length(tmic) ;
                 if (samples_remaining > 0)
