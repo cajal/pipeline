@@ -85,6 +85,7 @@ class Temperature(dj.Imported):
     def session_plot(self):
         """ Do a plot of how temperature progress through a session"""
         import matplotlib.pyplot as plt
+        import matplotlib.ticker as ticker
 
         # Check that plot is restricted to a single session
         session_key = self.fetch('KEY', limit=1)[0]
@@ -109,6 +110,10 @@ class Temperature(dj.Imported):
         plt.ylabel('Temperature (Celsius)')
         plt.xlabel('Hour')
         plt.legend()
+
+        # Plot formatting
+        plt.gca().yaxis.set_major_locator(ticker.MultipleLocator(0.5))
+        plt.grid(linestyle='--', alpha=0.8)
 
         return fig
 
