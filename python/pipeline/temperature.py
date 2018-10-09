@@ -94,19 +94,21 @@ class Temperature(dj.Imported):
                                     'time')
 
         # Get times and timestamps, scan_ts
-        ts, temperatures = self.fetch('temp_time', 'temperatures', order_by='scan_idx')
+        scan_indices, ts, temperatures = self.fetch('scan_idx', 'temp_time',
+                                                    'temperatures', order_by='scan_idx')
         session_ts = (experiment.Session() & self).fetch1('session_ts')
         scan_ts = (experiment.Scan() & self).fetch('scan_ts', order_by='scan_idx')
         abs_ts = [(sts - session_ts).seconds + (t - t[0]) for sts, t in zip(scan_ts, ts)]
 
         # Plot
         fig = plt.figure(figsize=(10, 5))
-        for abs_ts_, temp_ in zip(abs_ts, temperatures):
-            plt.plot(abs_ts_ / 3600, temp_)  # in hours
+        for abs_ts_, temp_, scan_idx in zip(abs_ts, temperatures, scan_indices):
+            plt.plot(abs_ts_ / 3600, temp_, label='Scan {}'.format(scan_idx))  # in hours
         plt.title('Temperature for {animal_id}-{session} starting at {session_ts}'.format(
             session_ts=session_ts, **session_key))
         plt.ylabel('Temperature (Celsius)')
         plt.xlabel('Hour')
+        plt.legend()
 
         return fig
 
