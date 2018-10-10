@@ -1509,6 +1509,7 @@ class RegistrationOverTime(dj.Computed):
         plt.xlabel('Frames')
         img_filename = '/tmp/{}.png'.format(key_hash(key))
         plt.savefig(img_filename)
+        plt.close()
 
         msg = ('registration over time of {animal_id}-{scan_session}-{scan_idx} field '
                '{field} to {animal_id}-{stack_session}-{stack_idx}')
