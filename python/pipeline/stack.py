@@ -1497,26 +1497,26 @@ class RegistrationOverTime(dj.Computed):
 
         self.notify(key)
 
-    @notify.ignore_exceptions
-    def notify(self, key):
-        frame_num, zs, scores = (self.Chunk() & key).fetch('frame_num', 'regot_z',
-                                                           'score')
-
-        plt.plot(frame_num, -zs, zorder=1)
-        plt.scatter(frame_num, -zs, marker='*', s=scores * 70, zorder=2, color='r')
-        plt.title('Registration over time (star size represents confidence)')
-        plt.ylabel('z (surface at 0)')
-        plt.xlabel('Frames')
-        img_filename = '/tmp/{}.png'.format(key_hash(key))
-        plt.savefig(img_filename)
-        plt.close()
-
-        msg = ('registration over time of {animal_id}-{scan_session}-{scan_idx} field '
-               '{field} to {animal_id}-{stack_session}-{stack_idx}')
-        msg = msg.format(**key)
-        slack_user = notify.SlackUser() & (experiment.Session() & key &
-                                           {'session': key['stack_session']})
-        slack_user.notify(file=img_filename, file_title=msg)
+    # @notify.ignore_exceptions
+    # def notify(self, key):
+    #     frame_num, zs, scores = (self.Chunk() & key).fetch('frame_num', 'regot_z',
+    #                                                        'score')
+    #
+    #     plt.plot(frame_num, -zs, zorder=1)
+    #     plt.scatter(frame_num, -zs, marker='*', s=scores * 70, zorder=2, color='r')
+    #     plt.title('Registration over time (star size represents confidence)')
+    #     plt.ylabel('z (surface at 0)')
+    #     plt.xlabel('Frames')
+    #     img_filename = '/tmp/{}.png'.format(key_hash(key))
+    #     plt.savefig(img_filename)
+    #     plt.close()
+    #
+    #     msg = ('registration over time of {animal_id}-{scan_session}-{scan_idx} field '
+    #            '{field} to {animal_id}-{stack_session}-{stack_idx}')
+    #     msg = msg.format(**key)
+    #     slack_user = notify.SlackUser() & (experiment.Session() & key &
+    #                                        {'session': key['stack_session']})
+    #     slack_user.notify(file=img_filename, file_title=msg)
 
     def _get_corrected_scan(key):
         # Read scan
