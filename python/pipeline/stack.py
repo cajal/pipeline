@@ -1688,9 +1688,9 @@ class StackSet(dj.Computed):
         -> master
         munit_id            :int        # unique id in the stack
         ---
-        munit_x             :float      # (px) position of the centroid in the stack
-        munit_y             :float      # (px) position of the centroid in the stack
-        munit_z             :float      # (um) position of the centroid in the stack
+        munit_x             :float      # (px) position of the centroid in the stack coordinate system
+        munit_y             :float      # (px) position of the centroid in the stack coordinate system
+        munit_z             :float      # (um) position of the centroid in the stack coordinate system
         """
 
     class Match(dj.Part):
@@ -1750,8 +1750,9 @@ class StackSet(dj.Computed):
                          'channel': field['scan_channel']} # no pipe_version
             field_hash = key_hash(field_key)
             pipe = reso if reso.ScanInfo() & field_key else meso if meso.ScanInfo() & field_key else None
-            field_res = ((reso.ScanInfo() & field_key).microns_per_pixel if pipe == reso
-                         else (meso.ScanInfo.Field() & field_key).microns_per_pixel)
+            field_dims = ((reso.ScanInfo() if pipe == reso else meso.ScanInfo.Field()) &
+                          field_key).fetch1('um_height', 'px_height', 'um_width', 'px_width')
+            field_res = np.array([field_dims[0] / field_dims[1], field_dims[2] / field_dims[3]])
 
             # Create transformation matrix
             transform_matrix = np.eye(4)
@@ -1765,6 +1766,7 @@ class StackSet(dj.Computed):
             somas = (pipe.MaskClassification.Type() & {'type': 'soma'})
             field_somas = pipe.ScanSet.Unit() & field_key & somas
             unit_keys, xs, ys = (pipe.ScanSet.UnitInfo() & field_somas).fetch('KEY', 'px_x', 'px_y')
+            xs, ys = xs - field_dims[3] / 2, ys - field_dims[1] / 2 # center in middle of scan (for rotation)
             coords = [xs * field_res[1], ys * field_res[0], np.zeros(len(xs)), np.ones(len(xs))]
             xs, ys, zs, _ = np.dot(transform_matrix, coords)
             units += [StackSet.MatchedUnit(*args, field_hash) for args in zip(unit_keys, xs, ys, zs)]
