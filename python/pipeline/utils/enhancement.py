@@ -13,12 +13,11 @@ def lcn(image, sigmas=(12, 12)):
         local_mean = ndimage.uniform_filter(image, size=(32, 32))
 
     :param np.array image: Array with raw two-photon images.
-    :param tuple sigmas: List with sigmas per axes to use for the gaussian filter.
+    :param tuple sigmas: List with sigmas (one per axis) to use for the gaussian filter.
         Smaller values result in more local neighborhoods. 15-30 microns should work fine
     """
     local_mean = ndimage.gaussian_filter(image, sigmas)
-    local_std = np.sqrt(ndimage.gaussian_filter(image ** 2, sigmas) -
-                        ndimage.gaussian_filter(image, sigmas) ** 2)
+    local_std = np.sqrt(ndimage.gaussian_filter(image ** 2, sigmas) - local_mean ** 2)
     norm = (image - local_mean) / (local_std + 1e-7)
 
     return norm
