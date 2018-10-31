@@ -39,7 +39,6 @@ class StackInfo(dj.Imported):
     ---
     nrois           : tinyint           # number of ROIs
     nchannels       : tinyint           # number of channels
-    z_step          : float             # (um) distance in z between adjacent slices (always positive)
     fill_fraction   : float             # raster scan temporal fill fraction (see scanimage)
     """
     @property
@@ -56,7 +55,7 @@ class StackInfo(dj.Imported):
         field_ids           : blob              # list of field_ids (0-index) sorted from shallower to deeper
         roi_x               : float             # (um) center of ROI in the motor coordinate system
         roi_y               : float             # (um) center of ROI in the motor coordinate system
-        roi_z               : float             # (um) initial depth in the motor coordinate system
+        roi_z               : float             # (um) center of ROI in the motor coordinate system (cortex is at 0)
         roi_px_height       : smallint          # lines per frame
         roi_px_width        : smallint          # pixels per line
         roi_px_depth        : smallint          # number of slices
@@ -115,9 +114,10 @@ class StackInfo(dj.Imported):
                 tuple_['roi_um_width'] = um_width * stack._x_angle_scale_factor
 
             # Get common parameters
-            tuple_['roi_z'] = field_depths[0] #TODO: Add surf_depth
+            z_step = field_depths[1] - field_depths[0]
+            tuple_['roi_z'] = field_depths[0] + (field_depths[-1] - field_depths[0]) / 2
             tuple_['roi_px_depth'] = len(field_ids)
-            tuple_['roi_um_depth'] = field_depths[-1] - field_depths[0] + 1
+            tuple_['roi_um_depth'] = field_depths[-1] - field_depths[0] + z_step
             tuple_['nframes'] = stack.num_frames
             tuple_['fps'] = stack.fps
             tuple_['bidirectional'] = stack.is_bidirectional
@@ -127,10 +127,10 @@ class StackInfo(dj.Imported):
 
         @property
         def microns_per_pixel(self):
-            """ Returns an array with microns per pixel in height and width. """
-            dims = self.fetch1('roi_um_height', 'roi_px_height', 'roi_um_width', 'roi_px_width')
-            um_height, px_height, um_width, px_width = dims
-            return np.array([um_height / px_height, um_width / px_width])
+            """ Returns an array with microns per pixel in depth, height and width. """
+            um_dims = self.fetch1('roi_um_depth', 'roi_um_height', 'roi_um_width')
+            px_dims = self.fetch1('roi_px_depth', 'roi_px_height', 'roi_px_width')
+            return np.array([um_dim / px_dim for  um_dim, px_dim in zip(um_dims, px_dims)])
 
     def _make_tuples(self, key):
         """ Read and store stack information."""
@@ -142,17 +142,16 @@ class StackInfo(dj.Imported):
         for filename_key in filename_keys:
             stack_filename = (experiment.Stack.Filename() & filename_key).local_filenames_as_wildcard
             stacks.append(scanreader.read_scan(stack_filename))
-        num_rois_per_file = [(stack.num_rois if stack.is_multiROI else 1) for stack in stacks]
+        num_rois_per_file = [(s.num_rois if s.is_multiROI else 1) for s in stacks]
 
         # Create Stack tuple
         tuple_ = key.copy()
         tuple_['nrois'] = np.sum(num_rois_per_file)
         tuple_['nchannels'] = stacks[0].num_channels
-        tuple_['z_step'] = abs(stacks[0].scanning_depths[1] - stacks[0].scanning_depths[0])
         tuple_['fill_fraction'] = stacks[0].temporal_fill_fraction
 
         # Insert Stack
-        StackInfo().insert1(tuple_)
+        self.insert1(tuple_)
 
         # Insert ROIs
         roi_id = 1
@@ -408,7 +407,7 @@ class MotionCorrection(dj.Computed):
             f = performance.parallel_motion_stack # function to map
             raster_phase = (RasterCorrection() & key).fetch1('raster_phase')
             fill_fraction = (StackInfo() & key).fetch1('fill_fraction')
-            max_y_shift, max_x_shift = 20 / (StackInfo.ROI() & key).microns_per_pixel
+            max_y_shift, max_x_shift = 20 / (StackInfo.ROI() & key).microns_per_pixel[1:]
             results = performance.map_fields(f, roi, field_ids=field_ids, channel=correction_channel,
                                              kwargs={'raster_phase': raster_phase, 'fill_fraction': fill_fraction,
                                                      'skip_rows': skip_rows, 'skip_cols': skip_cols,
@@ -512,7 +511,6 @@ class Stitching(dj.Computed):
         -> Stitching.Volume             # volume to which this ROI belongs
         stitch_xs        : blob         # (px) center of each slice in the volume-wise coordinate system
         stitch_ys        : blob         # (px) center of each slice in the volume-wise coordinate system
-        stitch_z         : float        # (um) initial depth in the motor coordinate system
         """
 
     def _make_tuples(self, key):
@@ -560,9 +558,10 @@ class Stitching(dj.Computed):
 
             # Create ROI object
             um_per_px = (StackInfo.ROI() & (StackInfo.ROI().proj() & roi_tuple)).microns_per_pixel
-            px_y, px_x = (roi_tuple['roi_y'], roi_tuple['roi_x']) / um_per_px # in pixels
-            rois.append(stitching.StitchedROI(corrected_roi, x=px_x, y=px_y,
-                                              z=roi_tuple['roi_z'], id_=roi_tuple['roi_id']))
+            px_z, px_y, px_x = np.array([roi_tuple['roi_{}'.format(dim)] for dim in
+                                         ['z', 'y', 'x']]) / um_per_px
+            rois.append(stitching.StitchedROI(corrected_roi, x=px_x, y=px_y, z=px_z,
+                                              id_=roi_tuple['roi_id']))
 
         def enhance(image, sigmas):
             """ Enhance 2p image. See enhancement.py for details."""
@@ -579,22 +578,25 @@ class Stitching(dj.Computed):
                 for left, right in itertools.combinations(sorted_rois, 2):
                     if left.is_aside_to(right):
                         roi_key = {**key, 'roi_id': left.roi_coordinates[0].id}
+                        um_per_px = (StackInfo.ROI() & roi_key).microns_per_pixel
 
                         # Compute stitching shifts
-                        neighborhood_size = 25 / (StackInfo.ROI() & roi_key).microns_per_pixel
+                        neighborhood_size = 25 / um_per_px[1:]
                         left_ys, left_xs = [], []
                         for l, r in zip(left.slices, right.slices):
                             left_slice = enhance(l.slice, neighborhood_size)
                             right_slice = enhance(r.slice, neighborhood_size)
-                            delta_y, delta_x = stitching.linear_stitch(left_slice, right_slice,
+                            delta_y, delta_x = stitching.linear_stitch(left_slice,
+                                                                       right_slice,
                                                                        r.x - l.x)
                             left_ys.append(r.y - delta_y)
                             left_xs.append(r.x - delta_x)
 
                         # Fix outliers
-                        max_y_shift, max_x_shift = 10 / (StackInfo.ROI() & roi_key).microns_per_pixel
-                        left_ys, left_xs, _ = galvo_corrections.fix_outliers(np.array(left_ys),
-                                np.array(left_xs), max_y_shift, max_x_shift, method='linear')
+                        max_y_shift, max_x_shift = 10 / um_per_px[1:]
+                        left_ys, left_xs, _ = galvo_corrections.fix_outliers(
+                            np.array(left_ys), np.array(left_xs), max_y_shift,
+                            max_x_shift, method='linear')
 
                         # Stitch together
                         right.join_with(left, left_xs, left_ys)
@@ -623,9 +625,10 @@ class Stitching(dj.Computed):
             big_volume = roi.volume
             num_slices, image_height, image_width = big_volume.shape
             roi_key = {**key, 'roi_id': roi.roi_coordinates[0].id}
+            um_per_px = (StackInfo.ROI() & roi_key).microns_per_pixel
 
             # Enhance
-            neighborhood_size = 25 / (StackInfo.ROI() & roi_key).microns_per_pixel
+            neighborhood_size = 25 / um_per_px[1:]
             for i in range(num_slices):
                 big_volume[i] = enhance(big_volume[i], neighborhood_size)
 
@@ -642,7 +645,7 @@ class Stitching(dj.Computed):
                                                                  big_volume[i-1], in_place=False)
 
             # Fix outliers
-            max_y_shift, max_x_shift = 15 / (StackInfo.ROI() & roi_key).microns_per_pixel
+            max_y_shift, max_x_shift = 15 / um_per_px[1:]
             y_fixed, x_fixed, _ = galvo_corrections.fix_outliers(y_aligns, x_aligns,
                                                                  max_y_shift, max_x_shift)
 
@@ -650,7 +653,7 @@ class Stitching(dj.Computed):
             y_cumsum, x_cumsum = np.cumsum(y_fixed), np.cumsum(x_fixed)
 
             # Detrend to discard influence of vessels going through the slices
-            filter_size = int(round(60 / (StackInfo() & key).fetch1('z_step'))) # 60 microns in z
+            filter_size = int(round(60 / um_per_px[0])) # 60 microns in z
             if len(y_cumsum) > filter_size:
                 smoothing_filter = signal.hann(filter_size + (1 if filter_size % 2 == 0 else 0))
                 y_detrend = y_cumsum - mirrconv(y_cumsum, smoothing_filter / sum(smoothing_filter))
@@ -678,7 +681,7 @@ class Stitching(dj.Computed):
             # Insert coordinates of each ROI forming this volume
             for roi_coord in roi.roi_coordinates:
                 tuple_ = {**key, 'roi_id': roi_coord.id, 'volume_id': volume_id,
-                          'stitch_xs': roi_coord.xs, 'stitch_ys': roi_coord.ys, 'stitch_z': roi.z}
+                          'stitch_xs': roi_coord.xs, 'stitch_ys': roi_coord.ys}
                 self.ROICoordinates().insert1(tuple_)
 
         self.notify(key)
@@ -686,11 +689,12 @@ class Stitching(dj.Computed):
     @notify.ignore_exceptions
     def notify(self, key):
         slack_user = (notify.SlackUser() & (experiment.Session() & key))
-        z_step = (StackInfo() & key).fetch1('z_step')
         for volume_key in (self.Volume() & key).fetch('KEY'):
             for roi_coord in (self.ROICoordinates() & volume_key).fetch(as_dict=True):
-                first_z, num_slices = (StackInfo.ROI() & roi_coord).fetch1('roi_z', 'roi_px_depth')
-                depths = first_z + z_step * np.arange(num_slices)
+                center_z, num_slices, um_depth = (StackInfo.ROI() & roi_coord).fetch1(
+                    'roi_z', 'roi_px_depth', 'roi_um_depth')
+                first_z = center_z - um_depth / 2 + (um_depth / num_slices) / 2
+                depths = first_z + (um_depth / num_slices) * np.arange(num_slices)
 
                 fig, axes = plt.subplots(2, 1, figsize=(15, 8), sharex=True)
                 axes[0].set_title('Center position (x)')
@@ -717,13 +721,14 @@ class CorrectedStack(dj.Computed):
     ---
     x               : float             # (px) center of volume in a volume-wise coordinate system
     y               : float             # (px) center of volume in a volume-wise coordinate system
-    z               : float             # (um) initial depth in the motor coordinate system
+    z               : float             # (px) center of volume in a volume-wise coordinate system
+    surf_z          : float             # (um) depth of first slice - half a z step (cortex is at z=0)
+    px_depth        : smallint          # number of slices
     px_height       : smallint          # lines per frame
     px_width        : smallint          # pixels per line
-    px_depth        : smallint          # number of slices
+    um_depth        : float             # depth in microns 
     um_height       : float             # height in microns
-    um_width        : float             # width in microns
-    um_depth        : float             # depth in microns
+    um_width        : float             # width in microns    
     """
     @property
     def key_source(self):
@@ -737,7 +742,6 @@ class CorrectedStack(dj.Computed):
         islice              : smallint          # index of slice in volume
         ---
         slice               : longblob          # image (height x width)
-        slice_z             : float             # slice depth in volume-wise coordinate system
         """
 
     def _make_tuples(self, key):
@@ -770,7 +774,8 @@ class CorrectedStack(dj.Computed):
 
                 # Create ROI object
                 xs, ys = list(roi_tuple['stitch_xs']), list(roi_tuple['stitch_ys'])
-                rois.append(stitching.StitchedROI(corrected_roi, x=xs, y=ys, z=roi_tuple['stitch_z'],
+                px_z = roi_tuple['roi_z'] * roi_tuple['roi_px_depth'] / roi_tuple['roi_um_depth']
+                rois.append(stitching.StitchedROI(corrected_roi, x=xs, y=ys, z=px_z,
                                                   id_=roi_tuple['roi_id']))
 
             def join_rows(rois_):
@@ -814,19 +819,18 @@ class CorrectedStack(dj.Computed):
             # Insert in CorrectedStack
             roi_info = StackInfo.ROI() & key & {'roi_id': stitched.roi_coordinates[0].id} # one roi from this volume
             tuple_ = {**key, 'x': stitched.x, 'y': stitched.y, 'z': stitched.z,
-                      'px_height': stitched.height, 'px_width': stitched.width}
-            tuple_['um_height'] = stitched.height * roi_info.microns_per_pixel[0]
-            tuple_['um_width'] = stitched.width * roi_info.microns_per_pixel[1]
-            tuple_['px_depth'] = roi_info.fetch1('roi_px_depth') # same as original rois
+                      'px_depth': stitched.depth, 'px_height': stitched.height,
+                      'px_width': stitched.width}
+            tuple_['surf_z'] = (stitched.z - stitched.depth / 2) * roi_info.microns_per_pixel[0]
+            tuple_['um_height'] = stitched.height * roi_info.microns_per_pixel[1]
+            tuple_['um_width'] = stitched.width * roi_info.microns_per_pixel[2]
             tuple_['um_depth'] = roi_info.fetch1('roi_um_depth') # same as original rois
             self.insert1(tuple_, skip_duplicates=True)
 
             # Insert each slice
-            initial_z = stitched.z
-            z_step = (StackInfo() & key).fetch1('z_step')
             for i, slice_ in enumerate(stitched.volume):
                 self.Slice().insert1({**key, 'channel': channel + 1, 'islice': i + 1,
-                                      'slice': slice_, 'slice_z': initial_z + i * z_step})
+                                      'slice': slice_})
 
             self.notify({**key, 'channel': channel + 1})
 
@@ -843,6 +847,13 @@ class CorrectedStack(dj.Computed):
                'channel {channel}').format(**key)
         slack_user = notify.SlackUser() & (experiment.Session() & key)
         slack_user.notify(file=video_filename, file_title=msg, channel='#pipeline_quality')
+
+    @property
+    def microns_per_pixel(self):
+        """ Returns an array with microns per pixel in depth, height and width. """
+        um_dims = self.fetch1('um_depth', 'um_height', 'um_width')
+        px_dims = self.fetch1('px_depth', 'px_height', 'px_width')
+        return np.array([um_dim / px_dim for um_dim, px_dim in zip(um_dims, px_dims)])
 
     def get_stack(self, channel=1):
         """ Get full stack (num_slices, height, width).
@@ -888,7 +899,6 @@ class CorrectedStack(dj.Computed):
         stack = self.get_stack(channel=channel)
         num_slices = stack.shape[0]
 
-        fig = plt.figure()
         fig, axes = plt.subplots(1, 1, sharex=True, sharey=True)
         im = fig.gca().imshow(stack[int(num_slices / 2)])
         video = animation.FuncAnimation(fig, lambda i: im.set_data(stack[i]), num_slices,
@@ -902,6 +912,82 @@ class CorrectedStack(dj.Computed):
         video.save(filename, dpi=dpi)
 
         return fig
+
+#
+# def _my_ndimagezoom(input, zoom, output=None, mode='constant', cval=0.0):
+#     """ndimage.zoom but having each value in the array being the center of the pixel, for
+#     instance values in a  5-dim array will be sampled at [0.5, 1.5, 2.5, 3.5 and 4.5]
+#
+#     See ndimage.zoom for arguments
+#     """
+#     order=1
+#     numpy = np
+#
+#     mode = _ni_support._extend_mode_to_code(mode)
+#     filtered = input
+#     zoom = _ni_support._normalize_sequence(zoom, input.ndim)
+#     output_shape = tuple([int(round(ii * jj)) for ii, jj in zip(input.shape, zoom)])
+#
+#     zoom_div = numpy.array(output_shape, float) - 1
+#     # Zooming to infinite values is unpredictable, so just choose
+#     # zoom factor 1 instead
+#     zoom = numpy.divide(numpy.array(input.shape) - 1, zoom_div,
+#                         out=numpy.ones_like(input.shape, dtype=numpy.float64),
+#                         where=zoom_div != 0)
+#
+#     output = _ni_support._get_output(output, input, shape=output_shape)
+#     zoom = numpy.ascontiguousarray(zoom)
+#     _nd_image.zoom_shift(filtered, zoom, None, output, order, mode, cval)
+#
+#     return output
+#
+# #I can definitely just change the zom b ya ddig one before the microns per pixel thing, it wil have to depend on the original number of pixels
+#
+#
+#
+#
+# # This is used for segmentation and registration but I prefer to avoid a direct dependency
+# # because they are not essential (more of a cache-type mechanism, could be deleted at any
+# # point).
+# @schema
+# class PreprocessedStack(dj.Computed):
+#     definition = """ # Resize to 1 um^3, apply local contrast normalization and sharpen
+#
+#     -> CorrectedStack
+#     -> shared.Channel
+#     ---
+#     resized:        external-stack      # original stack resized to 1 um^3
+#     lcned:          external-stack      # local contrast normalized stack. Filter size: (3, 25, 25)
+#     sharpened:      external-stack      # sharpened stack. Filter size: 1
+#     """
+#     @property
+#     def key_source(self):
+#         return CorrectedStack * shared.Channel() & {'pipe_version': CURRENT_VERSION}
+#         #TODO: restrict to valid channels
+#
+#     def make(self, key):
+#         from scipy import ndimage
+#         from .utils import enhancement
+#
+#         # Load stack
+#         stack = (CorrectedStack() & key).get_stack(key['channel'])
+#
+#         # Resize to be 1 um ^ 3
+#         um_per_px = (CorrectedStack & key).microns_per_pixel
+#         resized = ndimage.zoom(stack, um_per_px, order=1, output=np.float32)
+#         #TODO: Make sure x, y, z remain dead in the center of the stack even if the dimension size changes (for instance when going from 3 to 4 pixels).
+#
+#         # It keeps the center in the middle but it assumes ends are at edge of pixel rather than middle
+#         # Also the output shape is just rounded
+#
+#         # Enhance
+#         lcned = enhancement.lcn(resized, (3, 25, 25))
+#
+#         # Sharpen
+#         sharpened = enhancement.sharpen_2pimage(lcned, 1)
+#
+#         # Insert
+#         self.insert1({**key, 'resized': resized, 'lcned': lcned, 'sharpened': sharpened})
 
 
 @schema
@@ -924,13 +1010,14 @@ class SegmentationTask(dj.Manual):
 @schema
 class Segmentation(dj.Computed):
     definition="""
+    
     -> SegmentationTask
     ---
-    nobjects                : int            # numbef of objects found in the image              
+    nobjects                : int            # number of objects found in the image              
     """
 
     class ConvNet(dj.Part):
-        definition = """ # attributes particualr to convnet based methods
+        definition = """ # attributes particular to convnet based methods
         -> master
         ---
         centroids           : external-stack # voxel-wise probability of centroids
@@ -964,9 +1051,8 @@ class Segmentation(dj.Computed):
         pad_mode = 'reflect' # any valid mode in np.pad
 
         # Resize to be 1 um**3 voxels
-        dims = (CorrectedStack & key).fetch1()
-        um_per_px = (dims['um_depth'] / dims['px_depth'], dims['um_height'] / dims['px_height'],
-                     dims['um_width'] / dims['px_width'])
+        #TODO: Bring resized from preprocessed stack.
+        um_per_px = (CorrectedStack & key).microns_per_pixel
         resized = ndimage.zoom(original, um_per_px, order=1, output=np.float32)
 
         # Segment
@@ -1019,6 +1105,8 @@ class Segmentation(dj.Computed):
         """
         slices = (Segmentation.Slice() & self).fetch('segmentation', order_by='islice')
         return np.stack(slices)
+
+
 
 
 @schema
