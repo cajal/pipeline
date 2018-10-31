@@ -53,15 +53,15 @@ class StackInfo(dj.Imported):
         ---
         -> experiment.Stack.Filename
         field_ids           : blob              # list of field_ids (0-index) sorted from shallower to deeper
-        roi_x               : float             # (um) center of ROI in the motor coordinate system
-        roi_y               : float             # (um) center of ROI in the motor coordinate system
         roi_z               : float             # (um) center of ROI in the motor coordinate system (cortex is at 0)
+        roi_y               : float             # (um) center of ROI in the motor coordinate system
+        roi_x               : float             # (um) center of ROI in the motor coordinate system
+        roi_px_depth        : smallint          # number of slices
         roi_px_height       : smallint          # lines per frame
         roi_px_width        : smallint          # pixels per line
-        roi_px_depth        : smallint          # number of slices
+        roi_um_depth        : float             # depth in microns
         roi_um_height       : float             # height in microns
         roi_um_width        : float             # width in microns
-        roi_um_depth        : float             # depth in microns
         nframes             : smallint          # number of recorded frames per plane
         fps                 : float             # (Hz) volumes per second
         bidirectional       : boolean           # true = bidirectional scanning
@@ -91,15 +91,15 @@ class StackInfo(dj.Imported):
             # Get reso/meso specific coordinates
             x_zero, y_zero, _ = stack.motor_position_at_zero  # motor x, y at ScanImage's 0
             if stack.is_multiROI:
-                tuple_['roi_x'] = x_zero + stack._degrees_to_microns(stack.fields[field_ids[0]].x)
                 tuple_['roi_y'] = y_zero + stack._degrees_to_microns(stack.fields[field_ids[0]].y)
+                tuple_['roi_x'] = x_zero + stack._degrees_to_microns(stack.fields[field_ids[0]].x)
                 tuple_['roi_px_height'] = stack.field_heights[field_ids[0]]
                 tuple_['roi_px_width'] = stack.field_widths[field_ids[0]]
                 tuple_['roi_um_height'] = stack.field_heights_in_microns[field_ids[0]]
                 tuple_['roi_um_width'] = stack.field_widths_in_microns[field_ids[0]]
             else:
-                tuple_['roi_x'] = x_zero
                 tuple_['roi_y'] = y_zero #TODO: Add sign flip if ys in reso point upwards
+                tuple_['roi_x'] = x_zero
                 tuple_['roi_px_height'] = stack.image_height
                 tuple_['roi_px_width'] = stack.image_width
 
@@ -509,8 +509,8 @@ class Stitching(dj.Computed):
         -> MotionCorrection             # animal_id, session, stack_idx, version, roi_id
         ---
         -> Stitching.Volume             # volume to which this ROI belongs
-        stitch_xs        : blob         # (px) center of each slice in the volume-wise coordinate system
         stitch_ys        : blob         # (px) center of each slice in the volume-wise coordinate system
+        stitch_xs        : blob         # (px) center of each slice in the volume-wise coordinate system
         """
 
     def _make_tuples(self, key):
@@ -719,16 +719,16 @@ class CorrectedStack(dj.Computed):
 
     -> Stitching.Volume                 # animal_id, session, stack_idx, volume_id, pipe_version
     ---
-    x               : float             # (px) center of volume in a volume-wise coordinate system
-    y               : float             # (px) center of volume in a volume-wise coordinate system
     z               : float             # (px) center of volume in a volume-wise coordinate system
-    surf_z          : float             # (um) depth of first slice - half a z step (cortex is at z=0)
+    y               : float             # (px) center of volume in a volume-wise coordinate system
+    x               : float             # (px) center of volume in a volume-wise coordinate system   
     px_depth        : smallint          # number of slices
     px_height       : smallint          # lines per frame
     px_width        : smallint          # pixels per line
     um_depth        : float             # depth in microns 
     um_height       : float             # height in microns
-    um_width        : float             # width in microns    
+    um_width        : float             # width in microns
+    surf_z          : float             # (um) depth of first slice - half a z step (cortex is at z=0)    
     """
     @property
     def key_source(self):
@@ -773,8 +773,9 @@ class CorrectedStack(dj.Computed):
                     corrected_roi[field_idx] = corrected_field
 
                 # Create ROI object
-                xs, ys = list(roi_tuple['stitch_xs']), list(roi_tuple['stitch_ys'])
                 px_z = roi_tuple['roi_z'] * roi_tuple['roi_px_depth'] / roi_tuple['roi_um_depth']
+                ys = list(roi_tuple['stitch_ys'])
+                xs = list(roi_tuple['stitch_xs'])
                 rois.append(stitching.StitchedROI(corrected_roi, x=xs, y=ys, z=px_z,
                                                   id_=roi_tuple['roi_id']))
 
@@ -818,13 +819,13 @@ class CorrectedStack(dj.Computed):
 
             # Insert in CorrectedStack
             roi_info = StackInfo.ROI() & key & {'roi_id': stitched.roi_coordinates[0].id} # one roi from this volume
-            tuple_ = {**key, 'x': stitched.x, 'y': stitched.y, 'z': stitched.z,
+            tuple_ = {**key, 'z': stitched.z, 'y': stitched.y, 'x': stitched.x,
                       'px_depth': stitched.depth, 'px_height': stitched.height,
                       'px_width': stitched.width}
-            tuple_['surf_z'] = (stitched.z - stitched.depth / 2) * roi_info.microns_per_pixel[0]
+            tuple_['um_depth'] = roi_info.fetch1('roi_um_depth')  # same as original rois
             tuple_['um_height'] = stitched.height * roi_info.microns_per_pixel[1]
             tuple_['um_width'] = stitched.width * roi_info.microns_per_pixel[2]
-            tuple_['um_depth'] = roi_info.fetch1('roi_um_depth') # same as original rois
+            tuple_['surf_z'] = (stitched.z - stitched.depth / 2) * roi_info.microns_per_pixel[0]
             self.insert1(tuple_, skip_duplicates=True)
 
             # Insert each slice
