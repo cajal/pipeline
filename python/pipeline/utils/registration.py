@@ -61,8 +61,9 @@ def register_rigid(stack, field, px_estimate, px_range, angles=(0, 0, 0)):
     z_slack = np.max(big_corners[2, [4, 5, 6, 7]]) # z that sticks furthest away from you
 
     # Cut original stack
-    slices = [slice(int(round(max(0, s/2 + p - sl))), int(round(s/2 + p + sl))) for s, p, sl
-              in zip(stack.shape, px_estimate[::-1], [z_slack, y_slack, x_slack])]
+    slices = tuple(slice(int(round(max(0, s/2 + p - sl))), int(round(s/2 + p + sl))) for
+                   s, p, sl in zip(stack.shape, px_estimate[::-1], [z_slack, y_slack,
+                                                                    x_slack]))
     mini_stack = stack[slices]
 
     # Rotate stack (inverse of intrinsic yaw-> pitch -> roll)
@@ -72,14 +73,16 @@ def register_rigid(stack, field, px_estimate, px_range, angles=(0, 0, 0)):
     px_estimate_ms = [s/2 + p - (sli.start + ms/2) for s, p, sli, ms in # px_estimate with (0, 0, 0) in center of mini_stack
                       zip(stack.shape, px_estimate[::-1], slices, mini_stack.shape)][::-1] # x, y, z
     rot_px_estimate = np.dot(R_inv, px_estimate_ms)
-    rot_slices = [slice(int(round(max(0, s/2 + p - sl))), int(round(s/2 + p + sl))) for s, p, sl
-                  in zip(rotated.shape, rot_px_estimate[::-1], [rot_zlim, rot_ylim, rot_xlim])]
+    rot_slices = tuple(slice(int(round(max(0, s/2 + p - sl))), int(round(s/2 + p + sl)))
+                       for s, p, sl in zip(rotated.shape, rot_px_estimate[::-1],
+                                           [rot_zlim, rot_ylim, rot_xlim]))
     mini_rotated = rotated[rot_slices]
 
     # Create mask to restrict correlations to appropiate range
     mini_mask = np.zeros_like(mini_stack)
-    mask_slices = [slice(int(round(max(0, s/2 + p - r))), int(round(s/2 + p + r))) for s, p, r
-                   in zip(mini_stack.shape, px_estimate_ms[::-1], px_range[::-1])]
+    mask_slices = tuple(slice(int(round(max(0, s/2 + p - r))), int(round(s/2 + p + r)))
+                        for s, p, r in zip(mini_stack.shape, px_estimate_ms[::-1],
+                                           px_range[::-1]))
     mini_mask[mask_slices] = 1 # only consider positions initially in the range
     rot_mask = _inverse_rot3d(mini_mask, *angles)
     mr_mask = rot_mask[rot_slices]
@@ -94,7 +97,8 @@ def register_rigid(stack, field, px_estimate, px_range, angles=(0, 0, 0)):
     norm_stack = np.stack(enhancement.sharpen_2pimage(s) for s in mini_rotated)
 
     # 3-d match_template
-    corrs = np.stack(feature.match_template(s, norm_field, pad_input=True) for s in norm_stack)
+    corrs = np.stack(feature.match_template(s, norm_field, pad_input=True) for s in
+                     norm_stack)
     smooth_corrs = ndimage.gaussian_filter(corrs, 0.7)
     masked_corrs = smooth_corrs * mr_mask
     best_score = np.max(masked_corrs)
@@ -117,7 +121,7 @@ def register_rigid(stack, field, px_estimate, px_range, angles=(0, 0, 0)):
 
 
 # TODO: All rotations could be done in a single step using map_coordinates
-def _inverse_rot3d(stack, yaw, pitch, roll):
+def _inverse_rot3d(stack, yaw, pitch, roll, order=1):
     """ Apply the inverse of an intrinsic yaw -> pitch -> roll rotation.
     inv(yaw(w) -> pitch(v) -> roll(u)) = roll(-u) -> pitch(-v) -> yaw(-w) = extrinsic
         yaw(-w) -> extrinsic pitch(-v) -> extrinsic roll(-u).
@@ -130,20 +134,21 @@ def _inverse_rot3d(stack, yaw, pitch, roll):
     :param float yaw: Angle in degrees for rotation over z axis.
     :param float pitch: Angle in degrees for rotation over y axis.
     :param float roll: Angle in degrees for rotation over x axis.
+    :param int order: Order of the spline interpolation used in ndimage.zoom.
 
     :returns: 3-d array. Rotated stack.
 
     ..ref:: danceswithcode.net/engineeringnotes/rotations_in_3d/rotations_in_3d_part1.html
     """
     if yaw == 0 and pitch == 0 and roll == 0:
-        rotated = stack.astype(float, copy=True)
+        rotated = stack.copy()
     else:
         # Note on ndimage.rotate: Assuming our coordinate system; axes=(1, 2) will do a left
         # handed rotation in z, (0, 2) a right handed rotation in y and (0, 1) a left handed
         # rotation in x.
-        rotated = ndimage.rotate(stack, yaw, axes=(1, 2), order=1) # extrinsic yaw(-w)
-        rotated = ndimage.rotate(rotated, -pitch, axes=(0, 2), order=1) # extrinsic pitch(-v)
-        rotated = ndimage.rotate(rotated, roll, axes=(0, 1), order=1) # extrinsic roll(-u)
+        rotated = ndimage.rotate(stack, yaw, axes=(1, 2), order=order) # extrinsic yaw(-w)
+        rotated = ndimage.rotate(rotated, -pitch, axes=(0, 2), order=order) # extrinsic pitch(-v)
+        rotated = ndimage.rotate(rotated, roll, axes=(0, 1), order=order) # extrinsic roll(-u)
 
     return rotated
 
@@ -172,7 +177,7 @@ def create_rotation_matrix(yaw, pitch, roll):
     return rotation_matrix
 
 
-def find_field_in_stack(stack, height, width, x, y, z, yaw=0, pitch=0, roll=0):
+def find_field_in_stack(stack, height, width, x, y, z, yaw=0, pitch=0, roll=0, order=1):
     """ Get a cutout of the given height, width dimensions in the rotated stack at x, y, z.
 
     :param np.array stack: 3-d stack (depth, height, width)
@@ -180,11 +185,12 @@ def find_field_in_stack(stack, height, width, x, y, z, yaw=0, pitch=0, roll=0):
     :param float x, y, z: Center of field measured as distance from the center in the
         original stack (before rotation).
     :param yaw, pitch, roll: Rotation angles to apply to the field.
+    :param order: Order of the spline used for the interpolation.
 
     :returns: A height x width np.array at the desired location.
     """
     # Rotate stack (inverse of intrinsic yaw-> pitch -> roll)
-    rotated = _inverse_rot3d(stack, yaw, pitch, roll)
+    rotated = _inverse_rot3d(stack, yaw, pitch, roll, order=order)
 
     # Compute center of field in the rotated stack
     R_inv = np.linalg.inv(create_rotation_matrix(yaw, pitch, roll))
@@ -197,7 +203,7 @@ def find_field_in_stack(stack, height, width, x, y, z, yaw=0, pitch=0, roll=0):
     x_coords = np.arange(width)  - width / 2 + center_ind[2]
     coords = np.meshgrid(z_coords, y_coords, x_coords)
     out = ndimage.map_coordinates(rotated, [coords[0].reshape(-1), coords[1].reshape(-1),
-                                            coords[2].reshape(-1)], order=1)
+                                            coords[2].reshape(-1)], order=order)
     field = out.reshape([height, width])
 
     return field

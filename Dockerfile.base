@@ -1,4 +1,4 @@
-FROM ubuntu:18.04
+FROM nvidia/cuda:9.2-cudnn7-devel-ubuntu18.04
 
 LABEL maintainer="Erick Cobos <ecobos@bcm.edu>"
 ARG DEBIAN_FRONTEND=noninteractive
@@ -8,51 +8,15 @@ ARG DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && \
     apt-get install -y libopenblas-dev libatlas-base-dev libeigen3-dev && \
     export MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 OMP_NUM_THREADS=1   
-    
-###############################################################################
-# Install CUDA 9
-# Based in dockerfiles from https://gitlab.com/nvidia/cuda/blob/ubuntu17.04/9.0
-RUN apt-get update && apt-get install -y --no-install-recommends curl ca-certificates && \
-    curl -fsSL https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1704/x86_64/7fa2af80.pub | apt-key add - && \
-    echo "deb http://developer.download.nvidia.com/compute/cuda/repos/ubuntu1704/x86_64 /" > /etc/apt/sources.list.d/cuda.list && \
-    apt-get purge --autoremove -y curl ca-certificates && \
-    rm -rf /var/lib/apt/lists/*
-
-ENV CUDA_VERSION 9.0.176
-
-ENV CUDA_PKG_VERSION 9-0=$CUDA_VERSION-1
-RUN apt-get update && apt-get install -y --no-install-recommends \
-        cuda-libraries-dev-$CUDA_PKG_VERSION cuda-nvml-dev-$CUDA_PKG_VERSION \
-        cuda-minimal-build-$CUDA_PKG_VERSION \
-        cuda-command-line-tools-$CUDA_PKG_VERSION && \
-    ln -s cuda-9.0 /usr/local/cuda && \
-    rm -rf /var/lib/apt/lists/*
-
-# nvidia-docker 1.0
-LABEL com.nvidia.volumes.needed="nvidia_driver"
-LABEL com.nvidia.cuda.version="${CUDA_VERSION}"
-
-RUN echo "/usr/local/nvidia/lib" >> /etc/ld.so.conf.d/nvidia.conf && \
-    echo "/usr/local/nvidia/lib64" >> /etc/ld.so.conf.d/nvidia.conf
-
-ENV PATH /usr/local/nvidia/bin:/usr/local/cuda/bin:${PATH}
-ENV LD_LIBRARY_PATH /usr/local/nvidia/lib:/usr/local/nvidia/lib64:/usr/local/cuda/extras/CUPTI/lib64
-ENV LIBRARY_PATH /usr/local/cuda/lib64/stubs:${LIBRARY_PATH}
-
-# nvidia-container-runtime
-ENV NVIDIA_VISIBLE_DEVICES all
-ENV NVIDIA_DRIVER_CAPABILITIES compute,utility
-ENV NVIDIA_REQUIRE_CUDA "cuda>=9.0"
 
 ###############################################################################
 # Install Python 3
 RUN apt-get update && \
-    apt-get install -y python3-dev python3-pip && \ 
-    # Install these from pip cause TensorFlow needs numpy > 1.12.1
-    pip3 install numpy scipy matplotlib             
+    apt-get install -y python3-dev python3-pip python3-numpy python3-scipy \
+        python3-matplotlib
 
 ###############################################################################
-# Install OpenCV 3.4.0 with CUDA support (take a seat, this takes hours)
+# Install OpenCV 3.4.3 with CUDA support (take a seat, this takes hours)
 # With no CUDA support: sudo apt-get install python3-opencv
 
 ## Get dependencies
@@ -70,7 +34,7 @@ RUN apt-get update && \
 # Install
 RUN git clone https://github.com/opencv/opencv && \
     cd opencv && \
-    git checkout 3.4.0 && \
+    git checkout 3.4.3 && \
     mkdir build && \
     cd build && \ 
     cmake -D CUDA_HOST_COMPILER="/usr/bin/gcc-6" \
@@ -82,9 +46,9 @@ RUN git clone https://github.com/opencv/opencv && \
 ###############################################################################
 # Instal FFTW (C library) and pyfftw (its python wrapper)
 RUN apt-get install wget && \
-    wget http://www.fftw.org/fftw-3.3.7.tar.gz && \
-    tar -xvzf fftw-3.3.7.tar.gz && \
-    cd fftw-3.3.7 && \
+    wget http://www.fftw.org/fftw-3.3.8.tar.gz && \
+    tar -xvzf fftw-3.3.8.tar.gz && \
+    cd fftw-3.3.8 && \
     ./configure --enable-threads --with-pic --enable-float --enable-sse --enable-sse2 --enable-avx && \
     make && \
     make install && \
@@ -95,8 +59,8 @@ RUN apt-get install wget && \
     make && \
     make install && \
     cd .. && \
-    rm fftw-3.3.7.tar.gz && \
-    rm -r fftw-3.3.7 && \
+    rm fftw-3.3.8.tar.gz && \
+    rm -r fftw-3.3.8 && \
     pip3 install pyfftw
 
 ###############################################################################
@@ -110,14 +74,6 @@ RUN apt-get install -y python3-tk && \
 
 # Install without OASIS
 RUN pip3 install git+https://github.com/ecobost/CaImAn.git
-
-# Install with OASIS
-#RUN git clone https://github.com/ecobost/CaImAn.git && \
-#    cd CaImAn && \
-#    python3 setup.py build_ext -i && \
-#    python3 setup.py clean --all && \
-#    cd .. && \
-#    rm -r CaImAn
 
 ###############################################################################
 # Install spike deconvolution packages
@@ -138,15 +94,20 @@ RUN apt-get install autoconf automake libtool && \
     pip3 install git+https://github.com/cajal/c2s.git # stm (spike-triggered mixture model)
 
 ###############################################################################
-# Miscelaneous packages
+# Install pytorch
+RUN pip3 install http://download.pytorch.org/whl/cu92/torch-0.4.1-cp36-cp36m-linux_x86_64.whl && \
+    pip3 install torchvision
 
-# Required
+###############################################################################
+# Miscelaneous packages
 RUN pip3 install git+https://github.com/datajoint/datajoint-python.git && \
     pip3 install git+https://github.com/atlab/scanreader.git && \
+    pip3 install git+https://github.com/cajal/bl3d.git && \
     pip3 install seaborn slacker imreg_dft pandas imageio
 RUN apt-get install -y python3-git
 
 # Optional
-RUN pip3 install nano nose2 jupyterlab
+RUN apt-get install nano && \
+    pip3 install nose2 jupyterlab
 
 ENTRYPOINT ["/bin/bash"]
