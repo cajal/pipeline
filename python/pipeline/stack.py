@@ -15,7 +15,8 @@ from .exceptions import PipelineException
 
 
 schema = dj.schema('pipeline_stack', locals(), create_tables=False)
-dj.config['external-stack'] = {'protocol': 'file', 'location': '/mnt/scratch07/pipeline-externals'}
+dj.config['external-stack'] = {'protocol': 'file',
+                               'location': '/mnt/scratch07/pipeline-externals'}
 CURRENT_VERSION = 1
 
 
@@ -914,81 +915,65 @@ class CorrectedStack(dj.Computed):
 
         return fig
 
-#
-# def _my_ndimagezoom(input, zoom, output=None, mode='constant', cval=0.0):
-#     """ndimage.zoom but having each value in the array being the center of the pixel, for
-#     instance values in a  5-dim array will be sampled at [0.5, 1.5, 2.5, 3.5 and 4.5]
-#
-#     See ndimage.zoom for arguments
-#     """
-#     order=1
-#     numpy = np
-#
-#     mode = _ni_support._extend_mode_to_code(mode)
-#     filtered = input
-#     zoom = _ni_support._normalize_sequence(zoom, input.ndim)
-#     output_shape = tuple([int(round(ii * jj)) for ii, jj in zip(input.shape, zoom)])
-#
-#     zoom_div = numpy.array(output_shape, float) - 1
-#     # Zooming to infinite values is unpredictable, so just choose
-#     # zoom factor 1 instead
-#     zoom = numpy.divide(numpy.array(input.shape) - 1, zoom_div,
-#                         out=numpy.ones_like(input.shape, dtype=numpy.float64),
-#                         where=zoom_div != 0)
-#
-#     output = _ni_support._get_output(output, input, shape=output_shape)
-#     zoom = numpy.ascontiguousarray(zoom)
-#     _nd_image.zoom_shift(filtered, zoom, None, output, order, mode, cval)
-#
-#     return output
-#
-# #I can definitely just change the zom b ya ddig one before the microns per pixel thing, it wil have to depend on the original number of pixels
-#
-#
-#
-#
-# # This is used for segmentation and registration but I prefer to avoid a direct dependency
-# # because they are not essential (more of a cache-type mechanism, could be deleted at any
-# # point).
-# @schema
-# class PreprocessedStack(dj.Computed):
-#     definition = """ # Resize to 1 um^3, apply local contrast normalization and sharpen
-#
-#     -> CorrectedStack
-#     -> shared.Channel
-#     ---
-#     resized:        external-stack      # original stack resized to 1 um^3
-#     lcned:          external-stack      # local contrast normalized stack. Filter size: (3, 25, 25)
-#     sharpened:      external-stack      # sharpened stack. Filter size: 1
-#     """
-#     @property
-#     def key_source(self):
-#         return CorrectedStack * shared.Channel() & {'pipe_version': CURRENT_VERSION}
-#         #TODO: restrict to valid channels
-#
-#     def make(self, key):
-#         from scipy import ndimage
-#         from .utils import enhancement
-#
-#         # Load stack
-#         stack = (CorrectedStack() & key).get_stack(key['channel'])
-#
-#         # Resize to be 1 um ^ 3
-#         um_per_px = (CorrectedStack & key).microns_per_pixel
-#         resized = ndimage.zoom(stack, um_per_px, order=1, output=np.float32)
-#         #TODO: Make sure x, y, z remain dead in the center of the stack even if the dimension size changes (for instance when going from 3 to 4 pixels).
-#
-#         # It keeps the center in the middle but it assumes ends are at edge of pixel rather than middle
-#         # Also the output shape is just rounded
-#
-#         # Enhance
-#         lcned = enhancement.lcn(resized, (3, 25, 25))
-#
-#         # Sharpen
-#         sharpened = enhancement.sharpen_2pimage(lcned, 1)
-#
-#         # Insert
-#         self.insert1({**key, 'resized': resized, 'lcned': lcned, 'sharpened': sharpened})
+
+# This is used for segmentation and registration but I prefer to avoid a direct dependency
+# because they are not essential (this is more of a cache-type mechanism, could be deleted
+# at any point).
+@schema
+class PreprocessedStack(dj.Computed):
+    definition = """ # Resize to 1 um^3, apply local contrast normalization and sharpen
+
+    -> CorrectedStack
+    -> shared.Channel
+    ---
+    resized:        external-stack      # original stack resized to 1 um^3
+    lcned:          external-stack      # local contrast normalized stack. Filter size: (3, 25, 25)
+    sharpened:      external-stack      # sharpened stack. Filter size: 1
+    """
+
+    @property
+    def key_source(self):
+        return ((CorrectedStack * shared.Channel).proj() & CorrectedStack.Slice.proj() &
+                {'pipe_version': CURRENT_VERSION})
+
+    def make(self, key):
+        from .utils import enhancement
+
+        # Load stack
+        stack = (CorrectedStack() & key).get_stack(key['channel'])
+
+        # Resize to be 1 um^3
+        import torch
+        import torch.nn.functional as F
+
+        ## Create grid to sample in microns
+        um_sizes = (CorrectedStack & key).fetch1('um_depth', 'um_height', 'um_width')
+        out_sizes = [int(round(um_s)) for um_s in um_sizes]
+        um_grids = [np.linspace(-(s / 2 - 0.5), s / 2 - 0.5, s) for s in out_sizes]  # one per axis
+
+        ## Re-express as torch grid [-1, 1]
+        um_per_px = (CorrectedStack() & key).microns_per_pixel
+        torch_ones = [um_s / 2 - res / 2 for um_s, res in zip(um_sizes, um_per_px)]
+        torch_grids = [um_g / one for um_g, one in zip(um_grids, torch_ones)]
+        torch_grids = [g.astype(np.float32) for g in torch_grids]
+        full_grid = np.stack(np.meshgrid(*torch_grids, indexing='ij')[::-1], axis=-1) # d x h x w x 3
+
+        ## Resample
+        stack_tensor = torch.from_numpy(stack.reshape(1, 1, *stack.shape))
+        grid_tensor = torch.from_numpy(full_grid.reshape(1, *full_grid.shape))
+        resized_tensor = F.grid_sample(stack_tensor, grid_tensor, padding_mode='border')
+        resized = resized_tensor.numpy().squeeze()
+
+        del stack, stack_tensor, full_grid, grid_tensor, resized_tensor
+
+        # Enhance
+        lcned = enhancement.lcn(resized, (3, 25, 25))
+
+        # Sharpen
+        sharpened = enhancement.sharpen_2pimage(lcned, 1)
+
+        # Insert
+        self.insert1({**key, 'resized': resized, 'lcned': lcned, 'sharpened': sharpened})
 
 
 @schema
@@ -1016,6 +1001,9 @@ class Segmentation(dj.Computed):
     ---
     nobjects                : int            # number of objects found in the image              
     """
+    @property
+    def key_source(self):
+        return SegmentationTask & PreprocessedStack
 
     class ConvNet(dj.Part):
         definition = """ # attributes particular to convnet based methods
@@ -1041,9 +1029,6 @@ class Segmentation(dj.Computed):
     def _make_tuples(self, key):
         from .utils import segmentation3d
 
-        # Get stack
-        original = (CorrectedStack & key).get_stack(key['channel'])
-
         # Set params
         seg_threshold = 0.8
         min_voxels = 65 # sphere of diameter 5
@@ -1051,10 +1036,8 @@ class Segmentation(dj.Computed):
         compactness_factor = 0.05
         pad_mode = 'reflect' # any valid mode in np.pad
 
-        # Resize to be 1 um**3 voxels
-        #TODO: Bring resized from preprocessed stack.
-        um_per_px = (CorrectedStack & key).microns_per_pixel
-        resized = ndimage.zoom(original, um_per_px, order=1, output=np.float32)
+        # Get stack at 1 um**3 voxels
+        resized = (PreprocessedStack & key).fetch1('resized')
 
         # Segment
         if key['stacksegm_method'] not in [1, 2]:
@@ -1064,6 +1047,9 @@ class Segmentation(dj.Computed):
         centroids, probs, segmentation = segmentation3d.segment(resized, method, pad_mode,
                                                                 seg_threshold, min_voxels,
                                                                 max_voxels, compactness_factor)
+
+        #TODO: Either keep big or have a function to resize to original size
+
 
         # Resize to original size
         zoom = np.array(original.shape) / np.array(resized.shape)
