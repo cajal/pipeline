@@ -916,9 +916,6 @@ class CorrectedStack(dj.Computed):
         return fig
 
 
-# This is used for segmentation and registration but I prefer to avoid a direct dependency
-# because they are not essential (this is more of a cache-type mechanism, could be deleted
-# at any point).
 @schema
 class PreprocessedStack(dj.Computed):
     definition = """ # Resize to 1 um^3, apply local contrast normalization and sharpen
@@ -997,13 +994,12 @@ class SegmentationTask(dj.Manual):
 class Segmentation(dj.Computed):
     definition="""
     
+    -> PreprocessedStack
     -> SegmentationTask
     ---
-    nobjects                : int            # number of objects found in the image              
+    segmentation            : external-stack # voxel-wise cell-ids (0 for background)
+    nobjects                : int            # number of cells found            
     """
-    @property
-    def key_source(self):
-        return SegmentationTask & PreprocessedStack
 
     class ConvNet(dj.Part):
         definition = """ # attributes particular to convnet based methods
@@ -1048,25 +1044,13 @@ class Segmentation(dj.Computed):
                                                                 seg_threshold, min_voxels,
                                                                 max_voxels, compactness_factor)
 
-        #TODO: Either keep big or have a function to resize to original size
-
-
-        # Resize to original size
-        zoom = np.array(original.shape) / np.array(resized.shape)
-        centroids = ndimage.zoom(centroids, zoom, order=1, output=np.float32)
-        probs = ndimage.zoom(probs, zoom, order=1, output=np.float32)
-        segmentation = ndimage.zoom(segmentation, zoom, order=0, output=np.int32)
-        # Note: ndimage.zoom computes output_shape as input_shape * zoom and results is the same for
-        # any zoom that produces the same output_shape so small zoom variations don't matter
-
         # Insert
-        self.insert1({**key, 'nobjects': segmentation.max()})
+        self.insert1({**key, 'nobjects': segmentation.max(),
+                      'segmentation': segmentation})
         self.ConvNet().insert1({**key, 'centroids': centroids, 'probs': probs,
                                 'seg_threshold': seg_threshold, 'min_voxels': min_voxels,
                                 'max_voxels': max_voxels,
                                 'compactness_factor': compactness_factor})
-        for i, slice in enumerate(segmentation, start=1):
-            self.Slice().insert1({**key, 'islice': i, 'segmentation': slice})
         self.notify(key)
 
     @notify.ignore_exceptions
@@ -1074,7 +1058,7 @@ class Segmentation(dj.Computed):
         import imageio
         from bl3d import utils
 
-        volume = (self & key).get_stack()
+        volume = (self & key).fetch1('segmentation')
         volume = volume[:: int(volume.shape[0] / 8)]  # volume at 8 diff depths
         colored = utils.colorize_label(volume)
         video_filename = '/tmp/' + key_hash(key) + '.gif'
@@ -1083,17 +1067,6 @@ class Segmentation(dj.Computed):
         msg = 'segmentation for {animal_id}-{session}-{stack_idx}'.format(**key)
         slack_user = notify.SlackUser() & (experiment.Session() & key)
         slack_user.notify(file=video_filename, file_title=msg, channel='#pipeline_quality')
-
-    def get_stack(self):
-        """ Get full stack (num_slices, height, width).
-
-        :returns The stack: a (num_slices, image_height, image_width) array.
-        :rtype: np.array (float32)
-        """
-        slices = (Segmentation.Slice() & self).fetch('segmentation', order_by='islice')
-        return np.stack(slices)
-
-
 
 
 @schema
@@ -1155,6 +1128,7 @@ class InitialRegistration(dj.Computed):
         fields = (all_fields & processed_fields).proj(scan_session='session',
                                                       scan_channel='channel')
         keys = (all_stacks * fields) & RegistrationTask() & {'pipe_version': CURRENT_VERSION}
+        #TODO: Add dependence on preprocessed stack
 
         return keys
 
