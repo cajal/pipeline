@@ -8,8 +8,8 @@ from os import path
 #torch.backends.cudnn.benchmark=True # time efficient but memory inefficient
 
 
-def segment(stack, method='ensemble', pad_mode='reflect', seg_threshold=0.8, min_voxels=65,
-            max_voxels=4168, compactness_factor=0.05):
+def segment(stack, method='ensemble', pad_mode='reflect', seg_threshold=0.8,
+            min_voxels=65, max_voxels=4168, compactness_factor=0.05):
     """ Utility function to segment a 3-d stack
 
     :param stack: 3-d array. Raw Stack resampled to 1 mm^3.
