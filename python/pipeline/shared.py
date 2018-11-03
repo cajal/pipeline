@@ -119,7 +119,8 @@ class RegistrationMethod(dj.Lookup):
         [3, 'affine', ('exhaustive search of 3-d rotations + cross-correlation (40 microns'
                        'above and below estimated z)'), 'python'],
         [4, 'affine2', ('exhaustive search of 3-d rotations + cross-correlation (100 microns'
-                        'above and below estimated z)'), 'python']
+                        'above and below estimated z)'), 'python'],
+        [5, 'non-rigid', 'affine plus deformation field learnt via gradient ascent on correlation', 'python']
     ]
 
 @schema
