@@ -375,8 +375,8 @@ class MotionCorrection(dj.Computed):
 
     -> RasterCorrection
     ---
-     y_shifts            : longblob      # y motion correction shifts (num_slices x num_frames)
-     x_shifts            : longblob      # x motion correction shifts (num_slices x num_frames)
+    y_shifts            : longblob      # y motion correction shifts (num_slices x num_frames)
+    x_shifts            : longblob      # x motion correction shifts (num_slices x num_frames)
     """
     @property
     def key_source(self):
@@ -510,8 +510,8 @@ class Stitching(dj.Computed):
         -> MotionCorrection             # animal_id, session, stack_idx, version, roi_id
         ---
         -> Stitching.Volume             # volume to which this ROI belongs
-        stitch_ys        : blob         # (px) center of each slice in the volume-wise coordinate system
-        stitch_xs        : blob         # (px) center of each slice in the volume-wise coordinate system
+        stitch_ys        : blob         # (px) center of each slice in a volume-wise coordinate system
+        stitch_xs        : blob         # (px) center of each slice in a volume-wise coordinate system
         """
 
     def _make_tuples(self, key):
@@ -720,9 +720,9 @@ class CorrectedStack(dj.Computed):
 
     -> Stitching.Volume                 # animal_id, session, stack_idx, volume_id, pipe_version
     ---
-    z               : float             # (px) center of volume in a volume-wise coordinate system
-    y               : float             # (px) center of volume in a volume-wise coordinate system
-    x               : float             # (px) center of volume in a volume-wise coordinate system   
+    z               : float             # (um) center of volume in a volume-wise coordinate system
+    y               : float             # (um) center of volume in a volume-wise coordinate system
+    x               : float             # (um) center of volume in a volume-wise coordinate system   
     px_depth        : smallint          # number of slices
     px_height       : smallint          # lines per frame
     px_width        : smallint          # pixels per line
@@ -773,7 +773,7 @@ class CorrectedStack(dj.Computed):
                 for field_idx, corrected_field in results:
                     corrected_roi[field_idx] = corrected_field
 
-                # Create ROI object
+                # Create ROI object (with pixel x, y, z coordinates)
                 px_z = roi_tuple['roi_z'] * roi_tuple['roi_px_depth'] / roi_tuple['roi_um_depth']
                 ys = list(roi_tuple['stitch_ys'])
                 xs = list(roi_tuple['stitch_xs'])
@@ -819,14 +819,19 @@ class CorrectedStack(dj.Computed):
             stitched = rois[0]
 
             # Insert in CorrectedStack
-            roi_info = StackInfo.ROI() & key & {'roi_id': stitched.roi_coordinates[0].id} # one roi from this volume
-            tuple_ = {**key, 'z': stitched.z, 'y': stitched.y, 'x': stitched.x,
-                      'px_depth': stitched.depth, 'px_height': stitched.height,
-                      'px_width': stitched.width}
+            roi_info = StackInfo.ROI() & key & {'roi_id': stitched.roi_coordinates[0].id}
+            um_per_px = roi_info.microns_per_pixel
+            tuple_ = key.copy()
+            tuple_['z'] = stitched.z * um_per_px[0]
+            tuple_['y'] = stitched.y * um_per_px[1]
+            tuple_['x'] = stitched.x * um_per_px[2]
+            tuple_['px_depth'] = stitched.depth
+            tuple_['px_height'] = stitched.height
+            tuple_['px_width'] = stitched.width
             tuple_['um_depth'] = roi_info.fetch1('roi_um_depth')  # same as original rois
-            tuple_['um_height'] = stitched.height * roi_info.microns_per_pixel[1]
-            tuple_['um_width'] = stitched.width * roi_info.microns_per_pixel[2]
-            tuple_['surf_z'] = (stitched.z - stitched.depth / 2) * roi_info.microns_per_pixel[0]
+            tuple_['um_height'] = stitched.height * um_per_px[1]
+            tuple_['um_width'] = stitched.width * um_per_px[2]
+            tuple_['surf_z'] = (stitched.z - stitched.depth / 2) * um_per_px[0]
             self.insert1(tuple_, skip_duplicates=True)
 
             # Insert each slice
@@ -940,28 +945,8 @@ class PreprocessedStack(dj.Computed):
         stack = (CorrectedStack() & key).get_stack(key['channel'])
 
         # Resize to be 1 um^3
-        import torch
-        import torch.nn.functional as F
-
-        ## Create grid to sample in microns
         um_sizes = (CorrectedStack & key).fetch1('um_depth', 'um_height', 'um_width')
-        out_sizes = [int(round(um_s)) for um_s in um_sizes]
-        um_grids = [np.linspace(-(s / 2 - 0.5), s / 2 - 0.5, s) for s in out_sizes]  # one per axis
-
-        ## Re-express as torch grid [-1, 1]
-        um_per_px = (CorrectedStack() & key).microns_per_pixel
-        torch_ones = [um_s / 2 - res / 2 for um_s, res in zip(um_sizes, um_per_px)]
-        torch_grids = [um_g / one for um_g, one in zip(um_grids, torch_ones)]
-        torch_grids = [g.astype(np.float32) for g in torch_grids]
-        full_grid = np.stack(np.meshgrid(*torch_grids, indexing='ij')[::-1], axis=-1) # d x h x w x 3
-
-        ## Resample
-        stack_tensor = torch.from_numpy(stack.reshape(1, 1, *stack.shape))
-        grid_tensor = torch.from_numpy(full_grid.reshape(1, *full_grid.shape))
-        resized_tensor = F.grid_sample(stack_tensor, grid_tensor, padding_mode='border')
-        resized = resized_tensor.numpy().squeeze()
-
-        del stack, stack_tensor, full_grid, grid_tensor, resized_tensor
+        resized = PreprocessedStack.resize(stack, um_sizes)
 
         # Enhance
         lcned = enhancement.lcn(resized, (3, 25, 25))
@@ -971,6 +956,51 @@ class PreprocessedStack(dj.Computed):
 
         # Insert
         self.insert1({**key, 'resized': resized, 'lcned': lcned, 'sharpened': sharpened})
+
+    @staticmethod
+    def resize(original, um_sizes, desired_res=1):
+        """ Resizes to desired resolution.
+
+        We preserve the center of original and resized arrays exactly in the middle. We
+        also make sure resolution is exactly the desired resolution. Given these two
+        constraints we cannot hold FOV of original and resized arrays to be the same.
+
+        In our convention, samples are taken in the center of each pixel/voxel, i.e., a
+        volume centered at zero of size 4 will have samples at -1.5, -0.5, 0.5 and 1.5;
+        thus edges are not at -2 and 2 which is the assumption in some libraries.
+
+        :param original: np.array. Original array to be resized.
+        :param um_sizes: Tuple. Size in microns (one per axis).
+        :param desired_res: Float or tuple. Desired microns per pixel resolution.
+        """
+        import torch
+        import torch.nn.functional as F
+
+        # Make sure desired_res is a tuple with the same size as um_sizes
+        if np.isscalar(desired_res):
+            desired_res = (desired_res, ) * len(um_sizes)
+
+        # Create grid to sample in microns
+        out_sizes = [int(round(um_s / res)) for um_s, res in zip(um_sizes, desired_res)]
+        um_grids = [np.linspace(-(s / 2 - res / 2), s / 2 - res / 2, s) for s, res in
+                    zip(out_sizes, desired_res)]
+        # *this preserves the desired resolution by slightly changing the size of the FOV
+        # to out_sizes rather than um_sizes / desired_res.
+
+        # Re-express as torch grid [-1, 1]
+        um_per_px = np.array([um / px for um, px in zip(um_sizes, original.shape)])
+        torch_ones = [um_s / 2 - res / 2 for um_s, res in zip(um_sizes, um_per_px)]
+        torch_grids = [um_g / one for um_g, one in zip(um_grids, torch_ones)]
+        torch_grids = [g.astype(np.float32) for g in torch_grids]
+        full_grid = np.stack(np.meshgrid(*torch_grids, indexing='ij')[::-1], axis=-1) # d x h x w x 3
+
+        # Resample
+        input_tensor = torch.from_numpy(original.reshape(1, 1, *original.shape))
+        grid_tensor = torch.from_numpy(full_grid.reshape(1, *full_grid.shape))
+        resized_tensor = F.grid_sample(input_tensor, grid_tensor, padding_mode='border')
+        resized = resized_tensor.numpy().squeeze()
+
+        return resized
 
 
 @schema
@@ -1074,13 +1104,13 @@ class RegistrationTask(dj.Manual):
     definition = """ # declare scan fields to register to a stack as well as channels and method used
 
     (stack_session) -> CorrectedStack(session)  # animal_id, stack_session, stack_idx, pipe_version, volume_id
-    (scan_session) -> experiment.Scan(session)  # animal_id, scan_session, scan_idx
-    -> shared.Field
     (stack_channel) -> shared.Channel(channel)
+    (scan_session) -> experiment.Scan(session)  # animal_id, scan_session, scan_idx
     (scan_channel) -> shared.Channel(channel)
+    -> shared.Field
     -> shared.RegistrationMethod
     """
-    def fill(self, stack_key, scan_key, stack_channel=1, scan_channel=1, method=3):
+    def fill(self, stack_key, scan_key, stack_channel=1, scan_channel=1, method=5):
         # Add stack attributes
         stack_rel = CorrectedStack() & stack_key
         if len(stack_rel) > 1:
@@ -1093,7 +1123,7 @@ class RegistrationTask(dj.Manual):
         tuple_['registration_method'] = method
 
         # Add scan attributes
-        fields_rel = reso.ScanInfo.Field().proj() + meso.ScanInfo.Field().proj() & scan_key
+        fields_rel = reso.ScanInfo.Field.proj() + meso.ScanInfo.Field.proj() & scan_key
         scan_animal_ids = np.unique(fields_rel.fetch('animal_id'))
         if len(scan_animal_ids) > 1 or scan_animal_ids[0] != tuple_['animal_id']:
             raise PipelineException('animal_id of stack and scan do not match.')
@@ -1101,6 +1131,132 @@ class RegistrationTask(dj.Manual):
             RegistrationTask().insert1({**tuple_, 'scan_session': field['session'],
                                         'scan_idx': field['scan_idx'],
                                         'field': field['field']}, skip_duplicates=True)
+
+
+#@schema
+#class Registration(dj.Computed):
+class A:
+    """ Our stack coordinate system is consistent with numpy's: z in the first axis
+    pointing into the screen, y in the second axis pointing downwards and x on the third
+    axis pointing to the right.
+
+    Our affine matrix A is represented as the usual 4 x 4 matrix using homogeneous
+    coordinates, i.e., each point p is an [x, y, z, 1] vector.
+    Note: Because each field is flat, the original z coordinate will be the same at each
+    grid position (zero) and thus it won't affect its final position, so our affine matrix
+    has only 9 degrees of freedom A11, A21, A31, A12, A22, A32, A14, A24, A34.
+    """
+    definition = """ # align a 2-d scan field to a stack
+
+    (stack_session, stack_channel) -> PreprocessedStack.proj(session, channel)
+    -> RegistrationTask
+    """
+
+    class Rigid(dj.Part):
+        definition = """ # 3-d template matching keeping the stack straight 
+        
+        -> master
+        ---
+        reg_x       : float         # (um) center of field in volume-wise coordinate system
+        reg_y       : float         # (um) center of field in volume-wise coordinate system
+        reg_z       : float         # (um) center of field in volume-wise coordinate system
+        score       : float         # cross-correlation score (-1 to 1)
+        reg_field   : longblob      # extracted field from the stack in the specified position  
+        """
+
+    class Affine(dj.Part):
+        definition = """ # affine matrix learned via gradient ascent
+        
+        -> master
+        ---
+        m11             : float         # (um) element in row 1, column 1 of the affine matrix
+        m21             : float         # (um) element in row 2, column 1 of the affine matrix
+        m31             : float         # (um) element in row 3, column 1 of the affine matrix
+        m12             : float         # (um) element in row 1, column 2 of the affine matrix
+        m22             : float         # (um) element in row 2, column 2 of the affine matrix
+        m32             : float         # (um) element in row 3, column 2 of the affine matrix
+        reg_x           : float         # (um) element in row 1, column 4 of the affine matrix
+        reg_y           : float         # (um) element in row 2, column 4 of the affine matrix
+        reg_z           : float         # (um) element in row 3, column 4 of the affine matrix
+        score           : float         # cross-correlation score (-1 to 1)
+        reg_field       : longblob      # extracted field from the stack in the specified position 
+        """
+
+    class NonRigid(dj.Part):
+        definition = """ # affine plus deformation field learned via gradient descent
+        
+        ->master
+        ---
+        m11             : float         # (um) element in row 1, column 1 of the affine matrix
+        m21             : float         # (um) element in row 2, column 1 of the affine matrix
+        m31             : float         # (um) element in row 3, column 1 of the affine matrix
+        m12             : float         # (um) element in row 1, column 2 of the affine matrix
+        m22             : float         # (um) element in row 2, column 2 of the affine matrix
+        m32             : float         # (um) element in row 3, column 2 of the affine matrix
+        reg_x           : float         # (um) element in row 1, column 4 of the affine matrix
+        reg_y           : float         # (um) element in row 2, column 4 of the affine matrix
+        reg_z           : float         # (um) element in row 3, column 4 of the affine matrix       
+        landmarks       : longblob      # (um) position of each landmark used for the deformation_field (num_landmarxs x 3)
+        deformations    : longblob      # z, y, x deformations per landmark (num_landmarks x 3)
+        score           : float         # cross-correlation score (-1 to 1)
+        reg_field       : longblob      # extracted field from the stack in the specified position 
+        """
+
+    class Params(dj.Part):
+        definition = """ # document some parameters used for the registration
+        
+        -> master   
+        ---
+        rigid_zrange    : int           # microns above and below experimenter's estimate (in z) to search for rigid registration
+        
+        """
+
+    #TODO: class NonRigidParams or just Params with params for all the stuff
+
+    def make(self, key):
+        # Set params
+        rigid_zrange = 100 # microns to search above and below estimated z for rigid registration
+
+        # Get enhanced stack
+        stack_key = {'animal_id': key['animal_id'], 'session': key['stack_session'],
+                     'stack_idx': key['stack_idx'], 'volume': key['volume'],
+                     'channel': key['stack_channel'], 'pipe_version': key['pipe_version']}
+        original = (PreprocessedStack & stack_key).fetch1('resized')
+        stack =  (PreprocessedStack & stack_key).fetch1('sharpened')
+
+        # Get field
+        field_key = {'animal_id': key['animal_id'], 'session': key['scan_session'],
+                     'scan_idx': key['scan_idx'], 'field': key['field'],
+                     'channel': key['scan_channel']} # no pipe_version
+        if reso.ScanInfo & field_key:
+            field = (reso.SummaryImages.Average & field_key).fetch1('average_image')
+            field_um_per_px = (reso.ScanInfo & field_key).microns_per_pixel
+        else: # meso
+            field = (meso.SummaryImages.Average & field_key).fetch1('average_image')
+            field_um_per_px = (meso.ScanInfo.Field & field_key).microns_per_pixel
+        #TODO: Delete this
+        # pipe = (reso if reso.ScanInfo & field_key else meso if meso.ScanInfo & field_key
+        #         else None)
+        # field = (pipe.SummaryImages.Average & field_key).fetch1('average_image')
+
+        # Enhance field
+        original = PreprocessedStack.resize(field, um_sizes)
+        enhanced = ...
+
+    def get_grid(self, type='nonrigid'):
+        """ Get registered grid in microns for this registration. """
+        #grid = [-10, -9, .... 0, ....9, 10]
+        if type == 'rigid':
+            dz, dy, dx = (Registration.InitialRegistration & self).fetch1('reg_z, reg_x,'
+                                                                          ' reg_y')
+            #grid + dx
+            pass
+        elif type == 'affine':
+            pass
+        elif type == 'nonrigid':
+            pass
+        else:
+            raise PipelineException('Unrecognized registration.')
 
 
 @schema
@@ -1544,28 +1700,28 @@ class RegistrationOverTime(dj.Computed):
                                   'regot_z': final_z, 'score': score,
                                   'avg_chunk': chunk.mean(-1), 'reg_field': reg_field})
 
-        self.notify(key)
+        # self.notify(key)
 
-    # @notify.ignore_exceptions
-    # def notify(self, key):
-    #     frame_num, zs, scores = (self.Chunk() & key).fetch('frame_num', 'regot_z',
-    #                                                        'score')
-    #
-    #     plt.plot(frame_num, -zs, zorder=1)
-    #     plt.scatter(frame_num, -zs, marker='*', s=scores * 70, zorder=2, color='r')
-    #     plt.title('Registration over time (star size represents confidence)')
-    #     plt.ylabel('z (surface at 0)')
-    #     plt.xlabel('Frames')
-    #     img_filename = '/tmp/{}.png'.format(key_hash(key))
-    #     plt.savefig(img_filename)
-    #     plt.close()
-    #
-    #     msg = ('registration over time of {animal_id}-{scan_session}-{scan_idx} field '
-    #            '{field} to {animal_id}-{stack_session}-{stack_idx}')
-    #     msg = msg.format(**key)
-    #     slack_user = notify.SlackUser() & (experiment.Session() & key &
-    #                                        {'session': key['stack_session']})
-    #     slack_user.notify(file=img_filename, file_title=msg)
+    @notify.ignore_exceptions
+    def notify(self, key):
+        frame_num, zs, scores = (self.Chunk() & key).fetch('frame_num', 'regot_z',
+                                                           'score')
+
+        plt.plot(frame_num, -zs, zorder=1)
+        plt.scatter(frame_num, -zs, marker='*', s=scores * 70, zorder=2, color='r')
+        plt.title('Registration over time (star size represents confidence)')
+        plt.ylabel('z (surface at 0)')
+        plt.xlabel('Frames')
+        img_filename = '/tmp/{}.png'.format(key_hash(key))
+        plt.savefig(img_filename)
+        plt.close()
+
+        msg = ('registration over time of {animal_id}-{scan_session}-{scan_idx} field '
+               '{field} to {animal_id}-{stack_session}-{stack_idx}')
+        msg = msg.format(**key)
+        slack_user = notify.SlackUser() & (experiment.Session() & key &
+                                           {'session': key['stack_session']})
+        slack_user.notify(file=img_filename, file_title=msg)
 
     def _get_corrected_scan(key):
         # Read scan
@@ -1715,7 +1871,7 @@ class ZDrift(dj.Computed):
 
         return fig
 
-
+#TODO: Drop curation_method from here
 @schema
 class StackSet(dj.Computed):
     definition=""" # give a unique id to segmented masks in the stack
