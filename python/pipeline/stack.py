@@ -1467,7 +1467,7 @@ class Registration(dj.Computed):
 
 
         # Insert
-        stack_z, stack_y, stack_x = (CorrectedStack & key).fetch1('z', 'y', 'x')
+        stack_z, stack_y, stack_x = (CorrectedStack & stack_key).fetch1('z', 'y', 'x')
         self.insert1(key)
         self.Params.insert1({**key, 'rigid_zrange': rigid_zrange, 'lr_linear': lr_linear,
                              'lr_translation': lr_translation,
