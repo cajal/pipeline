@@ -13,17 +13,18 @@ def segment(stack, method='ensemble', pad_mode='reflect', seg_threshold=0.8,
     """ Utility function to segment a 3-d stack
 
     :param stack: 3-d array. Raw Stack resampled to 1 mm^3.
-    :param method: A string from 'single' or 'ensemble'. Whether to use a single model or an
-        ensemble of models for segmentation.
+    :param method: A string from 'single' or 'ensemble'. Whether to use a single model or
+        an ensemble of models for segmentation.
     :param pad_mode: How will the stack be padded. Any valid mode from np.pad.
     :param seg_threshold: Threshold used to produce instance segmentations.
     :param min_voxels: Minimum number of voxels in a valid object.
     :param max_voxels: Maximum number of voxels in a valid object.
-    :param compactness_factor: Weight for the compactness objective during instance segmentation.
+    :param compactness_factor: Weight for the compactness objective during instance
+        segmentation.
 
-    :return: detection, segmentation, instance. Arrays of the same shape as stack: voxel-wise
-        centroid probability (np.float32), voxel-wise cell probability (np.float32) and instance
-        segmentation (np.int32).
+    :return: detection, segmentation, instance. Arrays of the same shape as stack:
+        voxel-wise centroid probability (np.float32), voxel-wise cell probability
+        (np.float32) and instance segmentation (np.int32).
     """
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     if device.type == 'cpu':
@@ -42,8 +43,8 @@ def segment(stack, method='ensemble', pad_mode='reflect', seg_threshold=0.8,
     if method == 'single':
         model_names = ['bestndn_1-9-17026.pth']
     else:
-        model_names = ['bestndn_1-9-17026.pth', 'bestndn_1-17-17206.pth', 'bestndn_1-3-17259.pth',
-                       'bestndn_1-8-17261.pth']  # we'll ensemble all of these
+        model_names = ['bestndn_1-9-17026.pth', 'bestndn_1-17-17206.pth',
+                       'bestndn_1-3-17259.pth', 'bestndn_1-8-17261.pth']  # we'll ensemble all of these
 
     # Create detection and segmentation probabilities
     detection_sum = np.empty(input_.shape[-3:], dtype=np.float32)
