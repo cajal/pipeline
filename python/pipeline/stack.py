@@ -1515,9 +1515,8 @@ class Registration(dj.Computed):
         from .utils import registration
 
         # Get field
-        field_key = self.proj(session='scan_session').fetch1('animal_id', 'session',
-                                                             'scan_idx', 'field')
-        field_dims = ((reso.ScanInfo & field_key or meso.ScanInfo.Field) &
+        field_key = self.proj(session='scan_session')
+        field_dims = (reso.ScanInfo & field_key or meso.ScanInfo.Field &
                       field_key).fetch1('um_height', 'um_width')
 
         # Create grid at desired resolution
@@ -1534,7 +1533,7 @@ class Registration(dj.Computed):
             pred_grid = registration.affine_product(grid, linear, translation)
         elif type == 'affine':
             params = (Registration.Affine & self).fetch1('a11', 'a21', 'a31', 'a12',
-                                                         'a22', 'a32' 'reg_x', 'reg_y',
+                                                         'a22', 'a32', 'reg_x', 'reg_y',
                                                          'reg_z')
             a11, a21, a31, a12, a22, a32, delta_x, delta_y, delta_z = params
             linear = torch.tensor([[a11, a12], [a21, a22], [a31, a32]])
@@ -1543,13 +1542,15 @@ class Registration(dj.Computed):
             pred_grid = registration.affine_product(grid, linear, translation)
         elif type == 'nonrigid':
             params = (Registration.NonRigid & self).fetch1('a11', 'a21', 'a31', 'a12',
-                                                           'a22', 'a32' 'reg_x', 'reg_y',
+                                                           'a22', 'a32', 'reg_x', 'reg_y',
                                                            'reg_z', 'landmarks',
                                                            'deformations')
             rbf_radius = (Registration.Params & self).fetch1('rbf_radius')
             a11, a21, a31, a12, a22, a32, delta_x, delta_y, delta_z, landmarks, deformations = params
             linear = torch.tensor([[a11, a12], [a21, a22], [a31, a32]])
             translation = torch.tensor([delta_x, delta_y, delta_z])
+            landmarks = torch.from_numpy(landmarks)
+            deformations = torch.from_numpy(deformations)
 
             affine_grid = registration.affine_product(grid, linear, translation)
             grid_distances = torch.norm(grid.unsqueeze(-2) - landmarks, dim=-1)
@@ -1561,6 +1562,29 @@ class Registration(dj.Computed):
             raise PipelineException('Unrecognized registration.')
 
         return pred_grid.numpy()
+
+    def plot_grids(self, desired_res=5):
+        """ Plot the grids for this different registrations as 3-d surfaces."""
+        # Get grids at desired resoultion
+        rig_grid = self.get_grid('rigid', desired_res)
+        affine_grid = self.get_grid('affine', desired_res)
+        nonrigid_grid = self.get_grid('nonrigid', desired_res)
+
+        # Plot surfaces
+        import matplotlib.pyplot as plt
+        from mpl_toolkits.mplot3d import axes3d, Axes3D
+
+        fig = plt.figure(figsize=plt.figaspect(0.5) * 1.5)
+        ax = fig.gca(projection='3d')
+        ax.plot_surface(rig_grid[..., 0], rig_grid[..., 1], rig_grid[..., 2], alpha=0.5)
+        ax.plot_surface(affine_grid[..., 0], affine_grid[..., 1], affine_grid[..., 2],
+                        alpha=0.5)
+        ax.plot_surface(nonrigid_grid[..., 0], nonrigid_grid[..., 1],
+                        nonrigid_grid[..., 2], alpha=0.5)
+        ax.set_aspect('equal')
+
+        return fig
+
 
 
 @schema

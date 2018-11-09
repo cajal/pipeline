@@ -24,8 +24,8 @@ def create_grid(um_sizes, desired_res=1):
 
     # Create grid
     out_sizes = [int(round(um_s / res)) for um_s, res in zip(um_sizes, desired_res)]
-    um_grids = [np.linspace(-(s / 2 - res / 2), s / 2 - res / 2, s, dtype=np.float32) for
-                s, res in zip(out_sizes, desired_res)] # *
+    um_grids = [np.linspace(-(s - 1) * res / 2, (s - 1) * res / 2, s, dtype=np.float32)
+                for s, res in zip(out_sizes, desired_res)] # *
     full_grid = np.stack(np.meshgrid(*um_grids, indexing='ij')[::-1], axis=-1)
     # * this preserves the desired resolution by slightly changing the size of the FOV to
     # out_sizes rather than um_sizes / desired_res.
