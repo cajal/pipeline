@@ -17,9 +17,10 @@ from .exceptions import PipelineException
 schema = dj.schema('pipeline_stack', locals(), create_tables=False)
 dj.config['external-stack'] = {'protocol': 'file',
                                'location': '/mnt/scratch07/pipeline-externals'}
+
+
+#TODO: Drop this version and CURRENT_VERSION
 CURRENT_VERSION = 1
-
-
 @schema
 class Version(dj.Lookup):
     definition = """ # versions for the stack pipeline
@@ -30,6 +31,12 @@ class Version(dj.Lookup):
     date = CURRENT_TIMESTAMP        : timestamp         # automatic
     """
 
+
+""" Note on our coordinate system:
+Our stack coordinate system is consistent with numpy's: z in the first axis pointing
+downwards, y in the second axis pointing towards you and x on the third axis pointing to 
+the right.
+"""
 
 @schema
 class StackInfo(dj.Imported):
@@ -756,16 +763,16 @@ class CorrectedStack(dj.Computed):
 
     -> Stitching.Volume                 # animal_id, session, stack_idx, volume_id, pipe_version
     ---
-    z               : float             # (um) center of volume in a volume-wise coordinate system
-    y               : float             # (um) center of volume in a volume-wise coordinate system
-    x               : float             # (um) center of volume in a volume-wise coordinate system   
+    z               : float             # (um) center of volume in the motor coordinate system (cortex is at 0)
+    y               : float             # (um) center of volume in the motor coordinate system
+    x               : float             # (um) center of volume in the motor coordinate system
     px_depth        : smallint          # number of slices
     px_height       : smallint          # lines per frame
     px_width        : smallint          # pixels per line
     um_depth        : float             # depth in microns 
     um_height       : float             # height in microns
     um_width        : float             # width in microns
-    surf_z          : float             # (um) depth of first slice - half a z step (cortex is at z=0)    
+    surf_z          : float             # (um) depth of first slice - half a z step (cortex is at z=0)     
     """
 
     @property
@@ -984,6 +991,7 @@ class PreprocessedStack(dj.Computed):
                 {'pipe_version': CURRENT_VERSION})
 
     def make(self, key):
+        from .utils import registration
         from .utils import enhancement
 
         # Load stack
@@ -991,7 +999,7 @@ class PreprocessedStack(dj.Computed):
 
         # Resize to be 1 um^3
         um_sizes = (CorrectedStack & key).fetch1('um_depth', 'um_height', 'um_width')
-        resized = PreprocessedStack.resize(stack, um_sizes)
+        resized = registration.resize(stack, um_sizes, desired_res=1)
 
         # Enhance
         lcned = enhancement.lcn(resized, (3, 25, 25))
@@ -1001,51 +1009,6 @@ class PreprocessedStack(dj.Computed):
 
         # Insert
         self.insert1({**key, 'resized': resized, 'lcned': lcned, 'sharpened': sharpened})
-
-    @staticmethod
-    def resize(original, um_sizes, desired_res=1):
-        """ Resizes to desired resolution.
-
-        We preserve the center of original and resized arrays exactly in the middle. We
-        also make sure resolution is exactly the desired resolution. Given these two
-        constraints we cannot hold FOV of original and resized arrays to be the same.
-
-        In our convention, samples are taken in the center of each pixel/voxel, i.e., a
-        volume centered at zero of size 4 will have samples at -1.5, -0.5, 0.5 and 1.5;
-        thus edges are not at -2 and 2 which is the assumption in some libraries.
-
-        :param original: np.array. Original array to be resized.
-        :param um_sizes: Tuple. Size in microns (one per axis).
-        :param desired_res: Float or tuple. Desired microns per pixel resolution.
-        """
-        import torch
-        import torch.nn.functional as F
-
-        # Make sure desired_res is a tuple with the same size as um_sizes
-        if np.isscalar(desired_res):
-            desired_res = (desired_res,) * len(um_sizes)
-
-        # Create grid to sample in microns
-        out_sizes = [int(round(um_s / res)) for um_s, res in zip(um_sizes, desired_res)]
-        um_grids = [np.linspace(-(s / 2 - res / 2), s / 2 - res / 2, s) for s, res in
-                    zip(out_sizes, desired_res)]
-        # *this preserves the desired resolution by slightly changing the size of the FOV
-        # to out_sizes rather than um_sizes / desired_res.
-
-        # Re-express as torch grid [-1, 1]
-        um_per_px = np.array([um / px for um, px in zip(um_sizes, original.shape)])
-        torch_ones = [um_s / 2 - res / 2 for um_s, res in zip(um_sizes, um_per_px)]
-        torch_grids = [um_g / one for um_g, one in zip(um_grids, torch_ones)]
-        torch_grids = [g.astype(np.float32) for g in torch_grids]
-        full_grid = np.stack(np.meshgrid(*torch_grids, indexing='ij')[::-1], axis=-1)  # d x h x w x 3
-
-        # Resample
-        input_tensor = torch.from_numpy(original.reshape(1, 1, *original.shape))
-        grid_tensor = torch.from_numpy(full_grid.reshape(1, *full_grid.shape))
-        resized_tensor = F.grid_sample(input_tensor, grid_tensor, padding_mode='border')
-        resized = resized_tensor.numpy().squeeze()
-
-        return resized
 
 
 @schema
@@ -1143,7 +1106,7 @@ class Segmentation(dj.Computed):
 class RegistrationTask(dj.Manual):
     definition = """ # declare scan fields to register to a stack as well as channels and method used
 
-    (stack_session) -> CorrectedStack(session)  # animal_id, stack_session, stack_idx, pipe_version, volume_id
+    (stack_session) -> CorrectedStack(session) # animal_id, stack_session, stack_idx, pipe_version, volume_id
     (stack_channel) -> shared.Channel(channel)
     (scan_session) -> experiment.Scan(session)  # animal_id, scan_session, scan_idx
     (scan_channel) -> shared.Channel(channel)
@@ -1175,96 +1138,116 @@ class RegistrationTask(dj.Manual):
                                         'field': field['field']}, skip_duplicates=True)
 
 
-# @schema
-# class Registration(dj.Computed):
-class A:
-    """ Our stack coordinate system is consistent with numpy's: z in the first axis
-    pointing downwards, y in the second axis pointing towards you and x on the third axis
-    axis pointing to the right.
-
-    Our affine matrix A is represented as the usual 4 x 4 matrix using homogeneous
+@schema
+class Registration(dj.Computed):
+    """ Our affine matrix A is represented as the usual 4 x 4 matrix using homogeneous
     coordinates, i.e., each point p is an [x, y, z, 1] vector.
-    Note: Because each field is flat, the original z coordinate will be the same at each
-    grid position (zero) and thus it won't affect its final position, so our affine matrix
-    has only 9 degrees of freedom A11, A21, A31, A12, A22, A32, A14, A24, A34.
+
+    Because each field is flat, the original z coordinate will be the same at each grid
+    position (zero) and thus it won't affect its final position, so our affine matrix has
+    only 9 parameters: a11, a21, a31, a12, a22, a32, a14, a24 and a34.
     """
     definition = """ # align a 2-d scan field to a stack
 
-    (stack_session, stack_channel) -> PreprocessedStack.proj(session, channel)
+    (stack_session, stack_channel) -> PreprocessedStack(session, channel)
     -> RegistrationTask
     """
+    @property
+    def key_source(self):
+        stacks = PreprocessedStack.proj(stack_session='session', stack_channel='channel')
+        return stacks * RegistrationTask & {'registration_method': 5}
+
 
     class Rigid(dj.Part):
-        definition = """ # 3-d template matching keeping the stack straight 
-        
+        definition = """ # 3-d template matching keeping the stack straight
+
         -> master
         ---
         reg_x       : float         # (um) center of field in volume-wise coordinate system
         reg_y       : float         # (um) center of field in volume-wise coordinate system
         reg_z       : float         # (um) center of field in volume-wise coordinate system
         score       : float         # cross-correlation score (-1 to 1)
-        reg_field   : longblob      # extracted field from the stack in the specified position  
+        reg_field   : longblob      # extracted field from the stack in the specified position
         """
 
     class Affine(dj.Part):
         definition = """ # affine matrix learned via gradient ascent
-        
+
         -> master
         ---
-        m11             : float         # (um) element in row 1, column 1 of the affine matrix
-        m21             : float         # (um) element in row 2, column 1 of the affine matrix
-        m31             : float         # (um) element in row 3, column 1 of the affine matrix
-        m12             : float         # (um) element in row 1, column 2 of the affine matrix
-        m22             : float         # (um) element in row 2, column 2 of the affine matrix
-        m32             : float         # (um) element in row 3, column 2 of the affine matrix
+        a11             : float         # (um) element in row 1, column 1 of the affine matrix
+        a21             : float         # (um) element in row 2, column 1 of the affine matrix
+        a31             : float         # (um) element in row 3, column 1 of the affine matrix
+        a12             : float         # (um) element in row 1, column 2 of the affine matrix
+        a22             : float         # (um) element in row 2, column 2 of the affine matrix
+        a32             : float         # (um) element in row 3, column 2 of the affine matrix
         reg_x           : float         # (um) element in row 1, column 4 of the affine matrix
         reg_y           : float         # (um) element in row 2, column 4 of the affine matrix
         reg_z           : float         # (um) element in row 3, column 4 of the affine matrix
         score           : float         # cross-correlation score (-1 to 1)
-        reg_field       : longblob      # extracted field from the stack in the specified position 
+        reg_field       : longblob      # extracted field from the stack in the specified position
         """
 
     class NonRigid(dj.Part):
         definition = """ # affine plus deformation field learned via gradient descent
-        
+
         ->master
         ---
-        m11             : float         # (um) element in row 1, column 1 of the affine matrix
-        m21             : float         # (um) element in row 2, column 1 of the affine matrix
-        m31             : float         # (um) element in row 3, column 1 of the affine matrix
-        m12             : float         # (um) element in row 1, column 2 of the affine matrix
-        m22             : float         # (um) element in row 2, column 2 of the affine matrix
-        m32             : float         # (um) element in row 3, column 2 of the affine matrix
+        a11             : float         # (um) element in row 1, column 1 of the affine matrix
+        a21             : float         # (um) element in row 2, column 1 of the affine matrix
+        a31             : float         # (um) element in row 3, column 1 of the affine matrix
+        a12             : float         # (um) element in row 1, column 2 of the affine matrix
+        a22             : float         # (um) element in row 2, column 2 of the affine matrix
+        a32             : float         # (um) element in row 3, column 2 of the affine matrix
         reg_x           : float         # (um) element in row 1, column 4 of the affine matrix
         reg_y           : float         # (um) element in row 2, column 4 of the affine matrix
-        reg_z           : float         # (um) element in row 3, column 4 of the affine matrix       
-        landmarks       : longblob      # (um) position of each landmark used for the deformation_field (num_landmarxs x 3)
-        deformations    : longblob      # z, y, x deformations per landmark (num_landmarks x 3)
+        reg_z           : float         # (um) element in row 3, column 4 of the affine matrix
+        landmarks       : longblob      # (um) x, y position of each landmark (num_landmarks x 2) assuming center of field is at (0, 0)
+        deformations    : longblob      # (um) x, y, z deformations per landmark (num_landmarks x 3)
         score           : float         # cross-correlation score (-1 to 1)
-        reg_field       : longblob      # extracted field from the stack in the specified position 
+        reg_field       : longblob      # extracted field from the stack in the specified position
         """
 
     class Params(dj.Part):
         definition = """ # document some parameters used for the registration
-        
-        -> master   
+
+        -> master
         ---
         rigid_zrange    : int           # microns above and below experimenter's estimate (in z) to search for rigid registration
-        slsdaksaf
+        lr_linear       : float         # learning rate for the linear part of the affine matrix
+        lr_translation  : float         # learning rate for the translation vector
+        affine_iters    : int           # number of iterations to learn the affine registration
+        random_seed     : int           # seed used to initialize landmark deformations
+        landmark_gap    : int           # number of microns between landmarks
+        rbf_radius      : int           # critical radius for the gaussian radial basis function
+        lr_deformations : float         # learning rate for the deformation values
+        wd_deformations : float         # regularization term to control size of the deformations
+        smoothness_factor : float       # regularization term to control curvature of warping field
+        nonrigid_iters  : int           # number of iterations to optimize for the non-rigid parameters
         """
-        # TODO: Fill params
 
     def make(self, key):
-        from pipeline.utils import enhancement
+        from .utils import registration
+        from .utils import enhancement
 
         # Set params
         rigid_zrange = 80  # microns to search above and below estimated z for rigid registration
+        lr_linear = 0.001  # learning rate / step size for the linear part of the affine matrix
+        lr_translation = 1  # learning rate / step size for the translation vector
+        affine_iters = 200  # number of optimization iterations to learn the affine parameters
+        random_seed = 1234  # seed for torch random number generator (used to initialize deformations)
+        landmark_gap = 100  # spacing for the landmarks
+        rbf_radius = 150  # critical radius for the gaussian rbf
+        lr_deformations = 0.1  # learning rate / step size for deformation values
+        wd_deformations = 1e-4  # weight decay for deformations; controls their size
+        smoothness_factor = 0.01  # factor to keep the deformation field smooth
+        nonrigid_iters = 200  # number of optimization iterations for the nonrigid parameters
 
         # Get enhanced stack
         stack_key = {'animal_id': key['animal_id'], 'session': key['stack_session'],
-                     'stack_idx': key['stack_idx'], 'volume': key['volume'],
+                     'stack_idx': key['stack_idx'], 'volume_id': key['volume_id'],
                      'channel': key['stack_channel'], 'pipe_version': key['pipe_version']}
-        original = (PreprocessedStack & stack_key).fetch1('resized')
+        original_stack = (PreprocessedStack & stack_key).fetch1('resized')
         stack = (PreprocessedStack & stack_key).fetch1('sharpened')
 
         # Get field
@@ -1273,58 +1256,311 @@ class A:
                      'channel': key['scan_channel']}  # no pipe_version
         pipe = (reso if reso.ScanInfo & field_key else meso if meso.ScanInfo & field_key
                 else None)
-        original = (pipe.SummaryImages.Average & field_key).fetch1('average_image')
+        original_field = (pipe.SummaryImages.Average & field_key).fetch1(
+            'average_image').astype(np.float32)
 
         # Enhance field
-        field_dims = (reso.ScanInfo if pipe == reso else meso.ScanInfo.Field).fetch1(
-            'um_height', 'um_width')
-        original = PreprocessedStack.resize(original, field_dims)
-        field = enhancement.sharpen_2pimage(enhancement.lcn(original, (15, 15)), 1)
+        field_dims = ((reso.ScanInfo if pipe == reso else meso.ScanInfo.Field) &
+                      field_key).fetch1('um_height', 'um_width')
+        original_field = registration.resize(original_field, field_dims, desired_res=1)
+        field = enhancement.sharpen_2pimage(enhancement.lcn(original_field, (15, 15)), 1)
 
         # Drop some edges to avoid artifacts
         field = field[15:-15, 15:-15]
-        stack = stack[5:-5, 30:-30, 30:-30]
+        stack = stack[5:-5, 15:-15, 15:-15]
+
 
         # RIGID REGISTRATION
-        from .utils import registration
+        from skimage import feature
+        from scipy import ndimage
 
         # Get initial estimate of field depth from experimenters
         field_z = (pipe.ScanInfo.Field & field_key).fetch1('z')
-        stack_z = (CorrectedStack & key).fetch('z')
+        stack_z = (CorrectedStack & stack_key).fetch1('z')
         z_limits = stack_z - stack.shape[0] / 2, stack_z + stack.shape[0] / 2
-        if field_z < z_limits[0] or field_z > z_limits:
+        if field_z < z_limits[0] or field_z > z_limits[1]:
             print('Warning: Estimated depth ({}) outside stack range ({}-{}).'.format(
                 field_z, *z_limits))
 
-        # Run resgistration with no rotations searching 100 microns up and down
-        px_estimate = (0, 0, field_z - stack_z)  # x, y, z
-        px_range = (0.45 * stack.shape[2], 0.45 * stack.shape[1], rigid_zrange)
+        # Run registration with no rotations
+        px_z = field_z - stack_z + stack.shape[0] / 2 - 0.5
+        mini_stack = stack[max(0, int(round(px_z - rigid_zrange))): int(round(
+            px_z + rigid_zrange))]
+        corrs = np.stack(feature.match_template(s, field, pad_input=True) for s in
+                         mini_stack)
+        smooth_corrs = ndimage.gaussian_filter(corrs, 0.7)
 
-        # TODO: Change register rigid to not do rotations
-        # TODO: Delete map_angles
-        score, (x, y, z), _ = registration.register_rigid(stack, field, px_estimate,
-                                                          px_range)
+        # Get results
+        min_z = max(0, int(round(px_z - rigid_zrange)))
+        min_y = int(round(0.05 * stack.shape[1]))
+        min_x = int(round(0.05 * stack.shape[2]))
+        mini_corrs = smooth_corrs[:, min_y:-min_y, min_x:-min_x]
+        rig_z, rig_y, rig_x = np.unravel_index(np.argmax(mini_corrs), mini_corrs.shape)
+
+        # Rewrite coordinates with respect to original z
+        rig_z = (min_z + rig_z + 0.5) - stack.shape[0] / 2
+        rig_y = (min_y + rig_y + 0.5) - stack.shape[1] / 2
+        rig_x = (min_x + rig_x + 0.5) - stack.shape[2] / 2
+
+        del (field_z, stack_z, z_limits, px_z, mini_stack, corrs, smooth_corrs, min_z,
+             min_y, min_x, mini_corrs)
+
 
         # AFFINE REGISTRATION
         import torch
+        from torch import optim
         import torch.nn.functional as F
 
-        # NON-RIGID REGISTRATION
+        def sample_grid(volume, grid):
+            """ Volume is a d x h x w arrray, grid is a d1 x d2 x 3 (x, y, z) coordinates
+            and output is a d1 x d2 array"""
+            norm_factor = torch.as_tensor([s / 2 - 0.5 for s in volume.shape[::-1]])
+            norm_grid = grid / norm_factor  # between -1 and 1
+            resampled = F.grid_sample(volume.view(1, 1, *volume.shape),
+                                      norm_grid.view(1, 1, *norm_grid.shape),
+                                      padding_mode='zeros')
+            return resampled.squeeze()
 
-    def get_grid(self, type='nonrigid'):
-        """ Get registered grid in microns for this registration. """
-        # grid = [-10, -9, .... 0, ....9, 10]
+        # Create field grid (height x width x 2)
+        grid = registration.create_grid(field.shape)
+
+        # Create torch tensors
+        stack_ = torch.as_tensor(stack, dtype=torch.float32)
+        field_ = torch.as_tensor(field, dtype=torch.float32)
+        grid_ = torch.as_tensor(grid, dtype=torch.float32)
+
+        # Define parameters and optimizer
+        linear = torch.nn.Parameter(torch.eye(3)[:, :2])  # first two columns of rotation matrix
+        translation = torch.nn.Parameter(torch.tensor([rig_x, rig_y, rig_z]))  # translation vector
+        affine_optimizer = optim.Adam([{'params': linear, 'lr': lr_linear},
+                                       {'params': translation, 'lr': lr_translation}])
+
+        # Optimize
+        for i in range(affine_iters):
+            # Zero gradients
+            affine_optimizer.zero_grad()
+
+            # Compute gradients
+            pred_grid = registration.affine_product(grid_, linear, translation) # w x h x 3
+            pred_field = sample_grid(stack_, pred_grid)
+            corr_loss = -(pred_field * field_).sum() / (torch.norm(pred_field) *
+                                                        torch.norm(field_))
+            print('Corr at iteration {}: {:5.4f}'.format(i, -corr_loss))
+            corr_loss.backward()
+
+            # Update
+            affine_optimizer.step()
+
+        # Save em (originals will be modified during non-rigid registration)
+        affine_linear = linear.detach().clone()
+        affine_translation = translation.detach().clone()
+
+
+        # NON-RIGID REGISTRATION
+        torch.manual_seed(random_seed) # we use random initialization below
+
+        # Create landmarks (and their corresponding deformations)
+        first_y = int(round((field.shape[0] % landmark_gap) / 2))
+        first_x = int(round((field.shape[1] % landmark_gap) / 2))
+        landmarks = grid_[first_x::landmark_gap, first_y::landmark_gap].contiguous().view(
+            -1, 2)  # num_landmarks x 2
+
+        # Compute rbf scores between landmarks and grid coordinates and between landmarks
+        grid_distances = torch.norm(grid_.unsqueeze(-2) - landmarks, dim=-1)
+        grid_scores = torch.exp(-(grid_distances * (1 / rbf_radius)) ** 2)  # w x h x num_landmarks
+        landmark_distances = torch.norm(landmarks.unsqueeze(-2) - landmarks, dim=-1)
+        landmark_scores = torch.exp(-(landmark_distances * (1 / 200)) ** 2)  # num_landmarks x num_landmarks
+
+        # Define parameters and optimizer
+        deformations = torch.nn.Parameter(torch.randn((landmarks.shape[0], 3)) / 10)  # N(0, 0.1)
+        nonrigid_optimizer = optim.Adam([deformations], lr=lr_deformations,
+                                        weight_decay=wd_deformations)
+
+        # Optimize
+        for i in range(nonrigid_iters):
+            # Zero gradients
+            affine_optimizer.zero_grad()  # we reuse affine_optimizer so the affine matrix changes slowly
+            nonrigid_optimizer.zero_grad()
+
+            # Compute grid with radial basis
+            affine_grid = registration.affine_product(grid_, linear, translation)
+            warping_field = torch.einsum('whl,lt->wht', (grid_scores, deformations))
+            pred_grid = affine_grid + warping_field
+            pred_field = sample_grid(stack_, pred_grid)
+
+            # Compute loss
+            corr_loss = -(pred_field * field_).sum() / (torch.norm(pred_field) *
+                                                        torch.norm(field_))
+
+            # Compute cosine similarity between landmarks (and weight em by distance)
+            norm_deformations = deformations / torch.norm(deformations, dim=-1,
+                                                          keepdim=True)
+            cosine_similarity = torch.mm(norm_deformations, norm_deformations.t())
+            reg_term = -((cosine_similarity * landmark_scores).sum() /
+                         landmark_scores.sum())
+
+            # Compute gradients
+            loss = corr_loss + smoothness_factor * reg_term
+            print('Corr/loss at iteration {}: {:5.4f}/{:5.4f}'.format(i, -corr_loss,
+                                                                      loss))
+            loss.backward()
+
+            # Update
+            affine_optimizer.step()
+            nonrigid_optimizer.step()
+
+        # Save final results
+        nonrigid_linear = linear.detach().clone()
+        nonrigid_translation = translation.detach().clone()
+        nonrigid_landmarks = landmarks.clone()
+        nonrigid_deformations = deformations.detach().clone()
+
+
+        # COMPUTE SCORES (USING THE ENHANCED AND CROPPED VERSION OF THE FIELD)
+        # Rigid
+        pred_grid = registration.affine_product(grid_, torch.eye(3)[:, :2],
+                                                torch.tensor([rig_x, rig_y, rig_z]))
+        pred_field = sample_grid(stack_, pred_grid).numpy()
+        rig_score = np.corrcoef(field.ravel(), pred_field.ravel())[0, 1]
+
+        # Affine
+        pred_grid = registration.affine_product(grid_, affine_linear, affine_translation)
+        pred_field = sample_grid(stack_, pred_grid).numpy()
+        affine_score = np.corrcoef(field.ravel(), pred_field.ravel())[0, 1]
+
+        # Non-rigid
+        affine_grid = registration.affine_product(grid_, nonrigid_linear,
+                                                  nonrigid_translation)
+        warping_field = torch.einsum('whl,lt->wht', (grid_scores, nonrigid_deformations))
+        pred_grid = affine_grid + warping_field
+        pred_field = sample_grid(stack_, pred_grid).numpy()
+        nonrigid_score = np.corrcoef(field.ravel(), pred_field.ravel())[0, 1]
+
+
+        # FIND FIELDS IN STACK
+        # Create grid of original size (h x w x 2)
+        original_grid = registration.create_grid(original_field.shape)
+
+        # Create torch tensors
+        original_stack_ = torch.as_tensor(original_stack, dtype=torch.float32)
+        original_grid_ = torch.as_tensor(original_grid, dtype=torch.float32)
+
+        # Rigid
+        pred_grid = registration.affine_product(original_grid_, torch.eye(3)[:, :2],
+                                                torch.tensor([rig_x, rig_y, rig_z]))
+        rig_field = sample_grid(original_stack_, pred_grid).numpy()
+
+        # Affine
+        pred_grid = registration.affine_product(original_grid_, affine_linear,
+                                                affine_translation)
+        affine_field = sample_grid(original_stack_, pred_grid).numpy()
+
+        # Non-rigid
+        affine_grid = registration.affine_product(original_grid_, nonrigid_linear, nonrigid_translation)
+        original_grid_distances = torch.norm(original_grid_.unsqueeze(-2) -
+                                             nonrigid_landmarks, dim=-1)
+        original_grid_scores = torch.exp(-(original_grid_distances * (1 / rbf_radius)) ** 2)
+        warping_field = torch.einsum('whl,lt->wht', (original_grid_scores,
+                                                     nonrigid_deformations))
+        pred_grid = affine_grid + warping_field
+        nonrigid_field = sample_grid(original_stack_, pred_grid).numpy()
+
+
+        # Insert
+        stack_z, stack_y, stack_x = (CorrectedStack & key).fetch1('z', 'y', 'x')
+        self.insert1(key)
+        self.Params.insert1({**key, 'rigid_zrange': rigid_zrange, 'lr_linear': lr_linear,
+                             'lr_translation': lr_translation,
+                             'affine_iters': affine_iters, 'random_seed': random_seed,
+                             'landmark_gap': landmark_gap, 'rbf_radius': rbf_radius,
+                             'lr_deformations': lr_deformations,
+                             'wd_deformations': wd_deformations,
+                             'smoothness_factor': smoothness_factor,
+                             'nonrigid_iters': nonrigid_iters})
+        self.Rigid.insert1({**key, 'reg_x': stack_x + rig_x, 'reg_y': stack_y + rig_y,
+                            'reg_z': stack_z + rig_z, 'score': rig_score,
+                            'reg_field': rig_field})
+        self.Affine.insert1({**key, 'a11': affine_linear[0, 0].item(),
+                             'a21': affine_linear[1, 0].item(),
+                             'a31': affine_linear[2, 0].item(),
+                             'a12': affine_linear[0, 1].item(),
+                             'a22': affine_linear[1, 1].item(),
+                             'a32': affine_linear[2, 1].item(),
+                             'reg_x': stack_x + affine_translation[0].item(),
+                             'reg_y': stack_y + affine_translation[1].item(),
+                             'reg_z': stack_z + affine_translation[2].item(),
+                             'score': affine_score, 'reg_field': affine_field})
+        self.NonRigid.insert1({**key, 'a11': nonrigid_linear[0, 0].item(),
+                               'a21': nonrigid_linear[1, 0].item(),
+                               'a31': nonrigid_linear[2, 0].item(),
+                               'a12': nonrigid_linear[0, 1].item(),
+                               'a22': nonrigid_linear[1, 1].item(),
+                               'a32': nonrigid_linear[2, 1].item(),
+                               'reg_x': stack_x + nonrigid_translation[0].item(),
+                               'reg_y': stack_y + nonrigid_translation[1].item(),
+                               'reg_z': stack_z + nonrigid_translation[2].item(),
+                               'landmarks': nonrigid_landmarks.numpy(),
+                               'deformations': nonrigid_deformations.numpy(),
+                               'score': nonrigid_score, 'reg_field': nonrigid_field})
+        self.notify(key)
+
+    @notify.ignore_exceptions
+    def notify(self, key):
+        # No notifications
+        pass
+
+    def get_grid(self, type='nonrigid', desired_res=1):
+        """ Get registered grid for this registration. """
+        import torch
+        from .utils import registration
+
+        # Get field
+        field_key = self.proj(session='scan_session').fetch1('animal_id', 'session',
+                                                             'scan_idx', 'field')
+        field_dims = ((reso.ScanInfo & field_key or meso.ScanInfo.Field) &
+                      field_key).fetch1('um_height', 'um_width')
+
+        # Create grid at desired resolution
+        grid = registration.create_grid(field_dims, desired_res=desired_res)  # h x w x 2
+        grid = torch.as_tensor(grid, dtype=torch.float32)
+
+        # Apply required transform
         if type == 'rigid':
-            dz, dy, dx = (Registration.InitialRegistration & self).fetch1('reg_z, reg_x,'
-                                                                          ' reg_y')
-            # grid + dx
-            pass
+            params = (Registration.Rigid & self).fetch1('reg_x', 'reg_y', 'reg_z')
+            delta_x, delta_y, delta_z = params
+            linear = torch.eye(3)[:, :2]
+            translation = torch.tensor([delta_x, delta_y, delta_z])
+
+            pred_grid = registration.affine_product(grid, linear, translation)
         elif type == 'affine':
-            pass
+            params = (Registration.Affine & self).fetch1('a11', 'a21', 'a31', 'a12',
+                                                         'a22', 'a32' 'reg_x', 'reg_y',
+                                                         'reg_z')
+            a11, a21, a31, a12, a22, a32, delta_x, delta_y, delta_z = params
+            linear = torch.tensor([[a11, a12], [a21, a22], [a31, a32]])
+            translation = torch.tensor([delta_x, delta_y, delta_z])
+
+            pred_grid = registration.affine_product(grid, linear, translation)
         elif type == 'nonrigid':
-            pass
+            params = (Registration.NonRigid & self).fetch1('a11', 'a21', 'a31', 'a12',
+                                                           'a22', 'a32' 'reg_x', 'reg_y',
+                                                           'reg_z', 'landmarks',
+                                                           'deformations')
+            rbf_radius = (Registration.Params & self).fetch1('rbf_radius')
+            a11, a21, a31, a12, a22, a32, delta_x, delta_y, delta_z, landmarks, deformations = params
+            linear = torch.tensor([[a11, a12], [a21, a22], [a31, a32]])
+            translation = torch.tensor([delta_x, delta_y, delta_z])
+
+            affine_grid = registration.affine_product(grid, linear, translation)
+            grid_distances = torch.norm(grid.unsqueeze(-2) - landmarks, dim=-1)
+            grid_scores = torch.exp(-(grid_distances * (1 / rbf_radius)) ** 2)
+            warping_field = torch.einsum('whl,lt->wht', (grid_scores, deformations))
+
+            pred_grid = affine_grid + warping_field
         else:
             raise PipelineException('Unrecognized registration.')
+
+        return pred_grid.numpy()
 
 
 @schema
