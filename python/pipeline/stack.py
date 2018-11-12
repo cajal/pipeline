@@ -1546,6 +1546,7 @@ class Registration(dj.Computed):
         ax.plot_surface(nonrigid_grid[..., 0], nonrigid_grid[..., 1],
                         nonrigid_grid[..., 2], alpha=0.5)
         ax.set_aspect('equal')
+        ax.invert_zaxis()
 
         return fig
 
@@ -1865,6 +1866,7 @@ class StackSet(dj.Computed):
     
     (stack_session) -> CorrectedStack(session)  # animal_id, stack_session, stack_idx, volume_id
     -> shared.RegistrationMethod
+    -> shared.SegmentationMethod
     ---
     min_distance            :tinyint        # distance used as threshold to accept two masks as the same
     max_height              :tinyint        # maximum allowed height of a joint mask
@@ -1872,8 +1874,9 @@ class StackSet(dj.Computed):
 
     @property
     def key_source(self):
-        all_keys = CorrectedStack() * shared.RegistrationMethod()
-        return all_keys.proj(stack_session='session') & Registration()
+        return (CorrectedStack.proj(stack_session='session') *
+                shared.RegistrationMethod.proj() * shared.SegmentationMethod.proj() &
+                Registration &  {'segmentation_method': 5})
 
     class Unit(dj.Part):
         definition = """ # a unit in the stack
@@ -1891,7 +1894,6 @@ class StackSet(dj.Computed):
         
         -> master
         (scan_session) -> experiment.Scan(session)  # animal_id, scan_session, scan_idx
-        -> shared.SegmentationMethod
         unit_id             :int        # unit id from ScanSet.Unit
         ---
         -> StackSet.Unit
@@ -1948,7 +1950,8 @@ class StackSet(dj.Computed):
             grid = (Registration & field).get_grid(desired_res=um_per_px)
 
             # Create cell objects
-            for channel_key in pipe.ScanSet & field_key & {'segmentation_method': 5}:  # *
+            for channel_key in (pipe.ScanSet & field_key &
+                                {'segmentation_method': key['segmentation_method']}):  # *
                 somas = pipe.MaskClassification.Type & {'type': 'soma'}
                 field_somas = pipe.ScanSet.Unit & channel_key & somas
                 unit_keys, xs, ys = (pipe.ScanSet.UnitInfo & field_somas).fetch('KEY',
@@ -2015,12 +2018,12 @@ class StackSet(dj.Computed):
         # Insert
         self.insert1({**key, 'min_distance': min_distance, 'max_height': max_height})
         for munit_id, munit in zip(itertools.count(start=1), units):
-            centroid = munit.centroid / stack_res[::-1]  # in stack coordinates
-            self.Unit().insert1({**key, 'munit_id': munit_id, 'munit_x': centroid[0],
-                                 'munit_y': centroid[1], 'munit_z': centroid[2]})
+            new_unit = {**key, 'munit_id': munit_id, 'munit_x': munit.centroid[0],
+                        'munit_y': munit.centroid[1], 'munit_z': munit.centroid[2]}
+            self.Unit().insert1(new_unit)
             for subunit_key in munit.keys:
-                new_match = {**key, 'munit_id': munit_id,
-                             **subunit_key, 'scan_session': subunit_key['session']}
+                new_match = {**key, 'munit_id': munit_id, **subunit_key,
+                             'scan_session': subunit_key['session']}
                 self.Match().insert1(new_match, ignore_extra_fields=True)
 
         self.notify(key)
@@ -2046,19 +2049,13 @@ class StackSet(dj.Computed):
         """
         from mpl_toolkits.mplot3d import Axes3D
 
-        # Get stack resolution
-        stack_rel = CorrectedStack() & self.proj(session='stack_session')
-        dims = stack_rel.fetch1('um_height', 'px_height', 'um_width', 'px_width')
-        stack_res = [dims[0] / dims[1], dims[2] / dims[3]]
-
         # Get centroids
         xs, ys, zs = (StackSet.Unit() & self).fetch('munit_x', 'munit_y', 'munit_z')
-        centroids = np.stack([xs * stack_res[1], ys * stack_res[0], zs], axis=1)
 
         # Plot
         fig = plt.figure(figsize=(10, 10))
-        ax = fig.add_subplot(111, projection='3d')
-        ax.scatter(centroids[:, 0], centroids[:, 1], centroids[:, 2])
+        ax = fig.gca(projection='3d')
+        ax.scatter(xs, ys, zs, alpha=0.5)
         ax.invert_zaxis()
         ax.set_xlabel('x (um)')
         ax.set_ylabel('y (um)')
