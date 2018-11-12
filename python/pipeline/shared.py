@@ -41,7 +41,8 @@ class SegmentationMethod(dj.Lookup):
          'python'],
         [3, 'nmf-patches', 'same as nmf but initialized in small image patches', 'python'],
         [4, 'nmf-boutons', 'nmf for axonal terminals', 'python'],
-        [5, '3d-conv', 'masks from the segmentation of the stack', 'python']
+        [5, '3d-conv', 'masks from the segmentation of the stack', 'python'],
+        [6, 'nmf-new', 'same as method 3 (nmf-patches) but with some better tuned params', 'python']
     ]
 
 @schema

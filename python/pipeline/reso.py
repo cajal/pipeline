@@ -716,7 +716,7 @@ class SegmentationTask(dj.Manual):
     -> experiment.Compartment
     """
 
-    def fill(self, key, channel=1, segmentation_method=3, compartment='soma'):
+    def fill(self, key, channel=1, segmentation_method=6, compartment='soma'):
         for field_key in (ScanInfo.Field() & key).fetch(dj.key):
             tuple_ = {**field_key, 'channel': channel, 'compartment': compartment,
                       'segmentation_method': segmentation_method}
@@ -891,7 +891,7 @@ class Segmentation(dj.Computed):
                     kwargs['num_components'] = (SegmentationTask() & key).estimate_num_components()
                     kwargs['init_method'] = 'greedy_roi'
                     kwargs['soma_diameter'] = tuple(14 / (ScanInfo() & key).microns_per_pixel)
-            else: #nmf-patches
+            else: #nmf-new
                 kwargs['init_on_patches'] = True
                 kwargs['proportion_patch_overlap'] = 0.2 # 20% overlap
                 if target == 'axon':
@@ -1066,8 +1066,11 @@ class Segmentation(dj.Computed):
         # Create masks
         if key['segmentation_method'] == 1:  # manual
             Segmentation.Manual()._make_tuples(key)
-        elif key['segmentation_method'] in [2, 3]:  # nmf and nmf-patches
+        elif key['segmentation_method'] in [2, 6]:  # nmf and nmf-patches
             Segmentation.CNMF()._make_tuples(key)
+        elif key['segmentation_method'] in [3, 4]:  # nmf_patches
+            msg = 'This method has been deprecated, use segmentation_method 6'
+            raise PipelineException(msg)
         else:
             msg = 'Unrecognized segmentation method {}'.format(key['segmentation_method'])
             raise PipelineException(msg)

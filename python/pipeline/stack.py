@@ -984,10 +984,10 @@ class SegmentationTask(dj.Manual):
    -> experiment.Compartment
    """
 
-    def fill(self, key, channel=1, segmentation_method=2, compartment='soma'):
+    def fill(self, key, channel=1, stacksegm_method=2, compartment='soma'):
         for stack_key in (CorrectedStack() & key).fetch(dj.key):
             tuple_ = {**stack_key, 'channel': channel,
-                      'stacksegm_method': segmentation_method,
+                      'stacksegm_method': stacksegm_method,
                       'compartment': compartment}
             self.insert1(tuple_, ignore_extra_fields=True, skip_duplicates=True)
 
@@ -1876,7 +1876,7 @@ class StackSet(dj.Computed):
     def key_source(self):
         return (CorrectedStack.proj(stack_session='session') *
                 shared.RegistrationMethod.proj() * shared.SegmentationMethod.proj() &
-                Registration &  {'segmentation_method': 5})
+                Registration &  {'segmentation_method': 6})
 
     class Unit(dj.Part):
         definition = """ # a unit in the stack
