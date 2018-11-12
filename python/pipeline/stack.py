@@ -1931,31 +1931,34 @@ class StackSet(dj.Computed):
 
         # Create list of units
         units = []  # stands for matched units
-        for field in Registration() & key:
-            # Get field_hash and field_dims
-            field_key = {'animal_id': field['animal_id'],
-                         'session': field['scan_session'],
-                         'scan_idx': field['scan_idx'], 'field': field['field'],
-                         'channel': field['scan_channel']}
-            field_hash = key_hash(field_key)
-            pipe = (reso if reso.ScanInfo & field_key else meso if meso.ScanInfo &
-                                                                   field_key else None)
-            um_per_px = ((reso.ScanInfo if pipe == reso else meso.ScanInfo.Field) &
-                         field_key).microns_per_pixel
+        for field in Registration & key:
+            # Edge case: when two channels are registered, we don't know which to use
+            if len(Registration.proj(ignore='scan_channel') & field) > 1:
+                msg = ('More than one channel was registered for {animal_id}-'
+                       '{scan_session}-{scan_idx} field {field}'.format(**field))
+                raise PipelineException(msg)
 
             # Get registered grid
-            grid = (Registration() & key).get_grid('nonrigid', desired_res=um_per_px)
+            field_key = {'animal_id': field['animal_id'],
+                         'session': field['scan_session'], 'scan_idx': field['scan_idx'],
+                         'field': field['field']}
+            pipe = reso if reso.ScanInfo & field_key else meso
+            um_per_px = ((reso.ScanInfo if pipe == reso else meso.ScanInfo.Field) &
+                         field_key).microns_per_pixel
+            grid = (Registration & field).get_grid(desired_res=um_per_px)
 
             # Create cell objects
-            somas = pipe.MaskClassification.Type & {'type': 'soma'}
-            field_somas = pipe.ScanSet.Unit & field_key & somas
-            unit_keys, xs, ys = (pipe.ScanSet.UnitInfo & field_somas).fetch('KEY', 'px_x',
-                                                                            'px_y')
-            px_coords = np.stack([ys, xs], axis=-1)
-            xs, ys, zs = [ndimage.map_coordinates(grid[..., i], px_coords, order=1) for i
-                          in range(3)]
-            units += [StackSet.MatchedUnit(*args, field_hash) for args in zip(unit_keys,
-                                                                              xs, ys, zs)]
+            for channel_key in pipe.ScanSet & field_key & {'segmentation_method': 5}:  # *
+                somas = pipe.MaskClassification.Type & {'type': 'soma'}
+                field_somas = pipe.ScanSet.Unit & channel_key & somas
+                unit_keys, xs, ys = (pipe.ScanSet.UnitInfo & field_somas).fetch('KEY',
+                        'px_x', 'px_y')
+                px_coords = np.stack([ys, xs])
+                xs, ys, zs = [ndimage.map_coordinates(grid[..., i], px_coords, order=1)
+                              for i in range(3)]
+                units += [StackSet.MatchedUnit(*args, key_hash(channel_key)) for args in
+                          zip(unit_keys, xs, ys, zs)]
+            # * Separating masks per channel allows masks in diff channels to be matched
         print(len(units), 'initial units')
 
         def find_close_units(centroid, centroids, min_distance):
