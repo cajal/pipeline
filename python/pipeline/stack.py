@@ -12,16 +12,16 @@ from .utils import galvo_corrections, stitching, performance, enhancement
 from .utils.signal import mirrconv, float2uint8
 from .exceptions import PipelineException
 
+""" Note on our coordinate system:
+Our stack/motor coordinate system is consistent with numpy's: z in the first axis pointing
+downwards, y in the second axis pointing towards you and x on the third axis pointing to 
+the right.
+"""
 
 schema = dj.schema('pipeline_stack', locals(), create_tables=False)
 dj.config['external-stack'] = {'protocol': 'file',
                                'location': '/mnt/scratch07/pipeline-externals'}
 
-""" Note on our coordinate system:
-Our stack coordinate system is consistent with numpy's: z in the first axis pointing
-downwards, y in the second axis pointing towards you and x on the third axis pointing to 
-the right.
-"""
 
 @schema
 class StackInfo(dj.Imported):
@@ -91,7 +91,7 @@ class StackInfo(dj.Imported):
                 tuple_['roi_um_height'] = stack.field_heights_in_microns[field_ids[0]]
                 tuple_['roi_um_width'] = stack.field_widths_in_microns[field_ids[0]]
             else:
-                tuple_['roi_y'] = y_zero  # TODO: Add sign flip if ys in reso point upwards
+                tuple_['roi_y'] = y_zero
                 tuple_['roi_x'] = x_zero
                 tuple_['roi_px_height'] = stack.image_height
                 tuple_['roi_px_width'] = stack.image_width
@@ -1551,314 +1551,624 @@ class Registration(dj.Computed):
         return fig
 
 
+@schema
+class RegistrationOverTime(dj.Computed):
+    definition = """ # register a field at different timepoints of recording
+    
+    (stack_session, stack_channel) -> PreprocessedStack(session, channel)
+    -> RegistrationTask
+    """
+    @property
+    def key_source(self):
+        stacks = PreprocessedStack.proj(stack_session='session', stack_channel='channel')
+        return stacks * RegistrationTask & {'registration_method': 5}
 
-# @schema
-# class RegistrationOverTime(dj.Computed):
-#     definition = """ # register a field at different timepoints of recording
-#
-#     (stack_session) -> CorrectedStack(session)  # animal_id, stack_session, stack_idx, pipe_version, volume_id
-#     (scan_session) -> experiment.Scan(session)  # animal_id, scan_session, scan_idx
-#     -> shared.Field
-#     (stack_channel) -> shared.Channel(channel)
-#     (scan_channel) -> shared.Channel(channel)
-#     ---
-#     common_res      : float         # (um/px) common resolution used for registration
-#     """
-#
-#     @property
-#     def key_source(self):
-#         return InitialRegistration().key_source
-#
-#     class Chunk(dj.Part):
-#         definition = """ # single registered chunk
-#
-#         -> master
-#         frame_num       : int           # frame number of the frame in the middle of this chunk
-#         ---
-#         initial_frame   : int           # initial frame used in this chunk (1-based)
-#         final_frame     : int           # final frame used in this chunk (1-based)
-#         regot_x         : float         # (px) center of scan in stack coordinates
-#         regot_y         : float         # (px) center of scan in stack coordinates
-#         regot_z         : float         # (um) depth of scan in stack coordinates
-#         score           : float         # cross-correlation score (-1 to 1)
-#         avg_chunk       : longblob      # average field (from scan) used for registration (before any enhancement)
-#         reg_field       : longblob      # registered field in stack
-#         """
-#
-#     def _make_tuples(self, key):
-#         from .utils import registration
-#
-#         print('Registering over time:', key)
-#
-#         # Get stack
-#         print('Loading stack')
-#         stack_rel = (CorrectedStack() & key & {'session': key['stack_session']})
-#         stack = stack_rel.get_stack(key['stack_channel'])
-#
-#         # Get field and stack resolution
-#         field_key = {'animal_id': key['animal_id'], 'session': key['scan_session'],
-#                      'scan_idx': key['scan_idx'], 'field': key['field'],
-#                      'channel': key['scan_channel']}
-#         pipe = (reso if reso.ScanInfo() & field_key else meso if meso.ScanInfo() &
-#                                                                  field_key else None)
-#         if pipe is None:
-#             raise PipelineException('Scan has not been processed through reso/meso')
-#         field_res = ((reso.ScanInfo() & field_key).microns_per_pixel if pipe == reso else
-#                      (meso.ScanInfo.Field() & field_key).microns_per_pixel)
-#         dims = stack_rel.fetch1('um_depth', 'px_depth', 'um_height', 'px_height',
-#                                 'um_width', 'px_width')
-#         stack_res = np.array([dims[0] / dims[1], dims[2] / dims[3], dims[4] / dims[5]])
-#         common_res = min(*field_res, *stack_res[
-#                                       1:])  # maximum available resolution ignoring stack z resolution
-#
-#         # Prepare stack (drop edges, local contrast normalization and rescale)
-#         print('Preprocessing stack')
-#         common_stack = ndimage.zoom(stack, stack_res / common_res,
-#                                     order=1)  # used to find reg_field
-#         skip_dims = [max(1, int(round(s * 0.025))) for s in stack.shape]
-#         stack = stack[:, skip_dims[1]: -skip_dims[1], skip_dims[2]: -skip_dims[2]]
-#         stack = ndimage.zoom(enhancement.lcn(stack, np.array([3, 25, 25]) / stack_res),
-#                              stack_res / common_res, order=1)
-#
-#         # Get corrected scan
-#         print('Loading scan')
-#         scan = RegistrationOverTime._get_corrected_scan(field_key)
-#
-#         # Get estimated depth of the field (from experimenters)
-#         stack_x, stack_y, stack_z = stack_rel.fetch1('x', 'y',
-#                                                      'z')  # z of the first slice (zero is at surface depth)
-#         field_z = (pipe.ScanInfo.Field() & field_key).fetch1(
-#             'z')  # measured in microns (zero is at surface depth)
-#         if field_z < stack_z or field_z > stack_z + dims[0]:
-#             msg_template = 'Warning: Estimated depth ({}) outside stack range ({}-{}).'
-#             print(msg_template.format(field_z, stack_z, stack_z + dims[0]))
-#         estimated_px_z = (field_z - stack_z + 0.5) / common_res  # in pixels
-#
-#         # Insert in RegistrationOverTime
-#         self.insert1({**key, 'common_res': common_res})
-#
-#         # Compute best chunk size: each lasts the same (~10 minutes)
-#         fps = (pipe.ScanInfo() & field_key).fetch1('fps')
-#         num_frames = scan.shape[-1]
-#         overlap = int(round(2 * 60 * fps))  # ~ 2 minutes
-#         num_chunks = int(np.ceil((num_frames - overlap) / (10 * 60 * fps - overlap)))
-#         chunk_size = int(np.floor((num_frames - overlap) / num_chunks + overlap))  # *
-#         # * distributes frames in the last (incomplete) chunk to the other chunks
-#
-#         # Registration: Iterate over chunks
-#         print('Registering', num_chunks, 'chunk(s)')
-#         px_estimate = (
-#         0, 0, estimated_px_z - stack.shape[0] / 2)  # (0, 0, 0) in center of stack
-#         px_range = (0.45 * stack.shape[2], 0.45 * stack.shape[1], 100 / common_res)
-#         for initial_frame in range(0, num_frames - chunk_size, chunk_size - overlap):
-#             # Get next chunk
-#             final_frame = initial_frame + chunk_size
-#             chunk = scan[..., initial_frame: final_frame]
-#
-#             # Prepare field (drop edges, local contrast normalization and rescaling)
-#             skip_dims = [max(1, int(round(s * 0.025))) for s in chunk.shape[:-1]]
-#             small_chunk = chunk[skip_dims[0]: -skip_dims[0], skip_dims[1]: -skip_dims[1]]
-#             field = ndimage.zoom(enhancement.lcn(small_chunk.mean(-1), 20 / field_res),
-#                                  field_res / common_res, order=1)
-#
-#             # Run rigid registration with no rotations searching 100 microns up and down
-#             score, (x, y, z), _ = registration.register_rigid(stack, field, px_estimate,
-#                                                               px_range)
-#
-#             # Map back to stack coordinates
-#             final_x = stack_x + x * (common_res / stack_res[2])  # in stack pixels
-#             final_y = stack_y + y * (common_res / stack_res[1])  # in stack pixels
-#             final_z = stack_z + (z + stack.shape[0] / 2) * common_res  # in microns*
-#             # * Best match in slice 0 will not result in z = 0 but 0.5 * z_step.
-#
-#             # Get field in stack (after registration)
-#             field_shape = np.array(chunk.shape[:-1])
-#             common_shape = np.round(field_shape * field_res / common_res).astype(int)
-#             reg_field = registration.find_field_in_stack(common_stack, *common_shape, x,
-#                                                          y, z)
-#             # reg_field = ndimage.zoom(reg_field, common_res / field_res, order=1)
-#             reg_field = ndimage.zoom(reg_field, field_shape / common_shape, order=1)
-#
-#             # Insert
-#             frame_num = int(round((initial_frame + final_frame) / 2))
-#             self.Chunk().insert1({**key, 'frame_num': frame_num + 1,
-#                                   'initial_frame': initial_frame + 1,
-#                                   'final_frame': final_frame,
-#                                   'regot_x': final_x, 'regot_y': final_y,
-#                                   'regot_z': final_z, 'score': score,
-#                                   'avg_chunk': chunk.mean(-1), 'reg_field': reg_field})
-#
-#         # self.notify(key)
-#
-#     @notify.ignore_exceptions
-#     def notify(self, key):
-#         frame_num, zs, scores = (self.Chunk() & key).fetch('frame_num', 'regot_z',
-#                                                            'score')
-#
-#         plt.plot(frame_num, -zs, zorder=1)
-#         plt.scatter(frame_num, -zs, marker='*', s=scores * 70, zorder=2, color='r')
-#         plt.title('Registration over time (star size represents confidence)')
-#         plt.ylabel('z (surface at 0)')
-#         plt.xlabel('Frames')
-#         img_filename = '/tmp/{}.png'.format(key_hash(key))
-#         plt.savefig(img_filename)
-#         plt.close()
-#
-#         msg = ('registration over time of {animal_id}-{scan_session}-{scan_idx} field '
-#                '{field} to {animal_id}-{stack_session}-{stack_idx}')
-#         msg = msg.format(**key)
-#         slack_user = notify.SlackUser() & (experiment.Session() & key &
-#                                            {'session': key['stack_session']})
-#         slack_user.notify(file=img_filename, file_title=msg)
-#
-#     def _get_corrected_scan(key):
-#         # Read scan
-#         scan_filename = (experiment.Scan & key).local_filenames_as_wildcard
-#         scan = scanreader.read_scan(scan_filename)
-#
-#         # Get some params
-#         pipe = reso if (reso.ScanInfo() & key) else meso
-#
-#         # Map: Correct scan in parallel
-#         f = performance.parallel_correct_scan  # function to map
-#         raster_phase = (pipe.RasterCorrection() & key).fetch1('raster_phase')
-#         fill_fraction = (pipe.ScanInfo() & key).fetch1('fill_fraction')
-#         y_shifts, x_shifts = (pipe.MotionCorrection() & key).fetch1('y_shifts',
-#                                                                     'x_shifts')
-#         kwargs = {'raster_phase': raster_phase, 'fill_fraction': fill_fraction,
-#                   'y_shifts': y_shifts, 'x_shifts': x_shifts}
-#         results = performance.map_frames(f, scan, field_id=key['field'] - 1,
-#                                          channel=key['channel'] - 1, kwargs=kwargs)
-#
-#         # Reduce: Make a single array (height x width x num_frames)
-#         height, width, _ = results[0][1].shape
-#         corrected_scan = np.zeros([height, width, scan.num_frames], dtype=np.float32)
-#         for frames, chunk in results:
-#             corrected_scan[..., frames] = chunk
-#
-#         return corrected_scan
-#
-#     def session_plot(self):
-#         """ Create a registration plot for the session"""
-#         import matplotlib.pyplot as plt
-#         import matplotlib.ticker as ticker
-#
-#         # Check that plot is restricted to a single stack and a single session
-#         regot_key = self.fetch('KEY', limit=1)[0]
-#         stack_key = {n: regot_key[n] for n in ['animal_id', 'stack_session', 'stack_idx',
-#                                                'pipe_version', 'volume_id']}
-#         session_key = {n: regot_key[n] for n in ['animal_id', 'scan_session']}
-#         if len(self & stack_key) != len(self):
-#             raise PipelineException('Plot can only be generated for one stack at a time')
-#         if len(self & session_key) != len(self):
-#             raise PipelineException('Plot can only be generated for one session at a '
-#                                     'time')
-#
-#         # Get field times and depths
-#         ts = []
-#         zs = []
-#         session_ts = (experiment.Session() & regot_key &
-#                       {'session': regot_key['scan_session']}).fetch1('session_ts')
-#         for key in self.fetch('KEY'):
-#             field_key = {'animal_id': key['animal_id'], 'session': key['scan_session'],
-#                          'scan_idx': key['scan_idx'], 'field': key['field']}
-#             scan_ts = (experiment.Scan() & field_key).fetch1('scan_ts')
-#             fps = (reso.ScanInfo() & field_key or meso.ScanInfo() & field_key).fetch1(
-#                 'fps')
-#
-#             frame_nums, field_zs = (RegistrationOverTime.Chunk() & key).fetch('frame_num',
-#                                                                               'regot_z')
-#             field_ts = (scan_ts - session_ts).seconds + frame_nums / fps  # in seconds
-#
-#             ts.append(field_ts)
-#             zs.append(field_zs)
-#
-#         # Plot
-#         fig = plt.figure(figsize=(20, 8))
-#         for ts_, zs_ in zip(ts, zs):
-#             plt.plot(ts_ / 3600, zs_)
-#         plt.title('Registered zs for {animal_id}-{scan_session} into {animal_id}-'
-#                   '{stack_session}-{stack_idx} starting at {t}'.format(t=session_ts,
-#                                                                        **regot_key))
-#         plt.ylabel('Registered zs')
-#         plt.xlabel('Hours')
-#
-#         # Plot formatting
-#         plt.gca().invert_yaxis()
-#         plt.gca().yaxis.set_major_locator(ticker.MultipleLocator(10))
-#         plt.grid(linestyle='--', alpha=0.8)
-#
-#         return fig
-#
-#
-# @schema
-# class ZDrift(dj.Computed):
-#     definition = """ # assuming a linear drift in z, compute the slope of this line
-#
-#     -> RegistrationOverTime
-#     ---
-#     z_slope                 : float            # (um/hour) drift in z
-#     rmse                    : float            # (um) root mean squared error of the fit
-#     """
-#
-#     def _make_tuples(self, key):
-#         # Get all drifts (in z)
-#         frame_nums, zs = (RegistrationOverTime.Chunk() & key).fetch('frame_num',
-#                                                                     'regot_z')
-#
-#         # Fit a line (robust regression)
-#         from sklearn import linear_model
-#         X = frame_nums.reshape(-1, 1)
-#         y = zs
-#         model = linear_model.TheilSenRegressor()
-#         model.fit(X, y)
-#
-#         #  Get results
-#         field_key = {**key, 'session': key['scan_session']}
-#         fps = (reso.ScanInfo() & field_key or meso.ScanInfo() & field_key).fetch1('fps')
-#         z_slope = model.coef_[0] * fps * 3600  # um/hour
-#         rmse = np.sqrt(np.mean((zs - model.predict(X)) ** 2))
-#
-#         self.insert1({**key, 'z_slope': z_slope, 'rmse': rmse})
-#
-#     def session_plot(self):
-#         """ Create boxplots for the session (one per scan)."""
-#         import matplotlib.pyplot as plt
-#         import matplotlib.ticker as ticker
-#
-#         # Check that plot is restricted to a single stack and a single session
-#         regot_key = self.fetch('KEY', limit=1)[0]
-#         stack_key = {n: regot_key[n] for n in ['animal_id', 'stack_session', 'stack_idx',
-#                                                'pipe_version', 'volume_id']}
-#         session_key = {n: regot_key[n] for n in ['animal_id', 'scan_session']}
-#         if len(self & stack_key) != len(self):
-#             raise PipelineException('Plot can only be generated for one stack at a time')
-#         if len(self & session_key) != len(self):
-#             raise PipelineException('Plot can only be generated for one session at a '
-#                                     'time')
-#
-#         # Get field times and depths
-#         z_slopes = []
-#         scan_idxs = np.unique(self.fetch('scan_idx'))
-#         for scan_idx in scan_idxs:
-#             scan_slopes = (self & {**session_key, 'scan_idx': scan_idx}).fetch('z_slope')
-#             z_slopes.append(scan_slopes)
-#
-#         # Plot
-#         fig = plt.figure(figsize=(7, 4))
-#         plt.boxplot(z_slopes)
-#         plt.title('Z drift for {animal_id}-{scan_session} into {animal_id}-'
-#                   '{stack_session}-{stack_idx}'.format(**regot_key))
-#         plt.ylabel('Z drift (um/hour)')
-#         plt.xlabel('Scans')
-#         plt.xticks(range(1, len(scan_idxs) + 1), scan_idxs)
-#
-#         # Plot formatting
-#         plt.gca().invert_yaxis()
-#         plt.gca().yaxis.set_major_locator(ticker.MultipleLocator(5))
-#         plt.grid(linestyle='--', alpha=0.8)
-#
-#         return fig
+    class Chunk(dj.Part):
+        definition = """ # single registered chunk
+
+        -> master
+        frame_num       : int           # frame number of the frame in the middle of this chunk
+        ---
+        initial_frame   : int           # initial frame used in this chunk (1-based)
+        final_frame     : int           # final frame used in this chunk (1-based)
+        avg_chunk       : longblob      # average field used for registration
+        """
+
+        def get_grid(self, type='nonrigid', desired_res=1):
+            # TODO: Taken verbatim from Registration (minor changes for formatting), refactor
+            """ Get registered grid for this registration. """
+            import torch
+            from .utils import registration
+
+            # Get field
+            field_key = self.proj(session='scan_session')
+            field_dims = (reso.ScanInfo & field_key or meso.ScanInfo.Field &
+                          field_key).fetch1('um_height', 'um_width')
+
+            # Create grid at desired resolution
+            grid = registration.create_grid(field_dims, desired_res=desired_res)  # h x w x 2
+            grid = torch.as_tensor(grid, dtype=torch.float32)
+
+            # Apply required transform
+            if type == 'rigid':
+                params = (RegistrationOverTime.Rigid & self).fetch1('reg_x', 'reg_y',
+                                                                    'reg_z')
+                delta_x, delta_y, delta_z = params
+                linear = torch.eye(3)[:, :2]
+                translation = torch.tensor([delta_x, delta_y, delta_z])
+
+                pred_grid = registration.affine_product(grid, linear, translation)
+            elif type == 'affine':
+                params = (RegistrationOverTime.Affine & self).fetch1('a11', 'a21', 'a31',
+                                                                     'a12', 'a22', 'a32',
+                                                                     'reg_x', 'reg_y',
+                                                                     'reg_z')
+                a11, a21, a31, a12, a22, a32, delta_x, delta_y, delta_z = params
+                linear = torch.tensor([[a11, a12], [a21, a22], [a31, a32]])
+                translation = torch.tensor([delta_x, delta_y, delta_z])
+
+                pred_grid = registration.affine_product(grid, linear, translation)
+            elif type == 'nonrigid':
+                params = (RegistrationOverTime.NonRigid & self).fetch1('a11', 'a21',
+                                                                       'a31', 'a12',
+                                                                       'a22', 'a32',
+                                                                       'reg_x', 'reg_y',
+                                                                       'reg_z',
+                                                                       'landmarks',
+                                                                       'deformations')
+                rbf_radius = (RegistrationOverTime.Params & self).fetch1('rbf_radius')
+                (a11, a21, a31, a12, a22, a32, delta_x, delta_y, delta_z, landmarks,
+                 deformations) = params
+                linear = torch.tensor([[a11, a12], [a21, a22], [a31, a32]])
+                translation = torch.tensor([delta_x, delta_y, delta_z])
+                landmarks = torch.from_numpy(landmarks)
+                deformations = torch.from_numpy(deformations)
+
+                affine_grid = registration.affine_product(grid, linear, translation)
+                grid_distances = torch.norm(grid.unsqueeze(-2) - landmarks, dim=-1)
+                grid_scores = torch.exp(-(grid_distances * (1 / rbf_radius)) ** 2)
+                warping_field = torch.einsum('whl,lt->wht', (grid_scores, deformations))
+
+                pred_grid = affine_grid + warping_field
+            else:
+                raise PipelineException('Unrecognized registration.')
+
+            return pred_grid.numpy()
+
+    class Rigid(dj.Part):
+        definition = """ # rigid registration of a single chunk
+        -> RegistrationOverTime.Chunk
+        ---
+        reg_x       : float         # (um) center of field in motor coordinate system
+        reg_y       : float         # (um) center of field in motor coordinate system
+        reg_z       : float         # (um) center of field in motor coordinate system
+        score       : float         # cross-correlation score (-1 to 1)
+        reg_field   : longblob      # extracted field from the stack in the specified position
+        """
+
+    class Affine(dj.Part):
+        definition = """ # affine matrix learned via gradient ascent
+
+        -> RegistrationOverTime.Chunk
+        ---
+        a11             : float         # (um) element in row 1, column 1 of the affine matrix
+        a21             : float         # (um) element in row 2, column 1 of the affine matrix
+        a31             : float         # (um) element in row 3, column 1 of the affine matrix
+        a12             : float         # (um) element in row 1, column 2 of the affine matrix
+        a22             : float         # (um) element in row 2, column 2 of the affine matrix
+        a32             : float         # (um) element in row 3, column 2 of the affine matrix
+        reg_x           : float         # (um) element in row 1, column 4 of the affine matrix
+        reg_y           : float         # (um) element in row 2, column 4 of the affine matrix
+        reg_z           : float         # (um) element in row 3, column 4 of the affine matrix
+        score           : float         # cross-correlation score (-1 to 1)
+        reg_field       : longblob      # extracted field from the stack in the specified position
+        """
+
+    class NonRigid(dj.Part):
+        definition = """ # affine plus deformation field learned via gradient descent
+
+        -> RegistrationOverTime.Chunk
+        ---
+        a11             : float         # (um) element in row 1, column 1 of the affine matrix
+        a21             : float         # (um) element in row 2, column 1 of the affine matrix
+        a31             : float         # (um) element in row 3, column 1 of the affine matrix
+        a12             : float         # (um) element in row 1, column 2 of the affine matrix
+        a22             : float         # (um) element in row 2, column 2 of the affine matrix
+        a32             : float         # (um) element in row 3, column 2 of the affine matrix
+        reg_x           : float         # (um) element in row 1, column 4 of the affine matrix
+        reg_y           : float         # (um) element in row 2, column 4 of the affine matrix
+        reg_z           : float         # (um) element in row 3, column 4 of the affine matrix
+        landmarks       : longblob      # (um) x, y position of each landmark (num_landmarks x 2) assuming center of field is at (0, 0)
+        deformations    : longblob      # (um) x, y, z deformations per landmark (num_landmarks x 3)
+        score           : float         # cross-correlation score (-1 to 1)
+        reg_field       : longblob      # extracted field from the stack in the specified position
+        """
+
+    class Params(dj.Part):
+        definition = """ # document some parameters used for the registration
+
+        -> master
+        ---
+        rigid_zrange    : int           # microns above and below experimenter's estimate (in z) to search for rigid registration
+        lr_linear       : float         # learning rate for the linear part of the affine matrix
+        lr_translation  : float         # learning rate for the translation vector
+        affine_iters    : int           # number of iterations to learn the affine registration
+        random_seed     : int           # seed used to initialize landmark deformations
+        landmark_gap    : int           # number of microns between landmarks
+        rbf_radius      : int           # critical radius for the gaussian radial basis function
+        lr_deformations : float         # learning rate for the deformation values
+        wd_deformations : float         # regularization term to control size of the deformations
+        smoothness_factor : float       # regularization term to control curvature of warping field
+        nonrigid_iters  : int           # number of iterations to optimize for the non-rigid parameters
+        """
+
+    def make(self, key):
+        from .utils import registration
+        from .utils import enhancement
+
+        # Set params
+        rigid_zrange = 80  # microns to search above and below estimated z for rigid registration
+        lr_linear = 0.001  # learning rate / step size for the linear part of the affine matrix
+        lr_translation = 1  # learning rate / step size for the translation vector
+        affine_iters = 200  # number of optimization iterations to learn the affine parameters
+        random_seed = 1234  # seed for torch random number generator (used to initialize deformations)
+        landmark_gap = 100  # spacing for the landmarks
+        rbf_radius = 150  # critical radius for the gaussian rbf
+        lr_deformations = 0.1  # learning rate / step size for deformation values
+        wd_deformations = 1e-4  # weight decay for deformations; controls their size
+        smoothness_factor = 0.01  # factor to keep the deformation field smooth
+        nonrigid_iters = 200  # number of optimization iterations for the nonrigid parameters
+
+        # Get enhanced stack
+        stack_key = {'animal_id': key['animal_id'], 'session': key['stack_session'],
+                     'stack_idx': key['stack_idx'], 'volume_id': key['volume_id'],
+                     'channel': key['stack_channel']}
+        original_stack = (PreprocessedStack & stack_key).fetch1('resized')
+        stack = (PreprocessedStack & stack_key).fetch1('sharpened')
+        stack = stack[5:-5, 15:-15, 15:-15]  # drop some edges
+
+        # Get corrected scan
+        field_key = {'animal_id': key['animal_id'], 'session': key['scan_session'],
+                     'scan_idx': key['scan_idx'], 'field': key['field'],
+                     'channel': key['scan_channel']}
+        pipe = (reso if reso.ScanInfo & field_key else meso if meso.ScanInfo & field_key
+        else None)
+        scan = RegistrationOverTime._get_corrected_scan(field_key)
+
+        # Get initial estimate of field depth from experimenters
+        field_z = (pipe.ScanInfo.Field & field_key).fetch1('z')
+        stack_z = (CorrectedStack & stack_key).fetch1('z')
+        z_limits = stack_z - stack.shape[0] / 2, stack_z + stack.shape[0] / 2
+        if field_z < z_limits[0] or field_z > z_limits[1]:
+            print('Warning: Estimated depth ({}) outside stack range ({}-{}).'.format(
+                field_z, *z_limits))
+
+        # Compute best chunk size: each lasts the same (~15 minutes)
+        fps = (pipe.ScanInfo & field_key).fetch1('fps')
+        num_frames = scan.shape[-1]
+        overlap = int(round(3 * 60 * fps))  # ~ 3 minutes
+        num_chunks = int(np.ceil((num_frames - overlap) / (15 * 60 * fps - overlap)))
+        chunk_size = int(np.floor((num_frames - overlap) / num_chunks + overlap))  # *
+        # * distributes frames in the last (incomplete) chunk to the other chunks
+
+        # Insert in RegistrationOverTime and Params (once per field)
+        self.insert1(key)
+        self.Params.insert1(
+            {**key, 'rigid_zrange': rigid_zrange, 'lr_linear': lr_linear,
+             'lr_translation': lr_translation, 'affine_iters': affine_iters,
+             'random_seed': random_seed, 'landmark_gap': landmark_gap,
+             'rbf_radius': rbf_radius, 'lr_deformations': lr_deformations,
+             'wd_deformations': wd_deformations, 'smoothness_factor': smoothness_factor,
+             'nonrigid_iters': nonrigid_iters})
+
+        # Iterate over chunks
+        for initial_frame in range(0, num_frames - chunk_size, chunk_size - overlap):
+            # Get next chunk
+            final_frame = initial_frame + chunk_size
+            chunk = scan[..., initial_frame: final_frame]
+
+            # Enhance field
+            field_dims = ((reso.ScanInfo if pipe == reso else meso.ScanInfo.Field) &
+                          field_key).fetch1('um_height', 'um_width')
+            original_field = registration.resize(chunk.mean(-1), field_dims,
+                                                 desired_res=1)
+            field = enhancement.sharpen_2pimage(enhancement.lcn(original_field, 15), 1)
+            field = field[15:-15, 15:-15] # drop some edges
+
+
+            # TODO: From here until Insert is taken verbatim from Registration, refactor
+            #  RIGID REGISTRATION
+            from skimage import feature
+            from scipy import ndimage
+
+            # Run registration with no rotations
+            px_z = field_z - stack_z + stack.shape[0] / 2 - 0.5
+            mini_stack = stack[max(0, int(round(px_z - rigid_zrange))): int(round(
+                px_z + rigid_zrange))]
+            corrs = np.stack(feature.match_template(s, field, pad_input=True) for s in
+                             mini_stack)
+            smooth_corrs = ndimage.gaussian_filter(corrs, 0.7)
+
+            # Get results
+            min_z = max(0, int(round(px_z - rigid_zrange)))
+            min_y = int(round(0.05 * stack.shape[1]))
+            min_x = int(round(0.05 * stack.shape[2]))
+            mini_corrs = smooth_corrs[:, min_y:-min_y, min_x:-min_x]
+            rig_z, rig_y, rig_x = np.unravel_index(np.argmax(mini_corrs),
+                                                   mini_corrs.shape)
+
+            # Rewrite coordinates with respect to original z
+            rig_z = (min_z + rig_z + 0.5) - stack.shape[0] / 2
+            rig_y = (min_y + rig_y + 0.5) - stack.shape[1] / 2
+            rig_x = (min_x + rig_x + 0.5) - stack.shape[2] / 2
+
+            del px_z, mini_stack, corrs, smooth_corrs, min_z, min_y, min_x, mini_corrs
+
+            # AFFINE REGISTRATION
+            import torch
+            from torch import optim
+            import torch.nn.functional as F
+
+            def sample_grid(volume, grid):
+                """ Volume is a d x h x w arrray, grid is a d1 x d2 x 3 (x, y, z)
+                coordinates and output is a d1 x d2 array"""
+                norm_factor = torch.as_tensor([s / 2 - 0.5 for s in volume.shape[::-1]])
+                norm_grid = grid / norm_factor  # between -1 and 1
+                resampled = F.grid_sample(volume.view(1, 1, *volume.shape),
+                                          norm_grid.view(1, 1, *norm_grid.shape),
+                                          padding_mode='zeros')
+                return resampled.squeeze()
+
+            # Create field grid (height x width x 2)
+            grid = registration.create_grid(field.shape)
+
+            # Create torch tensors
+            stack_ = torch.as_tensor(stack, dtype=torch.float32)
+            field_ = torch.as_tensor(field, dtype=torch.float32)
+            grid_ = torch.as_tensor(grid, dtype=torch.float32)
+
+            # Define parameters and optimizer
+            linear = torch.nn.Parameter(torch.eye(3)[:, :2])  # first two columns of rotation matrix
+            translation = torch.nn.Parameter(torch.tensor([rig_x, rig_y, rig_z]))  # translation vector
+            affine_optimizer = optim.Adam([{'params': linear, 'lr': lr_linear},
+                                           {'params': translation, 'lr': lr_translation}])
+
+            # Optimize
+            for i in range(affine_iters):
+                # Zero gradients
+                affine_optimizer.zero_grad()
+
+                # Compute gradients
+                pred_grid = registration.affine_product(grid_, linear, translation)  # w x h x 3
+                pred_field = sample_grid(stack_, pred_grid)
+                corr_loss = -(pred_field * field_).sum() / (torch.norm(pred_field) *
+                                                            torch.norm(field_))
+                print('Corr at iteration {}: {:5.4f}'.format(i, -corr_loss))
+                corr_loss.backward()
+
+                # Update
+                affine_optimizer.step()
+
+            # Save them (originals will be modified during non-rigid registration)
+            affine_linear = linear.detach().clone()
+            affine_translation = translation.detach().clone()
+
+            # NON-RIGID REGISTRATION
+            # Inspired by the the Demon's Algorithm (Thirion, 1998)
+            torch.manual_seed(random_seed)  # we use random initialization below
+
+            # Create landmarks (and their corresponding deformations)
+            first_y = int(round((field.shape[0] % landmark_gap) / 2))
+            first_x = int(round((field.shape[1] % landmark_gap) / 2))
+            landmarks = grid_[first_x::landmark_gap,
+                              first_y::landmark_gap].contiguous().view(-1, 2)  # num_landmarks x 2
+
+            # Compute rbf scores between landmarks and grid coordinates and between landmarks
+            grid_distances = torch.norm(grid_.unsqueeze(-2) - landmarks, dim=-1)
+            grid_scores = torch.exp(-(grid_distances * (1 / rbf_radius)) ** 2)  # w x h x num_landmarks
+            landmark_distances = torch.norm(landmarks.unsqueeze(-2) - landmarks, dim=-1)
+            landmark_scores = torch.exp(-(landmark_distances * (1 / 200)) ** 2)  # num_landmarks x num_landmarks
+
+            # Define parameters and optimizer
+            deformations = torch.nn.Parameter(torch.randn((landmarks.shape[0], 3)) / 10)  # N(0, 0.1)
+            nonrigid_optimizer = optim.Adam([deformations], lr=lr_deformations,
+                                            weight_decay=wd_deformations)
+
+            # Optimize
+            for i in range(nonrigid_iters):
+                # Zero gradients
+                affine_optimizer.zero_grad()  # we reuse affine_optimizer so the affine matrix changes slowly
+                nonrigid_optimizer.zero_grad()
+
+                # Compute grid with radial basis
+                affine_grid = registration.affine_product(grid_, linear, translation)
+                warping_field = torch.einsum('whl,lt->wht', (grid_scores, deformations))
+                pred_grid = affine_grid + warping_field
+                pred_field = sample_grid(stack_, pred_grid)
+
+                # Compute loss
+                corr_loss = -(pred_field * field_).sum() / (torch.norm(pred_field) *
+                                                            torch.norm(field_))
+
+                # Compute cosine similarity between landmarks (and weight em by distance)
+                norm_deformations = deformations / torch.norm(deformations, dim=-1,
+                                                              keepdim=True)
+                cosine_similarity = torch.mm(norm_deformations, norm_deformations.t())
+                reg_term = -((cosine_similarity * landmark_scores).sum() /
+                             landmark_scores.sum())
+
+                # Compute gradients
+                loss = corr_loss + smoothness_factor * reg_term
+                print('Corr/loss at iteration {}: {:5.4f}/{:5.4f}'.format(i, -corr_loss,
+                                                                          loss))
+                loss.backward()
+
+                # Update
+                affine_optimizer.step()
+                nonrigid_optimizer.step()
+
+            # Save final results
+            nonrigid_linear = linear.detach().clone()
+            nonrigid_translation = translation.detach().clone()
+            nonrigid_landmarks = landmarks.clone()
+            nonrigid_deformations = deformations.detach().clone()
+
+            # COMPUTE SCORES (USING THE ENHANCED AND CROPPED VERSION OF THE FIELD)
+            # Rigid
+            pred_grid = registration.affine_product(grid_, torch.eye(3)[:, :2],
+                                                    torch.tensor([rig_x, rig_y, rig_z]))
+            pred_field = sample_grid(stack_, pred_grid).numpy()
+            rig_score = np.corrcoef(field.ravel(), pred_field.ravel())[0, 1]
+
+            # Affine
+            pred_grid = registration.affine_product(grid_, affine_linear,
+                                                    affine_translation)
+            pred_field = sample_grid(stack_, pred_grid).numpy()
+            affine_score = np.corrcoef(field.ravel(), pred_field.ravel())[0, 1]
+
+            # Non-rigid
+            affine_grid = registration.affine_product(grid_, nonrigid_linear,
+                                                      nonrigid_translation)
+            warping_field = torch.einsum('whl,lt->wht', (grid_scores, nonrigid_deformations))
+            pred_grid = affine_grid + warping_field
+            pred_field = sample_grid(stack_, pred_grid).numpy()
+            nonrigid_score = np.corrcoef(field.ravel(), pred_field.ravel())[0, 1]
+
+            # FIND FIELDS IN STACK
+            # Create grid of original size (h x w x 2)
+            original_grid = registration.create_grid(original_field.shape)
+
+            # Create torch tensors
+            original_stack_ = torch.as_tensor(original_stack, dtype=torch.float32)
+            original_grid_ = torch.as_tensor(original_grid, dtype=torch.float32)
+
+            # Rigid
+            pred_grid = registration.affine_product(original_grid_, torch.eye(3)[:, :2],
+                                                    torch.tensor([rig_x, rig_y, rig_z]))
+            rig_field = sample_grid(original_stack_, pred_grid).numpy()
+
+            # Affine
+            pred_grid = registration.affine_product(original_grid_, affine_linear,
+                                                    affine_translation)
+            affine_field = sample_grid(original_stack_, pred_grid).numpy()
+
+            # Non-rigid
+            affine_grid = registration.affine_product(original_grid_, nonrigid_linear,
+                                                      nonrigid_translation)
+            original_grid_distances = torch.norm(original_grid_.unsqueeze(-2) -
+                                                 nonrigid_landmarks, dim=-1)
+            original_grid_scores = torch.exp(-(original_grid_distances *
+                                               (1 / rbf_radius)) ** 2)
+            warping_field = torch.einsum('whl,lt->wht', (original_grid_scores,
+                                                         nonrigid_deformations))
+            pred_grid = affine_grid + warping_field
+            nonrigid_field = sample_grid(original_stack_, pred_grid).numpy()
+
+
+            # Insert chunk
+            stack_z, stack_y, stack_x = (CorrectedStack & stack_key).fetch1('z', 'y', 'x')
+            frame_num = int(round((initial_frame + final_frame) / 2))
+            self.Chunk.insert1({**key, 'frame_num': frame_num + 1,
+                                'initial_frame': initial_frame + 1,
+                                'final_frame': final_frame, 'avg_chunk': original_field})
+            self.Rigid.insert1({**key, 'frame_num': frame_num + 1,
+                                'reg_x': stack_x + rig_x, 'reg_y': stack_y + rig_y,
+                                'reg_z': stack_z + rig_z, 'score': rig_score,
+                                'reg_field': rig_field})
+            self.Affine.insert1({**key, 'frame_num': frame_num + 1,
+                                 'a11': affine_linear[0, 0].item(),
+                                 'a21': affine_linear[1, 0].item(),
+                                 'a31': affine_linear[2, 0].item(),
+                                 'a12': affine_linear[0, 1].item(),
+                                 'a22': affine_linear[1, 1].item(),
+                                 'a32': affine_linear[2, 1].item(),
+                                 'reg_x': stack_x + affine_translation[0].item(),
+                                 'reg_y': stack_y + affine_translation[1].item(),
+                                 'reg_z': stack_z + affine_translation[2].item(),
+                                 'score': affine_score,
+                                 'reg_field': affine_field})
+            self.NonRigid.insert1({**key, 'frame_num': frame_num + 1,
+                                   'a11': nonrigid_linear[0, 0].item(),
+                                   'a21': nonrigid_linear[1, 0].item(),
+                                   'a31': nonrigid_linear[2, 0].item(),
+                                   'a12': nonrigid_linear[0, 1].item(),
+                                   'a22': nonrigid_linear[1, 1].item(),
+                                   'a32': nonrigid_linear[2, 1].item(),
+                                   'reg_x': stack_x + nonrigid_translation[0].item(),
+                                   'reg_y': stack_y + nonrigid_translation[1].item(),
+                                   'reg_z': stack_z + nonrigid_translation[2].item(),
+                                   'landmarks': nonrigid_landmarks.numpy(),
+                                   'deformations': nonrigid_deformations.numpy(),
+                                   'score': nonrigid_score, 'reg_field': nonrigid_field})
+        # self.notify(key)
+
+    @notify.ignore_exceptions
+    def notify(self, key):
+        frame_num, zs, scores = (self.Affine & key).fetch('frame_num', 'reg_z', 'score')
+
+        plt.plot(frame_num, -zs, zorder=1)
+        plt.scatter(frame_num, -zs, marker='*', s=scores * 70, zorder=2, color='r')
+        plt.title('Registration over time (star size represents confidence)')
+        plt.ylabel('z (surface at 0)')
+        plt.xlabel('Frames')
+        img_filename = '/tmp/{}.png'.format(key_hash(key))
+        plt.savefig(img_filename)
+        plt.close()
+
+        msg = ('registration over time of {animal_id}-{scan_session}-{scan_idx} field '
+               '{field} to {animal_id}-{stack_session}-{stack_idx}')
+        msg = msg.format(**key)
+        slack_user = notify.SlackUser() & (experiment.Session() & key &
+                                           {'session': key['stack_session']})
+        slack_user.notify(file=img_filename, file_title=msg)
+
+    def _get_corrected_scan(key):
+        # Read scan
+        scan_filename = (experiment.Scan & key).local_filenames_as_wildcard
+        scan = scanreader.read_scan(scan_filename)
+
+        # Get some params
+        pipe = reso if (reso.ScanInfo() & key) else meso
+
+        # Map: Correct scan in parallel
+        f = performance.parallel_correct_scan  # function to map
+        raster_phase = (pipe.RasterCorrection & key).fetch1('raster_phase')
+        fill_fraction = (pipe.ScanInfo & key).fetch1('fill_fraction')
+        y_shifts, x_shifts = (pipe.MotionCorrection & key).fetch1('y_shifts', 'x_shifts')
+        kwargs = {'raster_phase': raster_phase, 'fill_fraction': fill_fraction,
+                  'y_shifts': y_shifts, 'x_shifts': x_shifts}
+        results = performance.map_frames(f, scan, field_id=key['field'] - 1,
+                                         channel=key['channel'] - 1, kwargs=kwargs)
+
+        # Reduce: Make a single array (height x width x num_frames)
+        height, width, _ = results[0][1].shape
+        corrected_scan = np.zeros([height, width, scan.num_frames], dtype=np.float32)
+        for frames, chunk in results:
+            corrected_scan[..., frames] = chunk
+
+        return corrected_scan
+
+    def session_plot(self):
+        """ Create a registration plot for the session"""
+        import matplotlib.pyplot as plt
+        import matplotlib.ticker as ticker
+
+        # Check that plot is restricted to a single stack and a single session
+        regot_key = self.fetch('KEY', limit=1)[0]
+        stack_key = {n: regot_key[n] for n in ['animal_id', 'stack_session', 'stack_idx',
+                                               'pipe_version', 'volume_id']}
+        session_key = {n: regot_key[n] for n in ['animal_id', 'scan_session']}
+        if len(self & stack_key) != len(self):
+            raise PipelineException('Plot can only be generated for one stack at a time')
+        if len(self & session_key) != len(self):
+            raise PipelineException('Plot can only be generated for one session at a '
+                                    'time')
+
+        # Get field times and depths
+        ts = []
+        zs = []
+        session_ts = (experiment.Session & regot_key &
+                      {'session': regot_key['scan_session']}).fetch1('session_ts')
+        for key in self.fetch('KEY'):
+            field_key = {'animal_id': key['animal_id'], 'session': key['scan_session'],
+                         'scan_idx': key['scan_idx'], 'field': key['field']}
+            scan_ts = (experiment.Scan & field_key).fetch1('scan_ts')
+            fps = (reso.ScanInfo & field_key or meso.ScanInfo & field_key).fetch1('fps')
+
+            frame_nums, field_zs = (RegistrationOverTime.Affine & key).fetch('frame_num',
+                                                                             'reg_z')
+            field_ts = (scan_ts - session_ts).seconds + frame_nums / fps  # in seconds
+
+            ts.append(field_ts)
+            zs.append(field_zs)
+
+        # Plot
+        fig = plt.figure(figsize=(20, 8))
+        for ts_, zs_ in zip(ts, zs):
+            plt.plot(ts_ / 3600, zs_)
+        plt.title('Registered zs for {animal_id}-{scan_session} into {animal_id}-'
+                  '{stack_session}-{stack_idx} starting at {t}'.format(t=session_ts,
+                                                                       **regot_key))
+        plt.ylabel('Registered zs')
+        plt.xlabel('Hours')
+
+        # Plot formatting
+        plt.gca().invert_yaxis()
+        plt.gca().yaxis.set_major_locator(ticker.MultipleLocator(10))
+        plt.grid(linestyle='--', alpha=0.8)
+
+        return fig
+
+
+@schema
+class ZDrift(dj.Computed):
+    definition = """ # assuming a linear drift in z, compute the slope of this line
+
+    -> RegistrationOverTime
+    ---
+    z_slope                 : float            # (um/hour) z drift (of the center of the field)
+    rmse                    : float            # (um) root mean squared error of the fit
+    """
+    #TODO: Compute zdrift individually per pixel
+
+    def _make_tuples(self, key):
+        # Get all drifts (in z)
+        frame_nums, zs = (RegistrationOverTime.Affine & key).fetch('frame_num', 'reg_z')
+
+        # Fit a line (robust regression)
+        from sklearn import linear_model
+        X = frame_nums.reshape(-1, 1)
+        y = zs
+        model = linear_model.TheilSenRegressor()
+        model.fit(X, y)
+
+        #  Get results
+        field_key = {**key, 'session': key['scan_session']}
+        fps = (reso.ScanInfo() & field_key or meso.ScanInfo() & field_key).fetch1('fps')
+        z_slope = model.coef_[0] * fps * 3600  # um/hour
+        rmse = np.sqrt(np.mean((zs - model.predict(X)) ** 2))
+
+        self.insert1({**key, 'z_slope': z_slope, 'rmse': rmse})
+
+    def session_plot(self):
+        """ Create boxplots for the session (one per scan)."""
+        import matplotlib.pyplot as plt
+        import matplotlib.ticker as ticker
+
+        # Check that plot is restricted to a single stack and a single session
+        regot_key = self.fetch('KEY', limit=1)[0]
+        stack_key = {n: regot_key[n] for n in ['animal_id', 'stack_session', 'stack_idx',
+                                               'pipe_version', 'volume_id']}
+        session_key = {n: regot_key[n] for n in ['animal_id', 'scan_session']}
+        if len(self & stack_key) != len(self):
+            raise PipelineException('Plot can only be generated for one stack at a time')
+        if len(self & session_key) != len(self):
+            raise PipelineException('Plot can only be generated for one session at a '
+                                    'time')
+
+        # Get field times and depths
+        z_slopes = []
+        scan_idxs = np.unique(self.fetch('scan_idx'))
+        for scan_idx in scan_idxs:
+            scan_slopes = (self & {**session_key, 'scan_idx': scan_idx}).fetch('z_slope')
+            z_slopes.append(scan_slopes)
+
+        # Plot
+        fig = plt.figure(figsize=(7, 4))
+        plt.boxplot(z_slopes)
+        plt.title('Z drift for {animal_id}-{scan_session} into {animal_id}-'
+                  '{stack_session}-{stack_idx}'.format(**regot_key))
+        plt.ylabel('Z drift (um/hour)')
+        plt.xlabel('Scans')
+        plt.xticks(range(1, len(scan_idxs) + 1), scan_idxs)
+
+        # Plot formatting
+        plt.gca().invert_yaxis()
+        plt.gca().yaxis.set_major_locator(ticker.MultipleLocator(5))
+        plt.grid(linestyle='--', alpha=0.8)
+
+        return fig
+
 
 @schema
 class StackSet(dj.Computed):
@@ -1922,7 +2232,7 @@ class StackSet(dj.Computed):
             """ Used for sorting. """
             return True
 
-    def _make_tuples(self, key):
+    def make(self, key):
         from scipy.spatial import distance
         from scipy import ndimage
         import bisect
@@ -2036,9 +2346,9 @@ class StackSet(dj.Computed):
         plt.close(fig)
 
         msg = ('StackSet for {animal_id}-{stack_session}-{stack_idx}: {num_units} final '
-               'units').format(**key, num_units=len(self.Unit() & key))
-        slack_user = notify.SlackUser() & (experiment.Session() & key &
-                                           {'session': key['stack_session']})
+               'units').format(**key, num_units=len(self.Unit & key))
+        slack_user = notify.SlackUser & (experiment.Session & key &
+                                         {'session': key['stack_session']})
         slack_user.notify(file=img_filename, file_title=msg)
 
     def plot_centroids3d(self):
@@ -2050,7 +2360,7 @@ class StackSet(dj.Computed):
         from mpl_toolkits.mplot3d import Axes3D
 
         # Get centroids
-        xs, ys, zs = (StackSet.Unit() & self).fetch('munit_x', 'munit_y', 'munit_z')
+        xs, ys, zs = (StackSet.Unit & self).fetch('munit_x', 'munit_y', 'munit_z')
 
         # Plot
         fig = plt.figure(figsize=(10, 10))
