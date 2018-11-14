@@ -2056,7 +2056,7 @@ class RegistrationOverTime(dj.Computed):
         # Check that plot is restricted to a single stack and a single session
         regot_key = self.fetch('KEY', limit=1)[0]
         stack_key = {n: regot_key[n] for n in ['animal_id', 'stack_session', 'stack_idx',
-                                               'pipe_version', 'volume_id']}
+                                               'volume_id']}
         session_key = {n: regot_key[n] for n in ['animal_id', 'scan_session']}
         if len(self & stack_key) != len(self):
             raise PipelineException('Plot can only be generated for one stack at a time')
@@ -2101,34 +2101,44 @@ class RegistrationOverTime(dj.Computed):
 
 
 @schema
-class ZDrift(dj.Computed):
-    definition = """ # assuming a linear drift in z, compute the slope of this line
-
+class Drift(dj.Computed):
+    definition = """ # assuming a linear drift, compute the rate of drift (of the affine registration)
+    
     -> RegistrationOverTime
     ---
-    z_slope                 : float            # (um/hour) z drift (of the center of the field)
-    rmse                    : float            # (um) root mean squared error of the fit
+    z_slope                 : float            # (um/hour) drift of the center of the field
+    y_slope                 : float            # (um/hour) drift of the center of the field
+    x_slope                 : float            # (um/hour) drift of the center of the field
+    z_rmse                  : float            # (um) root mean squared error of the fit
+    y_rmse                  : float            # (um) root mean squared error of the fit
+    x_rmse                  : float            # (um) root mean squared error of the fit
     """
-    #TODO: Compute zdrift individually per pixel
+    #TODO: Compute drifts per pixel
 
     def _make_tuples(self, key):
-        # Get all drifts (in z)
-        frame_nums, zs = (RegistrationOverTime.Affine & key).fetch('frame_num', 'reg_z')
-
-        # Fit a line (robust regression)
         from sklearn import linear_model
-        X = frame_nums.reshape(-1, 1)
-        y = zs
-        model = linear_model.TheilSenRegressor()
-        model.fit(X, y)
 
-        #  Get results
+        # Get drifts per axis
+        frame_nums, zs, ys, xs = (RegistrationOverTime.Affine & key).fetch('frame_num',
+                'reg_z', 'reg_y', 'reg_x')
+
+        # Get scan fps
         field_key = {**key, 'session': key['scan_session']}
         fps = (reso.ScanInfo() & field_key or meso.ScanInfo() & field_key).fetch1('fps')
-        z_slope = model.coef_[0] * fps * 3600  # um/hour
-        rmse = np.sqrt(np.mean((zs - model.predict(X)) ** 2))
 
-        self.insert1({**key, 'z_slope': z_slope, 'rmse': rmse})
+        # Fit a line through the values (robust regression)
+        slopes = []
+        rmses = []
+        X = frame_nums.reshape(-1, 1)
+        for y in [zs, ys, xs]:
+            model = linear_model.TheilSenRegressor()
+            model.fit(X, y)
+            slopes.append(model.coef_[0] * fps * 3600)
+            rmses.append(np.sqrt(np.mean(zs - model.predict(X)) ** 2))
+
+        self.insert1({**key, 'z_slope': slopes[0], 'y_slope': slopes[1],
+                      'x_slope': slopes[2], 'z_rmse': rmses[0], 'y_rmse': rmses[1],
+                      'x_rmse': rmses[2]})
 
     def session_plot(self):
         """ Create boxplots for the session (one per scan)."""
@@ -2138,7 +2148,7 @@ class ZDrift(dj.Computed):
         # Check that plot is restricted to a single stack and a single session
         regot_key = self.fetch('KEY', limit=1)[0]
         stack_key = {n: regot_key[n] for n in ['animal_id', 'stack_session', 'stack_idx',
-                                               'pipe_version', 'volume_id']}
+                                               'volume_id']}
         session_key = {n: regot_key[n] for n in ['animal_id', 'scan_session']}
         if len(self & stack_key) != len(self):
             raise PipelineException('Plot can only be generated for one stack at a time')
