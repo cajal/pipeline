@@ -107,9 +107,8 @@ class SegmentationFromStack(dj.Computed):
             height = (instance_prop.bbox[4] - instance_prop.bbox[1])
             width = (instance_prop.bbox[5] - instance_prop.bbox[2])
             volume = instance_prop.area
-            sunit_x, sunit_y, sunit_z = (np.array([stack_z, stack_y, stack_x]) + np.array(
+            sunit_z, sunit_y, sunit_x = (np.array([stack_z, stack_y, stack_x]) + np.array(
                 instance_prop.centroid) - np.array(instance.shape) / 2 + 0.5)
-
 
             binary_sunit = reg_segmentation == sunit_id
             area = np.count_nonzero(binary_sunit)
