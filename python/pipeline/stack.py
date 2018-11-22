@@ -2113,7 +2113,10 @@ class Drift(dj.Computed):
     y_rmse                  : float            # (um) root mean squared error of the fit
     x_rmse                  : float            # (um) root mean squared error of the fit
     """
-    #TODO: Compute drifts per pixel
+    @property
+    def key_source(self):
+        return RegistrationOverTime.aggr(RegistrationOverTime.Chunk.proj(),
+                                         nchunks='COUNT(*)') & 'nchunks > 1'
 
     def _make_tuples(self, key):
         from sklearn import linear_model
