@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scanreader
 from scipy import signal
+from scipy import ndimage
 import itertools
 
 from . import experiment, notify, shared, reso, meso
@@ -1068,10 +1069,10 @@ class Segmentation(dj.Computed):
 class RegistrationTask(dj.Manual):
     definition = """ # declare scan fields to register to a stack as well as channels and method used
 
-    (stack_session) -> CorrectedStack(session) # animal_id, stack_session, stack_idx, volume_id
-    (stack_channel) -> shared.Channel(channel)
-    (scan_session) -> experiment.Scan(session)  # animal_id, scan_session, scan_idx
-    (scan_channel) -> shared.Channel(channel)
+    -> CorrectedStack.proj(stack_session='session') # animal_id, stack_session, stack_idx, volume_id
+    -> shared.Channel.proj(stack_channel='channel')
+    -> experiment.Scan.proj(scan_session='session')  # animal_id, scan_session, scan_idx
+    -> shared.Channel.proj(scan_channel='channel')
     -> shared.Field
     -> shared.RegistrationMethod
     """
@@ -1111,7 +1112,7 @@ class Registration(dj.Computed):
     """
     definition = """ # align a 2-d scan field to a stack
 
-    (stack_session, stack_channel) -> PreprocessedStack(session, channel)
+    -> PreprocessedStack.proj(stack_session='session', stack_channel='channel')
     -> RegistrationTask
     """
     @property
@@ -1153,7 +1154,7 @@ class Registration(dj.Computed):
     class NonRigid(dj.Part):
         definition = """ # affine plus deformation field learned via gradient descent
 
-        ->master
+        -> master
         ---
         a11             : float         # (um) element in row 1, column 1 of the affine matrix
         a21             : float         # (um) element in row 2, column 1 of the affine matrix
@@ -1234,7 +1235,6 @@ class Registration(dj.Computed):
 
         # RIGID REGISTRATION
         from skimage import feature
-        from scipy import ndimage
 
         # Get initial estimate of field depth from experimenters
         field_z = (pipe.ScanInfo.Field & field_key).fetch1('z')
@@ -1552,10 +1552,92 @@ class Registration(dj.Computed):
 
 
 @schema
+class FieldSegmentation(dj.Computed):
+    definition = """ # structural segmentation of a 2-d field (using the affine registration)
+    
+    -> Segmentation.proj(stack_session='session', segm_channel='channel')
+    -> Registration
+    ---
+    segm_field          : longblob      # field (image x height) of cell ids at 1 um/px
+    """
+
+    class StackUnit(dj.Part):
+        definition = """ # single unit from the stack that appears in the field
+
+        -> master
+        sunit_id        : int           # id in the stack segmentation
+        ---
+        depth           : int           # (um) size in z   
+        height          : int           # (um) size in y
+        width           : int           # (um) size in x
+        volume          : float         # (um) volume of the 3-d unit
+        area            : float         # (um) area of the 2-d mask  
+        sunit_z         : float         # (um) centroid for the 3d unit in the motor coordinate system
+        sunit_y         : float         # (um) centroid for the 3d unit in the motor coordinate system
+        sunit_x         : float         # (um) centroid for the 3d unit in the motor coordinate system
+        mask_z          : float         # (um) centroid for the 2d mask in the motor coordinate system
+        mask_y          : float         # (um) centroid for the 2d mask in the motor coordinate system
+        mask_x          : float         # (um) centroid for the 2d mask in the motor coordinate system
+        distance        : float         # (um) euclidean distance between centroid of 2-d mask and 3-d unit
+        """
+
+    def _make_tuples(self, key):
+        from skimage import measure
+
+        # Get structural segmentation
+        stack_key = {'animal_id': key['animal_id'], 'session': key['stack_session'],
+                     'stack_idx': key['stack_idx'], 'volume_id': key['volume_id'],
+                     'channel': key['segm_channel']}
+        instance = (Segmentation & stack_key).fetch1('segmentation')
+
+        # Get segmented field
+        grid = (Registration & key).get_grid(type='affine', desired_res=1)
+        stack_center = np.array((CorrectedStack & stack_key).fetch1('z', 'y', 'x'))
+        px_grid = (grid[..., ::-1] - stack_center - 0.5 + np.array(instance.shape) / 2)
+        segmented_field = ndimage.map_coordinates(instance, np.moveaxis(px_grid, -1, 0),
+                                                  order=0)  # nearest neighbor sampling
+
+        # Insert in FieldSegmentation
+        self.insert1({**key, 'segm_field': segmented_field})
+
+        # Insert each StackUnit
+        instance_props = measure.regionprops(instance)
+        instance_labels = np.array([p.label for p in instance_props])
+        for prop in measure.regionprops(segmented_field):
+            sunit_id = prop.label
+            instance_prop = instance_props[np.argmax(instance_labels == sunit_id)]
+
+            depth = (instance_prop.bbox[3] - instance_prop.bbox[0])
+            height = (instance_prop.bbox[4] - instance_prop.bbox[1])
+            width = (instance_prop.bbox[5] - instance_prop.bbox[2])
+            volume = instance_prop.area
+            sunit_z, sunit_y, sunit_x = (stack_center + np.array(instance_prop.centroid) -
+                                         np.array(instance.shape) / 2 + 0.5)
+
+            binary_sunit = segmented_field == sunit_id
+            area = np.count_nonzero(binary_sunit)
+            px_y, px_x = ndimage.measurements.center_of_mass(binary_sunit)
+            px_coords = np.array([[px_y], [px_x]])
+            mask_x, mask_y, mask_z = [ndimage.map_coordinates(grid[..., i], px_coords,
+                                                              order=1)[0] for i in
+                                      range(3)]
+            distance = np.sqrt((sunit_z - mask_z) ** 2 + (sunit_y - mask_y) ** 2 +
+                               (sunit_x - mask_x) ** 2)
+
+            # Insert in StackUnit
+            self.StackUnit.insert1({**key, 'sunit_id': sunit_id, 'depth': depth,
+                                    'height': height, 'width': width, 'volume': volume,
+                                    'area': area, 'sunit_z': sunit_z, 'sunit_y': sunit_y,
+                                    'sunit_x': sunit_x, 'mask_z': mask_z,
+                                    'mask_y': mask_y, 'mask_x': mask_x,
+                                    'distance': distance})
+
+
+@schema
 class RegistrationOverTime(dj.Computed):
     definition = """ # register a field at different timepoints of recording
     
-    (stack_session, stack_channel) -> PreprocessedStack(session, channel)
+    -> PreprocessedStack.proj(stack_session='session', stack_channel='channel')
     -> RegistrationTask
     """
     @property
@@ -1637,6 +1719,7 @@ class RegistrationOverTime(dj.Computed):
 
     class Rigid(dj.Part):
         definition = """ # rigid registration of a single chunk
+        
         -> RegistrationOverTime.Chunk
         ---
         reg_x       : float         # (um) center of field in motor coordinate system
@@ -1779,7 +1862,6 @@ class RegistrationOverTime(dj.Computed):
             # TODO: From here until Insert is taken verbatim from Registration, refactor
             #  RIGID REGISTRATION
             from skimage import feature
-            from scipy import ndimage
 
             # Run registration with no rotations
             px_z = field_z - stack_z + stack.shape[0] / 2 - 0.5
@@ -2187,7 +2269,7 @@ class Drift(dj.Computed):
 class StackSet(dj.Computed):
     definition = """ # match segmented masks by proximity in the stack
     
-    (stack_session) -> CorrectedStack(session)  # animal_id, stack_session, stack_idx, volume_id
+    -> CorrectedStack.proj(stack_session='session')  # animal_id, stack_session, stack_idx, volume_id
     -> shared.RegistrationMethod
     -> shared.SegmentationMethod
     ---
@@ -2216,7 +2298,7 @@ class StackSet(dj.Computed):
         definition = """ # Scan unit to stack unit match (n:1 relation)
         
         -> master
-        (scan_session) -> experiment.Scan(session)  # animal_id, scan_session, scan_idx
+        -> experiment.Scan.proj(scan_session='session')  # animal_id, scan_session, scan_idx
         unit_id             :int        # unit id from ScanSet.Unit
         ---
         -> StackSet.Unit
@@ -2247,7 +2329,6 @@ class StackSet(dj.Computed):
 
     def make(self, key):
         from scipy.spatial import distance
-        from scipy import ndimage
         import bisect
 
         # Set some params

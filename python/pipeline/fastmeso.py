@@ -64,9 +64,8 @@ class SegmentationFromStack(dj.Computed):
 
         # Get instance segmentation
         stack_key = {'animal_id': key['animal_id'], 'session': key['stack_session'],
-                     'stack_idx': key['stack_idx'], 'volume_id': key['volume_id'],
-                     'channel': key['stack_channel']}
-        instance = (stack.Segmentation & stack_key).fetch1('segmentation')
+                     'stack_idx': key['stack_idx'], 'volume_id': key['volume_id']}
+        instance = (stack.Segmentation & stack_key).fetch1('segmentation') # fails if more than one channel is segmented
 
         # Get segmented field
         grid = (stack.RegistrationOverTime.Chunk & key).get_grid(desired_res=1)
