@@ -19,7 +19,7 @@ downwards, y in the second axis pointing towards you and x on the third axis poi
 the right.
 """
 
-schema = dj.schema('pipeline_stack', locals(), create_tables=False)
+schema = dj.schema('pipeline_stack', locals(), create_tables=True)
 dj.config['external-stack'] = {'protocol': 'file',
                                'location': '/mnt/scratch07/pipeline-externals'}
 
@@ -1555,7 +1555,7 @@ class Registration(dj.Computed):
 class FieldSegmentation(dj.Computed):
     definition = """ # structural segmentation of a 2-d field (using the affine registration)
     
-    -> Segmentation.proj(stack_session='session', segm_channel='channel')
+    -> Segmentation.proj(stack_session='session', stacksegm_channel='channel')
     -> Registration
     ---
     segm_field          : longblob      # field (image x height) of cell ids at 1 um/px
@@ -1587,7 +1587,7 @@ class FieldSegmentation(dj.Computed):
         # Get structural segmentation
         stack_key = {'animal_id': key['animal_id'], 'session': key['stack_session'],
                      'stack_idx': key['stack_idx'], 'volume_id': key['volume_id'],
-                     'channel': key['segm_channel']}
+                     'channel': key['stacksegm_channel']}
         instance = (Segmentation & stack_key).fetch1('segmentation')
 
         # Get segmented field
