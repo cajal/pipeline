@@ -130,7 +130,7 @@ class SegmentationFromStack(dj.Computed):
             intersection = np.logical_and(binary_masks, binary_sunit).sum(axis=(1, 2)) # num_masks
             union = np.logical_or(binary_masks, binary_sunit).sum(axis=(1, 2)) # num_masks
             ious = intersection / union
-            if np.any(ious > 0.2):
+            if np.any(ious > 0.1):
                 caiman_id = np.argmax(ious) + 1
                 caiman_iou = ious[caiman_id - 1]
                 area = np.count_nonzero(binary_sunit)
