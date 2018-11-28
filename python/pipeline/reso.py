@@ -571,6 +571,7 @@ class MotionCorrection(dj.Computed):
         return lambda scan, indices=slice(None): galvo_corrections.correct_motion(scan,
                                                  x_shifts[indices], y_shifts[indices])
 
+
 @schema
 class SummaryImages(dj.Computed):
     definition = """ # summary images for each field and channel after corrections
@@ -581,8 +582,7 @@ class SummaryImages(dj.Computed):
 
     @property
     def key_source(self):
-        # Run make_tuples once per scan iff MotionCorrection is done
-        return ScanInfo() & MotionCorrection() & {'pipe_version': CURRENT_VERSION}
+        return MotionCorrection() & {'pipe_version': CURRENT_VERSION}
 
     class Average(dj.Part):
         definition = """ # mean of each pixel across time
