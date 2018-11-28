@@ -327,9 +327,7 @@ class RasterCorrection(dj.Computed):
 
     @property
     def key_source(self):
-        # Run make_tuples once per scan iff correction channel has been set for all fields
-        scans = (ScanInfo() & CorrectionChannel()) - (ScanInfo.Field() - CorrectionChannel())
-        return scans & {'pipe_version': CURRENT_VERSION}
+        return ScanInfo * CorrectionChannel & {'pipe_version': CURRENT_VERSION}
 
     def _make_tuples(self, key):
         from scipy.signal import tukey
@@ -338,46 +336,34 @@ class RasterCorrection(dj.Computed):
         scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
         scan = scanreader.read_scan(scan_filename, dtype=np.float32)
 
-        for field_id in range(scan.num_fields):
-            print('Computing raster correction for field', field_id + 1)
+        # Select correction channel
+        channel = (CorrectionChannel() & key).fetch1('channel') - 1
+        field_id = key['field'] - 1
 
-            # Select channel
-            correction_channel = (CorrectionChannel() & key & {'field': field_id + 1})
-            channel = correction_channel.fetch1('channel') - 1
+        # Load some frames from the middle of the scan
+        middle_frame =  int(np.floor(scan.num_frames / 2))
+        frames = slice(max(middle_frame - 1000, 0), middle_frame + 1000)
+        mini_scan = scan[field_id, :, :, channel, frames]
 
-            # Create results tuple
-            tuple_ = key.copy()
-            tuple_['field'] = field_id + 1
+        # Create results tuple
+        tuple_ = key.copy()
 
-            # Load some frames from the middle of the scan
-            middle_frame =  int(np.floor(scan.num_frames / 2))
-            frames = slice(max(middle_frame - 1000, 0), middle_frame + 1000)
-            mini_scan = scan[field_id, :, :, channel, frames]
+        # Create template (average frame tapered to avoid edge artifacts)
+        taper = np.sqrt(np.outer(tukey(scan.image_height, 0.4),
+                                 tukey(scan.image_width, 0.4)))
+        anscombed = 2 * np.sqrt(mini_scan - mini_scan.min() + 3 / 8)  # anscombe transform
+        template = np.mean(anscombed, axis=-1) * taper
+        tuple_['raster_template'] = template
 
-            # Create template (average frame tapered to avoid edge artifacts)
-            taper = np.sqrt(np.outer(tukey(scan.image_height, 0.4),
-                                     tukey(scan.image_width, 0.4)))
-            anscombed = 2 * np.sqrt(mini_scan - mini_scan.min() + 3 / 8) # anscombe transform
-            template = np.mean(anscombed, axis=-1) * taper
-            tuple_['raster_template'] = template
+        # Compute raster correction parameters
+        if scan.is_bidirectional:
+            tuple_['raster_phase'] = galvo_corrections.compute_raster_phase(template,
+                                                         scan.temporal_fill_fraction)
+        else:
+            tuple_['raster_phase'] = 0
 
-            # Compute raster correction parameters
-            if scan.is_bidirectional:
-                tuple_['raster_phase'] = galvo_corrections.compute_raster_phase(template,
-                                                             scan.temporal_fill_fraction)
-            else:
-                tuple_['raster_phase'] = 0
-
-            # Insert
-            self.insert1(tuple_)
-
-        self.notify(key)
-
-    @notify.ignore_exceptions
-    def notify(self, key):
-        msg = 'raster phases for {animal_id}-{session}-{scan_idx}: {phases}'.format(**key,
-                phases=(self & key).fetch('raster_phase'))
-        (notify.SlackUser() & (experiment.Session() & key)).notify(msg)
+        # Insert
+        self.insert1(tuple_)
 
     def get_correct_raster(self):
         """ Returns a function to perform raster correction on the scan. """
@@ -408,8 +394,7 @@ class MotionCorrection(dj.Computed):
 
     @property
     def key_source(self):
-        # Run make_tuples once per scan iff RasterCorrection is done
-        return ScanInfo() & RasterCorrection() & {'pipe_version': CURRENT_VERSION}
+        return RasterCorrection() & {'pipe_version': CURRENT_VERSION}
 
     def _make_tuples(self, key):
         """Computes the motion shifts per frame needed to correct the scan."""
@@ -421,83 +406,85 @@ class MotionCorrection(dj.Computed):
 
         # Get some params
         px_height, px_width = (ScanInfo() & key).fetch1('px_height', 'px_width')
+        channel = (CorrectionChannel() & key).fetch1('channel') - 1
+        field_id = key['field'] - 1
 
-        for field_id in range(scan.num_fields):
-            print('Correcting motion in field', field_id + 1)
-            field_key = {**key, 'field': field_id + 1}
+        # Load some frames from middle of scan to compute template
+        skip_rows = int(round(px_height * 0.10))  # we discard some rows/cols to avoid edge artifacts
+        skip_cols = int(round(px_width * 0.10))
+        middle_frame = int(np.floor(scan.num_frames / 2))
+        mini_scan = scan[field_id, skip_rows: -skip_rows, skip_cols: -skip_cols, channel,
+                         max(middle_frame - 1000, 0): middle_frame + 1000]
+        mini_scan = mini_scan.astype(np.float32, copy=False)
 
-            # Select channel
-            correction_channel = (CorrectionChannel() & field_key)
-            channel = correction_channel.fetch1('channel') - 1
+        # Correct mini scan
+        correct_raster = (RasterCorrection() & key).get_correct_raster()
+        mini_scan = correct_raster(mini_scan)
 
-            # Load some frames from middle of scan to compute template
-            skip_rows = int(round(px_height * 0.10)) # we discard some rows/cols to avoid edge artifacts
-            skip_cols = int(round(px_width * 0.10))
-            middle_frame = int(np.floor(scan.num_frames / 2))
-            mini_scan = scan[field_id, skip_rows:-skip_rows, skip_cols: -skip_cols,
-                             channel, max(middle_frame - 1000, 0): middle_frame + 1000]
-            mini_scan = mini_scan.astype(np.float32, copy=False)
+        # Create template
+        mini_scan = 2 * np.sqrt(mini_scan - mini_scan.min() + 3 / 8)  # *
+        template = np.mean(mini_scan, axis=-1)
+        template = ndimage.gaussian_filter(template, 0.7)  # **
+        # * Anscombe tranform to normalize noise, increase contrast and decrease outliers' leverage
+        # ** Small amount of gaussian smoothing to get rid of high frequency noise
 
-            # Correct mini scan
-            correct_raster = (RasterCorrection() & field_key).get_correct_raster()
-            mini_scan = correct_raster(mini_scan)
+        # Map: compute motion shifts in parallel
+        f = performance.parallel_motion_shifts  # function to map
+        raster_phase = (RasterCorrection() & key).fetch1('raster_phase')
+        fill_fraction = (ScanInfo() & key).fetch1('fill_fraction')
+        kwargs = {'raster_phase': raster_phase, 'fill_fraction': fill_fraction,
+                  'template': template}
+        results = performance.map_frames(f, scan, field_id=field_id,
+                                         y=slice(skip_rows, -skip_rows),
+                                         x=slice(skip_cols, -skip_cols), channel=channel,
+                                         kwargs=kwargs)
 
-            # Create template
-            mini_scan = 2 * np.sqrt(mini_scan - mini_scan.min() + 3 / 8)  # *
-            template = np.mean(mini_scan, axis=-1)
-            template = ndimage.gaussian_filter(template, 0.7)  # **
-            # * Anscombe tranform to normalize noise, increase contrast and decrease outliers' leverage
-            # ** Small amount of gaussian smoothing to get rid of high frequency noise
+        # Reduce
+        y_shifts = np.zeros(scan.num_frames)
+        x_shifts = np.zeros(scan.num_frames)
+        for frames, chunk_y_shifts, chunk_x_shifts in results:
+            y_shifts[frames] = chunk_y_shifts
+            x_shifts[frames] = chunk_x_shifts
 
-            # Map: compute motion shifts in parallel
-            f = performance.parallel_motion_shifts # function to map
-            raster_phase = (RasterCorrection() & field_key).fetch1('raster_phase')
-            fill_fraction = (ScanInfo() & key).fetch1('fill_fraction')
-            kwargs = {'raster_phase': raster_phase, 'fill_fraction': fill_fraction, 'template': template}
-            results = performance.map_frames(f, scan, field_id=field_id, y=slice(skip_rows, -skip_rows),
-                                             x=slice(skip_cols, -skip_cols), channel=channel, kwargs=kwargs)
+        # Detect outliers
+        max_y_shift, max_x_shift = 20 / (ScanInfo() & key).microns_per_pixel
+        y_shifts, x_shifts, outliers = galvo_corrections.fix_outliers(y_shifts, x_shifts,
+                                                                      max_y_shift,
+                                                                      max_x_shift)
 
-            # Reduce
-            y_shifts = np.zeros(scan.num_frames)
-            x_shifts = np.zeros(scan.num_frames)
-            for frames, chunk_y_shifts, chunk_x_shifts in results:
-                y_shifts[frames] = chunk_y_shifts
-                x_shifts[frames] = chunk_x_shifts
+        # Center shifts around zero
+        y_shifts -= np.median(y_shifts)
+        x_shifts -= np.median(x_shifts)
 
-            # Detect outliers
-            max_y_shift, max_x_shift = 20 / (ScanInfo() & key).microns_per_pixel
-            y_shifts, x_shifts, outliers = galvo_corrections.fix_outliers(y_shifts, x_shifts,
-                                                                          max_y_shift, max_x_shift)
+        # Create results tuple
+        tuple_ = key.copy()
+        tuple_['field'] = field_id + 1
+        tuple_['motion_template'] = template
+        tuple_['y_shifts'] = y_shifts
+        tuple_['x_shifts'] = x_shifts
+        tuple_['outlier_frames'] = outliers
+        tuple_['y_std'] = np.std(y_shifts)
+        tuple_['x_std'] = np.std(x_shifts)
 
-            # Center shifts around zero
-            y_shifts -= np.median(y_shifts)
-            x_shifts -= np.median(x_shifts)
+        # Insert
+        self.insert1(tuple_)
 
-            # Create results tuple
-            tuple_ = key.copy()
-            tuple_['field'] = field_id + 1
-            tuple_['motion_template'] = template
-            tuple_['y_shifts'] = y_shifts
-            tuple_['x_shifts'] = x_shifts
-            tuple_['outlier_frames'] = outliers
-            tuple_['y_std'] = np.std(y_shifts)
-            tuple_['x_std'] = np.std(x_shifts)
-
-            # Insert
-            self.insert1(tuple_)
-
-        self.notify(key, scan)
+        # Notify after all fields have been processed
+        scan_key = {'animal_id': key['animal_id'], 'session': key['session'],
+                    'scan_idx': key['scan_idx'], 'pipe_version': key['pipe_version']}
+        if len(MotionCorrection - CorrectionChannel & scan_key) > 0:
+            self.notify(scan_key, scan.num_frames, scan.num_fields)
 
     @notify.ignore_exceptions
-    def notify(self, key, scan):
+    def notify(self, key, num_frames, num_fields):
         fps = (ScanInfo() & key).fetch1('fps')
-        seconds = np.arange(scan.num_frames) / fps
+        seconds = np.arange(num_frames) / fps
 
-        fig, axes = plt.subplots(scan.num_fields, 1, figsize=(15, 4 * scan.num_fields),
-                                 sharey=True)
-        axes = [axes] if scan.num_fields == 1 else axes # make list if single axis object
-        for i in range(scan.num_fields):
-            y_shifts, x_shifts = (self & key & {'field': i + 1}).fetch1('y_shifts', 'x_shifts')
+        fig, axes = plt.subplots(num_fields, 1, figsize=(15, 4 * num_fields), sharey=True)
+        axes = [axes] if num_fields == 1 else axes # make list if single axis object
+        for i in range(num_fields):
+            y_shifts, x_shifts = (self & key & {'field': i + 1}).fetch1('y_shifts',
+                                                                        'x_shifts')
             axes[i].set_title('Shifts for field {}'.format(i + 1))
             axes[i].plot(seconds, y_shifts, label='y shifts')
             axes[i].plot(seconds, x_shifts, label='x shifts')
@@ -626,56 +613,59 @@ class SummaryImages(dj.Computed):
         scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
         scan = scanreader.read_scan(scan_filename)
 
-        for field_id in range(scan.num_fields):
-            print('Computing summary images for field', field_id + 1)
+        for channel in range(scan.num_channels):
+            # Map: Compute some statistics in different chunks of the scan
+            f = performance.parallel_summary_images # function to map
+            raster_phase = (RasterCorrection() & key).fetch1('raster_phase')
+            fill_fraction = (ScanInfo() & key).fetch1('fill_fraction')
+            y_shifts, x_shifts = (MotionCorrection() & key).fetch1('y_shifts', 'x_shifts')
+            kwargs = {'raster_phase': raster_phase, 'fill_fraction': fill_fraction,
+                      'y_shifts': y_shifts, 'x_shifts': x_shifts}
+            results = performance.map_frames(f, scan, field_id=key['field'] - 1,
+                                             channel=channel, kwargs=kwargs)
 
-            for channel in range(scan.num_channels):
-                # Map: Compute some statistics in different chunks of the scan
-                f = performance.parallel_summary_images # function to map
-                raster_phase = (RasterCorrection() & key & {'field': field_id + 1}).fetch1('raster_phase')
-                fill_fraction = (ScanInfo() & key).fetch1('fill_fraction')
-                y_shifts, x_shifts = (MotionCorrection() & key & {'field': field_id + 1}).fetch1('y_shifts', 'x_shifts')
-                kwargs = {'raster_phase': raster_phase, 'fill_fraction': fill_fraction,
-                          'y_shifts': y_shifts, 'x_shifts': x_shifts}
-                results = performance.map_frames(f, scan, field_id=field_id, channel=channel, kwargs=kwargs)
+            # Reduce: Compute average images
+            average_image = np.sum([r[0] for r in results], axis=0) / scan.num_frames
+            l6norm_image = np.sum([r[1] for r in results], axis=0) ** (1 / 6)
 
-                # Reduce: Compute average images
-                average_image = np.sum([r[0] for r in results], axis=0) / scan.num_frames
-                l6norm_image = np.sum([r[1] for r in results], axis=0) ** (1 / 6)
+            # Reduce: Compute correlation image
+            sum_x = np.sum([r[2] for r in results], axis=0) # h x w
+            sum_sqx = np.sum([r[3] for r in results], axis=0) # h x w
+            sum_xy = np.sum([r[4] for r in results], axis=0) # h x w x 8
+            denom_factor = np.sqrt(scan.num_frames * sum_sqx - sum_x ** 2)
+            corrs = np.zeros(sum_xy.shape)
+            for k in [0, 1, 2, 3]:
+                rotated_corrs = np.rot90(corrs, k=k)
+                rotated_sum_x = np.rot90(sum_x, k=k)
+                rotated_dfactor = np.rot90(denom_factor, k=k)
+                rotated_sum_xy = np.rot90(sum_xy, k=k)
 
-                # Reduce: Compute correlation image
-                sum_x = np.sum([r[2] for r in results], axis=0) # h x w
-                sum_sqx = np.sum([r[3] for r in results], axis=0) # h x w
-                sum_xy = np.sum([r[4] for r in results], axis=0) # h x w x 8
-                denom_factor = np.sqrt(scan.num_frames * sum_sqx - sum_x ** 2)
-                corrs = np.zeros(sum_xy.shape)
-                for k in [0, 1, 2, 3]:
-                    rotated_corrs = np.rot90(corrs, k=k)
-                    rotated_sum_x = np.rot90(sum_x, k=k)
-                    rotated_dfactor = np.rot90(denom_factor, k=k)
-                    rotated_sum_xy = np.rot90(sum_xy, k=k)
+                # Compute correlation
+                rotated_corrs[1:, :, k] = (scan.num_frames * rotated_sum_xy[1:, :, k] -
+                                           rotated_sum_x[1:] * rotated_sum_x[:-1]) / \
+                                          (rotated_dfactor[1:] * rotated_dfactor[:-1])
+                rotated_corrs[1:, 1:, 4 + k] = ((scan.num_frames * rotated_sum_xy[1:, 1:, 4 + k] -
+                                                 rotated_sum_x[1:, 1:] * rotated_sum_x[:-1, : -1]) /
+                                                (rotated_dfactor[1:, 1:] * rotated_dfactor[:-1, :-1]))
 
-                    # Compute correlation
-                    rotated_corrs[1:, :, k] = (scan.num_frames * rotated_sum_xy[1:, :, k] - rotated_sum_x[1:] * rotated_sum_x[:-1]) / (rotated_dfactor[1:] * rotated_dfactor[:-1])
-                    rotated_corrs[1:, 1:, 4 + k] = (scan.num_frames * rotated_sum_xy[1:, 1:, 4 + k] - rotated_sum_x[1:, 1:] * rotated_sum_x[:-1, : -1]) / (rotated_dfactor[1:, 1:] * rotated_dfactor[:-1, :-1])
+                # Return back to original orientation
+                corrs = np.rot90(rotated_corrs, k=4 - k)
 
-                    # Return back to original orientation
-                    corrs = np.rot90(rotated_corrs, k=4 - k)
+            correlation_image = np.sum(corrs, axis=-1)
+            norm_factor = 5 * np.ones(correlation_image.shape) # edges
+            norm_factor[[0, -1, 0, -1], [0, -1, -1, 0]] = 3 # corners
+            norm_factor[1:-1, 1:-1] = 8 # center
+            correlation_image /= norm_factor
 
-                correlation_image = np.sum(corrs, axis=-1)
-                norm_factor = 5 * np.ones(correlation_image.shape) # edges
-                norm_factor[[0, -1, 0, -1], [0, -1, -1, 0]] = 3 # corners
-                norm_factor[1:-1, 1:-1] = 8 # center
-                correlation_image /= norm_factor
+            # Insert
+            field_key = {**key, 'channel': channel + 1}
+            SummaryImages().insert1(field_key)
+            SummaryImages.Average().insert1({**field_key, 'average_image': average_image})
+            SummaryImages.L6Norm().insert1({**field_key, 'l6norm_image': l6norm_image})
+            SummaryImages.Correlation().insert1({**field_key,
+                                                 'correlation_image': correlation_image})
 
-                # Insert
-                field_key = {**key, 'field': field_id + 1, 'channel': channel + 1}
-                SummaryImages().insert1(field_key)
-                SummaryImages.Average().insert1({**field_key, 'average_image': average_image})
-                SummaryImages.L6Norm().insert1({**field_key, 'l6norm_image': l6norm_image})
-                SummaryImages.Correlation().insert1({**field_key, 'correlation_image': correlation_image})
-
-            self.notify({**key, 'field': field_id + 1}, scan.num_channels)  # once per field
+        self.notify(key, scan.num_channels)
 
     @notify.ignore_exceptions
     def notify(self, key, num_channels):
