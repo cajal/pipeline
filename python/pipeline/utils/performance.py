@@ -5,7 +5,7 @@ import time
 
 
 def map_frames(f, scan, field_id, channel, y=slice(None), x=slice(None), kwargs={},
-               chunk_size_in_GB=1, num_processes=8, queue_size=8):
+               chunk_size_in_GB=0.5, num_processes=10, queue_size=10):
     """ Apply function f to chunks of the scan (divided in the temporal axis).
 
     :param function f: Function that receives two positional arguments:
@@ -312,7 +312,7 @@ def _correct_field(field, raster_phase, fill_fraction, x_shifts, y_shifts):
 ################################## Stacks ##############################################
 
 def map_fields(f, scan, field_ids, channel, y=slice(None), x=slice(None),
-               frames=slice(None), kwargs={}, num_processes=8, queue_size=8):
+               frames=slice(None), kwargs={}, num_processes=10, queue_size=10):
     """ Apply function f to each field in scan
 
     :param function f: Function that receives two positional arguments:
