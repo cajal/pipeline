@@ -566,6 +566,7 @@ class MotionCorrection(dj.Computed):
         return lambda scan, indices=slice(None): galvo_corrections.correct_motion(scan,
                                                  x_shifts[indices], y_shifts[indices])
 
+
 @schema
 class SummaryImages(dj.Computed):
     definition = """ # summary images for each field and channel after corrections
@@ -1539,7 +1540,7 @@ class Activity(dj.Computed):
             import multiprocessing as mp
 
             with mp.Pool(8) as pool:
-                results = pool.imap(cmn.deconvolve, full_traces)
+                results = pool.map(cmn.deconvolve, full_traces)
                 for unit_id, (spike_trace, ar_coeffs) in zip(unit_ids, results):
                     spike_trace = spike_trace.astype(np.float32, copy=False)
                     Activity.Trace().insert1({**key, 'unit_id': unit_id, 'trace': spike_trace})
