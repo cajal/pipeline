@@ -772,6 +772,18 @@ class Segmentation(dj.Computed):
         weights         : longblob      # weights of the mask at the indices above
         """
 
+        def get_mask_as_image(self):
+            """ Return this mask as an image (2-d numpy array)."""
+            # Get params
+            pixels, weights = self.fetch('pixels', 'weights')
+            image_height, image_width = (ScanInfo.Field() & self).fetch1('px_height',
+                                                                         'px_width')
+
+            # Reshape mask
+            mask = Segmentation.reshape_masks(pixels, weights, image_height, image_width)
+
+            return np.squeeze(mask)
+
     class Manual(dj.Part):
         definition = """ # masks created manually
 
