@@ -28,6 +28,8 @@ while True:
         stack.CorrectedStack().populate(reserve_jobs=True, suppress_errors=True)
         stack.PreprocessedStack().populate(stack.SegmentationTask(), reserve_jobs=True,
                                            suppress_errors=True)
+        # stack.Segmentation().populate(reserve_jobs=True, suppress_errors=True)
+        stack.FieldSegmentation().populate(reserve_jobs=True, suppress_errors=True)
         stack.PreprocessedStack().populate(stack.RegistrationTask().proj(
             session='stack_session', channel='stack_channel'), reserve_jobs=True,
             suppress_errors=True)
