@@ -1661,3 +1661,143 @@ class ScanDone(dj.Computed):
 
         # Insert all processed fields in Partial
         ScanDone.Partial().insert((Activity() & scan_key).proj())
+
+
+from . import stack
+@schema
+class StackCoordinates(dj.Computed):
+    definition = """ # centroids of each unit in the motor/stack coordinate system
+    
+    -> stack.Registration.proj(session='scan_session')
+    -> ScanSet
+    """
+
+    class Centroids(dj.Part):
+        definition = """ # ScanSet.UnitInfo centroids mapped to stack coordinates
+        
+        -> master                       # this will add field back
+        -> ScanSet.UnitInfo
+        ---
+        stack_x         : float
+        stack_y         : float
+        stack_z         : float
+        """
+
+    def make(self, key):
+        from scipy import ndimage
+
+        # Get registration grid (px -> stack_coordinate)
+        field_res = (ScanInfo & key).microns_per_pixel
+        grid = (stack.Registration & key).get_grid(type='affine', desired_res=field_res)
+
+        self.insert1(key)
+        field_units = ScanSet.UnitInfo & (ScanSet.Unit.proj() & key)
+        for unit_key, px_x, px_y in zip(*field_units.fetch('KEY', 'px_x', 'px_y')):
+            px_coords = np.array([[px_y], [px_x]])
+            unit_x, unit_y, unit_z = [ndimage.map_coordinates(grid[..., i], px_coords,
+                                                              order=1)[0] for i in
+                                      range(3)]
+            StackCoordinates.Centroids.insert1({**key, **unit_key, 'stack_x': unit_x,
+                                                'stack_y': unit_y, 'stack_z': unit_z})
+
+# @schema
+# class StackMatching(dj.Computed):
+#     definition = """ # match functional masks to structural masks
+#
+#     -> stack.FieldSegmentation.proj(session='scan_session')
+#     -> ScanSet
+#     """
+#
+#     class Match(dj.Part):
+#         definition = """ # match of a functional mask to a structural mask (1:1 relation)
+#         -> master
+#         -> ScanSet.Unit
+#         ---
+#         -> stack.FieldSegmentation.StackUnit.proj(session='scan_session')
+#         """
+#
+#     def make(self, key):
+#         from scipy import ndimage
+#
+#         # Get structural segmentation
+#         segmented_field = (stack.FieldSegmentation.proj(session='scan_session') & key).fetch1(
+#             'segm_field')
+#
+#         # Get caiman masks and resize them
+#         field_res = (ScanInfo & key).microns_per_pixel
+#         masks = (Segmentation & key).get_all_masks()
+#
+#
+#         # TODO: Redo the resizing
+#
+#
+#         masks = np.moveaxis(masks, -1, 0)  # num_masks x height x width
+#         masks = np.stack(ndimage.zoom(f, field_res, order=1) for f in masks)
+#
+#         # Binarize masks
+#         binary_masks = np.zeros(masks.shape, dtype=bool)
+#         for i, mask in enumerate(masks):
+#             ## Compute cumulative mass (similar to caiman)
+#             indices = np.unravel_index(np.flip(np.argsort(mask, axis=None), axis=0),
+#                                        mask.shape)  # max to min value in mask
+#             cumsum_mask = np.cumsum(mask[indices] ** 2) / np.sum(mask ** 2)
+#             binary_masks[i][indices] = cumsum_mask < 0.9
+#
+#         # Insert
+#         caiman_field = np.argmax(binary_masks, axis=0).astype(np.int32)
+#         self.insert1({**key, 'segm_field': reg_segmentation,
+#                       'caiman_field': caiman_field})
+#
+#         for prop in measure.regionprops(segmented_field):
+#             sunit_id = prop.label
+#             instance_prop = instance_props[np.argmax(instance_labels == sunit_id)]
+#
+#             depth = (instance_prop.bbox[3] - instance_prop.bbox[0])
+#             height = (instance_prop.bbox[4] - instance_prop.bbox[1])
+#             width = (instance_prop.bbox[5] - instance_prop.bbox[2])
+#             volume = instance_prop.area
+#             sunit_z, sunit_y, sunit_x = (np.array([stack_z, stack_y, stack_x]) + np.array(
+#                 instance_prop.centroid) - np.array(instance.shape) / 2 + 0.5)
+#
+#             binary_sunit = reg_segmentation == sunit_id
+#             area = np.count_nonzero(binary_sunit)
+#             px_y, px_x = ndimage.measurements.center_of_mass(binary_sunit)
+#             px_coords = np.array([[px_y], [px_x]])
+#             mask_x, mask_y, mask_z = [ndimage.map_coordinates(grid[..., i], px_coords,
+#                                                               order=1)[0] for i in
+#                                       range(3)]
+#             distance = np.sqrt((sunit_z - mask_z) ** 2 + (sunit_y - mask_y) ** 2 +
+#                                (sunit_x - mask_x) ** 2)
+#
+#             # Insert in StackUnit
+#             self.StackUnit.insert1({**key, 'sunit_id': sunit_id, 'depth': depth,
+#                                     'height': height, 'width': width, 'volume': volume,
+#                                     'area': area, 'sunit_z': sunit_z, 'sunit_y': sunit_y,
+#                                     'sunit_x': sunit_x, 'mask_z': mask_z,
+#                                     'mask_y': mask_y, 'mask_x': mask_x,
+#                                     'distance': distance})
+#
+#             # Find closest caiman mask
+#             intersection = np.logical_and(binary_masks, binary_sunit).sum(
+#                 axis=(1, 2))  # num_masks
+#             union = np.logical_or(binary_masks, binary_sunit).sum(
+#                 axis=(1, 2))  # num_masks
+#             ious = intersection / union
+#             if np.any(ious > 0.1):
+#                 caiman_id = np.argmax(ious) + 1
+#                 caiman_iou = ious[caiman_id - 1]
+#                 area = np.count_nonzero(binary_sunit)
+#                 px_y, px_x = ndimage.measurements.center_of_mass(
+#                     binary_masks[caiman_id - 1])
+#                 px_coords = np.array([[px_y], [px_x]])
+#                 caiman_x, caiman_y, caiman_z = [ndimage.map_coordinates(grid[..., i],
+#                                                                         px_coords,
+#                                                                         order=1)[0] for i
+#                                                 in range(3)]
+#                 distance = np.sqrt((caiman_y - mask_y) ** 2 + (caiman_x - mask_x) ** 2)
+#
+#                 self.CaimanMask.insert1({**key, 'sunit_id': sunit_id,
+#                                          'caiman_id': caiman_id, 'caiman_iou': caiman_iou,
+#                                          'caiman_area': area, 'caiman_z': caiman_z,
+#                                          'caiman_y': caiman_y, 'caiman_x': caiman_x,
+#                                          'distance': distance})
