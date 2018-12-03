@@ -65,3 +65,28 @@ def spaced_max(x, min_interval):
         peaks = np.array(new_peaks)
 
     return peaks
+
+
+def low_pass_filter(signal, sampling_freq, cutoff_freq, filter_size=1000):
+    """ Low pass filter a signal.
+
+    :param signal: Signal to filter.
+    :param sampling_freq: Signal sampling frequency.
+    :param cutoff_freq: Cutoff frequency. Frequencies above this will be filtered out.
+    :param filter_size: Size of the filter to use. If even, we use filter_size + 1.
+    :return: Filtered signal (same lenght as signal)
+
+    ..seealso: http://www.labbookpages.co.uk/audio/firWindowing.html
+    """
+    # Create filter
+    half_size = filter_size // 2
+    x = np.arange(-half_size, half_size + 1)
+    filter_ = np.sin(2 * np.pi * (cutoff_freq / sampling_freq) * x) / (np.pi * x + 1e-9)
+    filter_[half_size] = 2 * cutoff_freq / sampling_freq
+    filter_ *= np.blackman(len(filter_))
+    filter_ /= filter_.sum()
+
+    # Filter signal
+    filtered_signal = mirrconv(signal, filter_)
+
+    return filtered_signal

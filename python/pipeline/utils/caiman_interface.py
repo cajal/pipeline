@@ -411,7 +411,7 @@ def get_centroids(masks):
     return centroids
 
 
-def classify_masks(masks, soma_diameter=(14, 14)):
+def classify_masks(masks, soma_diameter=(12, 12)):
     """ Uses a convolutional network to predict the probability per mask of being a soma.
 
     :param np.array masks: Masks (image_height x image_width x num_components)

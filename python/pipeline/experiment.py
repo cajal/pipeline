@@ -128,7 +128,9 @@ class Person(dj.Lookup):
         ['Paul', 'hey paul'],
         ['shan', 'Shan Shen'],
         ['shuang', 'Shuang Li'],
-        ['xiaolong', 'Xiaolong Jiang']
+        ['xiaolong', 'Xiaolong Jiang'],
+        ['taliah', 'Taliah Muhammad'],
+        ['zhiwei',  'Zhiwei Ding']
     ]
 
 
@@ -336,7 +338,7 @@ class Session(dj.Manual):
     definition = """  # imaging session
 
     -> mice.Mice
-    session                       : smallint            # session index for the mouse
+    session                      : smallint            # session index for the mouse
     ---
     -> Rig
     session_date                  : date                # date
