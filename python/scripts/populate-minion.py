@@ -3,7 +3,7 @@ import time
 
 from pipeline import experiment, reso, meso, fuse, stack, pupil, treadmill, posture
 from stimulus import stimulus
-from stimline import tune, xcorr
+from stimline import tune
 
 while True:
     # Scans
@@ -26,8 +26,8 @@ while True:
         stack.MotionCorrection().populate(reserve_jobs=True, suppress_errors=True)
         stack.Stitching().populate(reserve_jobs=True, suppress_errors=True)
         stack.CorrectedStack().populate(reserve_jobs=True, suppress_errors=True)
-        stack.InitialRegistration().populate(next_scans, reserve_jobs=True, suppress_errors=True)
-        stack.FieldRegistration().populate(next_scans, reserve_jobs=True, suppress_errors=True)
+        stack.InitialRegistration().populate(reserve_jobs=True, suppress_errors=True)
+        stack.FieldRegistration().populate(reserve_jobs=True, suppress_errors=True)
 
         # reso/meso
         for pipe in [reso, meso]:
@@ -56,7 +56,7 @@ while True:
 
         tune.STA().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
         tune.STAQual().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
-        tune.STAExtent().populate(tune_scans, reserve_jobs=True)
+        tune.STAExtent().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
 
         tune.CaMovie().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
         tune.Drift().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
@@ -65,13 +65,11 @@ while True:
         tune.Cos2Map().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
         tune.OriMapQuality().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
 
-        tune.OracleMap().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
-        tune.MovieOracle().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
-        tune.MovieOracleTimeCourse().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
+        #tune.OracleMap().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
+        #tune.MovieOracle().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
+        #tune.MovieOracleTimeCourse().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
 
         tune.CaTimes().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
         tune.Ori().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
-
-        xcorr.ConditionCovariance().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
 
     time.sleep(600) # wait 10 minutes before trying to process things again

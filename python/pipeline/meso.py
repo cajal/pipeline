@@ -580,7 +580,7 @@ class MotionCorrection(dj.Computed):
         x_shifts, y_shifts = self.fetch1('x_shifts', 'y_shifts')
 
         return lambda scan, indices=slice(None): galvo_corrections.correct_motion(scan,
-                                                 x_shifts, y_shifts)
+                                                 x_shifts[indices], y_shifts[indices])
 
 @schema
 class SummaryImages(dj.Computed):
@@ -724,7 +724,7 @@ class SegmentationTask(dj.Manual):
         """ Estimates the number of components per field using simple rules of thumb.
 
         For somatic scans, estimate number of neurons based on:
-        (100x100x100)um^3 = 1e6 um^3 -> 1e2 neurons; (1x1x1)mm^3 = 1e9 um^3 -> 1e5 neurons
+        (100x100x100)um^3 = 1e6 um^3 -> 100 neurons; (1x1x1)mm^3 = 1e9 um^3 -> 100K neurons
 
         For axonal/dendritic scans, just ten times our estimate of neurons.
 
@@ -896,10 +896,10 @@ class Segmentation(dj.Computed):
                     kwargs['patch_size'] = tuple(20 / (ScanInfo.Field() & key).microns_per_pixel) # 20 x 20 microns
                     kwargs['soma_diameter'] = tuple(2 / (ScanInfo.Field() & key).microns_per_pixel)
                 else: # soma
-                    kwargs['num_components_per_patch'] = 5
+                    kwargs['num_components_per_patch'] = 6
                     kwargs['init_method'] = 'greedy_roi'
                     kwargs['patch_size'] = tuple(50 / (ScanInfo.Field() & key).microns_per_pixel)
-                    kwargs['soma_diameter'] = tuple(14 / (ScanInfo.Field() & key).microns_per_pixel)
+                    kwargs['soma_diameter'] = tuple(8 / (ScanInfo.Field() & key).microns_per_pixel)
 
             ## Set performance/execution parameters (heuristically), decrease if memory overflows
             kwargs['num_processes'] = 8  # Set to None for all cores available
@@ -1100,7 +1100,7 @@ class Segmentation(dj.Computed):
 
         return masks
 
-    def plot_masks(self, threshold=0.99, first_n=None):
+    def plot_masks(self, threshold=0.97, first_n=None):
         """ Draw contours of masks over the correlation image (if available).
 
         :param threshold: Threshold on the cumulative mass to define mask contours. Lower
