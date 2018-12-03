@@ -21,4 +21,32 @@ classdef DisplayGeometry < dj.Relvar
             inserti(experiment.DisplayGeometry, data)
         end
     end
+    
+    methods
+        function sz = getMonitorSize(self, type)
+            % gets X,Y monitor size
+            
+            if nargin<2
+                type = 'cm';
+            end
+
+            [m_sz, m_as, m_ds] = fetch1(self,'monitor_size','monitor_aspect','monitor_distance');
+            sz = nan(2,1);
+            sz(2) = sqrt(m_sz^2/(m_as^2+1));
+            sz(1) = m_as*sz(2);
+            
+            % get correct output
+            switch type
+                case 'inches'
+                   
+                case 'cm'
+                    sz = sz*2.54;
+                case 'degrees'
+                    sz = atand(sz/(m_ds)/2*2.54)*2;
+                otherwise 
+                    disp('Unknown metric')
+            end
+            
+        end
+    end
 end
