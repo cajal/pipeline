@@ -44,8 +44,8 @@ def resize(original, um_sizes, desired_res):
     :param tuple um_sizes: Size in microns of the array (one per axis).
     :param int or tuple desired_res: Desired resolution (um/px) for the output array.
 
-    :return: Output array resampled to the desired resolution. Size in pixels is
-        round(um_sizes / desired_res).
+    :return: Output array (np.float32) resampled to the desired resolution. Size in pixels
+        is round(um_sizes / desired_res).
     """
     import torch.nn.functional as F
 
@@ -58,7 +58,8 @@ def resize(original, um_sizes, desired_res):
     grid = grid / torch_ones[::-1].astype(np.float32)
 
     # Resample
-    input_tensor = torch.from_numpy(original.reshape(1, 1, *original.shape))
+    input_tensor = torch.from_numpy(original.reshape(1, 1, *original.shape).astype(
+        np.float32))
     grid_tensor = torch.from_numpy(grid.reshape(1, *grid.shape))
     resized_tensor = F.grid_sample(input_tensor, grid_tensor, padding_mode='border')
     resized = resized_tensor.numpy().squeeze()
