@@ -1709,7 +1709,22 @@ class Func2StructMatching(dj.Computed):
 
     -> ScanSet                  # animal_id, session, scan_idx, pipe_version, field, channel
     -> stack.FieldSegmentation.proj(session='scan_session') # animal_id, stack_session, stack_idx, volume_id, session, scan_idx, field, stack_channel, scan_channel, registration_method, stacksegm_channel, stacksegm_method
+    ---
+    key_hash        : varchar(32)       # single attribute representation of the key (used to avoid going over 16 attributes in the key)
     """
+
+    class AllMatches(dj.Part):
+        definition = """ # store all possible matches (one functional cell could match with more than one structural mask and viceversa)
+        
+        key_hash        : varchar(32)       # master key
+        unit_id         : int               # functional unit id
+        sunit_id        : int               # structural unit id
+        ---
+        iou             : float             # intersection-over-union of the 2-d masks
+        """
+        # Used key_hash because key using ScanSet.Unit, FieldSegmentation.StackUnit has
+        # more than 16 attributes and MySQL complains. I added the foreign key constraints
+        # manually
 
     class Match(dj.Part):
         definition = """ # match of a functional mask to a structural mask (1:1 relation)
@@ -1758,9 +1773,16 @@ class Func2StructMatching(dj.Computed):
             ious.append(intersection / union)
         iou_matrix = np.stack(ious)
 
+        # Save all possible matches / iou_matrix > 0
+        self.insert1({**key, 'key_hash': key_hash(key)})
+        for mask_idx, func_idx in zip(*np.nonzero(iou_matrix)):
+            self.AllMatches.insert1({'key_hash': key_hash(key),
+                                     'unit_id': scansetunit_keys[func_idx]['unit_id'],
+                                     'sunit_id': sunit_ids[mask_idx],
+                                     'iou': iou_matrix[mask_idx, func_idx]})
+
         # Iterate over matches (from best to worst), insert
-        self.insert1(key)
-        while iou_matrix.max() > 0.1: # minimum acceptable IOU
+        while iou_matrix.max() > 0:
             # Get next best
             best_mask, best_func = np.unravel_index(np.argmax(iou_matrix),
                                                     iou_matrix.shape)
