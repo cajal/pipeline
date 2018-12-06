@@ -1690,7 +1690,7 @@ class StackCoordinates(dj.Computed):
                                                          desired_res=field_res)
 
         self.insert1(key)
-        field_units = ScanSet.UnitInfo & (ScanSet.Unit.proj() & key)
+        field_units = ScanSet.UnitInfo & (ScanSet.Unit & key)
         for unit_key, px_x, px_y in zip(*field_units.fetch('KEY', 'px_x', 'px_y')):
             px_coords = np.array([[px_y], [px_x]])
             unit_x, unit_y, unit_z = [ndimage.map_coordinates(grid[..., i], px_coords,
