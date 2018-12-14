@@ -26,14 +26,6 @@ while True:
         stack.MotionCorrection().populate(reserve_jobs=True, suppress_errors=True)
         stack.Stitching().populate(reserve_jobs=True, suppress_errors=True)
         stack.CorrectedStack().populate(reserve_jobs=True, suppress_errors=True)
-        stack.PreprocessedStack().populate(stack.SegmentationTask(), reserve_jobs=True,
-                                           suppress_errors=True)
-        # stack.Segmentation().populate(reserve_jobs=True, suppress_errors=True)
-        stack.FieldSegmentation().populate(reserve_jobs=True, suppress_errors=True)
-        stack.PreprocessedStack().populate(stack.RegistrationTask().proj(
-            session='stack_session', channel='stack_channel'), reserve_jobs=True,
-            suppress_errors=True)
-        stack.Registration().populate(reserve_jobs=True, suppress_errors=True)
 
         # reso/meso
         for pipe in [reso, meso]:
@@ -56,6 +48,16 @@ while True:
         fuse.ScanSet().populate(next_scans, reserve_jobs=True, suppress_errors=True)
         fuse.Activity().populate(next_scans, reserve_jobs=True, suppress_errors=True)
         fuse.ScanDone().populate(next_scans, reserve_jobs=True, suppress_errors=True)
+
+        # more stack (needs corrected fields)
+        stack.PreprocessedStack().populate(stack.SegmentationTask(), reserve_jobs=True,
+                                           suppress_errors=True)
+        # stack.Segmentation().populate(reserve_jobs=True, suppress_errors=True)
+        stack.FieldSegmentation().populate(reserve_jobs=True, suppress_errors=True)
+        stack.PreprocessedStack().populate(stack.RegistrationTask().proj(
+            session='stack_session', channel='stack_channel'), reserve_jobs=True,
+            suppress_errors=True)
+        stack.Registration().populate(reserve_jobs=True, suppress_errors=True)
 
         # tune (these are memory intensive)
         tune_scans = next_scans & (experiment.Scan() & 'scan_ts > "2017-12-00 00:00:00"')
