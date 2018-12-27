@@ -30,7 +30,7 @@ classdef Object < dj.Lookup
                 clip_number = floor(info.duration/dur);
                 if clip_number<1; continue;end
                 if round(info.streams.codec.fps)~=fps; continue; end
-                mxclip = max([fetchn(stimulus.MovieClip & obj,'clip_number');0]);
+                mxclip = max([fetchn(movies.ObjectClip & obj,'clip_number');0]);
                 
                 % process & insert clips
                 for iclip = 1:clip_number
