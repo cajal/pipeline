@@ -19,7 +19,7 @@ classdef Object < dj.Lookup
             files = dir(getLocalPath(fullfile(path,file)));
             
             for ifile = 1:length(files)
-                if exists(movie.ObjectClip & sprintf('parent_file_name = "%s"',files(ifile).name));continue;end
+                if exists(movies.ObjectClip & sprintf('parent_file_name = "%s"',files(ifile).name));continue;end
                 infile = fullfile(files(ifile).folder,files(ifile).name);
                 try
                     info = ffmpeginfo(infile);
