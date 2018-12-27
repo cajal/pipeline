@@ -23,36 +23,18 @@ classdef FieldCoordinates < dj.Manual
             params.scale = [];
             params.figure = [];
             params.amp = 1;
+            params.noref = false;
 
             params = ne7.mat.getParams(params,varargin);
-            
-            % get reference map information
-            ref_key = fetch(proj(anatomy.RefMap) & keyI);
-            if ~exists(anatomy.RefMap & ref_key)
-                ref_key = createRef(anatomy.RefMap,fetch(mice.Mice & keyI));
-            end
-            if isfield(keyI,'ret_idx');keyI = rmfield(keyI,'ret_idx');end
-            [ref_map, ref_pxpitch, software] = fetch1(anatomy.RefMap * experiment.Scan  & ref_key,...
-                'ref_map','pxpitch','software');
-            switch software
-                case 'imager'
-                    if isempty(params.global_rotation)
-                        params.global_rotation = 60; % rotation of the ref_map
-                    end
-                case 'scanimage'
-                    if isempty(params.global_rotation)
-                        params.global_rotation = 0; % rotation of the ref_map
-                    end
-            end
-            
-            % get the scamimage reader
-            [setup, depth] = fetch1(experiment.Scan * experiment.Session & keyI,...
-                'rig','depth');
             
             % init tform params, specific to each setup
             tfp = struct('scale',1,'rotation',params.scan_rotation,'fliplr',0,'flipud',0);
             
-            % get information from the scans depending on the setup
+             % get the scamimage reader
+            [setup, depth] = fetch1(experiment.Scan * experiment.Session & keyI,...
+                'rig','depth');
+            
+             % get information from the scans depending on the setup
             if strcmp(setup,'2P4')
                 [x_pos, y_pos, slice_pos, fieldWidths, fieldHeights, fieldWidthsInMicrons, frames, field_num] = ...
                     fetchn(meso.ScanInfoField * meso.SummaryImagesAverage & keyI & 'channel = 1',...
@@ -67,6 +49,43 @@ classdef FieldCoordinates < dj.Manual
                 x_pos = zeros(size(fieldWidths));y_pos = x_pos;
             end
             
+            % if no input is given then scan coordinates are going to be used
+            if params.noref
+                ref_key = createRef(anatomy.RefMap,experiment.Scan & keyI);
+                for islice = 1:length(frames)
+                    tuple = keyI;
+                    tuple.ref_idx = ref_key.ref_idx;
+                    tuple.field = field_num(islice);
+                    tuple.x_offset = 0;
+                    tuple.y_offset = 0;
+                    tuple.tform = 1;
+                    tuple.pxpitch = 1; % estimated pixel pitch of the vessel map;
+                    tuple.field_depth = slice_pos(islice) - depth;
+                    insert(self,tuple)
+                end
+                return
+            end
+            
+            % get reference map information
+            ref_key = fetch(proj(anatomy.RefMap) & keyI);
+            if ~exists(anatomy.RefMap & ref_key)
+                ref_key = createRef(anatomy.RefMap,fetch(mice.Mice & keyI));
+            end
+            
+            if isfield(keyI,'ret_idx');keyI = rmfield(keyI,'ret_idx');end
+            [ref_map, ref_pxpitch, software] = fetch1(anatomy.RefMap * experiment.Scan  & ref_key,...
+                'ref_map','pxpitch','software');
+            switch software
+                case 'imager'
+                    if isempty(params.global_rotation)
+                        params.global_rotation = 60; % rotation of the ref_map
+                    end
+                case 'scanimage'
+                    if isempty(params.global_rotation)
+                        params.global_rotation = 0; % rotation of the ref_map
+                    end
+            end
+
             % calculate initial scale
             pxpitch = mean(fieldWidths.\fieldWidthsInMicrons);
             
