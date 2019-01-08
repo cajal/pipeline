@@ -1,14 +1,15 @@
-version: '2'
+version: '2.3'
 
 services:
   notebook:
-    image: ninai/pipeline
+    image: ninai/stimulus-pipeline
+    # runtime: nvidia
     ports:
       - "8888:8888"
     volumes:
-      - /mnt/:/mnt/
-      - /home/pipeline_data/:/tmp/
-      - .:/data/pipeline/
+      # - /mnt/:/mnt/
+      # - /home/pipeline_data/:/tmp/
+      - $HOME/Documents/BCM_ATLAB/pipeline/:/data/pipeline/
     env_file: .env
     environment:
       - DISPLAY=$DISPLAY
@@ -18,30 +19,38 @@ services:
       - --ip=0.0.0.0
       - --allow-root
       - --NotebookApp.token=''
-      - --no-browser 
+      - --no-browser
 
 
   minion:
     image: ninai/stimulus-pipeline
     volumes:
-      - /mnt/:/mnt/
-      - /home/pipeline_data:/tmp/
-      - .:/data/pipeline
-    env_file: .env
-    entrypoint:
-      - python3 
-      - /data/pipeline/python/scripts/populate-minion.py
-
-  
-  bash:
-    image: ninai/stimulus-pipeline
-    volumes:
-      - /mnt/:/mnt/
-      - /home/pipeline_data/:/tmp/
-      - .:/data/pipeline/
-      - /tmp/.X11-unix:/tmp/.X11-unix
+      # - /mnt/:/mnt/
+      # - /home/pipeline_data:/tmp/
+      - $HOME/Documents/BCM_ATLAB/pipeline:/data/pipeline
     env_file: .env
     environment:
       - DISPLAY=$DISPLAY
+    entrypoint:
+      - python3 
+      - /data/pipeline/python/scripts/populate-minion.py
+  
+  
+  bash:
+    image: ninai/stimulus-pipeline
+    # runtime: nvidia
+    volumes:
+      # - /mnt/:/mnt/
+      # - /home/pipeline_data/:/tmp/
+      # - /home/pipeline_data/:/mnt/data/
+      - $HOME/Documents/BCM_ATLAB/pipeline/:/data/pipeline/
+      # - $HOME/Documents/scanreader/:/data/scanreader/
+      #- $HOME/Documents/stimuli:/data/stimuli
+      # - $HOME/Documents/stimulus-pipeline:/data/stimulus-pipeline
+      # - /etc/localtime:/etc/localtime:ro
+      # - /tmp/.X11-unix:/tmp/.X11-unix
+    environment:
+      - DISPLAY=$DISPLAY
+    env_file: .env
     entrypoint:
       - /bin/bash
