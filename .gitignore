@@ -74,4 +74,4 @@ matlab/startup.m
 matlab/scripts/Eye_Movements/CircleMaps/
 
 #.vscode stuff
-*.vscode/*
+.vscode/*
