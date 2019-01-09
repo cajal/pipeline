@@ -9,7 +9,7 @@ services:
     volumes:
       # - /mnt/:/mnt/
       # - /home/pipeline_data/:/tmp/
-      - $HOME/Documents/BCM_ATLAB/pipeline/:/data/pipeline/
+      - $HOME/pipeline/:/data/pipeline/
     env_file: .env
     environment:
       - DISPLAY=$DISPLAY
@@ -27,7 +27,7 @@ services:
     volumes:
       # - /mnt/:/mnt/
       # - /home/pipeline_data:/tmp/
-      - $HOME/Documents/BCM_ATLAB/pipeline:/data/pipeline
+      - $HOME/pipeline:/data/pipeline
     env_file: .env
     environment:
       - DISPLAY=$DISPLAY
@@ -43,7 +43,7 @@ services:
       # - /mnt/:/mnt/
       # - /home/pipeline_data/:/tmp/
       # - /home/pipeline_data/:/mnt/data/
-      - $HOME/Documents/BCM_ATLAB/pipeline/:/data/pipeline/
+      - $HOME/pipeline/:/data/pipeline/
       # - $HOME/Documents/scanreader/:/data/scanreader/
       #- $HOME/Documents/stimuli:/data/stimuli
       # - $HOME/Documents/stimulus-pipeline:/data/stimulus-pipeline
