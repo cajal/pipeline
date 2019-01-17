@@ -223,6 +223,9 @@ class StitchedROI():
                             in zip(roi_coord.ys, ys, other.slices)]
             self.roi_coordinates.append(roi_coord)
 
+        # Update z (rarely different between ROIs)
+        self.z = (self.z + other.z) / 2
+
 
 
 def linear_stitch(left, right, expected_delta_x, minimum_overlap=10):

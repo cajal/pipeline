@@ -196,7 +196,7 @@ def find_flips(signal, fps, monitor_fps):
 
     :returns indices of each detected flip (0-based) and their decoded flip number.
     """
-    # Find flips
+    # Find flips (works best when there is one color change per (monitor) frame)
     samples_per_frame = fps / monitor_fps
     flip_detector = np.sin(np.linspace(0, 2 * np.pi, 2 * int(round(samples_per_frame)) + 1))
     filtered = mirrconv(signal, flip_detector)
@@ -216,7 +216,7 @@ def find_flips(signal, fps, monitor_fps):
     i = 0
     while i < len(flip_amps) - 32 * num_consecutive_bins:
         next_amps = flip_amps[i: i + 32 * num_consecutive_bins: 2] # skip black frames
-        if np.all(next_amps > 0):
+        if np.all(next_amps > 0): # black flips will have negative amplitude
             # Decode numbers
             bits = np.reshape(next_amps < thresh, [num_consecutive_bins, 16])
             nums = [int(''.join(map(str, reversed(b.astype(int)))), 2) for b in bits]
