@@ -5,7 +5,7 @@ import time
 
 
 def map_frames(f, scan, field_id, channel, y=slice(None), x=slice(None), kwargs={},
-               chunk_size_in_GB=1, num_processes=8, queue_size=8):
+               chunk_size_in_GB=0.5, num_processes=10, queue_size=10):
     """ Apply function f to chunks of the scan (divided in the temporal axis).
 
     :param function f: Function that receives two positional arguments:
@@ -312,7 +312,7 @@ def _correct_field(field, raster_phase, fill_fraction, x_shifts, y_shifts):
 ################################## Stacks ##############################################
 
 def map_fields(f, scan, field_ids, channel, y=slice(None), x=slice(None),
-               frames=slice(None), kwargs={}, num_processes=8, queue_size=8):
+               frames=slice(None), kwargs={}, num_processes=10, queue_size=10):
     """ Apply function f to each field in scan
 
     :param function f: Function that receives two positional arguments:
@@ -501,41 +501,3 @@ def parallel_correct_stack(chunks, results, raster_phase, fill_fraction, y_shift
 
         # Add to results
         results.append((field_idx, averaged))
-
-
-def map_angles(stack, field, px_estimate, px_range, angles, num_processes=8):
-    """ Parallel brute force search over all possible angle combinations of the highest
-    correlating position.
-
-    :param np.array: 3-d stack (depth, height, width).
-    :param np.array field: 2-d field to register in the stack.
-    :param triplet px_estimate: Initial estimate in x, y, z. (0, 0, 0) in center of stack.
-    :param triplet px_range: How many pixels to search around the initial estimate.
-    :param list angles: Angles to try for each rotation (in degrees).
-    :param int num_processes: Number of processes to use for mapping.
-    """
-    from itertools import product
-    from functools import partial
-
-    # Basic checks
-    num_processes = min(num_processes, mp.cpu_count() - 1)
-    print('Using', num_processes, 'processes')
-
-    # Over each angle combination
-    print('Initial time:', time.ctime())
-    f = partial(parallel_register_rigid, field, px_estimate, px_range)
-    with mp.Pool(num_processes, _reg_init, initargs=(stack,)) as pool:
-        results = pool.map(f, product(angles, angles, angles))
-
-    return results
-
-def _reg_init(stack):
-    """ Declare the shared stack as a global variable inside each process."""
-    global shared_stack
-    shared_stack = stack
-
-
-def parallel_register_rigid(field, px_estimate, px_range, angles):
-    """ A wrapper around registration.register_rigid """
-    from .registration import register_rigid
-    return register_rigid(shared_stack, field, px_estimate, px_range, angles)
