@@ -11,7 +11,9 @@ def ignore_exceptions(f):
             return f(*args, **kwargs)
         except Exception as e:
             print('Ignored exception:', e)
+
     return wrapper
+
 
 @schema
 class SlackConnection(dj.Manual):
@@ -23,9 +25,9 @@ class SlackConnection(dj.Manual):
     api_key        : varchar(128) # api key for bot connection
     """
 
+
 @schema
 class SlackUser(dj.Manual):
-
     definition = """
     # information for user notification
 
@@ -35,11 +37,12 @@ class SlackUser(dj.Manual):
     -> SlackConnection
     """
 
-    def notify(self, message=None, file = None, file_title=None, file_comment=None, channel=None):
-        if self:
+    def notify(self, message=None, file=None, file_title=None, file_comment=None,
+               channel=None):
+        if self:  # user exists
             from slacker import Slacker
 
-            api_key, user = (self * SlackConnection()).fetch1('api_key','slack_user')
+            api_key, user = (self * SlackConnection()).fetch1('api_key', 'slack_user')
             s = Slacker(api_key, timeout=60)
 
             channels = ['@' + user]
@@ -47,12 +50,12 @@ class SlackUser(dj.Manual):
                 channels.append(channel)
 
             for ch in channels:
-                if message: # None or ''
+                if message:  # None or ''
                     s.chat.post_message(ch, message, as_user=True)
 
                 if file is not None:
-                    s.files.upload(file_=file, channels=ch,
-                                   title=file_title, initial_comment=file_comment)
+                    s.files.upload(file_=file, channels=ch, title=file_title,
+                                   initial_comment=file_comment)
 
 
 def temporary_image(array, key):
