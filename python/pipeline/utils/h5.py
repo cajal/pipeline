@@ -14,12 +14,12 @@ def read_behavior_file(filename):
         version: string. File version
         analogPacketLen: int. Number of samples received in a single packet coming from
             analog channels. See ts for why this is relevant.
-        ts: 1-d array. Timestamps for analog sync signals (photodiode and ScanImage) in
-            master clock time. All samples in the same packet are given the same
-            timestamp: the clock time when they arrived.
-        syncPd: 1-d array. Photodiode current in volts at 10 KHz.
-        scanImage: 1-d array. ScanImage frame clock signal in volts at 10 KHz; high value
-            (~5 V) during aqcquisiton.
+        ts: 1-d array (num_samples). Timestamps for analog sync signals (photodiode,
+            scanimage and temperature) in master clock time. All samples in the same
+            packet are given the same timestamp: the clock time when they arrived.
+        syncPd: 1-d array (num_samples). Photodiode current in volts at 10 KHz.
+        scanImage: 1-d array (num_samples). ScanImage frame clock signal in volts at
+            10 KHz; high value (~5 V) during aqcquisiton.
         wheel: np.array (2 x num_timepoints) .
             wheel[0] Wheel position (as a counter value that wraps around 2 **32 -1)
                 recorded at 100 Hz.
@@ -41,9 +41,12 @@ def read_behavior_file(filename):
         eyecam_ts: np.array (2 x num_video_frames)
             eyecam_ts[0]: Timestamps in master clock time.
             eyecam_ts[1]: Timestamps in seconds since some reference time.
+        ### Optional:
         posture_ts: np.array (2 x num_video_frames)
             posture_ts[0]: Timestamps in master clock time.
             posture_ts[1]: Timestamps in seconds since some reference time.
+        temperature: np.array (num_samples). Temperature in Fahrenheit degrees / 100 at 10
+            KHz.
 
     ..note:: Master clock time is an integer counter that increases every 0.1 usecs and
         wraps around at 2 ** 32 - 1.
@@ -77,6 +80,8 @@ def read_behavior_file(filename):
             channel_names = [cn.strip() for cn in channel_names]
             data['syncPd'] = analog_signals[channel_names.index('Photodiode')]
             data['ts'] = analog_signals[channel_names.index('Time')]
+            if 'Temperature' in channel_names:
+                data['temperature'] = analog_signals[channel_names.index('Temperature')]
 
             if str(f.attrs['AS_Version'][0]) == '2.1':
                 data['scanImage'] = analog_signals[channel_names.index('ScanImageFrameSync')]
@@ -84,7 +89,7 @@ def read_behavior_file(filename):
                 data['scanImage'] = analog_signals[channel_names.index('FrameSync')]
 
         else:
-            msg = 'Wrong file version {} in file {}'.format(file_version, filename)
+            msg = 'Unknown file version {} in file {}'.format(file_version, filename)
             raise PipelineException(msg)
 
     return data
@@ -131,8 +136,8 @@ def ts2sec(ts, sampling_rate=1e7, is_packeted=False):
                 abnormal_indices = np.logical_and(sample_xs > xs[start], sample_xs < xs[stop])
                 ts_secs[abnormal_indices] = float('nan')
 
-            print('Warning: Unequal spacing between continuos packets: {} abnormal gaps '
-                  'detected. Signal will have NaNs.'.format(len(abnormal_limits) // 2))
+            print('Warning: Unequal spacing between continuos packets: {} abnormal gap(s)'
+                  ' detected. Signal will have NaNs.'.format(len(abnormal_limits) // 2))
 
     return ts_secs
 
@@ -191,7 +196,7 @@ def find_flips(signal, fps, monitor_fps):
 
     :returns indices of each detected flip (0-based) and their decoded flip number.
     """
-    # Find flips
+    # Find flips (works best when there is one color change per (monitor) frame)
     samples_per_frame = fps / monitor_fps
     flip_detector = np.sin(np.linspace(0, 2 * np.pi, 2 * int(round(samples_per_frame)) + 1))
     filtered = mirrconv(signal, flip_detector)
@@ -211,7 +216,7 @@ def find_flips(signal, fps, monitor_fps):
     i = 0
     while i < len(flip_amps) - 32 * num_consecutive_bins:
         next_amps = flip_amps[i: i + 32 * num_consecutive_bins: 2] # skip black frames
-        if np.all(next_amps > 0):
+        if np.all(next_amps > 0): # black flips will have negative amplitude
             # Decode numbers
             bits = np.reshape(next_amps < thresh, [num_consecutive_bins, 16])
             nums = [int(''.join(map(str, reversed(b.astype(int)))), 2) for b in bits]
