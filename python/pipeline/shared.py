@@ -35,12 +35,28 @@ class SegmentationMethod(dj.Lookup):
     details                     : varchar(255)
     language                    : enum('matlab', 'python')  # implementation language
     """
-
     contents = [
-    [1, 'manual', '', 'matlab'],
-    [2, 'nmf', 'constrained non-negative matrix factorization from Pnevmatikakis et al. (2016)', 'python'],
-    [3, 'nmf-patches', 'same as nmf but initialized in small image patches', 'python'],
-    [4, 'nmf-boutons', 'nmf for axonal terminals', 'python']
+        [1, 'manual', '', 'matlab'],
+        [2, 'nmf', 'constrained non-negative matrix factorization from Pnevmatikakis et al. (2016)',
+         'python'],
+        [3, 'nmf-patches', 'same as nmf but initialized in small image patches', 'python'],
+        [4, 'nmf-boutons', 'nmf for axonal terminals', 'python'],
+        [5, '3d-conv', 'masks from the segmentation of the stack', 'python'],
+        [6, 'nmf-new', 'same as method 3 (nmf-patches) but with some better tuned params', 'python']
+    ]
+
+@schema
+class StackSegmMethod(dj.Lookup):
+    definition = """ # methods for 3-d stack segmentations
+    stacksegm_method         : tinyint
+    ---
+    name                        : varchar(16)
+    details                     : varchar(255)
+    language                    : enum('matlab', 'python')  # implementation language
+    """
+    contents = [
+        [1, '3dconv', '3-d convolutional network plus watershed', 'python'],
+        [2, '3dconv-ensemble', 'an ensemble of 3-d convolutional networks plus watershed', 'python']
     ]
 
 @schema
@@ -83,7 +99,7 @@ class SpikeMethod(dj.Lookup):
     """
 
     contents = [
-        [2, 'oopsi', 'nonnegative sparse deconvolution from Vogelstein (2010)', 'python'],
+        [2, 'foopsi', 'nonnegative sparse deconvolution from Vogelstein (2010)', 'python'],
         [3, 'stm', 'spike triggered mixture model from Theis et al. (2016)', 'python'],
         [5, 'nmf', 'noise constrained deconvolution from Pnevmatikakis et al. (2016)', 'python']
     ]
@@ -104,7 +120,8 @@ class RegistrationMethod(dj.Lookup):
         [3, 'affine', ('exhaustive search of 3-d rotations + cross-correlation (40 microns'
                        'above and below estimated z)'), 'python'],
         [4, 'affine2', ('exhaustive search of 3-d rotations + cross-correlation (100 microns'
-                        'above and below estimated z)'), 'python']
+                        'above and below estimated z)'), 'python'],
+        [5, 'non-rigid', 'affine plus deformation field learnt via gradient ascent on correlation', 'python']
     ]
 
 @schema
