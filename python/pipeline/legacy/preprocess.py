@@ -1493,7 +1493,7 @@ class MaskClassification(dj.Computed):
         d1, d2, fps = tuple(map(int, (Prepare.Galvo() & key).fetch1('px_height', 'px_width', 'fps')))
 
         templates = {}
-        for slice in (Prepare.GalvoAverageFrame() & key).fetch=('slice'):
+        for slice in (Prepare.GalvoAverageFrame() & key).fetch('slice'):
 
             if ExtractRaw.GalvoCorrelationImage() & dict(key, slice=slice):
                 print('Using correlation image')
