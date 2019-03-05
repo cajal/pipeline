@@ -6,11 +6,11 @@ import sh
 from pipeline.notify import temporary_image
 import gc
 
-from . import experiment
-from .utils.signal import mirrconv
-from .utils import galvo_corrections
+from .. import experiment
+from ..utils.signal import mirrconv
+from ..utils import galvo_corrections
 import matplotlib.pyplot as plt
-from .import notify
+from ..import notify
 
 from distutils.version import StrictVersion
 
@@ -98,7 +98,7 @@ class Prepare(dj.Imported):
              :returns: A function to perform raster correction on the scan
                     [image_height, image_width, channels, slices, num_frames].
             """
-            raster_phase, fill_fraction = self.fetch1['raster_phase', 'fill_fraction']
+            raster_phase, fill_fraction = self.fetch1('raster_phase', 'fill_fraction')
             if raster_phase == 0:
                 return lambda scan: np.double(scan)
             else:
@@ -118,8 +118,8 @@ class Prepare(dj.Imported):
             """
 
             # Get slice dimensions (in micrometers)
-            slice_height, slice_width = (Prepare.Galvo() & self).fetch1['um_height',
-                                                                        'um_width']
+            slice_height, slice_width = (Prepare.Galvo() & self).fetch1('um_height',
+                                                                        'um_width')
             slice_thickness = 10  # assumption
             slice_volume = slice_width * slice_height * slice_thickness
 
@@ -142,12 +142,12 @@ class Prepare(dj.Imported):
             soma_radius_in_microns = 7  # assumption
 
             # Calculate size in pixels (height radius)
-            um_height, px_height = (Prepare.Galvo() & self).fetch1['um_height', 'px_height']
+            um_height, px_height = (Prepare.Galvo() & self).fetch1('um_height', 'px_height')
             height_microns_per_pixel = um_height / px_height
             height_radius_in_pixels = soma_radius_in_microns / height_microns_per_pixel
 
             # Calculate size in pixels (width radius)
-            um_width, px_width = (Prepare.Galvo() & self).fetch1['um_width', 'px_width']
+            um_width, px_width = (Prepare.Galvo() & self).fetch1('um_width', 'px_width')
             width_microns_per_pixel = um_width / px_width
             width_radius_in_pixels = soma_radius_in_microns / width_microns_per_pixel
 
@@ -193,9 +193,9 @@ class Prepare(dj.Imported):
                 # Estimate using measured FOVs for similar setups
                 fov_rel = (experiment.FOV() * experiment.Session() * experiment.Scan()
                            & key & 'session_date>=fov_ts')
-                zooms = fov_rel.fetch['mag'].astype(np.float32)  # measured zooms in setup
+                zooms = fov_rel.fetch('mag').astype(np.float32)  # measured zooms in setup
                 closest_zoom = zooms[np.argmin(np.abs(np.log(zooms / scan.zoom)))]
-                um_height, um_width = (fov_rel & {'mag': closest_zoom}).fetch1['height', 'width']
+                um_height, um_width = (fov_rel & {'mag': closest_zoom}).fetch1('height', 'width')
                 key['um_height'] = float(um_height) * (closest_zoom / scan.zoom) * scan._y_angle_scale_factor
                 key['um_width'] = float(um_width) * (closest_zoom / scan.zoom) * scan._x_angle_scale_factor
 
@@ -235,7 +235,7 @@ class Prepare(dj.Imported):
             :returns: A function to performs motion correction on scans
                       [image_height, image_width, channels, slices, num_frames].
             """
-            xy_motion = self.fetch1['motion_xy']
+            xy_motion = self.fetch1('motion_xy')
 
             def my_lambda_function(scan, indices=None):
                 if indices is None:
@@ -251,8 +251,8 @@ class Prepare(dj.Imported):
             key['channel'] = channel + 1  # indices start at 1 in database
 
             # Get some params
-            um_height, px_height = (Prepare.Galvo() & key).fetch1['um_height', 'px_height']
-            um_width, px_width = (Prepare.Galvo() & key).fetch1['um_width', 'px_width']
+            um_height, px_height = (Prepare.Galvo() & key).fetch1('um_height', 'px_height')
+            um_width, px_width = (Prepare.Galvo() & key).fetch1('um_width', 'px_width')
 
             # Get raster correction function
             correct_raster = (Prepare.Galvo() & key).get_correct_raster()
@@ -366,14 +366,14 @@ class Prepare(dj.Imported):
     def _make_tuples(self, key):
         print('Preparing scan', key)
         self.insert1(key)
-        if (experiment.Scan() & key).fetch1['software'] == 'scanimage':
+        if (experiment.Scan() & key).fetch1('software') == 'scanimage':
             # Read the scan
             import scanreader
             scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
             scan = scanreader.read_scan(scan_filename)
 
             # Select channel to use for raster and motion correction according to dye used
-            fluorophore = (experiment.Session.Fluorophore() & key).fetch1['fluorophore']
+            fluorophore = (experiment.Session.Fluorophore() & key).fetch1('fluorophore')
             channel = 1 if fluorophore in ['RCaMP1a', 'mCherry', 'tdTomato'] else 0
             if fluorophore == 'Twitch2B':
                 print('Warning: Twitch2B scan. Using first channel to compute correction '
@@ -392,7 +392,7 @@ class Prepare(dj.Imported):
             Prepare.GalvoAverageFrame()._make_tuples(key, scan)
 
             # --- notify
-            filename = temporary_image((Prepare.GalvoAverageFrame() & key & dict(channel=channel+1)).fetch1['frame'], key)
+            filename = temporary_image((Prepare.GalvoAverageFrame() & key & dict(channel=channel+1)).fetch1('frame'), key)
             (notify.SlackUser() & dict(username='fabee')).notify(
                 """Prepare tracking for
                     animal_id={animal_id},
@@ -422,7 +422,7 @@ class Prepare(dj.Imported):
         :rtype: matplotlib.figure.Figure
         """
         # Get fps and total_num_frames
-        fps = (Prepare.Galvo() & self).fetch1['fps']
+        fps = (Prepare.Galvo() & self).fetch1('fps')
         num_video_frames = int(round(fps * seconds))
         stop_index = start_index + num_video_frames
 
@@ -567,10 +567,10 @@ class ExtractRaw(dj.Imported):
         def get_mask_as_image(self):
             """Return the mask for this single ROI as  an image (2-d array)"""
             # Get params
-            pixel_indices, weights = (ExtractRaw.GalvoROI() & self).fetch1['mask_pixels',
-                                                                           'mask_weights']
-            image_height, image_width = (Prepare.Galvo() & self).fetch1['px_height',
-                                                                        'px_width']
+            pixel_indices, weights = (ExtractRaw.GalvoROI() & self).fetch1('mask_pixels',
+                                                                           'mask_weights')
+            image_height, image_width = (Prepare.Galvo() & self).fetch1('px_height',
+                                                                        'px_width')
             # Calculate and reshape mask
             mask_as_vector = np.zeros(image_height * image_width)
             mask_as_vector[pixel_indices - 1] = weights
@@ -645,10 +645,10 @@ class ExtractRaw(dj.Imported):
 
         mask_px, mask_w, spikes, traces, ids \
             = rel.fetch.order_by('trace_id')['mask_pixels', 'mask_weights', 'spike_trace', 'trace', 'trace_id']
-        template = np.stack((normalize(t) for t in (Prepare.GalvoAverageFrame() & key).fetch['frame'])
+        template = np.stack((normalize(t) for t in (Prepare.GalvoAverageFrame() & key).fetch('frame'))
                             , axis=2)[..., mask_channel - 1]
 
-        d1, d2, fps = [int(elem) for elem in (Prepare.Galvo() & key).fetch1['px_height', 'px_width', 'fps']]
+        d1, d2, fps = [int(elem) for elem in (Prepare.Galvo() & key).fetch1('px_height', 'px_width', 'fps')]
         selected_window = int(np.round(fps * 120))
         t = np.arange(selected_window) / fps
 
@@ -703,9 +703,9 @@ class ExtractRaw(dj.Imported):
                 'mask_pixels', 'mask_weights', 'spike_trace', 'trace', 'trace_id']
 
             template = np.stack([normalize(t)
-                                 for t in (Prepare.GalvoAverageFrame() & key).fetch['frame']], axis=2).max(axis=2)
+                                 for t in (Prepare.GalvoAverageFrame() & key).fetch('frame')], axis=2).max(axis=2)
 
-            d1, d2, fps = tuple(map(int, (Prepare.Galvo() & key).fetch1['px_height', 'px_width', 'fps']))
+            d1, d2, fps = tuple(map(int, (Prepare.Galvo() & key).fetch1('px_height', 'px_width', 'fps')))
             hs = int(np.round(fps * 60))
             masks = self.GalvoROI.reshape_masks(mask_px, mask_w, d1, d2)
             try:
@@ -933,7 +933,7 @@ class ExtractRaw(dj.Imported):
         :rtype: matplotlib.figure.Figure
         """
         # Get fps and calculate total number of frames
-        fps = (Prepare.Galvo() & self).fetch1['fps']
+        fps = (Prepare.Galvo() & self).fetch1('fps')
         num_video_frames = int(round(fps * seconds))
         stop_index = start_index + num_video_frames
 
@@ -960,7 +960,7 @@ class ExtractRaw(dj.Imported):
         background_rel = ExtractRaw.BackgroundComponents() & self & {'slice': field,
                                                                      'channel': channel}
         background_location_matrix, background_activity_matrix = \
-            background_rel.fetch1['masks', 'activity']
+            background_rel.fetch1('masks', 'activity')
 
         # Select first n components
         if first_n is not None:
@@ -1049,7 +1049,7 @@ class ExtractRaw(dj.Imported):
         # Get correlation image if defined
         image_rel = ExtractRaw.GalvoCorrelationImage() & self & {'slice': slice,
                                                                  'channel': channel}
-        correlation_image = image_rel.fetch1['correlation_image'] if image_rel else None
+        correlation_image = image_rel.fetch1('correlation_image') if image_rel else None
 
         # Draw contours
         cmn.plot_contours(location_matrix, correlation_image)
@@ -1074,7 +1074,7 @@ class ExtractRaw(dj.Imported):
         # Get correlation image if defined
         image_rel = ExtractRaw.GalvoCorrelationImage() & self & {'slice': slice,
                                                                  'channel': channel}
-        correlation_image = image_rel.fetch1['correlation_image'] if image_rel else None
+        correlation_image = image_rel.fetch1('correlation_image') if image_rel else None
 
         # Draw centroids
         cmn.plot_centroids(location_matrix, correlation_image)
@@ -1089,10 +1089,10 @@ class ExtractRaw(dj.Imported):
         :rtype: matplotlib.figure.Figure
         """
         ar_rel = ExtractRaw.ARCoefficients() & self & {'slice': slice, 'channel': channel}
-        fps = (Prepare.Galvo() & self).fetch1['fps']
+        fps = (Prepare.Galvo() & self).fetch1('fps')
 
         # Get AR coefficients
-        ar_coefficients = ar_rel.fetch['g'] if ar_rel else None
+        ar_coefficients = ar_rel.fetch('g') if ar_rel else None
 
         if ar_coefficients is not None:
             fig = plt.figure()
@@ -1121,8 +1121,8 @@ class ExtractRaw(dj.Imported):
         mask_rel = ExtractRaw.GalvoROI() & self & {'slice': slice, 'channel': channel}
 
         # Get masks
-        image_height, image_width = (Prepare.Galvo() & self).fetch1['px_height',
-                                                                    'px_width']
+        image_height, image_width = (Prepare.Galvo() & self).fetch1('px_height',
+                                                                    'px_width')
         mask_pixels, mask_weights = mask_rel.fetch.order_by('trace_id')['mask_pixels',
                                                                         'mask_weights']
 
@@ -1196,10 +1196,10 @@ class ComputeTraces(dj.Computed):
         from scipy import integrate as integr
         pass_band = (center - band_width / 2, center + band_width / 2)
         nu_loaded, s_loaded = (experiment.Fluorophore.EmissionSpectrum() &
-                               dict(fluorophore=fluorophore, loaded=1)).fetch1['wavelength', 'fluorescence']
+                               dict(fluorophore=fluorophore, loaded=1)).fetch1('wavelength', 'fluorescence')
 
         nu_free, s_free = (experiment.Fluorophore.EmissionSpectrum() &
-                           dict(fluorophore=fluorophore, loaded=0)).fetch1['wavelength', 'fluorescence']
+                           dict(fluorophore=fluorophore, loaded=0)).fetch1('wavelength', 'fluorescence')
 
         f_loaded = lambda xx: np.interp(xx, nu_loaded, s_loaded)
         f_free = lambda xx: np.interp(xx, nu_free, s_free)
@@ -1225,7 +1225,7 @@ class ComputeTraces(dj.Computed):
 
     def _make_tuples(self, key):
         if ExtractRaw.Trace() & key:
-            fluorophore = (experiment.Session.Fluorophore() & key).fetch1['fluorophore']
+            fluorophore = (experiment.Session.Fluorophore() & key).fetch1('fluorophore')
             if fluorophore != 'Twitch2B':
                 print('Populating', key)
 
@@ -1240,11 +1240,11 @@ class ComputeTraces(dj.Computed):
                 # --- get channel indices and filter passbands for twitch settings
                 filters = experiment.PMTFilterSet() * experiment.PMTFilterSet.Channel() \
                           & dict(pmt_filter_set='2P3 blue-green A')
-                fps = (Prepare.Galvo() & key).fetch1['fps']
+                fps = (Prepare.Galvo() & key).fetch1('fps')
                 green_idx, green_center, green_pb = \
-                    (filters & dict(color='green')).fetch1['pmt_channel', 'spectrum_center', 'spectrum_bandwidth']
+                    (filters & dict(color='green')).fetch1('pmt_channel', 'spectrum_center', 'spectrum_bandwidth')
                 blue_idx, blue_center, blue_pb = \
-                    (filters & dict(color='blue')).fetch1['pmt_channel', 'spectrum_center', 'spectrum_bandwidth']
+                    (filters & dict(color='blue')).fetch1('pmt_channel', 'spectrum_center', 'spectrum_bandwidth')
 
                 # --- compute theoretical emission over filter spectra
                 g_free, g_loaded = self.get_band_emission(fluorophore, green_center, green_pb)
@@ -1258,7 +1258,7 @@ class ComputeTraces(dj.Computed):
                                                                                blue_trace='raw_trace')
 
                 self.insert1(key)
-                for trace_id, gt, bt in zip(*(green * blue).fetch['trace_id', 'green_trace', 'blue_trace']):
+                for trace_id, gt, bt in zip(*(green * blue).fetch('trace_id', 'green_trace', 'blue_trace')):
                     print(
                         '\tProcessing animal_id: {animal_id}\t session: {session}\t scan_idx: {scan_idx}\ttrace: {trace_id}'.format(
                             trace_id=trace_id, **key))
@@ -1298,8 +1298,8 @@ class SpikeMethod(dj.Lookup):
             import c2s
         except ImportError:
             warn("c2s was not found. You won't be able to populate ExtracSpikes")
-        assert self.fetch1['language'] == 'python', "This tuple cannot be computed in python."
-        if self.fetch1['spike_method'] == 3:
+        assert self.fetch1('language') == 'python', "This tuple cannot be computed in python."
+        if self.fetch1('spike_method') == 3:
             N = len(X)
             for i, trace in enumerate(X):
                 print('Predicting trace %i/%i' % (i + 1, N))
@@ -1345,7 +1345,7 @@ class Spikes(dj.Computed):
         gs = plt.GridSpec(2, 5)
         for key in (ComputeTraces.Trace() & self).fetch.keys():
             print('Processing', key)
-            fps = (Prepare.Galvo() & key).fetch1['fps']
+            fps = (Prepare.Galvo() & key).fetch1('fps')
 
             hs = int(np.round(fps * 30))
 
@@ -1356,11 +1356,11 @@ class Spikes(dj.Computed):
             ax_cas = fig.add_subplot(gs[0, 3:], sharey=ax_ca)
             ax_sps = fig.add_subplot(gs[1, 3:], sharex=ax_cas, sharey=ax_sp)
 
-            ca = (ComputeTraces.Trace() & key).fetch1['trace'].squeeze()
+            ca = (ComputeTraces.Trace() & key).fetch1('trace').squeeze()
             t = np.arange(len(ca)) / fps
             ax_ca.plot(t, ca, 'k')
             loc = None
-            for sp, meth in zip(*(self.RateTrace() * SpikeMethod() & key).fetch['rate_trace', 'spike_method_name']):
+            for sp, meth in zip(*(self.RateTrace() * SpikeMethod() & key).fetch('rate_trace', 'spike_method_name')):
                 ax_sp.plot(t, sp, label=meth)
                 # --- plot zoom in
                 if loc is None:
@@ -1401,10 +1401,10 @@ class Spikes(dj.Computed):
                 'Could not load pyfnnd. Oopsi spike inference will fail. Install from https://github.com/cajal/PyFNND.git')
 
         print('Populating Spikes for ', key, end='...', flush=True)
-        method = (SpikeMethod() & key).fetch1['spike_method_name']
+        method = (SpikeMethod() & key).fetch1('spike_method_name')
         if method == 'stm':
             prep = (Prepare() * Prepare.Aod() & key) or (Prepare() * Prepare.Galvo() & key)
-            fps = prep.fetch1['fps']
+            fps = prep.fetch1('fps')
             X = [dict(trace=fill_nans(x['trace'].astype('float64'))) for x in
                  (ComputeTraces.Trace() & key).proj('trace').fetch.as_dict]
 
@@ -1421,9 +1421,9 @@ class Spikes(dj.Computed):
         elif method == 'oopsi':
             prep = (Prepare() * Prepare.Aod() & key) or (Prepare() * Prepare.Galvo() & key)
             self.insert1(key)
-            fps = prep.fetch1['fps']
+            fps = prep.fetch1('fps')
             part = self.RateTrace()
-            for trace, trace_key in zip(*(ComputeTraces.Trace() & key).fetch['trace', dj.key]):
+            for trace, trace_key in zip(*(ComputeTraces.Trace() & key).fetch('trace', dj.key)):
                 trace = pyfnnd.deconvolve(fill_nans(np.float64(trace.flatten())), dt=1 / fps)[0]
                 part.insert1(dict(trace_key, rate_trace=trace.astype(np.float32)[:, np.newaxis], **key))
         else:
@@ -1489,24 +1489,24 @@ class MaskClassification(dj.Computed):
         import seaborn as sns
         rel = ExtractRaw.GalvoROI() & key
 
-        keys, px, w = rel.fetch[dj.key, 'mask_pixels', 'mask_weights']
-        d1, d2, fps = tuple(map(int, (Prepare.Galvo() & key).fetch1['px_height', 'px_width', 'fps']))
+        keys, px, w = rel.fetch(dj.key, 'mask_pixels', 'mask_weights')
+        d1, d2, fps = tuple(map(int, (Prepare.Galvo() & key).fetch1('px_height', 'px_width', 'fps')))
 
         templates = {}
-        for slice in (Prepare.GalvoAverageFrame() & key).fetch['slice']:
+        for slice in (Prepare.GalvoAverageFrame() & key).fetch('slice'):
 
             if ExtractRaw.GalvoCorrelationImage() & dict(key, slice=slice):
                 print('Using correlation image')
                 templates[slice] = np.stack([normalize(t)
                                              for t in
-                                             (ExtractRaw.GalvoCorrelationImage() & dict(key, slice=slice)).fetch[
-                                                 'correlation_image']],
+                                             (ExtractRaw.GalvoCorrelationImage() & dict(key, slice=slice)).fetch(
+                                                 'correlation_image')],
                                             axis=2).max(axis=2)
             else:
                 print('Using average frame')
                 templates[slice] = np.stack([normalize(t)
                                              for t in
-                                             (Prepare.GalvoAverageFrame() & dict(key, slice=slice)).fetch['frame']],
+                                             (Prepare.GalvoAverageFrame() & dict(key, slice=slice)).fetch('frame')],
                                             axis=2).max(axis=2)
         masks = self._reshape_masks(px, w, d1, d2)
         self.insert1(key)
