@@ -635,7 +635,7 @@ class SummaryImages(dj.Computed):
                 rotated_sum_xy = np.rot90(sum_xy, k=k)
 
                 # Compute correlation
-                rotated_corrs[1:, :, k] = (scan.num_frames * rotated_sum_xy[1:, :,k] -
+                rotated_corrs[1:, :, k] = (scan.num_frames * rotated_sum_xy[1:, :, k] -
                                            rotated_sum_x[1:] * rotated_sum_x[:-1]) / \
                                           (rotated_dfactor[1:] * rotated_dfactor[:-1])
                 rotated_corrs[1:, 1:, 4 + k] = ((scan.num_frames * rotated_sum_xy[1:, 1:, 4 + k] -
