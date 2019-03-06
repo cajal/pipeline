@@ -89,7 +89,8 @@ classdef MonetLookup < dj.Relvar
                 speed = zeros(size(frametimes));
                 for i=1:cond.n_dirs
                     q = theta + directions(i);
-                    space_bias = hann(q, cond.ori_bands*2*pi/cond.n_dirs);
+                    % space_bias = hann(q, cond.ori_bands*2*pi/cond.n_dirs);
+                    space_bias = hann(q, cond.ori_bands*2*pi/16);
                     biased = real(ifftn(bsxfun(@times, space_bias, m)));
                     biased = result + cond.ori_modulation*(biased*sigma/std(biased(:)) - result);
                     biased = sigma/std(biased(:))*biased;
