@@ -12,7 +12,8 @@ import os
 from commons import lab
 from datajoint.autopopulate import AutoPopulate
 
-from .utils.eye_tracking import ROIGrabber, PupilTracker, CVROIGrabber, ManualTracker
+from .utils import eye_tracking
+from .utils.eye_tracking import PupilTracker, ManualTracker
 from . import config
 from .utils import h5
 from . import experiment, notify
@@ -176,12 +177,10 @@ class TrackingTask(dj.Manual):
     def enter_roi(self, key, **kwargs):
         key = (Eye() & key).fetch1(dj.key)  # complete key
         frames = (Eye() & key).fetch1('preview_frames')
-        try:
-            print('Drag window and print q when done')
-            rg = CVROIGrabber(frames.mean(axis=2))
-            rg.grab()
-        except ImportError:
-            rg = ROIGrabber(frames.mean(axis=2))
+
+        print('Drag window and print q when done')
+        rg = eye_tracking.CVROIGrabber(frames.mean(axis=2))
+        rg.grab()
 
         key['eye_roi'] = rg.roi
         mask = np.asarray(rg.mask, dtype=np.uint8)
@@ -476,6 +475,8 @@ class ManuallyTrackedContours(dj.Manual, AutoPopulate):
                         else:
                             frame.insert1(dict(key, frame_id=frame_id))
                         parameters.insert1(dict(key, **params), ignore_extra_fields=True)
+
+
 @schema
 class FittedContour(dj.Computed):
     definition = """
@@ -540,4 +541,3 @@ class FittedContour(dj.Computed):
         self.insert1(key)
         for ckey in tqdm(contours):
             self.Ellipse().insert1(ckey, ignore_extra_fields=True)
-
