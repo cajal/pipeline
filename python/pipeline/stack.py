@@ -19,9 +19,12 @@ downwards, y in the second axis pointing towards you and x on the third axis poi
 the right.
 """
 
-schema = dj.schema('pipeline_stack', locals(), create_tables=True)
 dj.config['external-stack'] = {'protocol': 'file',
-                               'location': '/mnt/scratch07/pipeline-externals'}
+                               'location': '/mnt/dj-stor01/pipeline-externals'}
+dj.config['cache'] = '/tmp/dj-cache'
+
+
+schema = dj.schema('pipeline_stack', locals(), create_tables=True)
 
 
 @schema
