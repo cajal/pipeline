@@ -10,7 +10,7 @@ mask                     : mediumblob            # mask of area
 
 classdef AreaMask < dj.Manual
     methods
-        function createMasks(obj, key, varargin)
+        function createMasks(self, key, varargin)
             
             params.exp = 1.5;
             params.sigma = 2;
@@ -39,8 +39,8 @@ classdef AreaMask < dj.Manual
                 contiguous = 0;
             end
             
-            if exists(obj & key)
-                [area_map, keys] = getContiguousMask(obj, key,contiguous);
+            if exists(self & key)
+                [area_map, keys] = getContiguousMask(self, key,contiguous);
             else
                 area_map = zeros(size(background,1),size(background,2));
             end
@@ -61,7 +61,7 @@ classdef AreaMask < dj.Manual
             end
             
             % delete previous keys if existed
-            if exists(obj & key)
+            if exists(self & key)
                 del(anatomy.AreaMask & keys)
             end
             
@@ -106,7 +106,7 @@ classdef AreaMask < dj.Manual
             
             if ~contiguous
                 % get field specific area map
-                [field_area_maps, fields] = splitContiguousMask(obj, tuple, area_map);
+                [field_area_maps, fields] = splitContiguousMask(self, tuple, area_map);
             else
                 field_area_maps{1} = area_map;
                 fields(1) = 1;
@@ -124,7 +124,7 @@ classdef AreaMask < dj.Manual
                     % get area name
                     tuple.brain_area = brain_areas{iarea};
                     tuple.mask = field_area_maps{ifield} == iarea;
-                    insert(obj,tuple)
+                    insert(self,tuple)
                 end
             end
         end
@@ -248,6 +248,7 @@ classdef AreaMask < dj.Manual
             params.bcontrast = 0.4;
             params.contrast = 1;
             params.exp = 1;
+            params.sat = 1;
             
             params = ne7.mat.getParams(params,varargin);
             
@@ -266,7 +267,7 @@ classdef AreaMask < dj.Manual
             if exists(map.RetMap & (map.RetMapScan &  obj))
                 background = getBackground(map.RetMap & (map.RetMapScan &  obj));
                 for iback = 1:size(background,4);
-                   background(:,:,:,iback) = imadjust(background(:,:,:,iback),[.2 .3 0.2; .65 .65 .65],[0 0 0; 1 1 1]); 
+                   background(:,:,:,iback) = imadjust(background(:,:,:,iback),[0 .1 0.2; .65 .65 .65],[0 0 0; 1 1 1]); 
                 end
                 % if FieldCoordinates exists add it to the background
                 if exists(anatomy.FieldCoordinates & proj(anatomy.RefMap & obj))
@@ -285,7 +286,7 @@ classdef AreaMask < dj.Manual
             
             % merge masks with background
             figure
-            sat = background(:,:,1,1);
+            sat = background(:,:,1,1)*params.sat;
             sat(area_map==0) = 0;
             im = hsv2rgb(cat(3,ne7.mat.normalize(area_map),sat,background(:,:,1,1)));
             if nargin<2 || isempty(params.back_idx) || params.back_idx > size(background,4)
