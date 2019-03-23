@@ -33,10 +33,14 @@ classdef  OpticFlowFine < dj.Imported
                 Orientation(:,:,iframe) = flow.Orientation;
                 Magnitude(:,:,iframe) = flow.Magnitude;
             end
+            
+            % insert key
             key.orientation = single(Orientation(:,:,1:iframe));
             key.magnitude =single( Magnitude(:,:,1:iframe));
-            
             insert( obj, key );
+            
+            % cleanup
+            delete(filename)
         end
     end
     
@@ -50,7 +54,7 @@ classdef  OpticFlowFine < dj.Imported
             
             % setup figure
             figure
-            set(gcf,'position',[300         200        1072         634])
+            set(gcf,'position',[300 200 1000 600])
             colormap gray
             [x,y] = meshgrid(1:sz(2),1:sz(1));
             
@@ -68,6 +72,33 @@ classdef  OpticFlowFine < dj.Imported
                 ylim([-5 sz(1)*10+5])
                 drawnow
             end
+            
+            % cleanup
+            delete(filename)
+        end
+        
+        function avgFlow(self)
+            
+            keys = fetch(self);
+            X = [];Y = [];
+            for ikey = 1:length(keys)
+                key = keys(ikey);
+                [Orientation,Magnitude] = fetch1(movies.OpticFlowFine & key,'orientation','magnitude');
+                X{ikey} = mean(cos(Orientation).*Magnitude,3);
+                Y{ikey} = mean(sin(Orientation).*Magnitude,3);
+            end
+            X = mean(reshape(cell2mat(X),size(X{1},1),size(X{1},2),[]),3);
+            Y = mean(reshape(cell2mat(Y),size(Y{1},1),size(Y{1},2),[]),3);
+            
+            % setup figure
+            figure
+            sz = size(Orientation);
+            [x,y] = meshgrid(1:sz(2),1:sz(1));
+            quiver(x,y,X,Y)
+            set(gca,'YDir','reverse')
+            axis off
+            axis image
+            shg
         end
     end
 end
