@@ -2284,7 +2284,7 @@ class StackSet(dj.Computed):
     def key_source(self):
         return (CorrectedStack.proj(stack_session='session') *
                 shared.RegistrationMethod.proj() * shared.SegmentationMethod.proj() &
-                Registration &  {'segmentation_method': 6})
+                Registration & {'segmentation_method': 6})
 
     class Unit(dj.Part):
         definition = """ # a unit in the stack
