@@ -334,6 +334,20 @@ class MonitorCalibration(dj.Manual):
 
 
 @schema
+class Surgery(dj.Manual):
+    definition = """ # List of surgeries performed on mice
+    -> mice.Mice
+    date                            : date               # Date surgery was performed
+    ---
+    -> Person            
+    outcome                         : varchar(26)        # Expected surgery outcome
+    surgery_type                    : varchar(52)        # Type of surgery performed
+    weight                          : float              # Weight of mouse before surgery
+    notes                           : varchar(256)       # Notes on surgery
+    """
+
+
+@schema
 class Session(dj.Manual):
     definition = """  # imaging session
 
