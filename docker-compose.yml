@@ -1,15 +1,15 @@
-version: '2.0'
+version: '2.3'
 
 services:
   notebook:
     image: ninai/stimulus-pipeline:DLC2.0.5
-    # runtime: nvidia
+    runtime: nvidia
     ports:
       - "8889:8888"
     volumes:
       - /mnt/:/mnt/
       # - /home/pipeline_data/:/tmp/
-      # - $HOME/pipeline/:/data/pipeline/
+      - /home/donnie/Documents/Repos/pipeline/:/data/pipeline/
     env_file: .env
     environment:
       - DISPLAY=$DISPLAY
@@ -38,7 +38,7 @@ services:
   
   bash:
     image: ninai/stimulus-pipeline:DLC2.0.5
-    # runtime: nvidia
+    runtime: nvidia
     volumes:
       - /mnt/:/mnt/
       # - /home/pipeline_data/:/tmp/
