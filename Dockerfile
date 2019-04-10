@@ -1,6 +1,6 @@
 #FROM datajoint/datajoint:latest
 FROM ninai/pipeline:latest
-LABEL maintainer="Edgar Y. Walker, Fabian Sinz, Erick Cobos"
+LABEL maintainer="Edgar Y. Walker, Fabian Sinz, Erick Cobos, Donnie Kim"
 
 WORKDIR /data
 
@@ -26,5 +26,8 @@ RUN pip3 install https://extras.wxpython.org/wxPython4/extras/linux/gtk3/ubuntu-
 #    libnotify-dev freeglut3 freeglut3-dev libsm-dev \
 #    libwebkitgtk-dev libwebkitgtk-3.0-dev
 
+# Uninstall tensorflow and install tensorflow-gpu
+RUN pip3 uninstall -y tensorflow
+RUN pip3 install tensorflow-gpu==1.11.0
 
 ENTRYPOINT ["/bin/bash"]
