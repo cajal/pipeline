@@ -32,13 +32,12 @@ schema = dj.schema('pipeline_eye_DLC', locals())
 
 pipeline_eye = dj.create_virtual_module('pipeline_eye', 'pipeline_eye')
 
-
+# If config.yaml ever updated, make sure you store the file name differently so that it becomes unique
 @schema
 class ConfigDlc(dj.Manual):
     definition = """
     # Minimal info needed to load deeplabcut model
     config_path                             : varchar(255)          # path to deeplabcut config
-    config_generation_date                  : date                  # date when the config file generated
     ---
     shuffle                                 : smallint unsigned     # shuffle number used for the trained dlc model. Needed for dlc.analyze_videos
     trainingsetindex                        : smallint unsigned     # trainingset index used for the trained dlc. model. Needed for dlc.analyze_videos
@@ -60,13 +59,16 @@ class TrackedLabelsDlc(dj.Computed):
     cropped_x1                              : smallint unsigned     # end coord in width of cropped video
     cropped_y0                              : smallint unsigned     # start coord in height of cropped video
     cropped_y1                              : smallint unsigned     # end coord in height of cropped video
-    analysis_dir                            : varchar(255)          # path to analysis directory
+    tracking_dir                            : varchar(255)          # path to tracking directory
     """
 
     @property
     def key_source(self):
 
-        new_key_source = (pipeline_eye.Eye * pipeline_experiment.Scan).proj() & {
+        new_ConfigDlc = ConfigDlc & {
+            'config_path': '/mnt/scratch07/donnie/DeepLabCut/pupil_track-Donnie-2019-02-12/config.yaml'}
+
+        new_key_source = (pipeline_eye.Eye * pipeline_experiment.Scan * new_ConfigDlc).proj() & {
             'animal_id': 20892, 'scan_idx': 10, 'session': 9}
 
         return new_key_source
@@ -83,14 +85,14 @@ class TrackedLabelsDlc(dj.Computed):
             "{behavior_path}/{filename}".format(**video_info))
         return video_path
 
-    def create_analysis_directory(self, key):
+    def create_tracking_directory(self, key):
         """
         this function creates the following directory structure:
 
         video_original_dir
             |
             |------ video_original
-            |------ analysis_dir (create_analysis_folder)
+            |------ tracking_dir (create_tracking_folder)
                         |------- symlink to video_original (add_symlink) 
                         |------- cropped_dir
                                     |------- cropped_video (generated from make_short_video)
@@ -106,45 +108,42 @@ class TrackedLabelsDlc(dj.Computed):
                 a string that contains mouse id, session, and scan idx joined by underscores.
                 ex) 20210_2_00015
         Return:
-            analysis_dir: string
-                a string that specifies the path to the analysis directory
+            tracking_dir: string
+                a string that specifies the path to the tracking directory
         """
 
-        print("Generating analysis directory for ", key)
+        print("Generating tracking directory for ", key)
 
         vid_path = self.get_video_path(key)
         vid_dir = os.path.dirname(os.path.normpath(vid_path))
-        analysis_dir_name = os.path.basename(
-            os.path.normpath(vid_path)).split('.')[0] + '_foo'
+        tracking_dir_name = os.path.basename(
+            os.path.normpath(vid_path)).split('.')[0] + '_tracking'
 
-        analysis_dir = os.path.join(vid_dir, analysis_dir_name)
+        tracking_dir = os.path.join(vid_dir, tracking_dir_name)
 
         symlink_path = os.path.join(
-                analysis_dir, os.path.basename(os.path.normpath(vid_path)))
+            tracking_dir, os.path.basename(os.path.normpath(vid_path)))
 
-        print(analysis_dir)
-        print(vid_path)
-        print(symlink_path)
-        if not os.path.exists(analysis_dir):
+        if not os.path.exists(tracking_dir):
 
-            os.mkdir(analysis_dir)
-            os.mkdir(os.path.join(analysis_dir, 'cropped'))
-            os.mkdir(os.path.join(analysis_dir, 'short'))
+            os.mkdir(tracking_dir)
+            os.mkdir(os.path.join(tracking_dir, 'cropped'))
+            os.mkdir(os.path.join(tracking_dir, 'short'))
 
             os.symlink(vid_path, symlink_path)
 
         else:
-            print('{} already exists!'.format(analysis_dir))
+            print('{} already exists!'.format(tracking_dir))
 
-        return analysis_dir
+        return tracking_dir
 
-    def make_short_video(self, analysis_dir):
+    def make_short_video(self, tracking_dir):
         """
         Extract 5 seconds long video starting from the middle of the original video.
 
         Input:
-            analysis_dir: string
-                String that specifies the full path of analysis directory
+            tracking_dir: string
+                String that specifies the full path of tracking directory
         Return:
             None
         """
@@ -153,22 +152,20 @@ class TrackedLabelsDlc(dj.Computed):
         suffix = '_short_beh.avi'
 
         case = os.path.basename(os.path.normpath(
-            analysis_dir)).split('_beh_foo')[0]
-        
-        input_video_path = os.path.join(analysis_dir, case + '_beh.avi')
+            tracking_dir)).split('_beh_tracking')[0]
+
+        input_video_path = os.path.join(tracking_dir, case + '_beh.avi')
 
         # output_vid = case + suffix
-        # out_vid_path =  os.path.join(analysis_dir, output_vid)
+        # out_vid_path =  os.path.join(tracking_dir, output_vid)
 
-        out_vid_path = os.path.join(analysis_dir, 'short', case + suffix)
-        
+        out_vid_path = os.path.join(tracking_dir, 'short', case + suffix)
+
         print('input_video_path is: {}'.format(input_video_path))
         cap = cv2.VideoCapture(input_video_path)
-        
+
         fps = cap.get(cv2.CAP_PROP_FPS)
-        print(fps)
         mid_frame_num = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)/2)
-        print(mid_frame_num)
         duration = int(mid_frame_num/fps)
 
         minutes, seconds = divmod(duration, 60)
@@ -187,8 +184,8 @@ class TrackedLabelsDlc(dj.Computed):
         print("{} was successfully generated".format(out_vid_path))
         return out_vid_path
 
-    def predict_on_short_video(self, short_vid_path):
-        dlc_config = (ConfigDlc & key).fetch1(as_dict=True)
+    def predict_on_short_video(self, short_vid_path, key):
+        dlc_config = (ConfigDlc & key).fetch1()
         destfolder = os.path.dirname(short_vid_path)
         dlc.analyze_videos(config=dlc_config['config_path'], videos=[short_vid_path], videotype='avi', shuffle=dlc_config['shuffle'],
                            trainingsetindex=dlc_config['trainingsetindex'], gputouse=gputouse, save_as_csv=False, destfolder=destfolder)
@@ -198,22 +195,25 @@ class TrackedLabelsDlc(dj.Computed):
 
     def make(self, key):
         print('Tracking labels with DLC')
+        config_path = key.pop('config_path')
 
-        analysis_dir = self.create_analysis_directory(key)
-        short_vid_path = self.make_short_video(analysis_dir)
+        tracking_dir = self.create_tracking_directory(key)
+        short_vid_path = self.make_short_video(tracking_dir)
 
         self.predict_on_short_video(short_vid_path, key)
 
-        config = auxiliaryfunctions.read_config(
-            (ConfigDlc & key).fetch1('config_path'))
+        # config = auxiliaryfunctions.read_config(
+        #     (ConfigDlc & key).fetch1('config_path'))
 
         key['original_width'] = 0
         key['original_height'] = 0
         key['cropped_x0'] = 0
         key['cropped_x1'] = 0
         key['cropped_y0'] = 0
-        key['analysis_dir'] = 'foo'
-        self.inser1(key)
+        key['cropped_y1'] = 0
+        key['tracking_dir'] = tracking_dir
+        key['config_path'] = config_path
+        self.insert1(key)
 
     # class Crop(dj.Part):
     #     definition = """
