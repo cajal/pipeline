@@ -334,16 +334,69 @@ class MonitorCalibration(dj.Manual):
 
 
 @schema
+class SurgeryTypes(dj.Lookup):
+    definition = """ # Surgery types used in experiment.Surgery
+    surgery_type                : varchar(64)         # Types of surgery performed on mice
+    """
+    contents = [
+        ['Cranial Window and Headbar'],
+        ['Headbar'],
+        ['Burr Hole and Suture'],
+        ['C-Section'],
+        ['Viral Injection'],
+        ['Electroporation']
+    ]
+
+
+@schema
+class SurgeryOutcomes(dj.Lookup):
+    definition = """ # Surgery outcomes used in experiment.Surgery
+    surgery_outcome             : varchar(32)         # Possible outcomes of surgeries performed on mice
+    """
+    contents = [
+        ['Survival'],
+        ['Non-Survival'],
+    ]
+
+
+@schema
+class SurgeryQualities(dj.Lookup):
+    definition = """ # Surgery qualities used in experiment.Surgery
+    surgery_quality              : varchar(32)         # Possible qualities of surgeries performed on mice
+    """
+    contents = [
+        ['Good'],
+        ['Okay'],
+        ['Bad']
+    ]
+
+
+@schema
 class Surgery(dj.Manual):
     definition = """ # List of surgeries performed on mice
     -> mice.Mice
-    date                            : date               # Date surgery was performed
+    date                         : date                   # Date surgery was performed
     ---
-    -> Person            
-    outcome                         : varchar(26)        # Expected surgery outcome
-    surgery_type                    : varchar(52)        # Type of surgery performed
-    weight                          : float              # Weight of mouse before surgery
-    notes                           : varchar(256)       # Notes on surgery
+    -> experiment.Person            
+    -> SurgeryOutcomes
+    -> SurgeryTypes
+    -> SurgeryQualities
+    ketoprofen = null            : decimal(4,3)           # Amount of Ketoprofen given to mouse
+    weight = null                : decimal(5,2) unsigned  # Weight of mouse before surgery
+    notes                        : varchar(256)           # Notes on surgery
+    """
+
+
+@schema
+class SurgeryStatus(dj.Manual):
+    definition = """ # Updates to surgeries performed on mice
+    -> Surgery
+    timestamp                           : timestamp              # Timestamp of entry
+    ---
+    euthanized = "False"                : enum("True","False")
+    day_one = "False"                   : enum("True","False")   # First day checkup performed
+    day_two = "False"                   : enum("True","False")   # Second day checkup performed
+    day_three = "False"                 : enum("True","False")   # Third day checkup performed
     """
 
 
