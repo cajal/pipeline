@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    
+    <title>Pipeline Control</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Bootstrap -->
+    <link href="//cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/3.3.7/css/bootstrap.min.css" rel="stylesheet">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="stylesheet" type="text/css"
+          href="//netdna.bootstrapcdn.com/font-awesome/4.6.3/css/font-awesome.min.css"/>
+    <link rel="shortcut icon" href="/static/favicon.ico" type="image/x-icon"/>
+    <link rel="icon" href="/static/favicon.ico" type="image/x-icon"/>
+    <link rel="stylesheet" type="text/css" href="/static/styles.css"/>
+    <link rel="stylesheet" type="text/css"
+          href="/static/metro-bootstrap/dist/css/metro-bootstrap.css"/>
+
+  </head>
+  <body>
+    
+    <div class="navbar navbar-inverse" role="navigation">
+
+        <a class="navbar-brand" href="/user">
+                Select user
+        </a>
+        <a class="navbar-brand" href="/schema/">ERD</a>
+        <a class="navbar-brand" href="/autoprocessing">Auto Processing</a>
+        <a class="navbar-brand" href="/correction">Correction Channel</a>
+        <a class="navbar-brand" href="/segmentation">Segmentation Task</a>
+        <a class="navbar-brand" href="/progress">Progress</a>
+        <a class="navbar-brand" href="/jobs">Jobs</a>
+
+        <a class="navbar-brand" href="/quality/">Quality Control</a>
+        <a class="navbar-brand" href="/report/">Reports</a>
+        <a class="navbar-brand" href="/surgery">Surgery</a>
+    </div>
+
+    
+    <div class="container">
+        
+
+        
+    <div class="post-tabs">
+        
+        <h3>Select user</h3>
+        <form method="post">
+            <dl>
+                
+    <dt> <label for="user">User</label> </dt>
+    <dd> <select id="user" name="user" required><option value="atlab">atlab</option><option value="cameron">cameron</option><option value="cathryn">cathryn</option><option value="dimitri">dimitri</option><option value="ecobost">ecobost</option><option value="edgar">edgar</option><option value="fabee">fabee</option><option value="fish">fish</option><option value="gary">gary</option><option value="jake">jake</option><option value="jiakun">jiakun</option><option value="manolis">manolis</option><option value="minggui">minggui</option><option value="Paul">Paul</option><option value="shan">shan</option><option value="shuang">shuang</option><option value="stelios">stelios</option><option value="taliah">taliah</option><option value="unknown">unknown</option><option value="xiaolong">xiaolong</option><option value="zhiwei">zhiwei</option></select>
+        
+    </dd>
+
+            </dl>
+            <input type="submit" value="Change">
+        </form>
+    </div>
+
+    </div>
+
+
+    
+    
+    <script src="//cdnjs.cloudflare.com/ajax/libs/jquery/1.12.4/jquery.min.js"></script>
+    <script src="//cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/3.3.7/js/bootstrap.min.js"></script>
+
+  </body>
+</html>
