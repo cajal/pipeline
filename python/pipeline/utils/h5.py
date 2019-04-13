@@ -96,7 +96,7 @@ def read_behavior_file(filename):
 
 
 def ts2sec(ts, sampling_rate=1e7, is_packeted=False):
-    """ Convert timestamps from 2pMaster (ts) to seconds (s)
+    """ Convert timestamps from master clock (ts) to seconds (s)
 
     :param np.array ts: Timestamps from behavior files.
     :param float sampling_rate: Sampling rate of the master clock counter in Hz.
