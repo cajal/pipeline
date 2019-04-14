@@ -2,7 +2,7 @@ version: '2.3'
 
 services:
   notebook:
-    image: ninai/pipeline:DLC2.0.5-gpu
+    image: ninai/pipeline:DLC2.0.5-GPU
     runtime: nvidia
     ports:
       - "8889:8888"
@@ -23,7 +23,7 @@ services:
 
 
   minion:
-    image: ninai/pipeline:DLC2.0.5-gpu
+    image: ninai/pipeline:DLC2.0.5-GPU
     volumes:
       # - /mnt/:/mnt/
       # - /home/pipeline_data:/tmp/
@@ -37,7 +37,7 @@ services:
   
   
   bash:
-    image: ninai/pipeline:DLC2.0.5-gpu
+    image: ninai/pipeline:DLC2.0.5-GPU
     runtime: nvidia
     volumes:
       - /mnt/:/mnt/
