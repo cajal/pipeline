@@ -75,3 +75,6 @@ matlab/scripts/Eye_Movements/CircleMaps/
 
 #.vscode stuff
 .vscode/*
+
+# .ipynb_checkpoints
+.ipynb_checkpoints
