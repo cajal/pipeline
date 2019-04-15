@@ -334,7 +334,7 @@ class MonitorCalibration(dj.Manual):
 
 
 @schema
-class SurgeryTypes(dj.Lookup):
+class SurgeryType(dj.Lookup):
     definition = """ # Surgery types used in experiment.Surgery
     surgery_type                : varchar(64)         # Types of surgery performed on mice
     """
@@ -349,7 +349,7 @@ class SurgeryTypes(dj.Lookup):
 
 
 @schema
-class SurgeryOutcomes(dj.Lookup):
+class SurgeryOutcome(dj.Lookup):
     definition = """ # Surgery outcomes used in experiment.Surgery
     surgery_outcome             : varchar(32)         # Possible outcomes of surgeries performed on mice
     """
@@ -360,7 +360,7 @@ class SurgeryOutcomes(dj.Lookup):
 
 
 @schema
-class SurgeryQualities(dj.Lookup):
+class SurgeryQuality(dj.Lookup):
     definition = """ # Surgery qualities used in experiment.Surgery
     surgery_quality              : varchar(32)         # Possible qualities of surgeries performed on mice
     """
@@ -378,9 +378,9 @@ class Surgery(dj.Manual):
     date                         : date                   # Date surgery was performed
     ---
     -> experiment.Person            
-    -> SurgeryOutcomes
-    -> SurgeryTypes
-    -> SurgeryQualities
+    -> SurgeryOutcome
+    -> SurgeryType
+    -> SurgeryQuality
     ketoprofen = null            : decimal(4,3)           # Amount of Ketoprofen given to mouse
     weight = null                : decimal(5,2) unsigned  # Weight of mouse before surgery
     notes                        : varchar(256)           # Notes on surgery
