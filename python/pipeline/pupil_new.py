@@ -372,14 +372,6 @@ class TrackedLabelsDlc(dj.Computed):
                                          original_width=original_width,
                                          original_height=original_height,
                                          pixel_num=pixel_num)
-        
-        compressed_cropped_video = self.CompressedCroppedVideo()
-        compressed_cropped_video.insert1(dict(key, cropped_x0=cropped_coords['cropped_x0'],
-                                              cropped_x1=cropped_coords['cropped_x1'],
-                                              cropped_y0=cropped_coords['cropped_y0'],
-                                              cropped_y1=cropped_coords['cropped_y1'],
-                                              added_pixels=pixel_num,
-                                              video_path=short_video_path))
 
         # make a compressed and cropped video
         compressed_cropped_video_path = self.make_compressed_cropped_video(
@@ -387,6 +379,17 @@ class TrackedLabelsDlc(dj.Computed):
 
         # predict using the compressed and cropped video
         self.predict_labels(compressed_cropped_video_path, config)
+
+        compressed_cropped_video = self.CompressedCroppedVideo()
+        compressed_cropped_video.insert1(dict(key, cropped_x0=cropped_coords['cropped_x0'],
+                                              cropped_x1=cropped_coords['cropped_x1'],
+                                              cropped_y0=cropped_coords['cropped_y0'],
+                                              cropped_y1=cropped_coords['cropped_y1'],
+                                              added_pixels=pixel_num,
+                                              video_path=compressed_cropped_video_path))
+
+
+
 
 
 @schema
