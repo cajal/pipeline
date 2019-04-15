@@ -136,7 +136,7 @@ class ZoomedDisplay():
 
 def update_config_crop_coords(config):
     """
-    Given the list of videos, users can manually zoom in the area they want to crop and update the coordinates in config.yaml 
+    Given the list of videos, users can manually zoom in the area they want to crop and update the coordinates in config.yaml
 
     Parameters
     ----------
@@ -205,7 +205,7 @@ def update_config_crop_coords(config):
 
 def update_inference_cropping_config(cropping_config, video_path):
     """
-    Given a video path, users can manually zoom in the area they want to crop and update cropping coordinates in config.yaml 
+    Given a video path, users can manually zoom in the area they want to crop and update cropping coordinates in config.yaml
 
     Parameters
     ----------
@@ -581,6 +581,31 @@ class PupilFitting(PlotBodyparts):
                                       'eyelid_left': 'eyelid_left_top',
                                       'eyelid_left_top': 'eyelid_top'}
 
+        self._circle_threshold = 3
+        self._ellipse_threshold = 6
+
+    @property
+    def circle_threshold(self):
+        return self._ellipse_threshold
+
+    @circle_threshold.setter
+    def circle_threshold(self, value):
+        if value > 8:
+            raise ValueError("value must be equal to or less than 8!")
+        else:
+            self._ellipse_threshold = value
+
+    @property
+    def ellipse_threshold(self):
+        return self._ellipse_threshold
+
+    @ellipse_threshold.setter
+    def ellipse_threshold(self, value):
+        if value > 8:
+            raise ValueError("value must be equal to or less than 8!")
+        else:
+            self._ellipse_threshold = value
+
     def coords_pcutoff(self, frame_num):
         """
         Given a frame number, return bpindex, x & y coordinates that meet pcutoff criteria
@@ -650,16 +675,19 @@ class PupilFitting(PlotBodyparts):
         final_mask = np.logical_not(new_mask).astype(int)[1:-1, 1:-1]
 
         # ax.imshow(mask)
-        return {'frame': frame, 'mask': final_mask}
+        return {'frame': frame,
+                'mask': final_mask,
+                'eyelid_labels_num': len(eyelid_labels)}
 
     def fit_circle_to_pupil(self, frame_num, frame):
         """
-        Fit a circle to the pupil
+        Fit a circle to the pupil if it meets the circle_threshold value
         Input:
             frame_num: int
                 A desired frame number
             frame: numpy array
                 A frame to be fitted 3D
+
         Output: dictionary
             A dictionary with the fitted frame, center and radius of the fitted circle. If fitting did
             not occur, return the original frame with center and raidus as None.
@@ -667,7 +695,7 @@ class PupilFitting(PlotBodyparts):
                 frame: a numpy array of the frame with pupil circle
                 center: coordinates of the center of the fitted circle. In tuple format
                 radius: radius of the fitted circle in int format
-                pupil_label_num: number of pupil labels used for fitting
+                pupil_labels_num: number of pupil labels used for fitting
                 mask: a binary mask for the fitted circle area
         """
 
@@ -678,14 +706,14 @@ class PupilFitting(PlotBodyparts):
         pupil_labels = [label for label in list(
             df_x_coords.index.get_level_values(0)) if 'pupil' in label]
 
-        if len(pupil_labels) <= 2:
+        if len(pupil_labels) < self.circle_threshold:
             # print('Frame number: {} has only 2 or less pupil label. Skip fitting!'.format(
             #     frame_num))
             center = None
             radius = None
             final_mask = mask[:, :, 0]
 
-        elif len(pupil_labels) > 2:
+        else:
             pupil_x = df_x_coords.loc[pupil_labels].values
             pupil_y = df_y_coords.loc[pupil_labels].values
 
@@ -709,11 +737,15 @@ class PupilFitting(PlotBodyparts):
             cv2.floodFill(mask, new_mask, seedPoint=(0, 0), newVal=1)
             final_mask = np.logical_not(new_mask).astype(int)[1:-1, 1:-1]
 
-        return {'frame': frame, 'center': center, 'radius': radius, 'pupil_label_num': len(pupil_labels), 'mask': final_mask}
+        return {'frame': frame,
+                'center': center,
+                'radius': radius,
+                'mask': final_mask,
+                'pupil_labels_num': len(pupil_labels)}
 
-    def fit_ellipse_to_pupil(self, frame_num, frame, threshold=6):
+    def fit_ellipse_to_pupil(self, frame_num, frame):
         """
-        Fit a circle to the pupil
+        Fit an ellipse to pupil iff there exist more than 6 labels. If less than 6, return None
         Input:
             frame_num: int
                 A desired frame number
@@ -726,7 +758,7 @@ class PupilFitting(PlotBodyparts):
                 frame: a numpy array of the frame with pupil circle
                 center: coordinates of the center of the fitted circle. In tuple format
                 radius: radius of the fitted circle in int format
-                pupil_label_num: number of pupil labels used for fitting
+                pupil_labels_num: number of pupil labels used for fitting
                 mask: a binary mask for the fitted circle area
         """
 
@@ -737,7 +769,7 @@ class PupilFitting(PlotBodyparts):
         pupil_labels = [label for label in list(
             df_x_coords.index.get_level_values(0)) if 'pupil' in label]
 
-        if len(pupil_labels) <= 2:
+        if len(pupil_labels) < self.ellipse_threshold:
             # print('Frame number: {} has only 2 or less pupil label. Skip fitting!'.format(
             #     frame_num))
             center = None
@@ -745,33 +777,6 @@ class PupilFitting(PlotBodyparts):
             minor_radius = None
             rotation_angle = None
             final_mask = mask[:, :, 0]
-
-        elif len(pupil_labels) > 2 and len(pupil_labels) < threshold:
-            pupil_x = df_x_coords.loc[pupil_labels].values
-            pupil_y = df_y_coords.loc[pupil_labels].values
-
-            pupil_coords = list(zip(pupil_x, pupil_y))
-
-            x, y, radius = smallest_enclosing_circle_naive(pupil_coords)
-
-            center = (x, y)
-            major_radius = radius
-            minor_radius = radius
-            rotation_angle = 0
-
-            # opencv has some issues with dealing with np objects. Cast it manually again
-            frame = cv2.circle(img=np.array(frame), center=(int(round(x)), int(round(y))),
-                               radius=int(round(radius)), color=(0, 255, 0), thickness=self.line_thickness)
-
-            mask = cv2.circle(img=mask, center=(int(round(x)), int(round(y))),
-                              radius=int(round(radius)), color=(0, 255, 0), thickness=self.line_thickness)
-
-            # fill out the mask with 1s OUTSIDE of the mask, then invert 0 and 1
-            # for cv2.floodFill, need a mask that is 2 pixels bigger than the input image
-            new_mask = np.zeros(
-                (mask.shape[0]+2, mask.shape[1]+2), dtype=np.uint8)
-            cv2.floodFill(mask, new_mask, seedPoint=(0, 0), newVal=1)
-            final_mask = np.logical_not(new_mask).astype(int)[1:-1, 1:-1]
 
         else:
             pupil_x = df_x_coords.loc[pupil_labels].values.round().astype(
@@ -806,39 +811,91 @@ class PupilFitting(PlotBodyparts):
             minor_radius = rotated_rect[1][0]/2.0
             rotation_angle = rotated_rect[2]
 
-        return {'frame': frame, 'center': center,
+        return {'frame': frame,
+                'center': center,
                 'mask': final_mask,
-                'pupil_label_num': len(pupil_labels),
                 'major_radius': major_radius,
                 'minor_radius': minor_radius,
-                'rotation_angle': rotation_angle
-                }
+                'rotation_angle': rotation_angle,
+                'pupil_labels_num': len(pupil_labels)}
 
-    def detect_visible_pupil(self, frame_num, frame):
+    def detect_visible_pupil_area(self, eyelid_connect_dict, fit_dict, fitting_method=None):
         """
         Given a frame, find a visible part of the pupil by finding the intersection of pupil and eyelid masks
         If pupil mask does not exist(i.e. label < 3), return None
 
         Input:
-            frame_num: int
-                frame number to extract a specific frame
-            frame:
+            eyelid_connect_dict: dicionary
+                An output dictionary from method 'connect_eyelids'
+            fit_dict: dictionary
+                An output dictionary from either of the method 'fit_circle_to_pupil' or 'fit_ellipse_to_pupil'
+            fitting_method: string
+                A string indicates whether the fitted method was an 'ellipse' or a 'circle'. 
 
         Output:
-            binary numpy array or None
-                If pupil was fitted, then return the visible part. Otherwise None
+            A dictionary that contains the following:
+                color_mask: numpy array
+                    A 3D mask that depicts visible area of pupil. 
+                    If no visible area provided, then it is an np.zeros
+                visible_portion: signed float
+                    if visible area exists, then value ranges from 0.0 to 1.0
+                    if equal to -1.0, not all eyelid labels exist, hence cannot find the visible area
+                    if equal to -2.0, number of pupil labels do not meet the threshold of the fitting method, hence no fitting performed
+                    if equal to -3.0, not all eyelid labels exist AND not enough pupil labels to meet the threshold of the fitting method
         """
 
-        eyelid_connected = self.connect_eyelids(frame_num, frame)
-        pupil_fitted = self.fit_circle_to_pupil(
-            frame_num, eyelid_connected['frame'])
+        color_mask = np.zeros(
+            shape=[*eyelid_connect_dict['mask'].shape, 3], dtype=np.uint8)
 
-        if pupil_fitted['pupil_label_num'] >= 3:
-            return np.logical_and(pupil_fitted['mask'], eyelid_connected['mask']).astype(int)
+        if fitting_method == 'circle':
+            threshold = self.circle_threshold
+
+        elif fitting_method == 'ellipse':
+            threshold = self.ellipse_threshold
+
         else:
-            return None
+            raise ValueError(
+                'fitting_method must be provided! It must be either a "circle" or an "ellipse"')
 
-    def fitted_plot_core(self, fig, ax, frame_num):
+        if fit_dict['pupil_labels_num'] >= threshold and eyelid_connect_dict['eyelid_labels_num'] == 8:
+
+            visible_mask = np.logical_and(
+                fit_dict['mask'], eyelid_connect_dict['mask']).astype(int)
+
+            # 126,0,255 for the color
+            color_mask[visible_mask == 1, 0] = 126
+            color_mask[visible_mask == 1, 2] = 255
+
+            visible_portion = visible_mask.sum() / fit_dict['mask'].sum()
+
+        elif fit_dict['pupil_labels_num'] >= threshold and eyelid_connect_dict['eyelid_labels_num'] != 8:
+            visible_portion = -1.0
+
+        elif fit_dict['pupil_labels_num'] < threshold and eyelid_connect_dict['eyelid_labels_num'] == 8:
+            visible_portion = -2.0
+
+        elif fit_dict['pupil_labels_num'] < threshold and eyelid_connect_dict['eyelid_labels_num'] != 8:
+            visible_portion = -3.0
+
+        return dict(color_mask=color_mask, visible_portion=visible_portion)
+
+    def fitted_core(self, fig, ax, frame_num, fitting_method=None):
+        """
+        Input:
+            fig: figure object
+                Figure object created by configure_plot method
+            ax: axis object
+                Axis object created by configure_plot method
+            frame_num: int
+                frame number of the video to be analyzed
+            fitting_method: string
+                It must be either 'circle' or 'ellipse'. If not provided, raising an error
+        Output:
+            A dictionary
+                'ax_frame': A fitted axis object
+                'ax_scatter': A scatter axis object that shows where labels are
+                'ax_mask':
+        """
         # it's given in 3 channels but every channel is the same i.e. grayscale
 
         image = self.clip._read_specific_frame(frame_num)
@@ -850,21 +907,23 @@ class PupilFitting(PlotBodyparts):
 
         eyelid_connected = self.connect_eyelids(frame_num, frame=image)
 
-        pupil_fitted = self.fit_circle_to_pupil(
+        circle_fit = self.fit_circle_to_pupil(
             frame_num, frame=eyelid_connected['frame'])
 
-        ax_frame = ax.imshow(pupil_fitted['frame'])
+        ellipse_fit = self.fit_ellipse_to_pupil(
+            frame_num, eyelid_connected['frame'], threshold=self.threshold)
 
-        color_mask = np.zeros(shape=image.shape, dtype=np.uint8)
-        if pupil_fitted['pupil_label_num'] >= 3:
-            visible_mask = np.logical_and(
-                pupil_fitted['mask'], eyelid_connected['mask']).astype(int)
+        circle_visible = self.detect_visible_pupil_area(eyelid_connect_dict=eyelid_connected,
+                                                        fit_dict=circle_fit,
+                                                        fitting_method='circle')
+        
+        ellipse_visible = self.detect_visible_pupil_area(eyelid_connect_dict=eyelid_connected,
+                                                        fit_dict=ellipse_fit,
+                                                        fitting_method='ellipse')
 
-            # 126,0,255 for the color
-            color_mask[visible_mask == 1, 0] = 126
-            color_mask[visible_mask == 1, 2] = 255
-
-        ax_mask = ax.imshow(color_mask, alpha=0.3)
+        circle_frame = ax.imshow(circle_fit['frame'])
+        ellipse_frame = ax.imshow(ellipse_fit['frame'])
+        
 
         return {'ax_frame': ax_frame, 'ax_scatter': ax_scatter, 'ax_mask': ax_mask}
 
