@@ -393,10 +393,10 @@ class SurgeryStatus(dj.Manual):
     -> Surgery
     timestamp                           : timestamp              # Timestamp of entry
     ---
-    euthanized = "False"                : enum("True","False")
-    day_one = "False"                   : enum("True","False")   # First day checkup performed
-    day_two = "False"                   : enum("True","False")   # Second day checkup performed
-    day_three = "False"                 : enum("True","False")   # Third day checkup performed
+    euthanized = 0                      : boolean
+    day_one = 0                         : boolean                # First day checkup performed
+    day_two = 0                         : boolean                # Second day checkup performed
+    day_three = 0                       : boolean                # Third day checkup performed
     """
 
 
