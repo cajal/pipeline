@@ -4,12 +4,22 @@ import os
 import yaml
 import cv2
 from pathlib import Path
+import numpy as np
+import pandas as pd
 import ruamel.yaml
+import imageio
+import time
 
 from deeplabcut.utils import auxiliaryfunctions
+from deeplabcut.utils.video_processor import VideoProcessorCV as vp
+from deeplabcut.utils.plotting import get_cmap
 
 import matplotlib.pyplot as plt
 from matplotlib.patches import Rectangle
+
+import pylab as pl
+from IPython import display
+import matplotlib.pyplot as plt
 
 
 def key_dict_generater(case):
@@ -18,6 +28,7 @@ def key_dict_generater(case):
         case_key[key] = int(case.split('_')[ind])
 
     return case_key
+
 
 def make_circumcircle(a, b, c):
     # Mathematical algorithm from Wikipedia: Circumscribed circle
@@ -310,3 +321,635 @@ def crop_videos(cropping_config, case):
     p = Popen(cmd, stdin=PIPE)
     # close ffmpeg
     p.wait()
+
+
+class PlotBodyparts():
+
+    def __init__(self, config, bodyparts='all'):
+        """
+        Input:
+            config: dictionary
+                A dictionary that contains animal id, session, scan idx, and a path to config
+            bodyparts: list
+                A list that contains bodyparts to plot. Each bodypart is in a string format. If none provided,
+                then by default it plots ALL existing bodyplots in config.yaml file.
+
+        """
+
+        self.config = config
+
+        if isinstance(bodyparts, list):
+            self.bodyparts = bodyparts
+        else:
+            self.bodyparts = self.config['bodyparts']
+        self.shuffle = self.config['shuffle']
+        self.trainingsetindex = self.config['trainingsetindex']
+
+        self.project_path = self.config['project_path']
+        self.video_path = self.config['video_path']
+        self.compressed_cropped_dir_path = os.path.dirname(self.video_path)
+        self.clip = vp(fname=self.video_path)
+
+        self._trainFraction = self.config['TrainingFraction'][self.trainingsetindex]
+        self._DLCscorer = auxiliaryfunctions.GetScorerName(
+            self.config, self.shuffle, self._trainFraction)
+
+        self.label_path = self.video_path.split(
+            '.')[0] + self._DLCscorer + '.h5'
+
+        self.df_label = pd.read_hdf(self.label_path)
+
+        self.df_bodyparts = self.df_label[self._DLCscorer][self.bodyparts]
+        self.df_bodyparts_likelihood = self.df_bodyparts.iloc[:, self.df_bodyparts.columns.get_level_values(
+            1) == 'likelihood']
+        self.df_bodyparts_x = self.df_bodyparts.iloc[:,
+                                                     self.df_bodyparts.columns.get_level_values(1) == 'x']
+        self.df_bodyparts_y = self.df_bodyparts.iloc[:,
+                                                     self.df_bodyparts.columns.get_level_values(1) == 'y']
+
+        self.nx = self.clip.width()
+        self.ny = self.clip.height()
+
+        # plotting properties
+        self._dotsize = 7
+        self._line_thickness = 1
+        self._pcutoff = self.config['pcutoff']
+        self._colormap = self.config['colormap']
+        self._label_colors = get_cmap(len(self.bodyparts), name=self._colormap)
+        self._alphavalue = self.config['alphavalue']
+        self._fig_size = [12, 8]
+        self._dpi = 100
+
+        self.tf_likelihood_array = self.df_bodyparts_likelihood.values > self._pcutoff
+
+    @property
+    def dotsize(self):
+        return self._dotsize
+
+    @dotsize.setter
+    def dotsize(self, value):
+        self._dotsize = value
+
+    @property
+    def line_thickness(self):
+        return self._line_thickness
+
+    @line_thickness.setter
+    def line_thickness(self, value):
+        if isinstance(value, int):
+            self._line_thickness = value
+
+        else:
+            raise TypeError("line thickness must be integer")
+
+    @property
+    def pcutoff(self):
+        return self._pcutoff
+
+    @pcutoff.setter
+    def pcutoff(self, value):
+        self._pcutoff = value
+
+    @property
+    def colormap(self):
+        return self._colormap
+
+    @colormap.setter
+    def colormap(self, value):
+        if isinstance(value, str):
+            self._colormap = value
+            self._label_colors = get_cmap(
+                len(self.bodyparts), name=self._colormap)
+        else:
+            raise TypeError("colormap must be in string format")
+
+    @property
+    def alphavalue(self):
+        return self._alphavalue
+
+    @alphavalue.setter
+    def alphavalue(self, value):
+        self._alphavalue = value
+
+    @property
+    def fig_size(self):
+        return self._fig_size
+
+    @fig_size.setter
+    def fig_size(self, value):
+        if isinstance(value, list):
+            self._fig_size = value
+        else:
+            raise TypeError("fig_size must be in a list format")
+
+    @property
+    def dpi(self):
+        return self._dpi
+
+    @dpi.setter
+    def dpi(self, value):
+        self._dpi = value
+
+    def coords_pcutoff(self, frame_num):
+        """
+        Given a frame number, return bpindex, x & y coordinates that meet pcutoff criteria
+        Input:
+            frame_num: int
+                A desired frame number
+        Output:
+            bpindex: list
+                A list of integers that match with bodypart. For instance, if the bodypart is ['A','B','C']
+                and only 'A' and 'C'qualifies the pcutoff, then bpindex = [0,2]
+            x_coords: pandas series
+                A pandas series that contains coordinates whose values meet pcutoff criteria
+            y_coords: pandas series
+                A pandas series that contains coordinates whose values meet pcutoff criteria
+        """
+        frame_num_tf = self.tf_likelihood_array[frame_num, :]
+        bpindex = [i for i, x in enumerate(frame_num_tf) if x]
+
+        df_x_coords = self.df_bodyparts_x.loc[frame_num, :][bpindex]
+        df_y_coords = self.df_bodyparts_y.loc[frame_num, :][bpindex]
+
+        return bpindex, df_x_coords, df_y_coords
+
+    def configure_plot(self):
+        fig = plt.figure(frameon=False, figsize=self.fig_size, dpi=self.dpi)
+        ax = fig.add_subplot(1, 1, 1)
+        plt.subplots_adjust(left=0, bottom=0, right=1,
+                            top=1, wspace=0, hspace=0)
+        plt.xlim(0, self.nx)
+        plt.ylim(0, self.ny)
+
+        plt.gca().invert_yaxis()
+
+        sm = plt.cm.ScalarMappable(cmap=self._label_colors, norm=plt.Normalize(
+            vmin=-0.5, vmax=len(self.bodyparts)-0.5))
+        sm._A = []
+        cbar = plt.colorbar(sm, ticks=range(len(self.bodyparts)))
+        cbar.set_ticklabels(self.bodyparts)
+        cbar.ax.tick_params(labelsize=18)
+
+        return fig, ax
+
+    def plot_core(self, fig, ax, frame_num):
+        # it's given in 3 channels but every channel is the same i.e. grayscale
+        image = self.clip._read_specific_frame(frame_num)
+
+        ax_frame = ax.imshow(image, cmap='gray')
+
+        # plot bodyparts above the pcutoff
+        bpindex, df_x_coords, df_y_coords = self.coords_pcutoff(frame_num)
+        ax_scatter = ax.scatter(df_x_coords.values, df_y_coords.values, s=self.dotsize**2,
+                                color=self._label_colors(bpindex), alpha=self.alphavalue)
+
+        return {'ax_frame': ax_frame, 'ax_scatter': ax_scatter}
+
+    def plot_one_frame(self, frame_num, save_fig=False):
+
+        fig, ax = self.configure_plot()
+
+        ax_dict = self.plot_core(fig, ax, frame_num)
+
+        plt.axis('off')
+        plt.title('frame num: ' + str(frame_num), fontsize=30)
+        plt.tight_layout()
+
+        fig.canvas.draw()
+
+        if save_fig:
+            plt.savefig(os.path.join(
+                self.video_path.split('.')[0] + '_frame_' + str(frame_num) + '.png'))
+
+        # return ax_dict
+
+    def plot_multi_frames(self, start, end, save_gif=False):
+
+        plt_list = []
+
+        fig, ax = self.configure_plot()
+
+        for frame_num in range(start, end):
+            ax_dict = self.plot_core(fig, ax, frame_num)
+
+            plt.axis('off')
+            plt.title('frame num: ' + str(frame_num), fontsize=30)
+            plt.tight_layout()
+
+            fig.canvas.draw()
+
+            data = np.fromstring(fig.canvas.tostring_rgb(),
+                                 dtype=np.uint8, sep='')
+            data = data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+            plt_list.append(data)
+
+            display.clear_output(wait=True)
+            display.display(pl.gcf())
+            time.sleep(0.5)
+
+            plt.cla()
+
+        if save_gif:
+            gif_path = self.video_path.split('.')[0] + '_'\
+                + str(start) + '_' + str(end) + '.gif'
+
+            imageio.mimsave(gif_path, plt_list, fps=1)
+
+        plt.close('all')
+
+
+class PupilFitting(PlotBodyparts):
+    # for this class, all bodyparts must be provided... so why bother providing bodyparts as input?
+    def __init__(self, config, bodyparts='all'):
+        """
+        Input:
+            config: dictionary
+                A dictionary that contains animal id, session, scan idx, and a path to config
+            bodyparts: list
+                A list that contains bodyparts to plot. Each bodypart is in a string format. If none provided,
+                then by default it plots ALL existing bodyplots in config.yaml file.
+
+        """
+        super().__init__(config, bodyparts=bodyparts)
+
+        self.complete_eyelid_graph = {'eyelid_top': 'eyelid_top_right',
+                                      'eyelid_top_right': 'eyelid_right',
+                                      'eyelid_right': 'eyelid_right_bottom',
+                                      'eyelid_right_bottom': 'eyelid_bottom',
+                                      'eyelid_bottom': 'eyelid_bottom_left',
+                                      'eyelid_bottom_left': 'eyelid_left',
+                                      'eyelid_left': 'eyelid_left_top',
+                                      'eyelid_left_top': 'eyelid_top'}
+
+    def coords_pcutoff(self, frame_num):
+        """
+        Given a frame number, return bpindex, x & y coordinates that meet pcutoff criteria
+        Input:
+            frame_num: int
+                A desired frame number
+        Output:
+            bpindex: list
+                A list of integers that match with bodypart. For instance, if the bodypart is ['A','B','C']
+                and only 'A' and 'C'qualifies the pcutoff, then bpindex = [0,2]
+            x_coords: pandas series
+                A pandas series that contains coordinates whose values meet pcutoff criteria
+            y_coords: pandas series
+                A pandas series that contains coordinates whose values meet pcutoff criteria
+        """
+        frame_num_tf = self.tf_likelihood_array[frame_num, :]
+        bpindex = [i for i, x in enumerate(frame_num_tf) if x]
+
+        df_x_coords = self.df_bodyparts_x.loc[frame_num, :][bpindex]
+        df_y_coords = self.df_bodyparts_y.loc[frame_num, :][bpindex]
+
+        return bpindex, df_x_coords, df_y_coords
+
+    def connect_eyelids(self, frame_num, frame):
+        """
+        connect eyelid labels with a straight line. If a label is missing, do not connect and skip to the next label.
+        Input:
+            frame_num: int
+                A desired frame number
+            frame: numpy array
+                A frame to be fitted
+        Output:
+            A dictionary containing the fitted frame and its corresponding binary mask.
+            For each key in dictionary:
+                frame:
+                    A numpy array frame with eyelids connected
+                mask:
+                    A binary numpy array
+        """
+        mask = np.zeros(frame.shape[:2], dtype=np.uint8)
+
+        _, df_x_coords, df_y_coords = self.coords_pcutoff(frame_num)
+        eyelid_labels = [label for label in list(
+            df_x_coords.index.get_level_values(0)) if 'eyelid' in label]
+
+        for eyelid in eyelid_labels:
+            next_bp = self.complete_eyelid_graph[eyelid]
+
+            if next_bp not in eyelid_labels:
+                continue
+
+            coord_0 = tuple(
+                map(int, map(round, [df_x_coords[eyelid].values[0], df_y_coords[eyelid].values[0]])))
+            coord_1 = tuple(
+                map(int, map(round, [df_x_coords[next_bp].values[0], df_y_coords[next_bp].values[0]])))
+            # opencv has some issues with dealing with np objects. Cast it manually again
+            frame = cv2.line(
+                np.array(frame), coord_0, coord_1, color=(255, 0, 0), thickness=self.line_thickness)
+            mask = cv2.line(
+                mask, coord_0, coord_1, color=(255), thickness=self.line_thickness)
+
+        # fill out the mask with 1s OUTSIDE of the mask, then invert 0 and 1
+        # for cv2.floodFill, need a mask that is 2 pixels bigger than the input image
+        new_mask = np.zeros((mask.shape[0]+2, mask.shape[1]+2), dtype=np.uint8)
+        cv2.floodFill(mask, new_mask, seedPoint=(0, 0), newVal=124)
+
+        final_mask = np.logical_not(new_mask).astype(int)[1:-1, 1:-1]
+
+        # ax.imshow(mask)
+        return {'frame': frame, 'mask': final_mask}
+
+    def fit_circle_to_pupil(self, frame_num, frame):
+        """
+        Fit a circle to the pupil
+        Input:
+            frame_num: int
+                A desired frame number
+            frame: numpy array
+                A frame to be fitted 3D
+        Output: dictionary
+            A dictionary with the fitted frame, center and radius of the fitted circle. If fitting did
+            not occur, return the original frame with center and raidus as None.
+            For each key in dictionary:
+                frame: a numpy array of the frame with pupil circle
+                center: coordinates of the center of the fitted circle. In tuple format
+                radius: radius of the fitted circle in int format
+                pupil_label_num: number of pupil labels used for fitting
+                mask: a binary mask for the fitted circle area
+        """
+
+        mask = np.zeros(frame.shape, dtype=np.uint8)
+
+        _, df_x_coords, df_y_coords = self.coords_pcutoff(frame_num)
+
+        pupil_labels = [label for label in list(
+            df_x_coords.index.get_level_values(0)) if 'pupil' in label]
+
+        if len(pupil_labels) <= 2:
+            # print('Frame number: {} has only 2 or less pupil label. Skip fitting!'.format(
+            #     frame_num))
+            center = None
+            radius = None
+            final_mask = mask[:, :, 0]
+
+        elif len(pupil_labels) > 2:
+            pupil_x = df_x_coords.loc[pupil_labels].values
+            pupil_y = df_y_coords.loc[pupil_labels].values
+
+            pupil_coords = list(zip(pupil_x, pupil_y))
+
+            x, y, radius = smallest_enclosing_circle_naive(pupil_coords)
+
+            center = (x, y)
+
+            # opencv has some issues with dealing with np objects. Cast it manually again
+            frame = cv2.circle(img=np.array(frame), center=(int(round(x)), int(round(y))),
+                               radius=int(round(radius)), color=(0, 255, 0), thickness=self.line_thickness)
+
+            mask = cv2.circle(img=mask, center=(int(round(x)), int(round(y))),
+                              radius=int(round(radius)), color=(0, 255, 0), thickness=self.line_thickness)
+
+            # fill out the mask with 1s OUTSIDE of the mask, then invert 0 and 1
+            # for cv2.floodFill, need a mask that is 2 pixels bigger than the input image
+            new_mask = np.zeros(
+                (mask.shape[0]+2, mask.shape[1]+2), dtype=np.uint8)
+            cv2.floodFill(mask, new_mask, seedPoint=(0, 0), newVal=1)
+            final_mask = np.logical_not(new_mask).astype(int)[1:-1, 1:-1]
+
+        return {'frame': frame, 'center': center, 'radius': radius, 'pupil_label_num': len(pupil_labels), 'mask': final_mask}
+
+    def fit_ellipse_to_pupil(self, frame_num, frame, threshold=6):
+        """
+        Fit a circle to the pupil
+        Input:
+            frame_num: int
+                A desired frame number
+            frame: numpy array
+                A frame to be fitted in 3D
+        Output: dictionary
+            A dictionary with the fitted frame, center and radius of the fitted circle. If fitting did
+            not occur, return the original frame with center and raidus as None.
+            For each key in dictionary:
+                frame: a numpy array of the frame with pupil circle
+                center: coordinates of the center of the fitted circle. In tuple format
+                radius: radius of the fitted circle in int format
+                pupil_label_num: number of pupil labels used for fitting
+                mask: a binary mask for the fitted circle area
+        """
+
+        mask = np.zeros(frame.shape, dtype=np.uint8)
+
+        _, df_x_coords, df_y_coords = self.coords_pcutoff(frame_num)
+
+        pupil_labels = [label for label in list(
+            df_x_coords.index.get_level_values(0)) if 'pupil' in label]
+
+        if len(pupil_labels) <= 2:
+            # print('Frame number: {} has only 2 or less pupil label. Skip fitting!'.format(
+            #     frame_num))
+            center = None
+            major_radius = None
+            minor_radius = None
+            rotation_angle = None
+            final_mask = mask[:, :, 0]
+
+        elif len(pupil_labels) > 2 and len(pupil_labels) < threshold:
+            pupil_x = df_x_coords.loc[pupil_labels].values
+            pupil_y = df_y_coords.loc[pupil_labels].values
+
+            pupil_coords = list(zip(pupil_x, pupil_y))
+
+            x, y, radius = smallest_enclosing_circle_naive(pupil_coords)
+
+            center = (x, y)
+            major_radius = radius
+            minor_radius = radius
+            rotation_angle = 0
+
+            # opencv has some issues with dealing with np objects. Cast it manually again
+            frame = cv2.circle(img=np.array(frame), center=(int(round(x)), int(round(y))),
+                               radius=int(round(radius)), color=(0, 255, 0), thickness=self.line_thickness)
+
+            mask = cv2.circle(img=mask, center=(int(round(x)), int(round(y))),
+                              radius=int(round(radius)), color=(0, 255, 0), thickness=self.line_thickness)
+
+            # fill out the mask with 1s OUTSIDE of the mask, then invert 0 and 1
+            # for cv2.floodFill, need a mask that is 2 pixels bigger than the input image
+            new_mask = np.zeros(
+                (mask.shape[0]+2, mask.shape[1]+2), dtype=np.uint8)
+            cv2.floodFill(mask, new_mask, seedPoint=(0, 0), newVal=1)
+            final_mask = np.logical_not(new_mask).astype(int)[1:-1, 1:-1]
+
+        else:
+            pupil_x = df_x_coords.loc[pupil_labels].values.round().astype(
+                np.int32)
+            pupil_y = df_y_coords.loc[pupil_labels].values.round().astype(
+                np.int32)
+
+            pupil_coords = np.array(
+                list(zip(pupil_x, pupil_y))).reshape((-1, 1, 2))
+
+            # https://docs.opencv.org/2.4/modules/imgproc/doc/structural_analysis_and_shape_descriptors.html#fitellipse
+            # Python: cv.FitEllipse2(points) → Box2D
+            # https://docs.opencv.org/3.4.5/db/dd6/classcv_1_1RotatedRect.html
+            rotated_rect = cv2.fitEllipse(pupil_coords)
+
+            # https://docs.opencv.org/3.0-beta/modules/imgproc/doc/drawing_functions.html#ellipse
+            # cv2.ellipse(img, box, color[, thickness[, lineType]]) → img
+            frame = cv2.ellipse(np.array(frame), rotated_rect, color=(
+                0, 0, 255), thickness=self.line_thickness)
+            mask = cv2.ellipse(np.array(frame), rotated_rect, color=(
+                0, 0, 255), thickness=self.line_thickness)
+
+            # fill out the mask with 1s OUTSIDE of the mask, then invert 0 and 1
+            # for cv2.floodFill, need a mask that is 2 pixels bigger than the input image
+            new_mask = np.zeros(
+                (mask.shape[0]+2, mask.shape[1]+2), dtype=np.uint8)
+            cv2.floodFill(mask, new_mask, seedPoint=(0, 0), newVal=1)
+            final_mask = np.logical_not(new_mask).astype(int)[1:-1, 1:-1]
+
+            center = rotated_rect[0]
+            major_radius = rotated_rect[1][1]/2.0
+            minor_radius = rotated_rect[1][0]/2.0
+            rotation_angle = rotated_rect[2]
+
+        return {'frame': frame, 'center': center,
+                'mask': final_mask,
+                'pupil_label_num': len(pupil_labels),
+                'major_radius': major_radius,
+                'minor_radius': minor_radius,
+                'rotation_angle': rotation_angle
+                }
+
+    def detect_visible_pupil(self, frame_num, frame):
+        """
+        Given a frame, find a visible part of the pupil by finding the intersection of pupil and eyelid masks
+        If pupil mask does not exist(i.e. label < 3), return None
+
+        Input:
+            frame_num: int
+                frame number to extract a specific frame
+            frame:
+
+        Output:
+            binary numpy array or None
+                If pupil was fitted, then return the visible part. Otherwise None
+        """
+
+        eyelid_connected = self.connect_eyelids(frame_num, frame)
+        pupil_fitted = self.fit_circle_to_pupil(
+            frame_num, eyelid_connected['frame'])
+
+        if pupil_fitted['pupil_label_num'] >= 3:
+            return np.logical_and(pupil_fitted['mask'], eyelid_connected['mask']).astype(int)
+        else:
+            return None
+
+    def fitted_plot_core(self, fig, ax, frame_num):
+        # it's given in 3 channels but every channel is the same i.e. grayscale
+
+        image = self.clip._read_specific_frame(frame_num)
+
+        # plot bodyparts above the pcutoff
+        bpindex, x_coords, y_coords = self.coords_pcutoff(frame_num)
+        ax_scatter = ax.scatter(x_coords.values, y_coords.values, s=self.dotsize**2,
+                                color=self._label_colors(bpindex), alpha=self.alphavalue)
+
+        eyelid_connected = self.connect_eyelids(frame_num, frame=image)
+
+        pupil_fitted = self.fit_circle_to_pupil(
+            frame_num, frame=eyelid_connected['frame'])
+
+        ax_frame = ax.imshow(pupil_fitted['frame'])
+
+        color_mask = np.zeros(shape=image.shape, dtype=np.uint8)
+        if pupil_fitted['pupil_label_num'] >= 3:
+            visible_mask = np.logical_and(
+                pupil_fitted['mask'], eyelid_connected['mask']).astype(int)
+
+            # 126,0,255 for the color
+            color_mask[visible_mask == 1, 0] = 126
+            color_mask[visible_mask == 1, 2] = 255
+
+        ax_mask = ax.imshow(color_mask, alpha=0.3)
+
+        return {'ax_frame': ax_frame, 'ax_scatter': ax_scatter, 'ax_mask': ax_mask}
+
+    def plot_fitted_frame(self, frame_num, save_fig=False):
+
+        fig, ax = self.configure_plot()
+        ax_dict = self.fitted_plot_core(fig, ax, frame_num)
+
+        plt.title('frame num: ' + str(frame_num), fontsize=30)
+
+        plt.axis('off')
+        plt.tight_layout()
+
+        fig.canvas.draw()
+
+        if save_fig:
+            plt.savefig(os.path.join(
+                self.compressed_cropped_dir_path, 'fitted_frame_' + str(frame_num) + '.png'))
+
+    def plot_fitted_multi_frames(self, start, end, save_gif=False):
+
+        fig, ax = self.configure_plot()
+
+        plt_list = []
+
+        for frame_num in range(start, end):
+
+            _ = self.fitted_plot_core(fig, ax, frame_num)
+
+            plt.axis('off')
+            plt.title('frame num: ' + str(frame_num), fontsize=30)
+            plt.tight_layout()
+
+            fig.canvas.draw()
+
+            data = np.fromstring(fig.canvas.tostring_rgb(),
+                                 dtype=np.uint8, sep='')
+            data = data.reshape(fig.canvas.get_width_height()[::-1] + (3,))
+            plt_list.append(data)
+
+            display.clear_output(wait=True)
+            display.display(pl.gcf())
+            time.sleep(0.5)
+
+            plt.cla()
+
+        if save_gif:
+            gif_path = self.video_path.split('.')[0] + '_fitted_' + \
+                str(start) + '_' + str(end) + '.gif'
+            imageio.mimsave(gif_path, plt_list, fps=1)
+
+        plt.close('all')
+
+    def make_movie(self, start, end):
+
+        import matplotlib.animation as animation
+
+        # initlize with start frame
+        fig, ax = self.configure_plot()
+        # ax_dict = self.fitted_plot_core(fig, ax, frame_num=start)
+        _ = self.fitted_plot_core(fig, ax, frame_num=start)
+
+        plt.axis('off')
+        plt.title('frame num: ' + str(start), fontsize=30)
+        plt.tight_layout()
+
+        def update_frame(frame_num):
+
+            # clear out the axis
+            plt.cla()
+            # new_ax_dict = self.fitted_plot_core(fig, ax, frame_num=frame_num)
+            _ = self.fitted_plot_core(fig, ax, frame_num=frame_num)
+
+            plt.axis('off')
+            plt.tight_layout()
+            plt.title('frame num: ' + str(frame_num), fontsize=30)
+
+        ani = animation.FuncAnimation(fig, update_frame, range(
+            start+1, end))  # , interval=int(1/self.clip.FPS)
+        # ani = animation.FuncAnimation(fig, self.plot_fitted_frame, 10)
+        writer = animation.writers['ffmpeg'](fps=self.clip.FPS)
+
+        # dpi=self.dpi, fps=self.clip.FPS
+        video_name = os.path.join(
+            self.path_to_analysis, self._case_full_name + '_labeled.avi')
+        ani.save(video_name, writer=writer, dpi=self.dpi)
+
+        return ani
