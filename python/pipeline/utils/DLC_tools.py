@@ -515,8 +515,6 @@ class PlotBodyparts():
         plt.title('frame num: ' + str(frame_num), fontsize=30)
         plt.tight_layout()
 
-        fig.canvas.draw()
-
         if save_fig:
             plt.savefig(os.path.join(
                 self.video_path.split('.')[0] + '_frame_' + str(frame_num) + '.png'))
@@ -753,13 +751,18 @@ class PupilFitting(PlotBodyparts):
                 A frame to be fitted in 3D
         Output: dictionary
             A dictionary with the fitted frame, center and radius of the fitted circle. If fitting did
-            not occur, return the original frame with center and raidus as None.
+            not occur, return None.
             For each key in dictionary:
-                frame: a numpy array of the frame with pupil circle
-                center: coordinates of the center of the fitted circle. In tuple format
-                radius: radius of the fitted circle in int format
-                pupil_labels_num: number of pupil labels used for fitting
-                mask: a binary mask for the fitted circle area
+                frame: numpy array
+                    a numpy array of the frame with pupil circle
+                center: tuple 
+                    coordinates of the center of the fitted ellipse in tuple format
+                major_r: float
+                    radius of the fitted circle in int format
+                pupil_labels_num: int
+                    number of pupil labels used for fitting
+                mask: numpy array
+                    a binary mask for the fitted ellipse area
         """
 
         mask = np.zeros(frame.shape, dtype=np.uint8)
@@ -796,7 +799,7 @@ class PupilFitting(PlotBodyparts):
             # cv2.ellipse(img, box, color[, thickness[, lineType]]) → img
             frame = cv2.ellipse(np.array(frame), rotated_rect, color=(
                 0, 0, 255), thickness=self.line_thickness)
-            mask = cv2.ellipse(np.array(frame), rotated_rect, color=(
+            mask = cv2.ellipse(np.array(mask), rotated_rect, color=(
                 0, 0, 255), thickness=self.line_thickness)
 
             # fill out the mask with 1s OUTSIDE of the mask, then invert 0 and 1
@@ -834,7 +837,7 @@ class PupilFitting(PlotBodyparts):
 
         Output:
             A dictionary that contains the following:
-                color_mask: numpy array
+                mask: numpy array
                     A 3D mask that depicts visible area of pupil. 
                     If no visible area provided, then it is an np.zeros
                 visible_portion: signed float
@@ -877,9 +880,9 @@ class PupilFitting(PlotBodyparts):
         elif fit_dict['pupil_labels_num'] < threshold and eyelid_connect_dict['eyelid_labels_num'] != 8:
             visible_portion = -3.0
 
-        return dict(color_mask=color_mask, visible_portion=visible_portion)
+        return dict(mask=color_mask, visible_portion=visible_portion)
 
-    def fitted_core(self, fig, ax, frame_num, fitting_method=None):
+    def fitted_core(self, frame_num):
         """
         Input:
             fig: figure object
@@ -900,50 +903,66 @@ class PupilFitting(PlotBodyparts):
 
         image = self.clip._read_specific_frame(frame_num)
 
+        eyelid_connected = self.connect_eyelids(
+            frame_num=frame_num, frame=image)
+
+        circle_fit = self.fit_circle_to_pupil(
+            frame_num=frame_num, frame=eyelid_connected['frame'])
+
+        ellipse_fit = self.fit_ellipse_to_pupil(
+            frame_num=frame_num, frame=eyelid_connected['frame'])
+
+        circle_visible = self.detect_visible_pupil_area(eyelid_connect_dict=eyelid_connected,
+                                                        fit_dict=circle_fit,
+                                                        fitting_method='circle')
+
+        ellipse_visible = self.detect_visible_pupil_area(eyelid_connect_dict=eyelid_connected,
+                                                         fit_dict=ellipse_fit,
+                                                         fitting_method='ellipse')
+
+        return {'circle_fit': circle_fit,
+                'ellipse_fit': ellipse_fit,
+                'circle_visible': circle_visible,
+                'ellipse_visible': ellipse_visible}
+
+    def plot_fitted_frame(self, frame_num, ax=None, fitting_method='circle', save_fig=False):
+
+        if ax is None:
+            fig, ax = self.configure_plot()
+
         # plot bodyparts above the pcutoff
         bpindex, x_coords, y_coords = self.coords_pcutoff(frame_num)
         ax_scatter = ax.scatter(x_coords.values, y_coords.values, s=self.dotsize**2,
                                 color=self._label_colors(bpindex), alpha=self.alphavalue)
 
-        eyelid_connected = self.connect_eyelids(frame_num, frame=image)
+        fitted_core_dict = self.fitted_core(frame_num)
 
-        circle_fit = self.fit_circle_to_pupil(
-            frame_num, frame=eyelid_connected['frame'])
+        if fitting_method == 'circle':
 
-        ellipse_fit = self.fit_ellipse_to_pupil(
-            frame_num, eyelid_connected['frame'], threshold=self.threshold)
+            circle_frame = ax.imshow(fitted_core_dict['circle_fit']['frame'])
+            circle_mask = ax.imshow(
+                fitted_core_dict['circle_visible']['mask'], alpha=0.2)
 
-        circle_visible = self.detect_visible_pupil_area(eyelid_connect_dict=eyelid_connected,
-                                                        fit_dict=circle_fit,
-                                                        fitting_method='circle')
-        
-        ellipse_visible = self.detect_visible_pupil_area(eyelid_connect_dict=eyelid_connected,
-                                                        fit_dict=ellipse_fit,
-                                                        fitting_method='ellipse')
+        elif fitting_method == 'ellipse':
 
-        circle_frame = ax.imshow(circle_fit['frame'])
-        ellipse_frame = ax.imshow(ellipse_fit['frame'])
-        
+            ellipse_frame = ax.imshow(fitted_core_dict['ellipse_fit']['frame'])
+            ellipse_mask = ax.imshow(
+                fitted_core_dict['ellipse_visible']['mask'], alpha=0.2)
 
-        return {'ax_frame': ax_frame, 'ax_scatter': ax_scatter, 'ax_mask': ax_mask}
-
-    def plot_fitted_frame(self, frame_num, save_fig=False):
-
-        fig, ax = self.configure_plot()
-        ax_dict = self.fitted_plot_core(fig, ax, frame_num)
+        else:
+            raise ValueError(
+                'fitting method must be either an ellipse or a circle!')
 
         plt.title('frame num: ' + str(frame_num), fontsize=30)
 
         plt.axis('off')
         plt.tight_layout()
 
-        fig.canvas.draw()
-
         if save_fig:
             plt.savefig(os.path.join(
                 self.compressed_cropped_dir_path, 'fitted_frame_' + str(frame_num) + '.png'))
 
-    def plot_fitted_multi_frames(self, start, end, save_gif=False):
+    def plot_fitted_multi_frames(self, start, end, fitting_method='circle', save_gif=False):
 
         fig, ax = self.configure_plot()
 
@@ -951,11 +970,7 @@ class PupilFitting(PlotBodyparts):
 
         for frame_num in range(start, end):
 
-            _ = self.fitted_plot_core(fig, ax, frame_num)
-
-            plt.axis('off')
-            plt.title('frame num: ' + str(frame_num), fontsize=30)
-            plt.tight_layout()
+            self.plot_fitted_frame(frame_num=frame_num, ax=ax, fitting_method=fitting_method)
 
             fig.canvas.draw()
 
@@ -977,29 +992,21 @@ class PupilFitting(PlotBodyparts):
 
         plt.close('all')
 
-    def make_movie(self, start, end):
+    def make_movie(self, start, end, fitting_method='circle'):
 
         import matplotlib.animation as animation
 
         # initlize with start frame
         fig, ax = self.configure_plot()
-        # ax_dict = self.fitted_plot_core(fig, ax, frame_num=start)
-        _ = self.fitted_plot_core(fig, ax, frame_num=start)
 
-        plt.axis('off')
-        plt.title('frame num: ' + str(start), fontsize=30)
-        plt.tight_layout()
+        self.plot_fitted_frame(frame_num=start, ax=ax, fitting_method=fitting_method)
 
         def update_frame(frame_num):
 
             # clear out the axis
             plt.cla()
-            # new_ax_dict = self.fitted_plot_core(fig, ax, frame_num=frame_num)
-            _ = self.fitted_plot_core(fig, ax, frame_num=frame_num)
-
-            plt.axis('off')
-            plt.tight_layout()
-            plt.title('frame num: ' + str(frame_num), fontsize=30)
+            
+            self.plot_fitted_frame(frame_num=frame_num, ax=ax, fitting_method=fitting_method)
 
         ani = animation.FuncAnimation(fig, update_frame, range(
             start+1, end))  # , interval=int(1/self.clip.FPS)
@@ -1007,8 +1014,8 @@ class PupilFitting(PlotBodyparts):
         writer = animation.writers['ffmpeg'](fps=self.clip.FPS)
 
         # dpi=self.dpi, fps=self.clip.FPS
-        video_name = os.path.join(
-            self.path_to_analysis, self._case_full_name + '_labeled.avi')
-        ani.save(video_name, writer=writer, dpi=self.dpi)
+        save_video_path = self.video_path.split('.')[0] + '_fitted_' + \
+                str(start) + '_' + str(end) + '_labeled.avi'
+        ani.save(save_video_path, writer=writer, dpi=self.dpi)
 
         return ani
