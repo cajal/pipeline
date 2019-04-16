@@ -360,27 +360,16 @@ class SurgeryOutcome(dj.Lookup):
 
 
 @schema
-class SurgeryQuality(dj.Lookup):
-    definition = """ # Surgery qualities used in experiment.Surgery
-    surgery_quality              : varchar(32)         # Possible qualities of surgeries performed on mice
-    """
-    contents = [
-        ['Good'],
-        ['Okay'],
-        ['Bad']
-    ]
-
-
-@schema
 class Surgery(dj.Manual):
     definition = """ # List of surgeries performed on mice
     -> mice.Mice
     date                         : date                   # Date surgery was performed
     ---
+    time                         : time                   # Start of mouse recovery
     -> experiment.Person            
     -> SurgeryOutcome
     -> SurgeryType
-    -> SurgeryQuality
+    surgery_quality              : tinyint                # 0-5 self-rating, 0 being worst and 5 best
     ketoprofen = null            : decimal(4,3)           # Amount of Ketoprofen given to mouse
     weight = null                : decimal(5,2) unsigned  # Weight of mouse before surgery
     notes                        : varchar(256)           # Notes on surgery
@@ -397,6 +386,7 @@ class SurgeryStatus(dj.Manual):
     day_one = 0                         : boolean                # First day checkup performed
     day_two = 0                         : boolean                # Second day checkup performed
     day_three = 0                       : boolean                # Third day checkup performed
+    checkup_notes = null                : varchar(265)           # Notes on surgery checkups
     """
 
 
