@@ -7,33 +7,27 @@ from .utils.DLC_tools import PupilFitting
 
 from commons import lab
 
-from itertools import count
-import json
 import numpy as np
 import cv2
-from tqdm import tqdm
 import pandas as pd
 
 from datajoint.jobs import key_hash
 from datajoint.autopopulate import AutoPopulate
 import datajoint as dj
 
-import deeplabcut as dlc
-from deeplabcut.utils import auxiliaryfunctions
-from deeplabcut.utils.plotting import get_cmap
-# already configured for cv2
-from deeplabcut.utils.video_processor import VideoProcessorCV as vp
-
-
 import os
 # Disable DLC GUI first, then import deeplabcut
 os.environ["DLClight"] = "True"
+
+import deeplabcut as dlc
+from deeplabcut.utils import auxiliaryfunctions
 
 gputouse = 0
 
 schema = dj.schema('pipeline_eye_DLC', locals())
 
 pipeline_eye = dj.create_virtual_module('pipeline_eye', 'pipeline_eye')
+pipeline_experiment = dj.create_virtual_module('pipeline_experiment', 'pipeline_experiment')
 
 # If config.yaml ever updated, make sure you store the file name differently so that it becomes unique
 @schema
@@ -309,7 +303,6 @@ class TrackedLabelsDlc(dj.Computed):
         out_h = cropped_coords['cropped_y1'] - cropped_coords['cropped_y0']
         print('\nMaking a compressed and cropped video!')
 
-        
         # crf: use value btw 17 and 28 (lower the number, higher the quality of the video)
         # intra: no compressing over time. only over space
         cmd = ['ffmpeg', '-i', '{}'.format(input_video_path), '-vcodec', 'libx264', '-crf', '17', '-intra', '-filter:v',
@@ -367,7 +360,7 @@ class TrackedLabelsDlc(dj.Computed):
             short_h5_path, DLCscorer, config)
 
         # add 100 pixels around cropping coords. Ensure that it is within the original dim
-        pixel_num=100
+        pixel_num = 100
         cropped_coords = self.add_pixels(cropped_coords=cropped_coords,
                                          original_width=original_width,
                                          original_height=original_height,
@@ -389,29 +382,14 @@ class TrackedLabelsDlc(dj.Computed):
                                               video_path=compressed_cropped_video_path))
 
 
-
-
-
 @schema
 class FittedContourDlc(dj.Computed):
     definition = """
-    # Fit a circle and an ellipse
+    # Fit a circle and an ellipse using compressed & cropped video. 
     -> TrackedLabelsDlc   
     ---
     fitting_ts=CURRENT_TIMESTAMP    : timestamp  # automatic
     """
-
-    class Ellipse(dj.Part):
-        definition = """
-        -> master
-        frame_id                 : int           # frame id with matlab based 1 indexing
-        ---
-        center=NULL              : tinyblob      # center of the ellipse in (x, y) of image
-        major_r=NULL             : float         # major radius of the ellipse
-        minor_r=NULL             : float         # minor radius of the ellipse
-        angle=NULL               : float         # ellipse rotation angle in degrees w.r.t. major_r
-        visible_portion=NULL     : float         # portion of visible pupil area given a fitted ellipse
-        """
 
     class Circle(dj.Part):
         definition = """
@@ -420,13 +398,26 @@ class FittedContourDlc(dj.Computed):
         ---
         center=NULL              : tinyblob      # center of the circle in (x, y) of image
         radius=NULL              : float         # radius of the circle
-        visible_portion=NULL     : float         # portion of visible pupil area given a fitted circle
+        visible_portion=NULL     : float         # portion of visible pupil area given a fitted circle frame. Please refer DLC_tools.PupilFitting.detect_visible_pupil_area for more details
+        """
+
+    class Ellipse(dj.Part):
+        definition = """
+        -> master
+        frame_id                 : int           # frame id with matlab based 1 indexing
+        ---
+        center=NULL              : tinyblob      # center of the ellipse in (x, y) of image
+        major_radius=NULL        : float         # major radius of the ellipse
+        minor_radius=NULL        : float         # minor radius of the ellipse
+        angle=NULL               : float         # ellipse rotation angle in degrees w.r.t. major_r
+        visible_portion=NULL     : float         # portion of visible pupil area given a fitted ellipse frame. Please refer DLC_tools.PupilFitting.detect_visible_pupil_area for more details
         """
 
     def make(self, key):
         print("Fitting:", key)
 
-        shuffle, trainingsetindex = (ConfigDlc & key).fetch1('shuffle', 'trainingsetindex')
+        shuffle, trainingsetindex = (ConfigDlc & key).fetch1(
+            'shuffle', 'trainingsetindex')
         cc_info = (TrackedLabelsDlc.CompressedCroppedVideo() & key).fetch1()
 
         config = auxiliaryfunctions.read_config(cc_info['config_path'])
@@ -437,84 +428,22 @@ class FittedContourDlc(dj.Computed):
 
         pupil_fit = PupilFitting(config=config, bodyparts='all')
 
-
-        contours = (ManuallyTrackedContours.Frame() & key).fetch(
-            order_by='frame_id ASC', as_dict=True)
-        self._cap = cap = cv2.VideoCapture(avi_path)
-
-        frame_number = 0
-        n_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        while cap.isOpened():
-            if frame_number >= n_frames - 1:
-                print("Reached end of videofile ", avi_path)
-                break
-
-            ret, frame = self._cap.read()
-            ckey = contours[frame_number]
-            if ret and frame is not None and ckey['contour'] is not None:
-                if ckey['contour'] is not None and len(ckey['contour']) >= 5:
-                    contour = ckey['contour']
-                    center = contour.mean(axis=0)
-                    cv2.drawContours(frame, [contour], -1, (0, 255, 0), 1)
-                    cv2.circle(frame, tuple(
-                        center.squeeze().astype(int)), 4, (0, 165, 255), -1)
-                    ellipse = cv2.fitEllipse(contour)
-                    cv2.ellipse(frame, ellipse, (255, 0, 255), 2)
-                    ecenter = ellipse[0]
-                    cv2.circle(frame, tuple(map(int, ecenter)),
-                               5, (255, 165, 0), -1)
-                    ckey['center'] = np.array(ecenter, dtype=np.float32)
-                    ckey['major_r'] = max(ellipse[1])
-                self.display_frame_number(frame, frame_number, n_frames)
-                cv2.imshow('Sauron', frame)
-                if (cv2.waitKey(5) & 0xFF) == ord('q'):
-                    break
-            frame_number += 1
-        cap.release()
-        cv2.destroyAllWindows()
-
         self.insert1(key)
-        for ckey in tqdm(contours):
-            self.Ellipse().insert1(ckey, ignore_extra_fields=True)
 
-"""
-DeepLabCut2.0 Toolbox
-D Kim, donniek@bcm.edu
-"""
+        for frame_num in range(pupil_fit.clip.nframes):
 
-# for ipython purpose
-import pylab as pl
-from IPython import display
-import matplotlib.pyplot as plt
+            fit_dict = pupil_fit.fitted_core(frame_num=frame_num)
 
+            circle = FittedContourDlc.Circle()
+            circle.insert1(dict(key, frame_id=frame_num,
+                                center=fit_dict['circle_fit']['center'],
+                                radius=fit_dict['circle_fit']['radius'],
+                                visible_portion=fit_dict['circle_visible']['visible_portion']))
 
-def bodyparts_info(config, case, bodyparts, trainingsetindex=0, shuffle=1):
-    """
-    Given bodyparts, return corresponding likelihood, x-coordinates, and y-coordinates in dataframe
-
-    Using pandas instead of numpy as my data is in range of 50k to 500k
-    http://gouthamanbalaraman.com/blog/numpy-vs-pandas-comparison.html
-    """
-    case_full_name = case + '_beh'
-
-    project_path = config['project_path']
-    label_path = os.path.join(project_path, 'analysis', case_full_name)
-
-    trainFraction = config['TrainingFraction'][trainingsetindex]
-    DLCscorer = auxiliaryfunctions.GetScorerName(
-        config, shuffle, trainFraction)
-
-    df_label = pd.read_hdf(os.path.join(
-        label_path, case_full_name + DLCscorer + '.h5'))
-
-    df_bodyparts = df_label[DLCscorer][bodyparts]
-
-    df_bodyparts_likelihood = df_bodyparts.iloc[:, df_bodyparts.columns.get_level_values(
-        1) == 'likelihood']
-    df_bodyparts_x = df_bodyparts.iloc[:,
-                                       df_bodyparts.columns.get_level_values(1) == 'x']
-    df_bodyparts_y = df_bodyparts.iloc[:,
-                                       df_bodyparts.columns.get_level_values(1) == 'y']
-
-    return df_bodyparts_likelihood, df_bodyparts_x, df_bodyparts_y
-
+            ellipse = FittedContourDlc.Circle()
+            ellipse.insert1(dict(key, frame_id=frame_num,
+                                 center=fit_dict['ellipse_fit']['center'],
+                                 major_radius=fit_dict['ellipse_fit']['major_r'],
+                                 minor_radius=fit_dict['ellipse_fit']['minor_r'],
+                                 angle=fit_dict['ellipse_fit']['angle'],
+                                 visible_portion=fit_dict['ellipse_visible']['visible_portion']))
