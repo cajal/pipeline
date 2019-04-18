@@ -41,6 +41,7 @@ services:
     runtime: nvidia
     volumes:
       - /mnt/:/mnt/
+      - /home/donnie/Documents/Repos/pipeline/:/data/pipeline/
       # - /home/pipeline_data/:/tmp/
       # - /home/pipeline_data/:/mnt/data/
       # - $HOME/pipeline/:/data/pipeline/
