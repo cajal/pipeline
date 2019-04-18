@@ -1,3 +1,7 @@
+import os
+# Disable DLC GUI first, then import deeplabcut
+os.environ["DLClight"] = "True"
+
 from .exceptions import PipelineException
 from . import experiment, notify
 from .utils import h5
@@ -15,10 +19,6 @@ from tqdm import tqdm
 from datajoint.jobs import key_hash
 from datajoint.autopopulate import AutoPopulate
 import datajoint as dj
-
-import os
-# Disable DLC GUI first, then import deeplabcut
-os.environ["DLClight"] = "True"
 
 import deeplabcut as dlc
 from deeplabcut.utils import auxiliaryfunctions
