@@ -363,16 +363,17 @@ class SurgeryOutcome(dj.Lookup):
 class Surgery(dj.Manual):
     definition = """ # List of surgeries performed on mice
     -> mice.Mice
-    date                         : date                   # Date surgery was performed
+    surgery_id                   : smallint               # Unique number given to each surgery
     ---
+    date                         : date                   # YYYY-MM-DD Format. Date surgery was performed
     time                         : time                   # Start of mouse recovery
     -> experiment.Person            
     -> SurgeryOutcome
     -> SurgeryType
     surgery_quality              : tinyint                # 0-5 self-rating, 0 being worst and 5 best
-    ketoprofen = null            : decimal(4,3)           # Amount of Ketoprofen given to mouse
+    ketoprofen = null            : decimal(4,3) unsigned  # Amount of Ketoprofen given to mouse
     weight = null                : decimal(5,2) unsigned  # Weight of mouse before surgery
-    notes                        : varchar(256)           # Notes on surgery
+    surgery_notes = ""           : varchar(256)           # Notes on surgery
     """
 
 
@@ -386,7 +387,7 @@ class SurgeryStatus(dj.Manual):
     day_one = 0                         : boolean                # First day checkup performed
     day_two = 0                         : boolean                # Second day checkup performed
     day_three = 0                       : boolean                # Third day checkup performed
-    checkup_notes = null                : varchar(265)           # Notes on surgery checkups
+    checkup_notes = ""                  : varchar(265)           # Notes on surgery checkups
     """
 
 
