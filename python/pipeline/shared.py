@@ -41,7 +41,8 @@ class SegmentationMethod(dj.Lookup):
          'python'],
         [3, 'nmf-patches', 'same as nmf but initialized in small image patches', 'python'],
         [4, 'nmf-boutons', 'nmf for axonal terminals', 'python'],
-        [5, '3d-conv', 'masks from the segmentation of the stack', 'python']
+        [5, '3d-conv', 'masks from the segmentation of the stack', 'python'],
+        [6, 'nmf-new', 'same as method 3 (nmf-patches) but with some better tuned params', 'python']
     ]
 
 @schema
@@ -119,7 +120,8 @@ class RegistrationMethod(dj.Lookup):
         [3, 'affine', ('exhaustive search of 3-d rotations + cross-correlation (40 microns'
                        'above and below estimated z)'), 'python'],
         [4, 'affine2', ('exhaustive search of 3-d rotations + cross-correlation (100 microns'
-                        'above and below estimated z)'), 'python']
+                        'above and below estimated z)'), 'python'],
+        [5, 'non-rigid', 'affine plus deformation field learnt via gradient ascent on correlation', 'python']
     ]
 
 @schema

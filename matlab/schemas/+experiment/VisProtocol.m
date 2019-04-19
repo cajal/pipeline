@@ -1,12 +1,14 @@
 %{
-experiment.VisProtocol (lookup) # visual protocol used
+# 
+vis_protocol                : varchar(255)                  # 
 -> experiment.Person
-vis_protocol        : varchar(255)               # brief name
 ---
-vis_filename                : varchar(255)                  # file base name
-discription                  : varchar(255)                 # 
+stim_version=1              : tinyint                       # 
+vis_filename=null           : varchar(255)                  # 
+discription=null            : varchar(255)                  # 
+timestamp=null              : timestamp                     # 
 %}
 
 
-classdef VisProtocol < dj.Relvar
+classdef VisProtocol < dj.Lookup
 end

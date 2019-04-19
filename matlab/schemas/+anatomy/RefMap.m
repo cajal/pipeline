@@ -13,15 +13,14 @@ classdef RefMap < dj.Manual
     methods
         function exit_tuple = createRef(obj,REF,pxpitch)
             
-            % by default use OptImageBar as reference map if not supplied
-            if isstruct(REF)
+            if isstruct(REF)  % by default use OptImageBar as reference map if not supplied
                 ret_keys = fetch(map.RetMapScan & REF,'ORDER BY ret_idx ASC, axis DESC');
                 assert(~isempty(ret_keys),'Create a retinotopic map or specify a reference map explicitly!')
                 REF = map.OptImageBar & ret_keys(1);
             end
                    
             % get primary key
-            tuple = fetch(experiment.Scan & REF);
+            tuple = fetch(experiment.Scan & fetch(REF));
             ref_indexes = fetchn(obj & (mice.Mice & tuple),'ref_idx');
             if ~isempty(ref_indexes)
                 tuple.ref_idx = max(ref_indexes)+1;
@@ -42,19 +41,24 @@ classdef RefMap < dj.Manual
             else    % get map from coresponding table
                 tuple.ref_table = REF.className;
                 switch REF.className
+                    case 'experiment.Scan'
+                        tuple.pxpitch = 1;
+                        tuple.ref_map = [];
                     case 'map.OptImageBar'
                         % get the intrinsic vessel map
                         [maps,   pxpitch] = fetchn(REF,'vessels','pxpitch');
                         tuple.ref_map = maps{1};
                         tuple.pxpitch = pxpitch(1);
+                        assert(~isempty(tuple.ref_map),'No maps found!');
                     case 'meso.SummaryImagesAverage'
                         tuple.ref_map = fetch1(REF,'average_image');
                         ref_height = fetch1(meso.ScanInfoField & REF,'um_height');
                         tuple.pxpitch = ref_height/size(tuple.ref_map,1);
+                        assert(~isempty(tuple.ref_map),'No maps found!');
                 end
                 
             end
-            assert(~isempty(tuple.ref_map),'No maps found!');
+            
             
             % insert
             insert(obj,tuple)

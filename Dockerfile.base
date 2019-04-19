@@ -107,7 +107,7 @@ RUN pip3 install git+https://github.com/datajoint/datajoint-python.git && \
 RUN apt-get install -y python3-git
 
 # Optional
-RUN apt-get install nano && \
+RUN apt-get install -y nano graphviz && \
     pip3 install nose2 jupyterlab
 
 ENTRYPOINT ["/bin/bash"]
