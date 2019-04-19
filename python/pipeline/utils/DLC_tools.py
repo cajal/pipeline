@@ -452,11 +452,16 @@ class PupilFitting(PlotBodyparts):
             A dictionary with the fitted frame, center and radius of the fitted circle. If fitting did
             not occur, return the original frame with center and raidus as None.
             For each key in dictionary:
-                frame: a numpy array of the frame with pupil circle
-                center: coordinates of the center of the fitted circle. In tuple format
-                radius: radius of the fitted circle in int format
-                pupil_labels_num: number of pupil labels used for fitting
-                mask: a binary mask for the fitted circle area
+                frame: numpy array
+                    a numpy array of the frame with pupil circle
+                center: tuple
+                    coordinates of the center of the fitted circle. In tuple format
+                radius: float
+                    radius of the fitted circle in int format
+                mask: numpy array
+                    a binary mask for the fitted circle area
+                pupil_labels_num: int
+                    number of pupil labels used for fitting
         """
 
         mask = np.zeros(frame.shape, dtype=np.uint8)
@@ -512,19 +517,23 @@ class PupilFitting(PlotBodyparts):
             frame: numpy array
                 A frame to be fitted in 3D
         Output: dictionary
-            A dictionary with the fitted frame, center and radius of the fitted circle. If fitting did
+            A dictionary with the fitted frame, center and radius of the fitted ellipse. If fitting did
             not occur, return None.
             For each key in dictionary:
                 frame: numpy array
-                    a numpy array of the frame with pupil circle
+                    a numpy array of the frame with pupil ellipse
                 center: tuple 
-                    coordinates of the center of the fitted ellipse in tuple format
-                major_r: float
-                    radius of the fitted circle in int format
-                pupil_labels_num: int
-                    number of pupil labels used for fitting
+                    coordinates of the center of the fitted ellipse in tuple of floats
                 mask: numpy array
                     a binary mask for the fitted ellipse area
+                major_radius: float
+                    major radius of the fitted ellipse
+                minor_radius: float
+                    minor radius of the fitted ellipse
+                rotation_angle: float
+                    angle from degree 0 to major_radius                
+                pupil_labels_num: int
+                    number of pupil labels used for fitting
         """
 
         mask = np.zeros(frame.shape, dtype=np.uint8)
