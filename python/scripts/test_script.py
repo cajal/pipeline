@@ -2,8 +2,8 @@
 import time
 
 from pipeline import experiment, reso, meso, fuse, stack, pupil, pupil_new, treadmill, posture
-from stimulus import stimulus
-from stimline import tune
+# from stimulus import stimulus
+# from stimline import tune
 
 while True:
     # Scans
@@ -11,14 +11,14 @@ while True:
         next_scans = experiment.AutoProcessing() & 'priority > {}'.format(priority)
 
         # stimulus
-        stimulus.Sync().populate(next_scans, reserve_jobs=True, suppress_errors=True)
-        stimulus.BehaviorSync().populate(next_scans, reserve_jobs=True, suppress_errors=True)
+        # stimulus.Sync().populate(next_scans, reserve_jobs=True, suppress_errors=True)
+        # stimulus.BehaviorSync().populate(next_scans, reserve_jobs=True, suppress_errors=True)
 
         # treadmill, pupil, posture
         treadmill.Treadmill().populate(next_scans, reserve_jobs=True, suppress_errors=True)
         pupil.Eye().populate(next_scans, reserve_jobs=True, suppress_errors=True)
-        pupil_new.TrackedLabelsDeeplabcut.populate(next_scans, reserve_jobs=True, suppress_errors=True)
-        pupil_new.FittedContourDeeplabcut.populate(next_scans, reserve_jobs=True, suppress_errors=True)
+        pupil_new.TrackedLabelsDeeplabcut().populate(next_scans, reserve_jobs=True, suppress_errors=True)
+        pupil_new.FittedContourDeeplabcut().populate(next_scans, reserve_jobs=True, suppress_errors=True)
         posture.Posture().populate(next_scans, reserve_jobs=True, suppress_errors=True)
 
         # stack
@@ -62,24 +62,24 @@ while True:
         stack.Registration().populate(reserve_jobs=True, suppress_errors=True)
 
         # tune (these are memory intensive)
-        tune_scans = next_scans & (experiment.Scan() & 'scan_ts > "2017-12-00 00:00:00"')
+        # tune_scans = next_scans & (experiment.Scan() & 'scan_ts > "2017-12-00 00:00:00"')
 
-        tune.STA().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
-        tune.STAQual().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
-        tune.STAExtent().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
+        # tune.STA().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
+        # tune.STAQual().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
+        # tune.STAExtent().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
 
-        tune.CaMovie().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
-        tune.Drift().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
-        tune.OriDesign().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
-        tune.OriMap().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
-        tune.Cos2Map().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
-        tune.OriMapQuality().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
+        # tune.CaMovie().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
+        # tune.Drift().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
+        # tune.OriDesign().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
+        # tune.OriMap().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
+        # tune.Cos2Map().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
+        # tune.OriMapQuality().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
 
-        #tune.OracleMap().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
-        #tune.MovieOracle().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
-        #tune.MovieOracleTimeCourse().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
+        # #tune.OracleMap().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
+        # #tune.MovieOracle().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
+        # #tune.MovieOracleTimeCourse().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
 
-        tune.CaTimes().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
-        tune.Ori().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
+        # tune.CaTimes().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
+        # tune.Ori().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
 
     time.sleep(600) # wait 10 minutes before trying to process things again
