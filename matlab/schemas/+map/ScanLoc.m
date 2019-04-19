@@ -107,8 +107,10 @@ classdef ScanLoc < dj.Manual
                 colormap gray
                 hold on
                 for i = 1:length(x)
-                    plot(x(i),y(i),'*k')
-                    text(x(i)+5,y(i)+5,[num2str(sess(i)) '-' num2str(scan(i)) ...
+                    xr = randn*20;
+                    yr = randn*20;
+                    plot(x(i)+xr,y(i)+yr,'*k')
+                    text(x(i)+5+xr,y(i)+5+yr,[num2str(sess(i)) '-' num2str(scan(i)) ...
                         ' (' area{i} ')'])
                 end
                 
