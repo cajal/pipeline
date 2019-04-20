@@ -17,7 +17,8 @@ def lcn(image, sigmas=(12, 12)):
         Smaller values result in more local neighborhoods. 15-30 microns should work fine
     """
     local_mean = ndimage.gaussian_filter(image, sigmas)
-    local_std = np.sqrt(ndimage.gaussian_filter(image ** 2, sigmas) - local_mean ** 2)
+    local_var = ndimage.gaussian_filter(image ** 2, sigmas) - local_mean ** 2
+    local_std = np.sqrt(np.clip(local_var, a_min=0, a_max=None))
     norm = (image - local_mean) / (local_std + 1e-7)
 
     return norm
