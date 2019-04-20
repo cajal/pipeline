@@ -34,7 +34,19 @@ services:
     entrypoint:
       - python3 
       - /data/pipeline/python/scripts/populate-minion.py
-  
+
+
+  minion-gpu:
+    image: ninai/stimulus-pipeline
+    volumes:
+      - /mnt/:/mnt/
+      - /home/pipeline_data:/tmp/
+      - .:/data/pipeline
+    env_file: .env
+    entrypoint:
+      - python3 
+      - /data/pipeline/python/scripts/populate-minion_gpu.py
+
   
   bash:
     image: ninai/pipeline:DLC2.0.5-GPU

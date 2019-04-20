@@ -23,36 +23,18 @@ classdef FieldCoordinates < dj.Manual
             params.scale = [];
             params.figure = [];
             params.amp = 1;
+            params.noref = false;
 
             params = ne7.mat.getParams(params,varargin);
-            
-            % get reference map information
-            ref_key = fetch(proj(anatomy.RefMap) & keyI);
-            if ~exists(anatomy.RefMap & ref_key)
-                ref_key = createRef(anatomy.RefMap,fetch(mice.Mice & keyI));
-            end
-            if isfield(keyI,'ret_idx');keyI = rmfield(keyI,'ret_idx');end
-            [ref_map, ref_pxpitch, software] = fetch1(anatomy.RefMap * experiment.Scan  & ref_key,...
-                'ref_map','pxpitch','software');
-            switch software
-                case 'imager'
-                    if isempty(params.global_rotation)
-                        params.global_rotation = 60; % rotation of the ref_map
-                    end
-                case 'scanimage'
-                    if isempty(params.global_rotation)
-                        params.global_rotation = 0; % rotation of the ref_map
-                    end
-            end
-            
-            % get the scamimage reader
-            [setup, depth] = fetch1(experiment.Scan * experiment.Session & keyI,...
-                'rig','depth');
             
             % init tform params, specific to each setup
             tfp = struct('scale',1,'rotation',params.scan_rotation,'fliplr',0,'flipud',0);
             
-            % get information from the scans depending on the setup
+             % get the scamimage reader
+            [setup, depth] = fetch1(experiment.Scan * experiment.Session & keyI,...
+                'rig','depth');
+            
+             % get information from the scans depending on the setup
             if strcmp(setup,'2P4')
                 [x_pos, y_pos, slice_pos, fieldWidths, fieldHeights, fieldWidthsInMicrons, frames, field_num] = ...
                     fetchn(meso.ScanInfoField * meso.SummaryImagesAverage & keyI & 'channel = 1',...
@@ -67,6 +49,43 @@ classdef FieldCoordinates < dj.Manual
                 x_pos = zeros(size(fieldWidths));y_pos = x_pos;
             end
             
+            % if no input is given then scan coordinates are going to be used
+            if params.noref
+                ref_key = createRef(anatomy.RefMap,experiment.Scan & keyI);
+                for islice = 1:length(frames)
+                    tuple = keyI;
+                    tuple.ref_idx = ref_key.ref_idx;
+                    tuple.field = field_num(islice);
+                    tuple.x_offset = 0;
+                    tuple.y_offset = 0;
+                    tuple.tform = 1;
+                    tuple.pxpitch = 1; % estimated pixel pitch of the vessel map;
+                    tuple.field_depth = slice_pos(islice) - depth;
+                    insert(self,tuple)
+                end
+                return
+            end
+            
+            % get reference map information
+            ref_key = fetch(proj(anatomy.RefMap) & keyI);
+            if ~exists(anatomy.RefMap & ref_key)
+                ref_key = createRef(anatomy.RefMap,fetch(mice.Mice & keyI));
+            end
+            
+            if isfield(keyI,'ret_idx');keyI = rmfield(keyI,'ret_idx');end
+            [ref_map, ref_pxpitch, software] = fetch1(anatomy.RefMap * experiment.Scan  & ref_key,...
+                'ref_map','pxpitch','software');
+            switch software
+                case 'imager'
+                    if isempty(params.global_rotation)
+                        params.global_rotation = 60; % rotation of the ref_map
+                    end
+                case 'scanimage'
+                    if isempty(params.global_rotation)
+                        params.global_rotation = 0; % rotation of the ref_map
+                    end
+            end
+
             % calculate initial scale
             pxpitch = mean(fieldWidths.\fieldWidthsInMicrons);
             
@@ -130,6 +149,7 @@ classdef FieldCoordinates < dj.Manual
             
             params.exp = 1;
             params.inv = 0;
+            params.vcontrast = 1;
             
             params = ne7.mat.getParams(params,varargin);
             
@@ -137,7 +157,7 @@ classdef FieldCoordinates < dj.Manual
 
             % get the ref_map
             ref_map = fetchn(proj(anatomy.RefMap,'ref_map') & self,'ref_map');
-            ref_map = ref_map{1};
+            ref_map = single(ref_map{1});
             
             % get the setup
             setups = fetchn(experiment.Session & self, 'rig');
@@ -145,15 +165,21 @@ classdef FieldCoordinates < dj.Manual
  
             % fetch images
             if strcmp(setup,'2P4')
-                [frames,x,y,tforms] = fetchn(meso.SummaryImagesAverage * self ,...
+                [frames1,x,y,tforms] = fetchn(meso.SummaryImagesAverage * self ,...
                     'average_image','x_offset','y_offset','tform');
+                
+                  [frames2,x,y,tforms] = fetchn(meso.SummaryImagesCorrelation * self ,...
+                    'correlation_image','x_offset','y_offset','tform');
+                for iframe = 1:length(frames1);
+                    frames{iframe} = frames1{iframe}.*frames2{iframe};
+                end
             else
                 [frames,x,y,tforms,keys] = fetchn(reso.SummaryImagesAverage * self & fuse.ScanSet,...
                     'average_image','x_offset','y_offset','tform');
             end
             
             % apply field transformations
-            ref_map = ne7.mat.normalize(ref_map.^params.exp);
+            ref_map = ne7.mat.normalize(abs(ref_map.^params.vcontrast));
             if params.inv; ref_map = 1-ref_map;end
             idxX = [];idxY = []; frame = [];
             for islice = 1:length(frames)
@@ -177,7 +203,7 @@ classdef FieldCoordinates < dj.Manual
             
             % construct image
             im = zeros(y_range,x_range,3);
-%             im(1+mnY:size(ref_map,1)+mnY,1+mnX:size(ref_map,2)+mnX,1) = ref_map;
+             im(1+mnY:size(ref_map,1)+mnY,1+mnX:size(ref_map,2)+mnX,1) = ref_map;
 
             % put frames
             for islice = 1:length(frames)

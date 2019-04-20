@@ -9,7 +9,7 @@ import io
 import imageio
 import datajoint as dj
 from . import preprocess
-from . import experiment
+from pipeline import experiment
 from . import vis
 
 from distutils.version import StrictVersion

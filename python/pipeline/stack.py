@@ -19,9 +19,12 @@ downwards, y in the second axis pointing towards you and x on the third axis poi
 the right.
 """
 
-schema = dj.schema('pipeline_stack', locals(), create_tables=True)
 dj.config['external-stack'] = {'protocol': 'file',
-                               'location': '/mnt/scratch07/pipeline-externals'}
+                               'location': '/mnt/dj-stor01/pipeline-externals'}
+dj.config['cache'] = '/tmp/dj-cache'
+
+
+schema = dj.schema('pipeline_stack', locals(), create_tables=False)
 
 
 @schema
@@ -1473,7 +1476,7 @@ class Registration(dj.Computed):
         # No notifications
         pass
 
-    def get_grid(self, type='nonrigid', desired_res=1):
+    def get_grid(self, type='affine', desired_res=1):
         """ Get registered grid for this registration. """
         import torch
         from .utils import registration
@@ -2281,7 +2284,7 @@ class StackSet(dj.Computed):
     def key_source(self):
         return (CorrectedStack.proj(stack_session='session') *
                 shared.RegistrationMethod.proj() * shared.SegmentationMethod.proj() &
-                Registration &  {'segmentation_method': 6})
+                Registration & {'segmentation_method': 6})
 
     class Unit(dj.Part):
         definition = """ # a unit in the stack
@@ -2351,7 +2354,7 @@ class StackSet(dj.Computed):
             pipe = reso if reso.ScanInfo & field_key else meso
             um_per_px = ((reso.ScanInfo if pipe == reso else meso.ScanInfo.Field) &
                          field_key).microns_per_pixel
-            grid = (Registration & field).get_grid(desired_res=um_per_px)
+            grid = (Registration & field).get_grid(type='affine', desired_res=um_per_px)
 
             # Create cell objects
             for channel_key in (pipe.ScanSet & field_key &

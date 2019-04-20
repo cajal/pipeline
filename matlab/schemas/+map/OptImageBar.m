@@ -205,6 +205,7 @@ classdef OptImageBar < dj.Imported
                 vessels = single(vessels);
                 
                 % process image range
+                imP = imP - 1.5;
                 imP(imP<-3.14) = imP(imP<-3.14) +3.14*2;
                 imP(imP>3.14) = imP(imP>3.14) -3.14*2;
                 uv =linspace(-3.14,3.14,20) ;

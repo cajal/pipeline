@@ -17,4 +17,4 @@ if ~isempty(ix)
 end
 ts(timed(ix))=nan;
 ts(timed(ix+1))=nan;
-ts = interp1(timed, ts(timed), 1:length(ts));
+ts = interp1(timed, ts(timed), 1:length(ts),'linear','extrap');
