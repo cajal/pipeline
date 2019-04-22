@@ -1,3 +1,7 @@
+# Disable DLC GUI first, then import deeplabcut
+os.environ["DLClight"] = "True"
+import deeplabcut as dlc
+
 from itertools import count
 
 from .utils.decorators import gitlog
@@ -18,10 +22,6 @@ from . import config
 from .utils import h5
 from . import experiment, notify
 from .exceptions import PipelineException
-
-# Disable DLC GUI first, then import deeplabcut
-os.environ["DLClight"] = "True"
-import deeplabcut as dlc
 
 schema = dj.schema('pipeline_eye', locals())
 
@@ -575,8 +575,8 @@ gputouse = 0
 
 # schema = dj.schema('pipeline_eye_DLC', locals())
 
-pipeline_eye = dj.create_virtual_module('pipeline_eye', 'pipeline_eye')
-pipeline_experiment = dj.create_virtual_module('pipeline_experiment', 'pipeline_experiment')
+# pipeline_eye = dj.create_virtual_module('pipeline_eye', 'pipeline_eye')
+# pipeline_experiment = dj.create_virtual_module('pipeline_experiment', 'pipeline_experiment')
 
 # If config.yaml ever updated, make sure you store the file name differently so that it becomes unique
 @schema
@@ -594,7 +594,7 @@ class ConfigDeeplabcut(dj.Manual):
 class TrackedLabelsDeeplabcut(dj.Computed):
     definition = """
     # Tracking table using deeplabcut
-    -> pipeline_eye.Eye
+    -> Eye
     -> pipeline_experiment.Scan
     -> ConfigDlc
     ---
@@ -637,13 +637,14 @@ class TrackedLabelsDeeplabcut(dj.Computed):
     @property
     def key_source(self):
 
-        new_ConfigDeeplabcut = ConfigDeeplabcut & {
-            'config_path': '/mnt/scratch07/donnie/DeepLabCut/pupil_track-Donnie-2019-02-12/config.yaml'}
+        # new_ConfigDeeplabcut = ConfigDeeplabcut & {
+        #     'config_path': '/mnt/scratch07/donnie/DeepLabCut/pupil_track-Donnie-2019-02-12/config.yaml'}
 
-        # new_key_source = (pipeline_eye.Eye * pipeline_experiment.Scan * new_ConfigDeeplabcut).proj() & {
-        #     'animal_id': 20892, 'scan_idx': 10, 'session': 9}
-        new_key_source = (pipeline_eye.Eye * pipeline_experiment.Scan * new_ConfigDeeplabcut).proj()
-        return new_key_source
+        # # new_key_source = (pipeline_eye.Eye * pipeline_experiment.Scan * new_ConfigDeeplabcut).proj() & {
+        # #     'animal_id': 20892, 'scan_idx': 10, 'session': 9}
+        # new_key_source = (pipeline_eye.Eye * pipeline_experiment.Scan * new_ConfigDeeplabcut).proj()
+        # return new_key_source
+        pass
 
     def get_video_path(self, key):
         """
