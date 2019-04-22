@@ -25,6 +25,7 @@ from .exceptions import PipelineException
 
 schema = dj.schema('pipeline_eye', locals())
 
+gputouse = 0
 
 DEFAULT_PARAMETERS = {'relative_area_threshold': 0.002,
                       'ratio_threshold': 1.5,
@@ -571,8 +572,6 @@ class FittedContour(dj.Computed):
             self.Ellipse().insert1(ckey, ignore_extra_fields=True)
 
 
-gputouse = 0
-
 # schema = dj.schema('pipeline_eye_DLC', locals())
 
 # pipeline_eye = dj.create_virtual_module('pipeline_eye', 'pipeline_eye')
@@ -595,8 +594,7 @@ class TrackedLabelsDeeplabcut(dj.Computed):
     definition = """
     # Tracking table using deeplabcut
     -> Eye
-    -> pipeline_experiment.Scan
-    -> ConfigDlc
+    -> ConfigDeeplabcut
     ---
     tracking_ts=CURRENT_TIMESTAMP           : timestamp             # automatic
     tracking_dir                            : varchar(255)          # path to tracking directory
