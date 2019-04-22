@@ -1,4 +1,5 @@
 # Disable DLC GUI first, then import deeplabcut
+import os
 os.environ["DLClight"] = "True"
 import deeplabcut as dlc
 
@@ -12,7 +13,6 @@ from tqdm import tqdm
 import cv2
 import numpy as np
 import json
-import os
 from commons import lab
 from datajoint.autopopulate import AutoPopulate
 
