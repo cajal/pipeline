@@ -2,6 +2,8 @@
 import os
 os.environ["DLClight"] = "True"
 import deeplabcut as dlc
+from deeplabcut.utils import auxiliaryfunctions
+from .utils import DLC_tools
 
 from itertools import count
 
@@ -12,6 +14,7 @@ from datajoint.jobs import key_hash
 from tqdm import tqdm
 import cv2
 import numpy as np
+import pandas as pd
 import json
 from commons import lab
 from datajoint.autopopulate import AutoPopulate
@@ -571,12 +574,6 @@ class FittedContour(dj.Computed):
         for ckey in tqdm(contours):
             self.Ellipse().insert1(ckey, ignore_extra_fields=True)
 
-
-# schema = dj.schema('pipeline_eye_DLC', locals())
-
-# pipeline_eye = dj.create_virtual_module('pipeline_eye', 'pipeline_eye')
-# pipeline_experiment = dj.create_virtual_module('pipeline_experiment', 'pipeline_experiment')
-
 # If config.yaml ever updated, make sure you store the file name differently so that it becomes unique
 @schema
 class ConfigDeeplabcut(dj.Manual):
@@ -632,26 +629,14 @@ class TrackedLabelsDeeplabcut(dj.Computed):
         video_path                         : varchar(255)           # path to comparessed & cropped video
         """
 
-    @property
-    def key_source(self):
-
-        # new_ConfigDeeplabcut = ConfigDeeplabcut & {
-        #     'config_path': '/mnt/scratch07/donnie/DeepLabCut/pupil_track-Donnie-2019-02-12/config.yaml'}
-
-        # # new_key_source = (pipeline_eye.Eye * pipeline_experiment.Scan * new_ConfigDeeplabcut).proj() & {
-        # #     'animal_id': 20892, 'scan_idx': 10, 'session': 9}
-        # new_key_source = (pipeline_eye.Eye * pipeline_experiment.Scan * new_ConfigDeeplabcut).proj()
-        # return new_key_source
-        pass
-
     def get_video_path(self, key):
         """
         Input:
             key: dictionary
                 A key that consists of animal_id, session, and scan_idx
         """
-        video_info = (pipeline_experiment.Session() *
-                      pipeline_experiment.Scan.EyeVideo() & key).fetch1()
+        video_info = (experiment.Session() *
+                      experiment.Scan.EyeVideo() & key).fetch1()
         video_path = lab.Paths().get_local_path(
             "{behavior_path}/{filename}".format(**video_info))
         return video_path
@@ -1017,7 +1002,7 @@ class FittedContourDeeplabcut(dj.Computed):
         config['trainingsetindex'] = trainingsetindex
         config['video_path'] = cc_info['video_path']
 
-        pupil_fit = PupilFitting(config=config, bodyparts='all')
+        pupil_fit = DLC_tools.PupilFitting(config=config, bodyparts='all')
 
         self.insert1(key)
 
