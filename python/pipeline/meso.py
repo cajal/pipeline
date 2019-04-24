@@ -653,7 +653,7 @@ class SummaryImages(dj.Computed):
 
             # Insert
             field_key = {**key, 'channel': channel + 1}
-            SummaryImages().insert1(field_key)
+            self.insert1(field_key)
             SummaryImages.Average().insert1({**field_key, 'average_image': average_image})
             SummaryImages.L6Norm().insert1({**field_key, 'l6norm_image': l6norm_image})
             SummaryImages.Correlation().insert1({**field_key,
