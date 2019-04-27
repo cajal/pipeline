@@ -335,6 +335,18 @@ class MonitorCalibration(dj.Manual):
 
 
 @schema
+class MouseRoom(dj.Lookup):
+    definition = """ # Mouse location after surgery
+    mouse_room                : varchar(64)         # Building letter along with room number
+    """
+    contents = [
+        ['T019'],
+        ['T057'],
+        ['T082C'],
+    ]
+
+
+@schema
 class SurgeryType(dj.Lookup):
     definition = """ # diff types of surgery
     
@@ -370,7 +382,8 @@ class Surgery(dj.Manual):
     ---
     date                         : date                   # YYYY-MM-DD Format. Date surgery was performed
     time                         : time                   # Start of mouse recovery
-    -> Person            
+    -> Person
+    -> MouseRoom            
     -> SurgeryOutcome
     -> SurgeryType
     surgery_quality              : tinyint                # 0-5 self-rating, 0 being worst and 5 best
