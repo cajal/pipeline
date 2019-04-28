@@ -350,7 +350,7 @@ classdef FieldCoordinates < dj.Manual
                             redraw
                         end
                     case 'uparrow'
-                        if x>0
+                        if x>(size(im1,1)/2)*-1
                             x = x-1*fine;
                             redraw
                         end
@@ -360,7 +360,7 @@ classdef FieldCoordinates < dj.Manual
                             redraw
                         end
                     case 'leftarrow'
-                        if y>0
+                        if y>(size(im1,2)/2)*-1
                             y = y-1*fine;
                             redraw
                         end
