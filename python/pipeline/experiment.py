@@ -334,6 +334,77 @@ class MonitorCalibration(dj.Manual):
 
 
 @schema
+class MouseRoom(dj.Lookup):
+    definition = """ # Mouse location after surgery
+    mouse_room                : varchar(64)         # Building letter along with room number
+    """
+    contents = [
+        ['T019'],
+        ['T057'],
+        ['T082C'],
+    ]
+
+
+@schema
+class SurgeryType(dj.Lookup):
+    definition = """ # Surgery types used in experiment.Surgery
+    surgery_type                : varchar(64)         # Types of surgery performed on mice
+    """
+    contents = [
+        ['Cranial Window and Headbar'],
+        ['Headbar'],
+        ['Burr Hole and Suture'],
+        ['C-Section'],
+        ['Viral Injection'],
+        ['Electroporation']
+    ]
+
+
+@schema
+class SurgeryOutcome(dj.Lookup):
+    definition = """ # Surgery outcomes used in experiment.Surgery
+    surgery_outcome             : varchar(32)         # Possible outcomes of surgeries performed on mice
+    """
+    contents = [
+        ['Survival'],
+        ['Non-Survival'],
+    ]
+
+
+@schema
+class Surgery(dj.Manual):
+    definition = """ # List of surgeries performed on mice
+    -> mice.Mice
+    surgery_id                   : smallint               # Unique number given to each surgery
+    ---
+    date                         : date                   # YYYY-MM-DD Format. Date surgery was performed
+    time                         : time                   # Start of mouse recovery
+    -> experiment.MouseRoom
+    -> experiment.Person            
+    -> SurgeryOutcome
+    -> SurgeryType
+    surgery_quality              : tinyint                # 0-5 self-rating, 0 being worst and 5 best
+    ketoprofen = null            : decimal(4,3) unsigned  # Amount of Ketoprofen given to mouse
+    weight = null                : decimal(5,2) unsigned  # Weight of mouse before surgery
+    surgery_notes = ""           : varchar(256)           # Notes on surgery
+    """
+
+
+@schema
+class SurgeryStatus(dj.Manual):
+    definition = """ # Updates to surgeries performed on mice
+    -> Surgery
+    timestamp                           : timestamp              # Timestamp of entry
+    ---
+    euthanized = 0                      : boolean
+    day_one = 0                         : boolean                # First day checkup performed
+    day_two = 0                         : boolean                # Second day checkup performed
+    day_three = 0                       : boolean                # Third day checkup performed
+    checkup_notes = ""                  : varchar(265)           # Notes on surgery checkups
+    """
+
+
+@schema
 class Session(dj.Manual):
     definition = """  # imaging session
 
