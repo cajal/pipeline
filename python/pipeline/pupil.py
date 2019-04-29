@@ -794,6 +794,7 @@ class TrackedLabelsDeeplabcut(dj.Computed):
 
             for coord in ['x', 'y']:
 
+                # only obtain if the labels are confident enough (i.e. > pcutoff)
                 eyelid_coord_pcutoff = df_eyelid_coord[coord][(
                     df_eyelid_likelihood.loc[:, eyelid_label].values > config['pcutoff'])][eyelid_label][coord].values
 
