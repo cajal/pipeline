@@ -921,7 +921,7 @@ class Segmentation(dj.Computed):
             # Segmentation().insert1(key)
             # Segmentation.CNMF().insert1({**key, 'params': json.dumps(kwargs)})
             self.insert1({**key, 'params': json.dumps(kwargs)})
-            Fluorescence().insert1(key)  # we also insert traces
+            Fluorescence().insert1(key, allow_direct_insert=True)  # we also insert traces
 
             ## Insert background components
             Segmentation.CNMFBackground().insert1({**key, 'masks': background_masks,
@@ -938,7 +938,7 @@ class Segmentation(dj.Computed):
                 Segmentation.Mask().insert1({**key, 'mask_id': mask_id, 'pixels': mask_pixels,
                                              'weights': mask_weights})
 
-                Fluorescence.Trace().insert1({**key, 'mask_id': mask_id, 'trace': trace})
+                Fluorescence.Trace().insert1({**key, 'mask_id': mask_id, 'trace': trace}, allow_direct_insert=True)
 
             Segmentation().notify(key)
 
