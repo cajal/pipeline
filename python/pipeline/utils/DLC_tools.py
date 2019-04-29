@@ -1,6 +1,9 @@
 
-import math
 import os
+# disable DLC GUI
+os.environ["DLClight"] = "True"
+
+import math
 import yaml
 import cv2
 from pathlib import Path
