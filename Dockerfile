@@ -1,5 +1,5 @@
 #FROM datajoint/datajoint:latest
-FROM ninai/pipeline:TF-GPU
+FROM ninai/pipeline:base
 LABEL maintainer="Edgar Y. Walker, Fabian Sinz, Erick Cobos, Donnie Kim"
 
 WORKDIR /data
