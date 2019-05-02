@@ -1,30 +1,32 @@
+from .exceptions import PipelineException
+from . import experiment, notify
+from .utils import h5
+from . import config
+from .utils.eye_tracking import PupilTracker, ManualTracker
+from .utils import eye_tracking
+from .utils.decorators import gitlog
+from .utils import DLC_tools
+
+import datajoint as dj
+from datajoint.autopopulate import AutoPopulate
+from datajoint.jobs import key_hash
+
+from commons import lab
+import json
+import pandas as pd
+import numpy as np
+import cv2
+from tqdm import tqdm
+
+from scipy.misc import imresize
+from itertools import count
+
 # Disable DLC GUI first, then import deeplabcut
 import os
 os.environ["DLClight"] = "True"
 import deeplabcut as dlc
 from deeplabcut.utils import auxiliaryfunctions
-from .utils import DLC_tools
 
-from itertools import count
-
-from .utils.decorators import gitlog
-from scipy.misc import imresize
-import datajoint as dj
-from datajoint.jobs import key_hash
-from tqdm import tqdm
-import cv2
-import numpy as np
-import pandas as pd
-import json
-from commons import lab
-from datajoint.autopopulate import AutoPopulate
-
-from .utils import eye_tracking
-from .utils.eye_tracking import PupilTracker, ManualTracker
-from . import config
-from .utils import h5
-from . import experiment, notify
-from .exceptions import PipelineException
 
 schema = dj.schema('pipeline_eye', locals())
 
@@ -51,9 +53,9 @@ class Eye(dj.Imported):
 
     -> experiment.Scan
     ---
-    eye_time                    : longblob  # times of each movie frame in behavior clock
-    total_frames                : int       # number of frames in movie.
-    preview_frames              : longblob  # 16 preview frames
+    eye_time                    : longblob      # times of each movie frame in behavior clock
+    total_frames                : int           # number of frames in movie.
+    preview_frames              : longblob      # 16 preview frames
     eye_ts=CURRENT_TIMESTAMP    : timestamp
     """
 
@@ -227,7 +229,7 @@ class TrackedVideo(dj.Computed):
     -> Eye
     -> TrackingTask
     ---
-    tracking_parameters              : longblob  # tracking parameters
+    tracking_parameters              : longblob   # tracking parameters
     tracking_ts=CURRENT_TIMESTAMP    : timestamp  # automatic
     """
 
@@ -419,7 +421,7 @@ class ManuallyTrackedContours(dj.Manual, AutoPopulate):
         exponent=NULL           : tinyint   # exponent for contrast enhancement
         dilation_iter=NULL      : tinyint   # number of dilation and erosion operations
         min_contour_len=NULL    : tinyint   # minimal contour length
-        running_avg_mix=NULL    : float     # weight a in a * current_frame + (1-a) * running_avg 
+        running_avg_mix=NULL    : float     # weight a in a * current_frame + (1-a) * running_avg
         """
 
     def make(self, key, backup_file=None):
@@ -503,7 +505,8 @@ class ManuallyTrackedContours(dj.Manual, AutoPopulate):
                                 dict(key, frame_id=frame_id, contour=contour))
                         else:
                             frame.insert1(dict(key, frame_id=frame_id))
-                        parameters.insert1(dict(key, **params), ignore_extra_fields=True)
+                        parameters.insert1(
+                            dict(key, **params), ignore_extra_fields=True)
 
 
 @schema
@@ -579,10 +582,10 @@ class FittedContour(dj.Computed):
 class ConfigDeeplabcut(dj.Manual):
     definition = """
     # Minimal info needed to load deeplabcut model
-    config_path                             : varchar(255)          # path to deeplabcut config
+    config_path         : varchar(255)          # path to deeplabcut config
     ---
-    shuffle                                 : smallint unsigned     # shuffle number used for the trained dlc model. Needed for dlc.analyze_videos
-    trainingsetindex                        : smallint unsigned     # trainingset index used for the trained dlc. model. Needed for dlc.analyze_videos
+    shuffle             : smallint unsigned     # shuffle number used for the trained dlc model. Needed for dlc.analyze_videos
+    trainingsetindex    : smallint unsigned     # trainingset index used for the trained dlc. model. Needed for dlc.analyze_videos
     """
 
 
@@ -602,9 +605,9 @@ class TrackedLabelsDeeplabcut(dj.Computed):
         # original video information
         -> master
         ---
-        original_width                     : smallint unsigned      # original video width size
-        original_height                    : smallint unsigned      # original video height size
-        video_path                         : varchar(255)           # path to original video
+        original_width      : smallint unsigned    # original video width size
+        original_height     : smallint unsigned    # original video height size
+        video_path          : varchar(255)         # path to original video
         """
 
     class ShortVideo(dj.Part):
@@ -612,8 +615,8 @@ class TrackedLabelsDeeplabcut(dj.Computed):
         # 5 seconds long video starting from the middle frame of the original video
         -> master
         ---
-        starting_frame                     : int unsigned           # middle frame of the original video
-        video_path                         : varchar(255)           # path to short video
+        starting_frame       : int unsigned        # middle frame of the original video
+        video_path           : varchar(255)        # path to short video
         """
 
     class CompressedCroppedVideo(dj.Part):
@@ -621,12 +624,12 @@ class TrackedLabelsDeeplabcut(dj.Computed):
         # Compressed and cropped video information
         -> master
         ---
-        cropped_x0                         : smallint unsigned      # start width coord wrt original video
-        cropped_x1                         : smallint unsigned      # end width coord wrt original video
-        cropped_y0                         : smallint unsigned      # start height coord wrt original video
-        cropped_y1                         : smallint unsigned      # end height coord wrt original video
-        added_pixels                       : smallint unsigned      # number of pixels added around the cropping coords
-        video_path                         : varchar(255)           # path to comparessed & cropped video
+        cropped_x0      : smallint unsigned        # start width coord wrt original video
+        cropped_x1      : smallint unsigned        # end width coord wrt original video
+        cropped_y0      : smallint unsigned        # start height coord wrt original video
+        cropped_y1      : smallint unsigned        # end height coord wrt original video
+        added_pixels    : smallint unsigned        # number of pixels added around the cropping coords
+        video_path      : varchar(255)             # path to comparessed & cropped video
         """
 
     def get_video_path(self, key):
@@ -649,7 +652,7 @@ class TrackedLabelsDeeplabcut(dj.Computed):
             |
             |------ video_original
             |------ tracking_dir (create_tracking_directory)
-                        |------- symlink to video_original (add_symlink) 
+                        |------- symlink to video_original (add_symlink)
                         |------- compressed_cropped_dir
                                     |------- cropped_video (generated by make_compressed_cropped_video function)
                                     |------- h5 file for cropped video (generated by deeplabcut)
@@ -756,13 +759,13 @@ class TrackedLabelsDeeplabcut(dj.Computed):
 
     def obtain_cropping_coords(self, short_h5_path, DLCscorer, config):
         """
-        First, filter out by the pcutoff, then find values that are within 1 std from mean 
+        First, filter out by the pcutoff, then find values that are within 1 std from mean
         for each eyelid bodypart. Then, compare among the parts and find min,max values in x and y.
 
         The reason we use 1 std from mean is that dlc might have outliers in this short video.
         Hence we filter out these potential outliers
 
-        Input: 
+        Input:
             short_h5_path: string
                 path to h5 file generated by deeplabcut on short video.
             DLCscorer: string
@@ -859,7 +862,7 @@ class TrackedLabelsDeeplabcut(dj.Computed):
         Input:
             tracking_dir: string
                 String that specifies the full path of tracking directory
-            cropped_coords: dictionary 
+            cropped_coords: dictionary
                 cropoping coordinates specifying left_top  and bottom_right coords
         Return:
             None
@@ -897,7 +900,8 @@ class TrackedLabelsDeeplabcut(dj.Computed):
 
         print('Tracking labels with DLC')
 
-        temp_config = (ConfigDeeplabcut & key).fetch1()
+        temp_config = (ConfigDeeplabcut & dict(
+            config_path='/mnt/lab/DeepLabCut/pupil_track-Donnie-2019-02-12/config.yaml')).fetch1()
         config = auxiliaryfunctions.read_config(temp_config['config_path'])
         config['config_path'] = temp_config['config_path']
         config['shuffle'] = temp_config['shuffle']
@@ -909,7 +913,8 @@ class TrackedLabelsDeeplabcut(dj.Computed):
 
         # make needed directories
         tracking_dir, original_video_path = self.create_tracking_directory(key)
-        self.insert1(dict(key, tracking_dir=tracking_dir))
+        self.insert1(
+            dict(key, config_path=config['config_path'], tracking_dir=tracking_dir))
 
         # make a short video (5 seconds long)
         short_video_path, original_width, original_height, mid_frame_num = self.make_short_video(
@@ -962,8 +967,8 @@ class TrackedLabelsDeeplabcut(dj.Computed):
 @schema
 class FittedContourDeeplabcut(dj.Computed):
     definition = """
-    # Fit a circle and an ellipse using compressed & cropped video. 
-    -> TrackedLabelsDeeplabcut   
+    # Fit a circle and an ellipse using compressed & cropped video.
+    -> TrackedLabelsDeeplabcut
     ---
     fitting_ts=CURRENT_TIMESTAMP    : timestamp  # automatic
     """
@@ -976,6 +981,7 @@ class FittedContourDeeplabcut(dj.Computed):
         center=NULL              : tinyblob      # center of the circle in (x, y) of image
         radius=NULL              : float         # radius of the circle
         visible_portion=NULL     : float         # portion of visible pupil area given a fitted circle frame. Please refer DLC_tools.PupilFitting.detect_visible_pupil_area for more details
+
         """
 
     class Ellipse(dj.Part):
@@ -993,15 +999,19 @@ class FittedContourDeeplabcut(dj.Computed):
     def make(self, key):
         print("Fitting:", key)
 
-        shuffle, trainingsetindex = (ConfigDeeplabcut & key).fetch1(
+        tracking_info = (TrackedLabelsDeeplabcut & key).fetch1()
+        shuffle, trainingsetindex = (ConfigDeeplabcut & tracking_info).fetch1(
             'shuffle', 'trainingsetindex')
-        cc_info = (TrackedLabelsDeeplabcut.CompressedCroppedVideo() & key).fetch1()
 
-        config = auxiliaryfunctions.read_config(cc_info['config_path'])
-        config['config_path'] = cc_info['config_path']
+        config = auxiliaryfunctions.read_config(tracking_info['config_path'])
+        config['config_path'] = tracking_info['config_path']
         config['shuffle'] = shuffle
         config['trainingsetindex'] = trainingsetindex
-        config['video_path'] = cc_info['video_path']
+
+        compressed_cropped_vid_path = (
+            TrackedLabelsDeeplabcut.CompressedCroppedVideo & key).fetch1('video_path')
+
+        config['video_path'] = compressed_cropped_vid_path
 
         pupil_fit = DLC_tools.PupilFitting(config=config, bodyparts='all')
 
