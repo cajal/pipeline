@@ -591,8 +591,8 @@ class TrackedLabelsDeeplabcut(dj.Computed):
     definition = """
     # Tracking table using deeplabcut
     -> Eye
-    -> ConfigDeeplabcut
     ---
+    -> ConfigDeeplabcut
     tracking_ts=CURRENT_TIMESTAMP           : timestamp             # automatic
     tracking_dir                            : varchar(255)          # path to tracking directory
     """
