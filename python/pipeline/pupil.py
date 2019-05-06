@@ -900,6 +900,7 @@ class TrackedLabelsDeeplabcut(dj.Computed):
 
         print('Tracking labels with DLC')
 
+        # change config_path if we were to update DLC model configuration
         temp_config = (ConfigDeeplabcut & dict(
             config_path='/mnt/lab/DeepLabCut/pupil_track-Donnie-2019-02-12/config.yaml')).fetch1()
         config = auxiliaryfunctions.read_config(temp_config['config_path'])
