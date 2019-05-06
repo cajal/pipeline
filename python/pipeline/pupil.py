@@ -5,7 +5,6 @@ from . import config
 from .utils.eye_tracking import PupilTracker, ManualTracker
 from .utils import eye_tracking
 from .utils.decorators import gitlog
-from .utils import DLC_tools
 
 import datajoint as dj
 from datajoint.autopopulate import AutoPopulate
@@ -26,6 +25,7 @@ import os
 os.environ["DLClight"] = "True"
 import deeplabcut as dlc
 from deeplabcut.utils import auxiliaryfunctions
+from .utils import DLC_tools
 
 
 schema = dj.schema('pipeline_eye', locals())
