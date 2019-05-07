@@ -344,30 +344,32 @@ class PupilFitting(PlotBodyparts):
                                       'eyelid_left': 'eyelid_left_top',
                                       'eyelid_left_top': 'eyelid_top'}
 
-        self._circle_threshold = 3
-        self._ellipse_threshold = 6
+        self._circle_threshold_num = 3
+        self._ellipse_threshold_num = 6
 
     @property
-    def circle_threshold(self):
-        return self._ellipse_threshold
+    def circle_threshold_num(self):
+        return self._circle_threshold_num
 
-    @circle_threshold.setter
-    def circle_threshold(self, value):
+    @circle_threshold_num.setter
+    def circle_threshold_num(self, value):
         if value > 8:
             raise ValueError("value must be equal to or less than 8!")
         else:
-            self._ellipse_threshold = value
+            self._circle_threshold_num = value
 
     @property
-    def ellipse_threshold(self):
-        return self._ellipse_threshold
+    def ellipse_threshold_num(self):
+        return self._ellipse_threshold_num
 
-    @ellipse_threshold.setter
-    def ellipse_threshold(self, value):
+    @ellipse_threshold_num.setter
+    def ellipse_threshold_num(self, value):
         if value > 8:
             raise ValueError("value must be equal to or less than 8!")
+        elif value < 5:
+            raise ValueError("value must be equal to or more than 5!")
         else:
-            self._ellipse_threshold = value
+            self._ellipse_threshold_num = value
 
     def coords_pcutoff(self, frame_num):
         """
@@ -474,7 +476,7 @@ class PupilFitting(PlotBodyparts):
         pupil_labels = [label for label in list(
             df_x_coords.index.get_level_values(0)) if 'pupil' in label]
 
-        if len(pupil_labels) < self.circle_threshold:
+        if len(pupil_labels) < self.circle_threshold_num:
             # print('Frame number: {} has only 2 or less pupil label. Skip fitting!'.format(
             #     frame_num))
             center = None
@@ -546,7 +548,7 @@ class PupilFitting(PlotBodyparts):
         pupil_labels = [label for label in list(
             df_x_coords.index.get_level_values(0)) if 'pupil' in label]
 
-        if len(pupil_labels) < self.ellipse_threshold:
+        if len(pupil_labels) < self.ellipse_threshold_num:
             # print('Frame number: {} has only 2 or less pupil label. Skip fitting!'.format(
             #     frame_num))
             center = None
@@ -625,10 +627,10 @@ class PupilFitting(PlotBodyparts):
             shape=[*eyelid_connect_dict['mask'].shape, 3], dtype=np.uint8)
 
         if fitting_method == 'circle':
-            threshold = self.circle_threshold
+            threshold = self.circle_threshold_num
 
         elif fitting_method == 'ellipse':
-            threshold = self.ellipse_threshold
+            threshold = self.ellipse_threshold_num
 
         else:
             raise ValueError(
