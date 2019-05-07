@@ -1,4 +1,3 @@
-#!/usr/local/bin/python3
 import time
 
 from pipeline import experiment, reso, meso, fuse, stack, pupil, pupil_new, treadmill, posture
