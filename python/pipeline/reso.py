@@ -918,10 +918,9 @@ class Segmentation(dj.Computed):
             dj.conn()
 
             ## Insert in CNMF, Segmentation and Fluorescence
-            Segmentation().insert1(key)
-            Segmentation.CNMF().insert1({**key, 'params': json.dumps(kwargs)})
-            Fluorescence().insert1(key)  # we also insert traces
-
+            self.insert1({**key, 'params': json.dumps(kwargs)})
+            Fluorescence().insert1(key, allow_direct_insert=True)  # we also insert traces
+            
             ## Insert background components
             Segmentation.CNMFBackground().insert1({**key, 'masks': background_masks,
                                                    'activity': background_traces})
@@ -1056,6 +1055,7 @@ class Segmentation(dj.Computed):
         if key['segmentation_method'] == 1:  # manual
             Segmentation.Manual().make(key)
         elif key['segmentation_method'] in [2, 6]:  # nmf and nmf-patches
+            self.insert1(key)
             Segmentation.CNMF().make(key)
         elif key['segmentation_method'] in [3, 4]:  # nmf_patches
             msg = 'This method has been deprecated, use segmentation_method 6'
