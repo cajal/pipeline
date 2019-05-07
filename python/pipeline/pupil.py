@@ -590,7 +590,7 @@ class ConfigDeeplabcut(dj.Manual):
 
 
 @schema
-class TrackedLabelsDeeplabcut(dj.Computed):
+class AutomaticTrackedLabels(dj.Computed):
     definition = """
     # Tracking table using deeplabcut
     -> Eye
@@ -964,6 +964,43 @@ class TrackedLabelsDeeplabcut(dj.Computed):
                                               added_pixels=pixel_num,
                                               video_path=compressed_cropped_video_path))
 
+
+@schema
+class FittedContourAll(dj.Computed):
+    definition="""
+    # Fit a circle and an ellipse
+    -> AutomaticTrackedLabels
+    -> ManuallyTrackedContours
+    tracking_method                 : varchar(128)   # tracking method, either 'manual' or 'deeplabcut'
+    ---
+    fitting_ts=CURRENT_TIMESTAMP    : timestamp      # automatic
+    """
+    class Circle(dj.Part):
+        definition = """
+        -> master
+        frame_id                 : int           # frame id with matlab based 1 indexing
+        ---
+        center=NULL              : tinyblob      # center of the circle in (x, y) of image
+        radius=NULL              : float         # radius of the circle
+        visible_portion=NULL     : float         # portion of visible pupil area given a fitted circle frame. Please refer DLC_tools.PupilFitting.detect_visible_pupil_area for more details
+
+        """
+
+    class Ellipse(dj.Part):
+        definition = """
+        -> master
+        frame_id                 : int           # frame id with matlab based 1 indexing
+        ---
+        center=NULL              : tinyblob      # center of the ellipse in (x, y) of image
+        major_radius=NULL        : float         # major radius of the ellipse
+        minor_radius=NULL        : float         # minor radius of the ellipse
+        rotation_angle=NULL      : float         # ellipse rotation angle in degrees w.r.t. major_radius
+        visible_portion=NULL     : float         # portion of visible pupil area given a fitted ellipse frame. Please refer DLC_tools.PupilFitting.detect_visible_pupil_area for more details
+        """
+
+    def make(self, key):
+        print("Fitting:", key)
+        
 
 @schema
 class FittedContourDeeplabcut(dj.Computed):
