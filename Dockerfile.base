@@ -68,18 +68,6 @@ RUN apt-get install -y autoconf automake libtool && \
 ###############################################################################
 # install Deeplabcut and its dependencies
 RUN pip3 install git+https://github.com/cajal/DeepLabCut.git
-#RUN pip3 install https://extras.wxpython.org/wxPython4/extras/linux/gtk3/ubuntu-16.04/wxPython-4.0.3-cp36-cp36m-linux_x86_64.whl
-
-# Install dependencies of wxPython
-#RUN apt-get update && \
-#    apt-get install -y libgtk2.0-dev libgtk-3-dev \
-#    libjpeg-dev libtiff-dev \
-#    libsdl1.2-dev libgstreamer-plugins-base1.0-dev \
-#    libnotify-dev freeglut3 freeglut3-dev libsm-dev \
-#    libwebkitgtk-dev libwebkitgtk-3.0-dev
-
-#RUN wget http://security.ubuntu.com/ubuntu/pool/main/libp/libpng/libpng12-0_1.2.54-1ubuntu1.1_amd64.deb
-#RUN dpkg -i libpng12-0_1.2.54-1ubuntu1.1_amd64.deb
 
 ###############################################################################
 # Install pytorch
