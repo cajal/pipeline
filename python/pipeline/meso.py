@@ -918,8 +918,6 @@ class Segmentation(dj.Computed):
             dj.conn()
 
             ## Insert in CNMF, Segmentation and Fluorescence
-            # Segmentation().insert1(key)
-            # Segmentation.CNMF().insert1({**key, 'params': json.dumps(kwargs)})
             self.insert1({**key, 'params': json.dumps(kwargs)})
             Fluorescence().insert1(key, allow_direct_insert=True)  # we also insert traces
 
