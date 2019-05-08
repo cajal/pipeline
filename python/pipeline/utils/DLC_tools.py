@@ -1,29 +1,22 @@
 
+from IPython import display
+import pylab as pl
+import matplotlib.pyplot as plt
+from deeplabcut.utils import plotting
+from deeplabcut.utils import video_processor
+from deeplabcut.utils import auxiliaryfunctions
+import time
+import imageio
+import ruamel.yaml
+import pandas as pd
+import numpy as np
+from pathlib import Path
+import cv2
+import yaml
+import math
 import os
 # disable DLC GUI
 os.environ["DLClight"] = "True"
-
-import math
-import yaml
-import cv2
-from pathlib import Path
-import numpy as np
-import pandas as pd
-import ruamel.yaml
-import imageio
-import time
-
-from deeplabcut.utils import auxiliaryfunctions
-from deeplabcut.utils import video_processor
-from deeplabcut.utils import plotting
-
-import matplotlib.pyplot as plt
-from matplotlib.patches import Rectangle
-
-
-import pylab as pl
-from IPython import display
-import matplotlib.pyplot as plt
 
 
 def key_dict_generater(case):
@@ -88,6 +81,7 @@ def smallest_enclosing_circle_naive(points):
         raise AssertionError()
     return result
 
+
 class PlotBodyparts():
 
     def __init__(self, config, bodyparts='all'):
@@ -140,7 +134,8 @@ class PlotBodyparts():
         self._line_thickness = 1
         self._pcutoff = self.config['pcutoff']
         self._colormap = self.config['colormap']
-        self._label_colors = plotting.get_cmap(len(self.bodyparts), name=self._colormap)
+        self._label_colors = plotting.get_cmap(
+            len(self.bodyparts), name=self._colormap)
         self._alphavalue = self.config['alphavalue']
         self._fig_size = [12, 8]
         self._dpi = 100
@@ -353,8 +348,9 @@ class PupilFitting(PlotBodyparts):
 
     @circle_threshold_num.setter
     def circle_threshold_num(self, value):
-        if value > 8:
-            raise ValueError("value must be equal to or less than 8!")
+        if value > len(self.complete_eyelid_graph.keys()):
+            raise ValueError("value must be equal to or less than {}!".format(
+                len(self.complete_eyelid_graph.keys())))
         else:
             self._circle_threshold_num = value
 
@@ -364,8 +360,11 @@ class PupilFitting(PlotBodyparts):
 
     @ellipse_threshold_num.setter
     def ellipse_threshold_num(self, value):
-        if value > 8:
-            raise ValueError("value must be equal to or less than 8!")
+        if value > len(self.complete_eyelid_graph.keys()):
+            raise ValueError("value must be equal to or less than {}!".format(
+                len(self.complete_eyelid_graph.keys())))
+
+        # 5 is the minimum number needed for ellipse fitting
         elif value < 5:
             raise ValueError("value must be equal to or more than 5!")
         else:
@@ -746,7 +745,8 @@ class PupilFitting(PlotBodyparts):
 
         for frame_num in range(start, end):
 
-            self.plot_fitted_frame(frame_num=frame_num, ax=ax, fitting_method=fitting_method)
+            self.plot_fitted_frame(frame_num=frame_num,
+                                   ax=ax, fitting_method=fitting_method)
 
             fig.canvas.draw()
 
@@ -775,14 +775,16 @@ class PupilFitting(PlotBodyparts):
         # initlize with start frame
         fig, ax = self.configure_plot()
 
-        self.plot_fitted_frame(frame_num=start, ax=ax, fitting_method=fitting_method)
+        self.plot_fitted_frame(frame_num=start, ax=ax,
+                               fitting_method=fitting_method)
 
         def update_frame(frame_num):
 
             # clear out the axis
             plt.cla()
-            
-            self.plot_fitted_frame(frame_num=frame_num, ax=ax, fitting_method=fitting_method)
+
+            self.plot_fitted_frame(frame_num=frame_num,
+                                   ax=ax, fitting_method=fitting_method)
 
         ani = animation.FuncAnimation(fig, update_frame, range(
             start+1, end))  # , interval=int(1/self.clip.FPS)
@@ -791,7 +793,7 @@ class PupilFitting(PlotBodyparts):
 
         # dpi=self.dpi, fps=self.clip.FPS
         save_video_path = self.video_path.split('.')[0] + '_fitted_' + \
-                str(start) + '_' + str(end) + '_labeled.avi'
+            str(start) + '_' + str(end) + '_labeled.avi'
         ani.save(save_video_path, writer=writer, dpi=self.dpi)
 
         return ani
