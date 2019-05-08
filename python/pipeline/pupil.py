@@ -971,7 +971,7 @@ class FittedContourAll(dj.Computed):
     # Fit a circle and an ellipse
     -> AutomaticTrackedLabels
     -> ManuallyTrackedContours
-    tracking_method                 : varchar(128)   # tracking method, either 'manual' or 'deeplabcut'
+    tracking_method                 : varchar(128)   # tracking method, either 'manual' or 'deeplabcut' (or 'dlc')
     ---
     fitting_ts=CURRENT_TIMESTAMP    : timestamp      # automatic
     """
@@ -1000,7 +1000,91 @@ class FittedContourAll(dj.Computed):
 
     def make(self, key):
         print("Fitting:", key)
+        self.insert1(key)
+
+        if key['tracking_method'].lower() in ['deeplabcut' or 'dlc']:
+
+            tracking_info = (AutomaticTrackedLabels & key).fetch1()
+            shuffle, trainingsetindex = (ConfigDeeplabcut & tracking_info).fetch1(
+                'shuffle', 'trainingsetindex')
+
+            config = auxiliaryfunctions.read_config(tracking_info['config_path'])
+            config['config_path'] = tracking_info['config_path']
+            config['shuffle'] = shuffle
+            config['trainingsetindex'] = trainingsetindex
+
+            compressed_cropped_vid_path = (
+                AutomaticTrackedLabels.CompressedCroppedVideo & key).fetch1('video_path')
+
+            config['video_path'] = compressed_cropped_vid_path
+
+            pupil_fit = DLC_tools.PupilFitting(config=config, bodyparts='all')
+
+            for frame_num in tqdm(range(pupil_fit.clip.nframes)):
+
+                fit_dict = pupil_fit.fitted_core(frame_num=frame_num)
+
+                self.Circle().insert1(dict(key, frame_id=frame_num,
+                                    center=fit_dict['circle_fit']['center'],
+                                    radius=fit_dict['circle_fit']['radius'],
+                                    visible_portion=fit_dict['circle_visible']['visible_portion']))
+
+                self.Ellipse().insert1(dict(key, frame_id=frame_num,
+                                    center=fit_dict['ellipse_fit']['center'],
+                                    major_radius=fit_dict['ellipse_fit']['major_radius'],
+                                    minor_radius=fit_dict['ellipse_fit']['minor_radius'],
+                                    rotation_angle=fit_dict['ellipse_fit']['rotation_angle'],
+                                    visible_portion=fit_dict['ellipse_visible']['visible_portion']))
         
+        elif key['tracking_method'].lower() in ['manual']:
+
+            avi_path = (Eye() & key).get_video_path()
+
+            contours = (ManuallyTrackedContours.Frame() & key).fetch(
+                order_by='frame_id ASC', as_dict=True)
+            
+            video = DLC_tools.video_processor.VideoProcessorCV(fname=avi_path)
+
+            # for manual tracking, we did not track eyelids, hence put -1.0 to be 
+            # consistent with how we defined under PupilFitting.detect_visible_pupil_area
+            visible_portion = -1.0 
+            for frame_num in tdqm(range(video.nframes)):
+                ckey = contours[frame_num]
+
+                if ckey['contour'] is not None:
+
+                    # fit circle. This is consistent with fitting method for DLC
+                    if len(ckey['contour']) >= 3:
+                        x, y, radius = DLC_tools.smallest_enclosing_circle_naive(ckey['contour'])
+                        center = (x, y)
+                        self.Circle().insert1(dict(key, frame_id=frame_num,
+                                            center=center,
+                                            radius=radius,
+                                            visible_portion=visible_portion))
+                    else:
+                        self.Circle().insert1(dict(key, frame_id=frame_num,
+                                            center=None,
+                                            radius=None,
+                                            visible_portion=-3.0))   
+
+                    # fit ellipse. This is consistent with fitting method for DLC
+                    if len(ckey['contour']) >= 6:
+                        rotated_rect = cv2.fitEllipse(ckey['contour'])
+                        self.Ellipse().insert1(dict(key, frame_id=frame_num,
+                                            center=rotated_rect[0],
+                                            major_radius=rotated_rect[1][1]/2.0,
+                                            minor_radius=rotated_rect[1][0]/2.0,
+                                            rotation_angle=rotated_rect[2],
+                                            visible_portion=visible_portion))
+                    else:
+                        self.Ellipse().insert1(dict(key, frame_id=frame_num, 
+                                            center=None,
+                                            major_radius=None,
+                                            minor_radius=None,
+                                            rotation_angle=None,
+                                            visible_portion=-3.0))
+
+
 
 @schema
 class FittedContourDeeplabcut(dj.Computed):
