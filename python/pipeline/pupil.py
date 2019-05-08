@@ -590,12 +590,12 @@ class ConfigDeeplabcut(dj.Manual):
 
 
 @schema
-class AutomaticTrackedLabels(dj.Computed):
+class AutomaticallyTrackedLabels(dj.Computed):
     definition = """
     # Tracking table using deeplabcut
     -> Eye
+    method                                  : varchar(128)          # tracking method
     ---
-    -> ConfigDeeplabcut
     tracking_ts=CURRENT_TIMESTAMP           : timestamp             # automatic
     tracking_dir                            : varchar(255)          # path to tracking directory
     """
@@ -897,76 +897,83 @@ class AutomaticTrackedLabels(dj.Computed):
         return out_vid_path
 
     def make(self, key):
+        """
+        Automatically predict the pupil labels
 
-        print('Tracking labels with DLC')
+        Args:
+            key (dict): contains animal_id, session, scan_idx, and method.
+                        The only available method is deeplabcut at the moment.
+        Returns:
+            None
+        """
+        if key['method'].lower() in ['deeplabcut', 'dlc']:
+            print('Tracking labels with DLC')
 
-        # change config_path if we were to update DLC model configuration
-        temp_config = (ConfigDeeplabcut & dict(
-            config_path='/mnt/lab/DeepLabCut/pupil_track-Donnie-2019-02-12/config.yaml')).fetch1()
-        config = auxiliaryfunctions.read_config(temp_config['config_path'])
-        config['config_path'] = temp_config['config_path']
-        config['shuffle'] = temp_config['shuffle']
-        config['trainingsetindex'] = temp_config['trainingsetindex']
+            # change config_path if we were to update DLC model configuration
+            temp_config = (ConfigDeeplabcut & dict(
+                config_path='/mnt/lab/DeepLabCut/pupil_track-Donnie-2019-02-12/config.yaml')).fetch1()
+            config = auxiliaryfunctions.read_config(temp_config['config_path'])
+            config['config_path'] = temp_config['config_path']
+            config['shuffle'] = temp_config['shuffle']
+            config['trainingsetindex'] = temp_config['trainingsetindex']
 
-        trainFraction = config['TrainingFraction'][config['trainingsetindex']]
-        DLCscorer = auxiliaryfunctions.GetScorerName(
-            config, config['shuffle'], trainFraction)
+            trainFraction = config['TrainingFraction'][config['trainingsetindex']]
+            DLCscorer = auxiliaryfunctions.GetScorerName(
+                config, config['shuffle'], trainFraction)
 
-        # make needed directories
-        tracking_dir, original_video_path = self.create_tracking_directory(key)
-        self.insert1(
-            dict(key, config_path=config['config_path'], tracking_dir=tracking_dir))
+            # make needed directories
+            tracking_dir, original_video_path = self.create_tracking_directory(key)
+            self.insert1(dict(key, tracking_dir=tracking_dir))
 
-        # make a short video (5 seconds long)
-        short_video_path, original_width, original_height, mid_frame_num = self.make_short_video(
-            tracking_dir)
+            # make a short video (5 seconds long)
+            short_video_path, original_width, original_height, mid_frame_num = self.make_short_video(
+                tracking_dir)
 
-        # save info about original video
-        original_video = self.OriginalVideo()
-        original_video.insert1(
-            dict(key, original_width=original_width,
-                 original_height=original_height,
-                 video_path=original_video_path))
+            # save info about original video
+            original_video = self.OriginalVideo()
+            original_video.insert1(
+                dict(key, original_width=original_width,
+                     original_height=original_height,
+                     video_path=original_video_path))
 
-        # save info about short video
-        short_video = self.ShortVideo()
-        short_video.insert1(
-            dict(key, starting_frame=mid_frame_num, video_path=short_video_path))
+            # save info about short video
+            short_video = self.ShortVideo()
+            short_video.insert1(
+                dict(key, starting_frame=mid_frame_num, video_path=short_video_path))
 
-        short_h5_path = short_video_path.split('.')[0] + DLCscorer + '.h5'
+            short_h5_path = short_video_path.split('.')[0] + DLCscorer + '.h5'
 
-        # predict using the short video
-        self.predict_labels(short_video_path, config)
+            # predict using the short video
+            self.predict_labels(short_video_path, config)
 
-        # obtain the cropping coordinates from the prediciton on short video
-        cropped_coords = self.obtain_cropping_coords(
-            short_h5_path, DLCscorer, config)
+            # obtain the cropping coordinates from the prediciton on short video
+            cropped_coords = self.obtain_cropping_coords(
+                short_h5_path, DLCscorer, config)
 
-        # add 100 pixels around cropping coords. Ensure that it is within the original dim
-        pixel_num = 100
-        cropped_coords = self.add_pixels(cropped_coords=cropped_coords,
-                                         original_width=original_width,
-                                         original_height=original_height,
-                                         pixel_num=pixel_num)
+            # add 100 pixels around cropping coords. Ensure that it is within the original dim
+            pixel_num = 100
+            cropped_coords = self.add_pixels(cropped_coords=cropped_coords,
+                                             original_width=original_width,
+                                             original_height=original_height,
+                                             pixel_num=pixel_num)
 
-        # make a compressed and cropped video
-        compressed_cropped_video_path = self.make_compressed_cropped_video(
-            tracking_dir, cropped_coords)
+            # make a compressed and cropped video
+            compressed_cropped_video_path = self.make_compressed_cropped_video(
+                tracking_dir, cropped_coords)
 
-        # predict using the compressed and cropped video
-        self.predict_labels(compressed_cropped_video_path, config)
+            # predict using the compressed and cropped video
+            self.predict_labels(compressed_cropped_video_path, config)
 
-        compressed_cropped_video = self.CompressedCroppedVideo()
-        compressed_cropped_video.insert1(dict(key, cropped_x0=cropped_coords['cropped_x0'],
-                                              cropped_x1=cropped_coords['cropped_x1'],
-                                              cropped_y0=cropped_coords['cropped_y0'],
-                                              cropped_y1=cropped_coords['cropped_y1'],
-                                              added_pixels=pixel_num,
-                                              video_path=compressed_cropped_video_path))
-
+            compressed_cropped_video = self.CompressedCroppedVideo()
+            compressed_cropped_video.insert1(dict(key, cropped_x0=cropped_coords['cropped_x0'],
+                                                  cropped_x1=cropped_coords['cropped_x1'],
+                                                  cropped_y0=cropped_coords['cropped_y0'],
+                                                  cropped_y1=cropped_coords['cropped_y1'],
+                                                  added_pixels=pixel_num,
+                                                  video_path=compressed_cropped_video_path))
 
 @schema
-class FittedContourAll(dj.Computed):
+class FittedContourNew(dj.Computed):
     definition="""
     # Fit a circle and an ellipse
     -> AutomaticTrackedLabels
@@ -998,13 +1005,16 @@ class FittedContourAll(dj.Computed):
         visible_portion=NULL     : float         # portion of visible pupil area given a fitted ellipse frame. Please refer DLC_tools.PupilFitting.detect_visible_pupil_area for more details
         """
 
+    def key_source(self):
+        return AutomaticallyTrackedLabels.proj() + ManuallyTrackedContours.proj()
+
     def make(self, key):
         print("Fitting:", key)
         self.insert1(key)
 
         if key['tracking_method'].lower() in ['deeplabcut' or 'dlc']:
 
-            tracking_info = (AutomaticTrackedLabels & key).fetch1()
+            tracking_info = (AutomaticallyTrackedLabels & key).fetch1()
             shuffle, trainingsetindex = (ConfigDeeplabcut & tracking_info).fetch1(
                 'shuffle', 'trainingsetindex')
 
@@ -1014,7 +1024,7 @@ class FittedContourAll(dj.Computed):
             config['trainingsetindex'] = trainingsetindex
 
             compressed_cropped_vid_path = (
-                AutomaticTrackedLabels.CompressedCroppedVideo & key).fetch1('video_path')
+                AutomaticallyTrackedLabels.CompressedCroppedVideo & key).fetch1('video_path')
 
             config['video_path'] = compressed_cropped_vid_path
 
