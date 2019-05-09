@@ -967,8 +967,10 @@ class Tracking(dj.Computed):
         print("Tracking for case {}".format(key))
 
         if key['tracking_method'].lower() in ['manual']:
+            self.insert1(dict(key, tracking_method='manual'))
             self.ManualTracking().make(key)
         elif key['tracking_method'].lower() in ['dlc', 'deeplabcut']:
+            self.insert1(dict(key, tracking_method='deeplabcut'))
             self.Deeplabcut().make(key)
         else:
             msg = 'Unrecognized Tracking method {}'.format(key['tracking_method'])
@@ -1358,40 +1360,14 @@ class AutomaticallyTrackedLabels(dj.Computed):
                                                   video_path=compressed_cropped_video_path))
 
 @schema
-class FittedContourNew2(dj.Computed):
-    definition="""
-    # Fit a circle and an ellipse
-    -> Eye
-    ---
-    method                          : varchar(128)  # Tracking method, either 'DLC (or deeplabcut)' or 'manual'
-    fitting_ts=CURRENT_TIMESTAMP    : timestamp     # automatic
-    """
-
-    class Circle(dj.Part):
-        definition = """
-        -> master
-        frame_id       : int
-        ---
-        center=NULL    : tinyblob
-        """
-
-    class Ellipse(dj.Part):
-        definition = """
-        -> master
-        frame_id       : int
-        ---
-        center=NULL    : tinyblob
-        """   
-
-@schema
 class FittedContourNew(dj.Computed):
     definition="""
     # Fit a circle and an ellipse
-    -> Eye
-    tracking_method                 : varchar(128)   # tracking method, either 'manual' or 'deeplabcut' (or 'dlc')
+    -> Tracking
     ---
-    fitting_ts=CURRENT_TIMESTAMP    : timestamp      # automatic
+    fitting_ts=CURRENT_TIMESTAMP    : timestamp     # automatic
     """
+
     class Circle(dj.Part):
         definition = """
         -> master
@@ -1415,12 +1391,9 @@ class FittedContourNew(dj.Computed):
         visible_portion=NULL     : float         # portion of visible pupil area given a fitted ellipse frame. Please refer DLC_tools.PupilFitting.detect_visible_pupil_area for more details
         """
 
-    def key_source(self):
-        return AutomaticallyTrackedLabels.proj() + ManuallyTrackedContours.proj()
-
     def make(self, key):
         print("Fitting:", key)
-        self.insert1(key)
+        
 
         if key['tracking_method'].lower() in ['deeplabcut' or 'dlc']:
 
