@@ -1504,7 +1504,6 @@ class FittedContourNew(dj.Computed):
                                             rotation_angle=None,
                                             visible_portion=-3.0))
 
-@schema 
 
 @schema
 class FittedContourDeeplabcut(dj.Computed):
