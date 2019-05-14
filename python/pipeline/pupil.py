@@ -589,10 +589,20 @@ class ConfigDeeplabcut(dj.Manual):
     """
 
 @schema
-class Tracking(dj.Computed):
+class TrackingMethod(dj.Manual):
     definition="""
     -> Eye
-    tracking_method                 : varchar(128) # tracking method
+    tracking_method     : tinyint unsigned # tracking_method 0:manual 1: deeplabcut
+    ---
+    """
+
+    def fill(self, key, tracking_method):
+        self.insert1(dict(key, tracking_method=tracking_method))
+
+@schema
+class Tracking(dj.Computed):
+    definition="""
+    -> TrackingMethod
     ---
     tracking_ts=CURRENT_TIMESTAMP   : timestamp  # automatic
     """
@@ -966,15 +976,17 @@ class Tracking(dj.Computed):
     def make(self, key):
         print("Tracking for case {}".format(key))
 
-        if key['tracking_method'].lower() in ['manual']:
-            self.insert1(dict(key, tracking_method='manual'))
+        if key['tracking_method'] == 0:
+            self.insert1(key)
             self.ManualTracking().make(key)
-        elif key['tracking_method'].lower() in ['dlc', 'deeplabcut']:
-            self.insert1(dict(key, tracking_method='deeplabcut'))
+        elif key['tracking_method'] == 1:
+            self.insert1(key)
             self.Deeplabcut().make(key)
         else:
             msg = 'Unrecognized Tracking method {}'.format(key['tracking_method'])
             raise PipelineException(msg)
+        
+        
 
 @schema
 class AutomaticallyTrackedLabels(dj.Computed):
@@ -1393,18 +1405,22 @@ class FittedContourNew(dj.Computed):
 
     def make(self, key):
         print("Fitting:", key)
-        
 
-        if key['tracking_method'].lower() in ['deeplabcut' or 'dlc']:
+        if key['tracking_method'] == 1:
 
-            tracking_info = (AutomaticallyTrackedLabels & key).fetch1()
-            shuffle, trainingsetindex = (ConfigDeeplabcut & tracking_info).fetch1(
-                'shuffle', 'trainingsetindex')
+            dlc_config = ConfigDeeplabcut & (Tracking.Deeplabcut & key)
 
-            config = auxiliaryfunctions.read_config(tracking_info['config_path'])
-            config['config_path'] = tracking_info['config_path']
-            config['shuffle'] = shuffle
-            config['trainingsetindex'] = trainingsetindex
+            config = auxiliaryfunctions.read_config(dlc_config['config_path'])
+            config['config_path'] = dlc_config['config_path']
+            config['shuffle'] = dlc_config['shuffle']
+            config['trainingsetindex'] = dlc_config['trainingsetindex']
+
+            # find path to compressed_cropped_video
+            tracking_dir = (Eye() & key).get_video_path()[:-4] + '_tracking'
+
+            compressed_cropped_vid_path = os.path.join(tracking_dir, 'compressed_cropped',
+            )
+
 
             compressed_cropped_vid_path = (
                 AutomaticallyTrackedLabels.CompressedCroppedVideo & key).fetch1('video_path')
@@ -1429,7 +1445,7 @@ class FittedContourNew(dj.Computed):
                                     rotation_angle=fit_dict['ellipse_fit']['rotation_angle'],
                                     visible_portion=fit_dict['ellipse_visible']['visible_portion']))
         
-        elif key['tracking_method'].lower() in ['manual']:
+        elif key['tracking_method'] == 0:
 
             avi_path = (Eye() & key).get_video_path()
 
