@@ -622,7 +622,9 @@ class Tracking(dj.Computed):
             """)
 
             if (ManuallyTrackedContours() & key).fetch1() is not None:
-                self.insert(ManuallyTrackedContours.Frame() & key)
+                for frame_id in range((ManuallyTrackedContours.Frame & key).fetch('frame_id').max())
+                    ckey = (ManuallyTrackedContours.Frame & dict(key, frame_id=frame_id)).fetch1()
+                    self.insert(dict(ckey, tracking_method= key['tracking_method']))
             else:
                 print("Given key does not exist in ManuallyTrackedContours table!")
                 print("Either manually track by populating ManuallyTrackedContours or use deeplabcut method!")
@@ -987,7 +989,6 @@ class Tracking(dj.Computed):
             raise PipelineException(msg)
         
         
-
 @schema
 class AutomaticallyTrackedLabels(dj.Computed):
     definition = """
