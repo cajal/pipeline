@@ -1406,50 +1406,12 @@ class FittedContourNew(dj.Computed):
     def make(self, key):
         print("Fitting:", key)
 
-        if key['tracking_method'] == 1:
-
-            dlc_config = ConfigDeeplabcut & (Tracking.Deeplabcut & key)
-
-            config = auxiliaryfunctions.read_config(dlc_config['config_path'])
-            config['config_path'] = dlc_config['config_path']
-            config['shuffle'] = dlc_config['shuffle']
-            config['trainingsetindex'] = dlc_config['trainingsetindex']
-
-            # find path to compressed_cropped_video
-            tracking_dir = (Eye() & key).get_video_path()[:-4] + '_tracking'
-
-            compressed_cropped_vid_path = os.path.join(tracking_dir, 'compressed_cropped',
-            )
-
-
-            compressed_cropped_vid_path = (
-                AutomaticallyTrackedLabels.CompressedCroppedVideo & key).fetch1('video_path')
-
-            config['video_path'] = compressed_cropped_vid_path
-
-            pupil_fit = DLC_tools.PupilFitting(config=config, bodyparts='all')
-
-            for frame_num in tqdm(range(pupil_fit.clip.nframes)):
-
-                fit_dict = pupil_fit.fitted_core(frame_num=frame_num)
-
-                self.Circle().insert1(dict(key, frame_id=frame_num,
-                                    center=fit_dict['circle_fit']['center'],
-                                    radius=fit_dict['circle_fit']['radius'],
-                                    visible_portion=fit_dict['circle_visible']['visible_portion']))
-
-                self.Ellipse().insert1(dict(key, frame_id=frame_num,
-                                    center=fit_dict['ellipse_fit']['center'],
-                                    major_radius=fit_dict['ellipse_fit']['major_radius'],
-                                    minor_radius=fit_dict['ellipse_fit']['minor_radius'],
-                                    rotation_angle=fit_dict['ellipse_fit']['rotation_angle'],
-                                    visible_portion=fit_dict['ellipse_visible']['visible_portion']))
-        
-        elif key['tracking_method'] == 0:
+        # manual == 0
+        if key['tracking_method'] == 0:
 
             avi_path = (Eye() & key).get_video_path()
 
-            contours = (ManuallyTrackedContours.Frame() & key).fetch(
+            contours = (Tracking.ManualTracking() & key).fetch(
                 order_by='frame_id ASC', as_dict=True)
             
             video = DLC_tools.video_processor.VideoProcessorCV(fname=avi_path)
@@ -1471,6 +1433,8 @@ class FittedContourNew(dj.Computed):
                                             radius=radius,
                                             visible_portion=visible_portion))
                     else:
+                        # if less than 3, then we do not have enough pupil labels nor
+                        # we have eyelid labels
                         self.Circle().insert1(dict(key, frame_id=frame_num,
                                             center=None,
                                             radius=None,
@@ -1486,6 +1450,8 @@ class FittedContourNew(dj.Computed):
                                             rotation_angle=rotated_rect[2],
                                             visible_portion=visible_portion))
                     else:
+                        # if less than 3, then we do not have enough pupil labels nor
+                        # we have eyelid labels
                         self.Ellipse().insert1(dict(key, frame_id=frame_num, 
                                             center=None,
                                             major_radius=None,
@@ -1493,7 +1459,44 @@ class FittedContourNew(dj.Computed):
                                             rotation_angle=None,
                                             visible_portion=-3.0))
 
+        elif key['tracking_method'] == 1:
 
+            dlc_config = (ConfigDeeplabcut & (Tracking.Deeplabcut & key)).fetch1()
+
+            config = auxiliaryfunctions.read_config(dlc_config['config_path'])
+            config['config_path'] = dlc_config['config_path']
+            config['shuffle'] = dlc_config['shuffle']
+            config['trainingsetindex'] = dlc_config['trainingsetindex']
+
+            # find path to compressed_cropped_video
+            base_path = os.path.splitext((Eye() & key).get_video_path())[0] + '_tracking'
+            
+            for root, _, files in os.walk(base_path):
+                for file in files:
+                    if file.endswith('compressed_cropped.avi'):
+                        cc_vid_path = os.path.join(root, file)
+
+            config['video_path'] = cc_vid_path
+
+            pupil_fit = DLC_tools.PupilFitting(config=config, bodyparts='all')
+
+            for frame_num in tqdm(range(pupil_fit.clip.nframes)):
+
+                fit_dict = pupil_fit.fitted_core(frame_num=frame_num)
+
+                self.Circle().insert1(dict(key, frame_id=frame_num,
+                                    center=fit_dict['circle_fit']['center'],
+                                    radius=fit_dict['circle_fit']['radius'],
+                                    visible_portion=fit_dict['circle_visible']['visible_portion']))
+
+                self.Ellipse().insert1(dict(key, frame_id=frame_num,
+                                    center=fit_dict['ellipse_fit']['center'],
+                                    major_radius=fit_dict['ellipse_fit']['major_radius'],
+                                    minor_radius=fit_dict['ellipse_fit']['minor_radius'],
+                                    rotation_angle=fit_dict['ellipse_fit']['rotation_angle'],
+                                    visible_portion=fit_dict['ellipse_visible']['visible_portion']))
+        
+        
 @schema
 class FittedContourDeeplabcut(dj.Computed):
     definition = """
