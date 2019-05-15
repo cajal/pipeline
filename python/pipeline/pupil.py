@@ -1406,6 +1406,8 @@ class FittedContourNew(dj.Computed):
     def make(self, key):
         print("Fitting:", key)
 
+        self.insert1(key)
+
         # manual == 0
         if key['tracking_method'] == 0:
 
