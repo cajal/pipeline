@@ -6,6 +6,7 @@ import numpy as np
 import scanreader
 from scipy import signal
 from scipy import ndimage
+from scipy.optimize import curve_fit
 import itertools
 
 from . import experiment, notify, shared, reso, meso
@@ -975,6 +976,129 @@ class PreprocessedStack(dj.Computed):
 
         # Insert
         self.insert1({**key, 'resized': resized, 'lcned': lcned, 'sharpened': sharpened})
+
+
+@schema
+class StackSurfaceMethod(dj.Lookup):
+    definition = """ # Methods used to compute surface of the brain
+
+    surface_method_id   : tinyint unsigned   # Unique ID given to each surface calculation method
+    ---
+    method_title        : varchar(32)        # Title of surface calculation method
+    method_description  : varchar(256)       # Details on surface calculation
+    """
+
+    contents = [
+        [1, 'Paraboloid Fit', 'Fit ax^2 + by^2 + cx + dy + f to surface after finding max of sobel']
+    ]
+
+
+@schema
+class StackSurface(dj.Computed):
+    definition = """ # Calculated surface of the brain
+
+    -> PreprocessedStack
+    -> StackSurfaceMethod
+    ---
+    surface_im        : longblob          # Matrix of calculated depth for each pixel in stack
+    lower_bound_im    : longblob          # Lower bound of 95th percentile confidence interval
+    upper_bound_im    : longblob          # Upper bound of 95th percentile confidence interval
+    """
+
+    def make(self, key):
+
+        # WARNINGS
+        #  - This code assumes the surface will be in the top half of the stack
+        #      - Only the top half of z-values are analyzed
+        #  - Points along the edge are dropped to avoid errors due to blank space left by stack registration
+        #  - This code assumes the surface median intensity should be in the bottom 60% of the range of values over z
+        #      - ex. Intensities ranges from 10-20. Surface points must have an intensity < .6*(20-10) + 10 = 17.5
+        #      - This is within the 2r x 2r window being analyzed
+        #  - This code drops any 2r x 2r field where the first median value is above the 30th-percentile of the whole stack.
+        #  - Windows where the final median intensity is below 10 are removed
+        #      - Attempts to replace this with a percentile all fail
+        #  - This code drops guessed depths > 95th-percentile and < 5th-percentile to be more robust to outliers
+
+        def surface_eqn(data, a, b, c, d, f):
+            x, y = data
+            return a * x ** 2 + b * y ** 2 + c * x + d * y + f
+
+        # SETTINGS
+        # Note: Intial parameters for fitting set further down
+        r = 50  # Radius of square in pixels
+        upper_threshold_percent = 0.6  # Surface median intensity should be in the bottom X% of the *range* of medians
+        gaussian_blur_size = 5  # Size of gaussian blur applied to slice
+        min_points_allowed = 10  # If there are less than X points after filtering, throw an error
+        bounds = (
+        [0, 0, np.NINF, np.NINF, np.NINF], [np.Inf, np.Inf, np.Inf, np.Inf, np.Inf])  # Bounds for paraboloid fit
+        ss_percent = 0.40  # Percentage of points to subsample for robustness check
+        num_iterations = 1000  # Number of iterations to use for robustness check
+
+        print('Calculating surface of brain for stack', key)
+        full_stack = (stack.PreprocessedStack & key).fetch1('resized')
+        depth = full_stack.shape[0]
+        height = full_stack.shape[1]
+        width = full_stack.shape[2]
+
+        surface_guess_map = []
+        r_xs = np.arange(r, width - width % r, r * 2)[1:-1]
+        r_ys = np.arange(r, height - height % r, r * 2)[1:-1]
+        full_mesh_x, full_mesh_y = np.meshgrid(np.arange(width), np.arange(height))
+
+        # Surface z should be below this value
+        z_lim = int(depth / 2)
+        # Mean intensity of the first frame in the slice should be less than this value
+        z_0_upper_threshold = np.percentile(full_stack, 30)
+
+        for x in r_xs:
+            for y in r_ys:
+                stack_slice_medians = np.percentile(full_stack[0:z_lim, y - r:y + r, x - r:x + r], 50, axis=(1, 2))
+                blurred_slice = ndimage.gaussian_filter1d(stack_slice_medians, gaussian_blur_size)
+
+                upper_threshold_value = upper_threshold_percent * (
+                            (blurred_slice.max() - blurred_slice.min()) - blurred_slice.min())
+                upper_threshold_idx = np.where(blurred_slice > upper_threshold_value)[0][0]
+
+                stack_slice_derivative = ndimage.sobel(blurred_slice)
+                surface_z = np.argmax(stack_slice_derivative)
+
+                if ((surface_z < upper_threshold_idx) and (blurred_slice[0] < z_0_upper_threshold) and
+                        (blurred_slice[-1] > 10)):
+                    surface_guess_map.append((surface_z, y, x))
+
+        if len(surface_guess_map) < min_points_allowed:
+            raise Exception(f"Surface calculation could not find enough valid points for {key}. Only {len(surface_guess_map)} detected")
+
+        # Drop the z-values lower than 5th-percentile or greater than 95th-percentile
+        arr = np.array(surface_guess_map)
+        top = np.percentile(arr[:, 0], 95)
+        bot = np.percentile(arr[:, 0], 5)
+        surface_guess_map = arr[np.where(np.logical_and(arr[:, 0] > bot, arr[:, 0] < top))]
+
+        # Guess for initial parameters
+        initial = [1, 1, int(width / 2), int(height / 2), 1]
+
+        popt, pcov = curve_fit(surface_eqn, (surface_guess_map[:, 2], surface_guess_map[:, 1]),
+                               surface_guess_map[:, 0], p0=initial, maxfev=10000, bounds=bounds)
+
+        calculated_surface_map = surface_eqn((full_mesh_x, full_mesh_y), *popt)
+
+        all_sub_fitted_z = np.zeros((num_iterations, height, width))
+        for i in np.arange(num_iterations):
+            indices = np.random.choice(surface_guess_map.shape[0], int(surface_guess_map.shape[0] * ss_percent),
+                                       replace=False)
+            subsample = surface_guess_map[indices]
+            sub_popt, sub_pcov = curve_fit(surface_eqn, (subsample[:, 2], subsample[:, 1]), subsample[:, 0],
+                                           p0=initial, maxfev=10000, bounds=bounds)
+            all_sub_fitted_z[i, :, :] = surface_eqn((full_mesh_x, full_mesh_y), *sub_popt)
+
+        z_min_matrix = np.percentile(all_sub_fitted_z, 5, axis=0)
+        z_max_matrix = np.percentile(all_sub_fitted_z, 95, axis=0)
+
+        surface_key = {**key, 'surface_method_id': 1, 'surface_im': calculated_surface_map,
+                       'lower_bound_im': z_min_matrix, 'upper_bound_im': z_max_matrix}
+
+        self.insert1(surface_key)
 
 
 @schema
