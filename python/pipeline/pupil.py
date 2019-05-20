@@ -610,7 +610,7 @@ class Tracking(dj.Computed):
     class ManualTracking(dj.Part):
         definition="""
         -> master
-        frame_id                    : int                   # frame id with matlab based 1 indexing
+        frame_id                    : int                   # frame id (starting from 0)
         ---
         contour=NULL                : longblob              # eye contour relative to ROI
         """
