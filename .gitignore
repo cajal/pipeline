@@ -78,3 +78,6 @@ matlab/scripts/Eye_Movements/CircleMaps/
 
 # .ipynb_checkpoints
 .ipynb_checkpoints
+
+# docker-compose-private.yml
+docker-compose-private.yml
