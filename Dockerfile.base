@@ -1,4 +1,4 @@
-FROM nvidia/cuda:10.0-cudnn7-devel-ubuntu18.04
+FROM ubuntu:18.04
 
 LABEL maintainer="Erick Cobos <ecobos@bcm.edu>, Donnie Kim <donniek@bcm.edu>"
 ARG DEBIAN_FRONTEND=noninteractive
@@ -39,7 +39,7 @@ RUN apt-get install -y wget && \
 # Install CaImAn
 # Install dependencies. When installing tensorflow, ensure cuda and cudnn versions meet requirements
 RUN apt-get install -y git python3-tk && \
-    pip3 install future cvxpy scikit-learn scikit-image tensorflow-gpu==1.13.1 keras \
+    pip3 install future cvxpy scikit-learn scikit-image tensorflow==1.13.1 keras \
                  peakutils \
     # Unused but required (imported in code)
                  ipyparallel Cython h5py tqdm psutil
