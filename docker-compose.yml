@@ -2,14 +2,14 @@ version: '2.3'
 
 services:
   notebook:
-    image: ninai/pipeline:DLC2.0.5-GPU
+    image: ninai/pipeline:latest
     runtime: nvidia
     ports:
-      - "8889:8888"
+      - "8888:8888"
     volumes:
       - /mnt/:/mnt/
-      # - /home/pipeline_data/:/tmp/
-      - /home/donnie/Documents/Repos/pipeline/:/data/pipeline/
+      - /home/pipeline_data/:/tmp/
+      - .:/data/pipeline/
     env_file: .env
     environment:
       - DISPLAY=$DISPLAY
@@ -23,14 +23,12 @@ services:
 
 
   minion:
-    image: ninai/pipeline:DLC2.0.5-GPU
+    image: ninai/stimulus-pipeline:latest
     volumes:
-      # - /mnt/:/mnt/
-      # - /home/pipeline_data:/tmp/
-      - $HOME/pipeline:/data/pipeline
+      - /mnt/:/mnt/
+      - /home/pipeline_data:/tmp/
+      - .:/data/pipeline
     env_file: .env
-    environment:
-      - DISPLAY=$DISPLAY
     entrypoint:
       - python3 
       - /data/pipeline/python/scripts/populate-minion.py
@@ -49,21 +47,16 @@ services:
 
   
   bash:
-    image: ninai/pipeline:DLC2.0.5-GPU
+    image: ninai/pipeline:latest
     runtime: nvidia
     volumes:
       - /mnt/:/mnt/
-      - /home/donnie/Documents/Repos/pipeline/:/data/pipeline/
-      # - /home/pipeline_data/:/tmp/
-      # - /home/pipeline_data/:/mnt/data/
-      # - $HOME/pipeline/:/data/pipeline/
-      # - $HOME/Documents/scanreader/:/data/scanreader/
-      #- $HOME/Documents/stimuli:/data/stimuli
-      # - $HOME/Documents/stimulus-pipeline:/data/stimulus-pipeline
+      - /home/pipeline_data/:/tmp/
+      - .:/data/pipeline
       - /etc/localtime:/etc/localtime:ro
       - /tmp/.X11-unix:/tmp/.X11-unix
+    env_file: .env
     environment:
       - DISPLAY=$DISPLAY
-    env_file: .env
     entrypoint:
       - /bin/bash
