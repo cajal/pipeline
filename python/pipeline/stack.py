@@ -6,7 +6,7 @@ import numpy as np
 import scanreader
 from scipy import signal
 from scipy import ndimage
-from scipy.optimize import curve_fit
+from scipy import optimize
 import itertools
 
 from . import experiment, notify, shared, reso, meso
@@ -979,26 +979,11 @@ class PreprocessedStack(dj.Computed):
 
 
 @schema
-class StackSurfaceMethod(dj.Lookup):
-    definition = """ # Methods used to compute surface of the brain
-
-    surface_method_id   : tinyint unsigned   # Unique ID given to each surface calculation method
-    ---
-    method_title        : varchar(32)        # Title of surface calculation method
-    method_description  : varchar(256)       # Details on surface calculation
-    """
-
-    contents = [
-        [1, 'Paraboloid Fit', 'Fit ax^2 + by^2 + cx + dy + f to surface after finding max of sobel']
-    ]
-
-
-@schema
-class StackSurface(dj.Computed):
+class Surface(dj.Computed):
     definition = """ # Calculated surface of the brain
 
     -> PreprocessedStack
-    -> StackSurfaceMethod
+    -> shared.SurfaceMethod
     ---
     surface_im        : longblob          # Matrix of calculated depth for each pixel in stack
     lower_bound_im    : longblob          # Lower bound of 95th percentile confidence interval
@@ -1019,6 +1004,8 @@ class StackSurface(dj.Computed):
         #      - Attempts to replace this with a percentile all fail
         #  - This code drops guessed depths > 95th-percentile and < 5th-percentile to be more robust to outliers
 
+        valid_method_ids = [1]  # Used to check if method is implemented
+
         def surface_eqn(data, a, b, c, d, f):
             x, y = data
             return a * x ** 2 + b * y ** 2 + c * x + d * y + f
@@ -1029,16 +1016,19 @@ class StackSurface(dj.Computed):
         upper_threshold_percent = 0.6  # Surface median intensity should be in the bottom X% of the *range* of medians
         gaussian_blur_size = 5  # Size of gaussian blur applied to slice
         min_points_allowed = 10  # If there are less than X points after filtering, throw an error
-        bounds = (
-        [0, 0, np.NINF, np.NINF, np.NINF], [np.Inf, np.Inf, np.Inf, np.Inf, np.Inf])  # Bounds for paraboloid fit
+        bounds = ([0, 0, np.NINF, np.NINF, np.NINF], [np.Inf, np.Inf, np.Inf, np.Inf, np.Inf])  # Bounds for paraboloid fit
         ss_percent = 0.40  # Percentage of points to subsample for robustness check
         num_iterations = 1000  # Number of iterations to use for robustness check
 
+        if 'surface_method_id' not in key:
+            raise PipelineException('Error: surface_method_id not specified')
+        if int(key['surface_method_id']) not in valid_method_ids:
+            raise PipelineException(f'Error: surface_method_id {key["surface_method_id"]} is not implemented')
+
+
         print('Calculating surface of brain for stack', key)
         full_stack = (stack.PreprocessedStack & key).fetch1('resized')
-        depth = full_stack.shape[0]
-        height = full_stack.shape[1]
-        width = full_stack.shape[2]
+        depth, height, width = full_stack.shape
 
         surface_guess_map = []
         r_xs = np.arange(r, width - width % r, r * 2)[1:-1]
@@ -1067,18 +1057,18 @@ class StackSurface(dj.Computed):
                     surface_guess_map.append((surface_z, y, x))
 
         if len(surface_guess_map) < min_points_allowed:
-            raise Exception(f"Surface calculation could not find enough valid points for {key}. Only {len(surface_guess_map)} detected")
+            raise PipelineException(f"Surface calculation could not find enough valid points for {key}. Only {len(surface_guess_map)} detected")
 
         # Drop the z-values lower than 5th-percentile or greater than 95th-percentile
         arr = np.array(surface_guess_map)
         top = np.percentile(arr[:, 0], 95)
         bot = np.percentile(arr[:, 0], 5)
-        surface_guess_map = arr[np.where(np.logical_and(arr[:, 0] > bot, arr[:, 0] < top))]
+        surface_guess_map = arr[np.logical_and(arr[:, 0] > bot, arr[:, 0] < top)]
 
         # Guess for initial parameters
         initial = [1, 1, int(width / 2), int(height / 2), 1]
 
-        popt, pcov = curve_fit(surface_eqn, (surface_guess_map[:, 2], surface_guess_map[:, 1]),
+        popt, pcov = optimize.curve_fit(surface_eqn, (surface_guess_map[:, 2], surface_guess_map[:, 1]),
                                surface_guess_map[:, 0], p0=initial, maxfev=10000, bounds=bounds)
 
         calculated_surface_map = surface_eqn((full_mesh_x, full_mesh_y), *popt)
@@ -1088,15 +1078,15 @@ class StackSurface(dj.Computed):
             indices = np.random.choice(surface_guess_map.shape[0], int(surface_guess_map.shape[0] * ss_percent),
                                        replace=False)
             subsample = surface_guess_map[indices]
-            sub_popt, sub_pcov = curve_fit(surface_eqn, (subsample[:, 2], subsample[:, 1]), subsample[:, 0],
+            sub_popt, sub_pcov = optimize.curve_fit(surface_eqn, (subsample[:, 2], subsample[:, 1]), subsample[:, 0],
                                            p0=initial, maxfev=10000, bounds=bounds)
             all_sub_fitted_z[i, :, :] = surface_eqn((full_mesh_x, full_mesh_y), *sub_popt)
 
         z_min_matrix = np.percentile(all_sub_fitted_z, 5, axis=0)
         z_max_matrix = np.percentile(all_sub_fitted_z, 95, axis=0)
 
-        surface_key = {**key, 'surface_method_id': 1, 'surface_im': calculated_surface_map,
-                       'lower_bound_im': z_min_matrix, 'upper_bound_im': z_max_matrix}
+        surface_key = {**key, 'surface_im': calculated_surface_map, 'lower_bound_im': z_min_matrix,
+                       'upper_bound_im': z_max_matrix}
 
         self.insert1(surface_key)
 
