@@ -112,7 +112,7 @@ class Eye(dj.Imported):
                 raise PipelineException(msg)
             elif num_timestamps > num_video_frames:  # cut timestamps to match video frames
                 timestamps_in_secs = timestamps_in_secs[:-1]
-            else:  # fill with NaNs
+            else: # fill with NaNs
                 timestamps_in_secs = np.array(
                     [*timestamps_in_secs, float('nan')])
 
