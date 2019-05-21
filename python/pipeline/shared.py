@@ -138,3 +138,18 @@ class CurationMethod(dj.Lookup):
         [1, 'none', 'estimates are left unchanged', 'python'],
         [2, 'manual', 'manually inspect each field estimate', 'matlab'],
     ]
+
+@schema
+class TrackingMethod(dj.Lookup):
+    definition = """
+    tracking_method : tinyint                       # method used for pupil tracking
+    ---
+    name                : varchar(16)               # short name to identify the tracking method
+    details             : varchar(255)              # more details
+    language            : enum('matlab', 'python')  # implementation language
+    """
+
+    contents = [
+        [1, 'manual', 'manually tracking', 'python'],
+        [2, 'deeplabcut', 'automatically tracking using deeplabcut package', 'python'],
+    ]
