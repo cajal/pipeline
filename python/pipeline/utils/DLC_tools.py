@@ -1,6 +1,6 @@
 
-# from IPython import display
-# import pylab as pl
+from IPython import display
+import pylab as pl
 
 
 import math
