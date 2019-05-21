@@ -1,5 +1,5 @@
 from .exceptions import PipelineException
-from . import experiment, notify
+from . import experiment, notify, shared
 from .utils import h5
 from . import config
 from .utils.eye_tracking import PupilTracker, ManualTracker
@@ -29,8 +29,6 @@ from .utils import DLC_tools
 
 
 schema = dj.schema('pipeline_eye', locals())
-
-gputouse = 0
 
 DEFAULT_PARAMETERS = {'relative_area_threshold': 0.002,
                       'ratio_threshold': 1.5,
@@ -589,20 +587,10 @@ class ConfigDeeplabcut(dj.Manual):
     """
 
 @schema
-class TrackingMethod(dj.Manual):
-    definition="""
-    -> Eye
-    tracking_method     : tinyint unsigned # tracking_method 0:manual 1: deeplabcut
-    ---
-    """
-
-    def fill(self, key, tracking_method):
-        self.insert1(dict(key, tracking_method=tracking_method))
-
-@schema
 class Tracking(dj.Computed):
     definition="""
-    -> TrackingMethod
+    -> Eye
+    -> shared.TrackingMethod
     ---
     tracking_ts=CURRENT_TIMESTAMP   : timestamp  # automatic
     """
@@ -706,215 +694,210 @@ class Tracking(dj.Computed):
 
             return tracking_dir, symlink_path
 
-        def make_short_video(self, tracking_dir):
-            """
-            Extract 5 seconds long video starting from the middle of the original video.
+        # def make_short_video(self, tracking_dir):
+        #     """
+        #     Extract 5 seconds long video starting from the middle of the original video.
 
-            Input:
-                tracking_dir: string
-                    String that specifies the full path of tracking directory
-            Return:
-                None
-            """
-            from subprocess import Popen, PIPE
+        #     Input:
+        #         tracking_dir: string
+        #             String that specifies the full path of tracking directory
+        #     Return:
+        #         None
+        #     """
+        #     from subprocess import Popen, PIPE
 
-            suffix = '_short.avi'
+        #     suffix = '_short.avi'
 
-            case = os.path.basename(os.path.normpath(
-                tracking_dir)).split('_tracking')[0]
+        #     case = os.path.basename(os.path.normpath(
+        #         tracking_dir)).split('_tracking')[0]
 
-            input_video_path = os.path.join(tracking_dir, case + '.avi')
+        #     input_video_path = os.path.join(tracking_dir, case + '.avi')
 
-            out_vid_path = os.path.join(tracking_dir, 'short', case + suffix)
+        #     out_vid_path = os.path.join(tracking_dir, 'short', case + suffix)
 
-            cap = cv2.VideoCapture(input_video_path)
+        #     cap = cv2.VideoCapture(input_video_path)
 
-            original_width = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
-            original_height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
+        #     original_width = cap.get(cv2.CAP_PROP_FRAME_WIDTH)
+        #     original_height = cap.get(cv2.CAP_PROP_FRAME_HEIGHT)
 
-            fps = cap.get(cv2.CAP_PROP_FPS)
-            mid_frame_num = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)/2)
-            duration = int(mid_frame_num/fps)
+        #     fps = cap.get(cv2.CAP_PROP_FPS)
+        #     mid_frame_num = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)/2)
+        #     duration = int(mid_frame_num/fps)
 
-            minutes, seconds = divmod(duration, 60)
-            hours, minutes = divmod(minutes, 60)
+        #     minutes, seconds = divmod(duration, 60)
+        #     hours, minutes = divmod(minutes, 60)
 
-            print('\nMaking a short video!')
+        #     print('\nMaking a short video!')
 
-            cmd = ['ffmpeg', '-i', input_video_path, '-ss',
-                '{}:{}:{}'.format(hours, minutes, seconds), '-t', '5', '-c', 'copy', out_vid_path]
+        #     cmd = ['ffmpeg', '-i', input_video_path, '-ss',
+        #         '{}:{}:{}'.format(hours, minutes, seconds), '-t', '5', '-c', 'copy', out_vid_path]
 
-            # call ffmpeg to make a short video
-            p = Popen(cmd, stdin=PIPE)
-            # close ffmpeg
-            p.wait()
+        #     # call ffmpeg to make a short video
+        #     p = Popen(cmd, stdin=PIPE)
+        #     # close ffmpeg
+        #     p.wait()
 
-            print('\nSuccessfully created a short video!')
+        #     print('\nSuccessfully created a short video!')
 
-            return out_vid_path, original_width, original_height, mid_frame_num
+        #     return out_vid_path, original_width, original_height, mid_frame_num
 
-        def predict_labels(self, vid_path, config):
-            """
-            Predict labels on a given video
+        # def predict_labels(self, vid_path, config):
+        #     """
+        #     Predict labels on a given video
 
-            Input:
-                vid_path: string
-                    Path to video.
-                config: dictionary
-                    a deeplabcut model configuration dictionary.
-            """
-            destfolder = os.path.dirname(vid_path)
-            dlc.analyze_videos(config=config['config_path'], videos=[vid_path], videotype='avi', shuffle=config['shuffle'],
-                            trainingsetindex=config['trainingsetindex'], gputouse=gputouse, save_as_csv=False, destfolder=destfolder)
+        #     Input:
+        #         vid_path: string
+        #             Path to video.
+        #         config: dictionary
+        #             a deeplabcut model configuration dictionary.
+        #     """
+        #     destfolder = os.path.dirname(vid_path)
+        #     dlc.analyze_videos(config=config['config_path'], videos=[vid_path], videotype='avi', shuffle=config['shuffle'],
+        #                     trainingsetindex=config['trainingsetindex'], gputouse=gputouse, save_as_csv=False, destfolder=destfolder)
 
-        def obtain_cropping_coords(self, short_h5_path, DLCscorer, config):
-            """
-            First, filter out by the pcutoff, then find values that are within 1 std from mean
-            for each eyelid bodypart. Then, compare among the parts and find min,max values in x and y.
+        # def obtain_cropping_coords(self, short_h5_path, DLCscorer, config):
+        #     """
+        #     First, filter out by the pcutoff, then find values that are within 1 std from mean
+        #     for each eyelid bodypart. Then, compare among the parts and find min,max values in x and y.
 
-            The reason we use 1 std from mean is that dlc might have outliers in this short video.
-            Hence we filter out these potential outliers
+        #     The reason we use 1 std from mean is that dlc might have outliers in this short video.
+        #     Hence we filter out these potential outliers
 
-            Input:
-                short_h5_path: string
-                    path to h5 file generated by deeplabcut on short video.
-                DLCscorer: string
-                    scorer name used for deeplabcut. Can be obtained via auxiliaryfunctions.GetScorerName(config, shuffle, trainsetindex)
-                config: dictionary
-                    a deeplabcut model configuration dictionary.
-            """
+        #     Input:
+        #         short_h5_path: string
+        #             path to h5 file generated by deeplabcut on short video.
+        #         DLCscorer: string
+        #             scorer name used for deeplabcut. Can be obtained via auxiliaryfunctions.GetScorerName(config, shuffle, trainsetindex)
+        #         config: dictionary
+        #             a deeplabcut model configuration dictionary.
+        #     """
 
-            # there should be only 1 h5 file generated by dlc
-            df_short = pd.read_hdf(short_h5_path)
+        #     # there should be only 1 h5 file generated by dlc
+        #     df_short = pd.read_hdf(short_h5_path)
 
-            eyelid_cols = ['eyelid_top', 'eyelid_right',
-                        'eyelid_left', 'eyelid_bottom']
+        #     eyelid_cols = ['eyelid_top', 'eyelid_right',
+        #                 'eyelid_left', 'eyelid_bottom']
 
-            df_eyelid = df_short[DLCscorer][eyelid_cols]
+        #     df_eyelid = df_short[DLCscorer][eyelid_cols]
 
-            df_eyelid_likelihood = df_eyelid.iloc[:, df_eyelid.columns.get_level_values(
-                1) == 'likelihood']
-            df_eyelid_x = df_eyelid.iloc[:, df_eyelid.columns.get_level_values(
-                1) == 'x']
-            df_eyelid_y = df_eyelid.iloc[:, df_eyelid.columns.get_level_values(
-                1) == 'y']
+        #     df_eyelid_likelihood = df_eyelid.iloc[:, df_eyelid.columns.get_level_values(
+        #         1) == 'likelihood']
+        #     df_eyelid_x = df_eyelid.iloc[:, df_eyelid.columns.get_level_values(
+        #         1) == 'x']
+        #     df_eyelid_y = df_eyelid.iloc[:, df_eyelid.columns.get_level_values(
+        #         1) == 'y']
 
-            df_eyelid_coord = dict(x=df_eyelid_x, y=df_eyelid_y)
+        #     df_eyelid_coord = dict(x=df_eyelid_x, y=df_eyelid_y)
 
-            coords_dict = dict(xmin=[], xmax=[], ymin=[], ymax=[])
+        #     coords_dict = dict(xmin=[], xmax=[], ymin=[], ymax=[])
 
-            for eyelid_label in eyelid_cols:
+        #     for eyelid_label in eyelid_cols:
 
-                for coord in ['x', 'y']:
+        #         for coord in ['x', 'y']:
 
-                    # only obtain if the labels are confident enough (i.e. > pcutoff)
-                    eyelid_coord_pcutoff = df_eyelid_coord[coord][(
-                        df_eyelid_likelihood.loc[:, eyelid_label].values > config['pcutoff'])][eyelid_label][coord].values
+        #             # only obtain if the labels are confident enough (i.e. > pcutoff)
+        #             eyelid_coord_pcutoff = df_eyelid_coord[coord][(
+        #                 df_eyelid_likelihood.loc[:, eyelid_label].values > config['pcutoff'])][eyelid_label][coord].values
 
-                    eyelid_coord_68 = eyelid_coord_pcutoff[(eyelid_coord_pcutoff < np.mean(eyelid_coord_pcutoff) + np.std(eyelid_coord_pcutoff)) *
-                                                        (eyelid_coord_pcutoff > np.mean(
-                                                            eyelid_coord_pcutoff) - np.std(eyelid_coord_pcutoff))]
+        #             eyelid_coord_68 = eyelid_coord_pcutoff[(eyelid_coord_pcutoff < np.mean(eyelid_coord_pcutoff) + np.std(eyelid_coord_pcutoff)) *
+        #                                                 (eyelid_coord_pcutoff > np.mean(
+        #                                                     eyelid_coord_pcutoff) - np.std(eyelid_coord_pcutoff))]
 
-                    coords_dict[coord+'min'].append(eyelid_coord_68.min())
-                    coords_dict[coord+'max'].append(eyelid_coord_68.max())
+        #             coords_dict[coord+'min'].append(eyelid_coord_68.min())
+        #             coords_dict[coord+'max'].append(eyelid_coord_68.max())
 
-            cropped_coords = {}
-            cropped_coords['cropped_x0'] = int(min(coords_dict['xmin']))
-            cropped_coords['cropped_x1'] = int(max(coords_dict['xmax']))
-            cropped_coords['cropped_y0'] = int(min(coords_dict['ymin']))
-            cropped_coords['cropped_y1'] = int(max(coords_dict['ymax']))
+        #     cropped_coords = {}
+        #     cropped_coords['cropped_x0'] = int(min(coords_dict['xmin']))
+        #     cropped_coords['cropped_x1'] = int(max(coords_dict['xmax']))
+        #     cropped_coords['cropped_y0'] = int(min(coords_dict['ymin']))
+        #     cropped_coords['cropped_y1'] = int(max(coords_dict['ymax']))
 
-            return cropped_coords
+        #     return cropped_coords
 
-        def add_pixels(self, cropped_coords, original_width, original_height, pixel_num):
-            """
-            Add addtional pixels around cropped_coords
-            Input:
-                cropped_coords: dictionary
-                    cropoping coordinates specifying left_top  and bottom_right coords
-                original_width: int
-                    width of the original video
-                original_height: int
-                    height of the original video
-                pixel_num: int
-                    number of pixels to add around the cropped_coords
-            Return:
-                cropped_coords: dictionary
-                    updated cropoping coordinates specifying left_top  and bottom_right coords
-            """
+        # def add_pixels(self, cropped_coords, original_width, original_height, pixel_num):
+        #     """
+        #     Add addtional pixels around cropped_coords
+        #     Input:
+        #         cropped_coords: dictionary
+        #             cropoping coordinates specifying left_top  and bottom_right coords
+        #         original_width: int
+        #             width of the original video
+        #         original_height: int
+        #             height of the original video
+        #         pixel_num: int
+        #             number of pixels to add around the cropped_coords
+        #     Return:
+        #         cropped_coords: dictionary
+        #             updated cropoping coordinates specifying left_top  and bottom_right coords
+        #     """
 
-            if cropped_coords['cropped_x0'] - pixel_num < 0:
-                cropped_coords['cropped_x0'] = 0
-            else:
-                cropped_coords['cropped_x0'] -= pixel_num
+        #     if cropped_coords['cropped_x0'] - pixel_num < 0:
+        #         cropped_coords['cropped_x0'] = 0
+        #     else:
+        #         cropped_coords['cropped_x0'] -= pixel_num
 
-            if cropped_coords['cropped_x1'] + pixel_num > original_width:
-                cropped_coords['cropped_x1'] = original_width
-            else:
-                cropped_coords['cropped_x1'] += pixel_num
+        #     if cropped_coords['cropped_x1'] + pixel_num > original_width:
+        #         cropped_coords['cropped_x1'] = original_width
+        #     else:
+        #         cropped_coords['cropped_x1'] += pixel_num
 
-            if cropped_coords['cropped_y0'] - pixel_num < 0:
-                cropped_coords['cropped_y0'] = 0
-            else:
-                cropped_coords['cropped_y0'] -= pixel_num
+        #     if cropped_coords['cropped_y0'] - pixel_num < 0:
+        #         cropped_coords['cropped_y0'] = 0
+        #     else:
+        #         cropped_coords['cropped_y0'] -= pixel_num
 
-            if cropped_coords['cropped_y1'] + pixel_num > original_height:
-                cropped_coords['cropped_y1'] = original_height
-            else:
-                cropped_coords['cropped_y1'] += pixel_num
+        #     if cropped_coords['cropped_y1'] + pixel_num > original_height:
+        #         cropped_coords['cropped_y1'] = original_height
+        #     else:
+        #         cropped_coords['cropped_y1'] += pixel_num
 
-            return cropped_coords
+        #     return cropped_coords
 
-        def make_compressed_cropped_video(self, tracking_dir, cropped_coords):
-            """
-            Make a compressed and cropped video.
+        # def make_compressed_cropped_video(self, tracking_dir, cropped_coords):
+        #     """
+        #     Make a compressed and cropped video.
 
-            Input:
-                tracking_dir: string
-                    String that specifies the full path of tracking directory
-                cropped_coords: dictionary
-                    cropoping coordinates specifying left_top  and bottom_right coords
-            Return:
-                None
-            """
-            from subprocess import Popen, PIPE
+        #     Input:
+        #         tracking_dir: string
+        #             String that specifies the full path of tracking directory
+        #         cropped_coords: dictionary
+        #             cropoping coordinates specifying left_top  and bottom_right coords
+        #     Return:
+        #         None
+        #     """
+        #     from subprocess import Popen, PIPE
 
-            suffix = '_compressed_cropped.avi'
+        #     suffix = '_compressed_cropped.avi'
 
-            case = os.path.basename(os.path.normpath(
-                tracking_dir)).split('_tracking')[0]
+        #     case = os.path.basename(os.path.normpath(
+        #         tracking_dir)).split('_tracking')[0]
 
-            input_video_path = os.path.join(tracking_dir, case + '.avi')
+        #     input_video_path = os.path.join(tracking_dir, case + '.avi')
 
-            out_vid_path = os.path.join(
-                tracking_dir, 'compressed_cropped', case + suffix)
+        #     out_vid_path = os.path.join(
+        #         tracking_dir, 'compressed_cropped', case + suffix)
 
-            out_w = cropped_coords['cropped_x1'] - cropped_coords['cropped_x0']
-            out_h = cropped_coords['cropped_y1'] - cropped_coords['cropped_y0']
-            print('\nMaking a compressed and cropped video!')
+        #     out_w = cropped_coords['cropped_x1'] - cropped_coords['cropped_x0']
+        #     out_h = cropped_coords['cropped_y1'] - cropped_coords['cropped_y0']
+        #     print('\nMaking a compressed and cropped video!')
 
-            # crf: use value btw 17 and 28 (lower the number, higher the quality of the video)
-            # intra: no compressing over time. only over space
-            cmd = ['ffmpeg', '-i', '{}'.format(input_video_path), '-vcodec', 'libx264', '-crf', '17', '-intra', '-filter:v',
-                "crop={}:{}:{}:{}".format(out_w, out_h, cropped_coords['cropped_x0'], cropped_coords['cropped_y0']), '{}'.format(out_vid_path)]
+        #     # crf: use value btw 17 and 28 (lower the number, higher the quality of the video)
+        #     # intra: no compressing over time. only over space
+        #     cmd = ['ffmpeg', '-i', '{}'.format(input_video_path), '-vcodec', 'libx264', '-crf', '17', '-intra', '-filter:v',
+        #         "crop={}:{}:{}:{}".format(out_w, out_h, cropped_coords['cropped_x0'], cropped_coords['cropped_y0']), '{}'.format(out_vid_path)]
 
-            # call ffmpeg to make a short video
-            p = Popen(cmd, stdin=PIPE)
-            # close ffmpeg
-            p.wait()
-            print('\nSuccessfully created a compressed & cropped video!\n')
+        #     # call ffmpeg to make a short video
+        #     p = Popen(cmd, stdin=PIPE)
+        #     # close ffmpeg
+        #     p.wait()
+        #     print('\nSuccessfully created a compressed & cropped video!\n')
 
-            return out_vid_path
+        #     return out_vid_path
 
         def make(self, key):
             """
             Use Deeplabcut to label pupil and eyelids
             """
-            # Disable DLC GUI first, then import deeplabcut
-            os.environ["DLClight"] = "True"
-            import deeplabcut as dlc
-            from deeplabcut.utils import auxiliaryfunctions
-            from .utils import DLC_tools
 
             print('Tracking labels with Deeplabcut!')
 
@@ -938,7 +921,7 @@ class Tracking(dj.Computed):
             tracking_dir, _ = self.create_tracking_directory(key)
 
             # make a short video (5 seconds long)
-            short_video_path, original_width, original_height, mid_frame_num = self.make_short_video(
+            short_video_path, original_width, original_height, mid_frame_num = DLC_tools.make_short_video(
                 tracking_dir)
 
             # save info about short video
@@ -947,25 +930,25 @@ class Tracking(dj.Computed):
             short_h5_path = short_video_path.split('.')[0] + DLCscorer + '.h5'
 
             # predict using the short video
-            self.predict_labels(short_video_path, config)
+            DLC_tools.predict_labels(short_video_path, config)
 
             # obtain the cropping coordinates from the prediciton on short video
-            cropped_coords = self.obtain_cropping_coords(
+            cropped_coords = DLC_tools.obtain_cropping_coords(
                 short_h5_path, DLCscorer, config)
 
             # add 100 pixels around cropping coords. Ensure that it is within the original dim
             pixel_num = 100
-            cropped_coords = self.add_pixels(cropped_coords=cropped_coords,
+            cropped_coords = DLC_tools.add_pixels(cropped_coords=cropped_coords,
                                              original_width=original_width,
                                              original_height=original_height,
                                              pixel_num=pixel_num)
 
             # make a compressed and cropped video
-            compressed_cropped_video_path = self.make_compressed_cropped_video(
+            compressed_cropped_video_path = DLC_tools.make_compressed_cropped_video(
                 tracking_dir, cropped_coords)
 
             # predict using the compressed and cropped video
-            self.predict_labels(compressed_cropped_video_path, config)
+            DLC_tools.predict_labels(compressed_cropped_video_path, config)
 
             key = dict(key, cropped_x0=cropped_coords['cropped_x0'],
                             cropped_x1=cropped_coords['cropped_x1'],
@@ -978,10 +961,10 @@ class Tracking(dj.Computed):
     def make(self, key):
         print("Tracking for case {}".format(key))
 
-        if key['tracking_method'] == 0:
+        if key['tracking_method'] == 1:
             self.insert1(key)
             self.ManualTracking().make(key)
-        elif key['tracking_method'] == 1:
+        elif key['tracking_method'] == 2:
             self.insert1(key)
             self.Deeplabcut().make(key)
         else:
@@ -1373,7 +1356,7 @@ class AutomaticallyTrackedLabels(dj.Computed):
                                                   video_path=compressed_cropped_video_path))
 
 @schema
-class FittedContourNew(dj.Computed):
+class FittedPupil(dj.Computed):
     definition="""
     # Fit a circle and an ellipse
     -> Tracking
@@ -1412,9 +1395,9 @@ class FittedContourNew(dj.Computed):
         # manual == 0
         if key['tracking_method'] == 0:
 
-            avi_path = (Eye() & key).get_video_path()
+            avi_path = (Eye & key).get_video_path()
 
-            contours = (Tracking.ManualTracking() & key).fetch(
+            contours = (Tracking.ManualTracking & key).fetch(
                 order_by='frame_id ASC', as_dict=True)
             
             video = DLC_tools.video_processor.VideoProcessorCV(fname=avi_path)
@@ -1432,16 +1415,16 @@ class FittedContourNew(dj.Computed):
                         x, y, radius = DLC_tools.smallest_enclosing_circle_naive(ckey['contour'])
                         center = (x, y)
                         self.Circle().insert1(dict(key, frame_id=frame_num,
-                                            center=center,
-                                            radius=radius,
-                                            visible_portion=visible_portion))
+                                                   center=center,
+                                                   radius=radius,
+                                                   visible_portion=visible_portion))
                     else:
                         # if less than 3, then we do not have enough pupil labels nor
                         # we have eyelid labels
                         self.Circle().insert1(dict(key, frame_id=frame_num,
-                                            center=None,
-                                            radius=None,
-                                            visible_portion=-3.0))   
+                                                   center=None,
+                                                   radius=None,
+                                                   visible_portion=-3.0))   
 
                     # fit ellipse. This is consistent with fitting method for DLC
                     if len(ckey['contour']) >= 6:
@@ -1487,12 +1470,12 @@ class FittedContourNew(dj.Computed):
 
                 fit_dict = pupil_fit.fitted_core(frame_num=frame_num)
 
-                self.Circle().insert1(dict(key, frame_id=frame_num,
+                self.Circle.insert1(dict(key, frame_id=frame_num,
                                     center=fit_dict['circle_fit']['center'],
                                     radius=fit_dict['circle_fit']['radius'],
                                     visible_portion=fit_dict['circle_visible']['visible_portion']))
 
-                self.Ellipse().insert1(dict(key, frame_id=frame_num,
+                self.Ellipse.insert1(dict(key, frame_id=frame_num,
                                     center=fit_dict['ellipse_fit']['center'],
                                     major_radius=fit_dict['ellipse_fit']['major_radius'],
                                     minor_radius=fit_dict['ellipse_fit']['minor_radius'],
