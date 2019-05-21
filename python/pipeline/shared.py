@@ -138,3 +138,17 @@ class CurationMethod(dj.Lookup):
         [1, 'none', 'estimates are left unchanged', 'python'],
         [2, 'manual', 'manually inspect each field estimate', 'matlab'],
     ]
+
+@schema
+class SurfaceMethod(dj.Lookup):
+    definition = """ # Methods used to compute surface of the brain
+
+    surface_method_id   : tinyint unsigned   # Unique ID given to each surface calculation method
+    ---
+    method_title        : varchar(32)        # Title of surface calculation method
+    method_description  : varchar(256)       # Details on surface calculation
+    """
+
+    contents = [
+        [1, 'Paraboloid Fit', 'Fit ax^2 + by^2 + cx + dy + f to surface after finding max of sobel']
+    ]
