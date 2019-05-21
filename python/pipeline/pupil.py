@@ -1191,8 +1191,8 @@ class FittedPupil(dj.Computed):
 
         self.insert1(key)
 
-        # manual == 0
-        if key['tracking_method'] == 0:
+        # manual == 1
+        if key['tracking_method'] == 1:
 
             avi_path = (Eye & key).get_video_path()
 
@@ -1244,7 +1244,8 @@ class FittedPupil(dj.Computed):
                                             rotation_angle=None,
                                             visible_portion=-3.0))
 
-        elif key['tracking_method'] == 1:
+        # deeplabcut 2
+        elif key['tracking_method'] == 2:
 
             dlc_config = (ConfigDeeplabcut & (Tracking.Deeplabcut & key)).fetch1()
 
