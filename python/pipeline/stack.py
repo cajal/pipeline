@@ -1027,7 +1027,7 @@ class Surface(dj.Computed):
             raise PipelineException(f'Error: surface_method_id {key["surface_method_id"]} is not implemented')
 
         print('Calculating surface of brain for stack', key)
-        full_stack = (stack.PreprocessedStack & key).fetch1('resized')
+        full_stack = (PreprocessedStack & key).fetch1('resized')
         depth, height, width = full_stack.shape
 
         surface_guess_map = []
@@ -1129,7 +1129,9 @@ class Surface(dj.Computed):
         :rtype: matplotlib.figure.Figure
         """
 
-        full_stack = (stack.PreprocessedStack & key).fetch1('resized')
+        from matplotlib import cm
+
+        full_stack = (PreprocessedStack & self).fetch1('resized')
         stack_depth, stack_height, stack_width = full_stack.shape
         surface_guess_map, fitted_surface = self.fetch1('guessed_points', 'surface_im')
         fig, axes = plt.subplots(1, 2, figsize=(fig_width, fig_height))
