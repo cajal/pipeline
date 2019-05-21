@@ -1,3 +1,10 @@
+# Disable DLC GUI first, then import deeplabcut
+import os
+os.environ["DLClight"] = "True"
+import deeplabcut as dlc
+from deeplabcut.utils import auxiliaryfunctions
+from .utils import DLC_tools
+
 from .exceptions import PipelineException
 from . import experiment, notify, shared
 from .utils import h5
@@ -19,14 +26,6 @@ from tqdm import tqdm
 
 from scipy.misc import imresize
 from itertools import count
-
-# Disable DLC GUI first, then import deeplabcut
-import os
-os.environ["DLClight"] = "True"
-import deeplabcut as dlc
-from deeplabcut.utils import auxiliaryfunctions
-from .utils import DLC_tools
-
 
 schema = dj.schema('pipeline_eye', locals())
 
