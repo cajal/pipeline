@@ -8,7 +8,6 @@ from scipy import signal
 from scipy import ndimage
 from scipy import optimize
 import itertools
-from typing import Any
 
 from . import experiment, notify, shared, reso, meso
 from .utils import galvo_corrections, stitching, performance, enhancement
