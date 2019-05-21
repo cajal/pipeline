@@ -985,7 +985,7 @@ class Surface(dj.Computed):
     -> PreprocessedStack
     -> shared.SurfaceMethod
     ---
-    guessed_points    : blob              # Array of guessed depths stored in (z,y,x) format
+    guessed_points    : longblob              # Array of guessed depths stored in (z,y,x) format
     surface_im        : longblob          # Matrix of fitted depth for each pixel in stack. Value is number of pixels to surface from top of array.
     lower_bound_im    : longblob          # Lower bound of 95th percentile confidence interval
     upper_bound_im    : longblob          # Upper bound of 95th percentile confidence interval
