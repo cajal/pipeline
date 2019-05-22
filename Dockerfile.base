@@ -1,4 +1,4 @@
-FROM ubuntu:18.04
+FROM nvidia/cuda:10.0-cudnn7-devel-ubuntu18.04
 
 LABEL maintainer="Erick Cobos <ecobos@bcm.edu>, Donnie Kim <donniek@bcm.edu>"
 ARG DEBIAN_FRONTEND=noninteractive
@@ -37,7 +37,7 @@ RUN apt-get install -y wget && \
 
 ###############################################################################
 # Install CaImAn
-# Install dependencies. When installing tensorflow, ensure cuda and cudnn versions meet requirements
+# Install dependencies.
 RUN apt-get install -y git python3-tk && \
     pip3 install future cvxpy scikit-learn scikit-image tensorflow==1.13.1 keras \
                  peakutils \
@@ -80,7 +80,8 @@ RUN pip3 install git+https://github.com/datajoint/datajoint-python.git && \
     pip3 install git+https://github.com/atlab/scanreader.git && \
     pip3 install git+https://github.com/cajal/bl3d.git && \
     pip3 install seaborn slacker imreg_dft pandas imageio
-RUN apt-get install -y python3-git ffmpeg
+RUN apt-get update && \
+    apt-get install -y python3-git ffmpeg
 
 # Optional
 RUN apt-get install -y nano vim graphviz && \
