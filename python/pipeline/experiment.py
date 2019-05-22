@@ -334,6 +334,18 @@ class MonitorCalibration(dj.Manual):
 
 
 @schema
+class MouseRoom(dj.Lookup):
+    definition = """ # Mouse location after surgery
+    mouse_room                : varchar(64)         # Building letter along with room number
+    """
+    contents = [
+        ['T019'],
+        ['T057'],
+        ['T082C'],
+    ]
+
+
+@schema
 class SurgeryType(dj.Lookup):
     definition = """ # Surgery types used in experiment.Surgery
     surgery_type                : varchar(64)         # Types of surgery performed on mice
@@ -367,6 +379,7 @@ class Surgery(dj.Manual):
     ---
     date                         : date                   # YYYY-MM-DD Format. Date surgery was performed
     time                         : time                   # Start of mouse recovery
+    -> experiment.MouseRoom
     -> experiment.Person            
     -> SurgeryOutcome
     -> SurgeryType
