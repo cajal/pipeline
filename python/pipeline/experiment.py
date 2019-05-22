@@ -6,7 +6,7 @@ import os
 from commons import lab
 
 
-schema = dj.schema('pipeline_experiment', locals(), create_tables=True)
+schema = dj.schema('pipeline_experiment', locals(), create_tables=False)
 
 
 @schema
@@ -343,6 +343,7 @@ class MouseRoom(dj.Lookup):
         ['T019'],
         ['T057'],
         ['T082C'],
+        ['Other'],
     ]
 
 
