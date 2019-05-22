@@ -140,6 +140,20 @@ class CurationMethod(dj.Lookup):
     ]
 
 @schema
+class TrackingMethod(dj.Lookup):
+    definition = """
+    tracking_method : tinyint                       # method used for pupil tracking
+    ---
+    name                : varchar(16)               # short name to identify the tracking method
+    details             : varchar(255)              # more details
+    language            : enum('matlab', 'python')  # implementation language
+    """
+
+    contents = [
+        [1, 'manual', 'manually tracking', 'python'],
+        [2, 'deeplabcut', 'automatically tracking using deeplabcut package', 'python'],
+    ]
+    
 class SurfaceMethod(dj.Lookup):
     definition = """ # Methods used to compute surface of the brain
 

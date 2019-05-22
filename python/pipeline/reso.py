@@ -65,7 +65,7 @@ class ScanInfo(dj.Imported):
         delay_image     : longblob      # (ms) delay between the start of the scan and pixels in this field
         """
 
-    def _make_tuples(self, key):
+    def make(self, key):
         """ Read some scan parameters and compute FOV in microns."""
         from decimal import Decimal
 
@@ -206,7 +206,7 @@ class Quality(dj.Computed):
         widths          : longblob      # (secs) width at half prominence for all peaks
         """
 
-    def _make_tuples(self, key):
+    def make(self, key):
         # Read the scan
         scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
         scan = scanreader.read_scan(scan_filename)
@@ -328,7 +328,7 @@ class RasterCorrection(dj.Computed):
     def key_source(self):
         return ScanInfo * CorrectionChannel & {'pipe_version': CURRENT_VERSION}
 
-    def _make_tuples(self, key):
+    def make(self, key):
         from scipy.signal import tukey
 
         # Read the scan
@@ -395,7 +395,7 @@ class MotionCorrection(dj.Computed):
     def key_source(self):
         return RasterCorrection() & {'pipe_version': CURRENT_VERSION}
 
-    def _make_tuples(self, key):
+    def make(self, key):
         """Computes the motion shifts per frame needed to correct the scan."""
         from scipy import ndimage
 
@@ -607,7 +607,7 @@ class SummaryImages(dj.Computed):
         l6norm_image           : longblob
         """
 
-    def _make_tuples(self, key):
+    def make(self, key):
         # Read the scan
         scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
         scan = scanreader.read_scan(scan_filename)
@@ -793,7 +793,7 @@ class Segmentation(dj.Computed):
         -> Segmentation
         """
 
-        def _make_tuples(self, key):
+        def make(self, key):
             print('Warning: Manual segmentation is not implemented in Python.')
             # Copy any masks (and MaskClassification) that were there before
             # Delete key from Segmentation (this is needed for trace and ScanSet and Activity computation to restart when things are added)
@@ -809,7 +809,7 @@ class Segmentation(dj.Computed):
         params              : varchar(1024)     # parameters send to CNMF as JSON array
         """
 
-        def _make_tuples(self, key):
+        def make(self, key):
             """ Use CNMF to extract masks and traces.
 
             See caiman_interface.extract_masks for explanation of parameters
@@ -918,10 +918,9 @@ class Segmentation(dj.Computed):
             dj.conn()
 
             ## Insert in CNMF, Segmentation and Fluorescence
-            Segmentation().insert1(key)
-            Segmentation.CNMF().insert1({**key, 'params': json.dumps(kwargs)})
-            Fluorescence().insert1(key)  # we also insert traces
-
+            self.insert1({**key, 'params': json.dumps(kwargs)})
+            Fluorescence().insert1(key, allow_direct_insert=True)  # we also insert traces
+            
             ## Insert background components
             Segmentation.CNMFBackground().insert1({**key, 'masks': background_masks,
                                                    'activity': background_traces})
@@ -1051,12 +1050,13 @@ class Segmentation(dj.Computed):
         activity            : longblob      # array (num_background_components x timesteps)
         """
 
-    def _make_tuples(self, key):
+    def make(self, key):
         # Create masks
         if key['segmentation_method'] == 1:  # manual
-            Segmentation.Manual()._make_tuples(key)
+            Segmentation.Manual().make(key)
         elif key['segmentation_method'] in [2, 6]:  # nmf and nmf-patches
-            Segmentation.CNMF()._make_tuples(key)
+            self.insert1(key)
+            Segmentation.CNMF().make(key)
         elif key['segmentation_method'] in [3, 4]:  # nmf_patches
             msg = 'This method has been deprecated, use segmentation_method 6'
             raise PipelineException(msg)
@@ -1165,7 +1165,7 @@ class Fluorescence(dj.Computed):
         trace                   : longblob
         """
 
-    def _make_tuples(self, key):
+    def make(self, key):
         # Load scan
         print('Reading scan...')
         field_id = key['field'] - 1
@@ -1240,7 +1240,7 @@ class MaskClassification(dj.Computed):
         -> shared.MaskType
         """
 
-    def _make_tuples(self, key):
+    def make(self, key):
         # Skip axonal scans
         target = (SegmentationTask() & key).fetch1('compartment')
         if key['classification_method'] == 2 and target != 'soma':
@@ -1377,7 +1377,7 @@ class ScanSet(dj.Computed):
         # Force reservation key to be per scan so diff fields are not run in parallel
         return {k: v for k, v in key.items() if k not in ['field', 'channel']}
 
-    def _make_tuples(self, key):
+    def make(self, key):
         from pipeline.utils import caiman_interface as cmn
 
         # Get masks
@@ -1518,7 +1518,7 @@ class Activity(dj.Computed):
         g                   : blob          # g1, g2, ... coefficients for the AR process
         """
 
-    def _make_tuples(self, key):
+    def make(self, key):
         print('Creating activity traces for', key)
 
         # Get fluorescence
@@ -1649,7 +1649,7 @@ class ScanDone(dj.Computed):
         -> Activity
         """
 
-    def _make_tuples(self, key):
+    def make(self, key):
         scan_key = {k: v for k, v in key.items() if k in self.heading}
 
         # Delete current ScanDone entry
