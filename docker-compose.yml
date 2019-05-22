@@ -2,8 +2,7 @@ version: '2.3'
 
 services:
   notebook:
-    image: ninai/pipeline:latest
-    runtime: nvidia
+    image: ninai/stimulus-pipeline:latest
     ports:
       - "8888:8888"
     volumes:
@@ -35,7 +34,8 @@ services:
 
 
   minion-gpu:
-    image: ninai/stimulus-pipeline
+    image: ninai/pipeline:tf-gpu
+    runtime: nvidia
     volumes:
       - /mnt/:/mnt/
       - /home/pipeline_data:/tmp/
@@ -47,8 +47,7 @@ services:
 
   
   bash:
-    image: ninai/pipeline:latest
-    runtime: nvidia
+    image: ninai/stimulus-pipeline:latest
     volumes:
       - /mnt/:/mnt/
       - /home/pipeline_data/:/tmp/
