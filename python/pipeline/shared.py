@@ -138,3 +138,19 @@ class CurationMethod(dj.Lookup):
         [1, 'none', 'estimates are left unchanged', 'python'],
         [2, 'manual', 'manually inspect each field estimate', 'matlab'],
     ]
+
+
+@schema
+class AreaMaskMethod(dj.Lookup):
+    definition = """
+    # method for assigning cortex to visual areas
+    mask_method                 : tinyint           # method to assign membership to visual areas
+    ---
+    name                        : varchar(16)
+    details                     : varchar(255)
+    language                    : enum('matlab', 'python')  # implementation language
+    """
+
+    contents = [
+        [1, 'manual', '', 'matlab'],
+    ]

@@ -15,18 +15,6 @@ class Study(dj.Manual):
 
 
 @schema
-class Scan(dj.Manual):
-    definition = """
-    # relevant scans completed for given experiment
-    ->Study
-    ->experiment.Scan
-    ---
-    ->experiment.Person 
-    notes=null                          :varchar(450)           # experimenter comments/concerns at time of entry
-    """
-
-
-@schema
 class CurationPurpose(dj.Lookup):
     definition = """
     # Targeted use for scans added to CuratedScans
@@ -41,7 +29,8 @@ class CurationPurpose(dj.Lookup):
 class CuratedScan(dj.Manual):
     definition = """
     # Collection of scans approved for specified use
-    ->Scan
+    ->Study
+    ->experiment.Scan
     ->CurationPurpose
     score_ts = CURRENT_TIMESTAMP     :timestamp              # timestamp of score entry
     ---
@@ -50,24 +39,12 @@ class CuratedScan(dj.Manual):
     notes=null                          :varchar(450)           # reviewer comments/concerns at time of entry
     """
 
-
-@schema
-class Stack(dj.Manual):
-    definition = """
-    # relevant stacks completed for given experiment
-    ->Study
-    ->experiment.Stack
-    ---
-    ->experiment.Person
-    notes=null			                :varchar(450)		    # experimenter comments/concerns at time of entry
-    """
-
-
 @schema
 class CuratedStack(dj.Manual):
     definition = """
     # Collection of stacks approved for specified use
-    ->Stack
+    ->Study
+    ->experiment.Stack
     ->CurationPurpose
     score_ts = CURRENT_TIMESTAMP     :timestamp              # timestamp of score entry
     ---
