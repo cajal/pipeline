@@ -758,10 +758,6 @@ class Tracking(dj.Computed):
 
             self.insert1(key)
 
-    @property
-    def key_source(self):
-        return (Eye.proj() & 'eye_ts > "2019-01-01 00:00:00"') * shared.TrackingMethod()
-
     def make(self, key):
         print("Tracking for case {}".format(key))
 
