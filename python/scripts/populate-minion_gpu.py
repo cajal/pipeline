@@ -1,10 +1,13 @@
 #!/usr/local/bin/python3
 import time
 
-from pipeline import stack, pupil
+from pipeline import stack, pupil, experiment
 
 while True:
     stack.Segmentation.populate(reserve_jobs=True, suppress_errors=True)
-    pupil.Tracking.populate({'tracking_method': 2},
+
+    next_scans = experiment.AutoProcessing() & (experiment.Scan() & 'scan_ts > "2019-01-01 00:00:00"')
+    pupil.Tracking.populate(next_scans, {'tracking_method': 2},
                             reserve_jobs=True, suppress_errors=True)
-    time.sleep(3600)  # wait an hour before checking again
+
+    time.sleep(600)  # wait 10 minutes before checking again
