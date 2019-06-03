@@ -17,6 +17,7 @@ while True:
         # treadmill, pupil, posture
         treadmill.Treadmill().populate(next_scans, reserve_jobs=True, suppress_errors=True)
         pupil.Eye().populate(next_scans, reserve_jobs=True, suppress_errors=True)
+        pupil.FittedPupil().populate(next_scans, reserve_jobs=True, suppress_errors=True)
         posture.Posture().populate(next_scans, reserve_jobs=True, suppress_errors=True)
 
         # stack
