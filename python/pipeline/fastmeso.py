@@ -80,7 +80,7 @@ class SegmentationFromStack(dj.Computed):
         masks = (meso.Segmentation & key & {'session': key['scan_session']} &
                  {'segmentation_method': 6}).get_all_masks()
         masks = np.moveaxis(masks, -1, 0) # num_masks x height x width
-        masks = np.stack(ndimage.zoom(f, field_res, order=1) for f in masks)
+        masks = np.stack([ndimage.zoom(f, field_res, order=1) for f in masks])
 
         # Binarize masks
         binary_masks = np.zeros(masks.shape, dtype=bool)
