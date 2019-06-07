@@ -225,6 +225,12 @@ classdef OptImageBar < dj.Imported
                 end
                 imA(imA>prctile(imA(:),99)) = prctile(imA(:),99);
                 
+                mn = prctile(imP(:),1);
+                mx = prctile(imP(:),99);
+                imP(imP<mn) = mn;
+                imP(imP>mx) = mx;
+                imP = normalize(imP)*2*pi - pi;
+                
                 % create the hsv map
                 h = imgaussfilt(normalize(imP),params.sigma);
                 s = imgaussfilt(normalize(imA),params.sigma)*params.saturation;
@@ -302,6 +308,7 @@ classdef OptImageBar < dj.Imported
             params.grad_gauss = 1;
             params.scale = 5;
             params.exp = 1;
+            params.vcontrast = 0.3;
             
             params = ne7.mat.getParams(params,varargin);
             
@@ -310,8 +317,8 @@ classdef OptImageBar < dj.Imported
             Vkeys = fetch(map.OptImageBar & (experiment.Session & obj) & 'axis="vertical"');
             
             % fetch horizontal & vertical maps
-            [Hor(:,:,1),Hor(:,:,2),Hor(:,:,3)] = plot(map.OptImageBar & Hkeys(end),'exp',params.exp);
-            [Ver(:,:,1),Ver(:,:,2),Ver(:,:,3)] = plot(map.OptImageBar & Vkeys(end),'exp',params.exp);
+            [Hor(:,:,1),Hor(:,:,2),Hor(:,:,3)] = plot(map.OptImageBar & Hkeys(end),'exp',params.exp,'vcontrast',params.vcontrast);
+            [Ver(:,:,1),Ver(:,:,2),Ver(:,:,3)] = plot(map.OptImageBar & Vkeys(end),'exp',params.exp,'vcontrast',params.vcontrast);
             
             % get vessels
             vessels = normalize(Hor(:,:,3));
