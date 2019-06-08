@@ -60,7 +60,7 @@ class Eye(dj.Imported):
     def key_source(self):
         return experiment.Scan() & experiment.Scan.EyeVideo().proj()
 
-    def _make_tuples(self, key):
+    def make(self, key):
         # Get behavior filename
         behavior_path = (experiment.Session() & key).fetch1('behavior_path')
         local_path = lab.Paths().get_local_path(behavior_path)
@@ -244,7 +244,7 @@ class TrackedVideo(dj.Computed):
 
     key_source = Eye() * TrackingTask() - TrackingTask.Ignore()
 
-    def _make_tuples(self, key):
+    def make(self, key):
         print("Populating", key)
         param = DEFAULT_PARAMETERS
         if TrackingTask.ManualParameters() & key:

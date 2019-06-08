@@ -17,6 +17,7 @@ while True:
         # treadmill, pupil, posture
         treadmill.Treadmill().populate(next_scans, reserve_jobs=True, suppress_errors=True)
         pupil.Eye().populate(next_scans, reserve_jobs=True, suppress_errors=True)
+        pupil.FittedPupil().populate(next_scans, reserve_jobs=True, suppress_errors=True)
         posture.Posture().populate(next_scans, reserve_jobs=True, suppress_errors=True)
 
         # stack
@@ -60,7 +61,7 @@ while True:
         stack.Registration().populate(reserve_jobs=True, suppress_errors=True)
 
         # tune (these are memory intensive)
-        tune_scans = next_scans & (experiment.Scan() & 'scan_ts > "2017-12-00 00:00:00"')
+        tune_scans = next_scans & (experiment.Scan() & 'scan_ts > "2019-01-01 00:00:00"')
 
         tune.STA().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
         tune.STAQual().populate(tune_scans, reserve_jobs=True, suppress_errors=True)
