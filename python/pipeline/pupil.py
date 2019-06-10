@@ -22,6 +22,7 @@ import json
 import pandas as pd
 import numpy as np
 import cv2
+import shutil
 from tqdm import tqdm
 
 from scipy.misc import imresize
@@ -757,6 +758,12 @@ class Tracking(dj.Computed):
                             added_pixels=pixel_num)
 
             self.insert1(key)
+
+            # delete short video directory 
+            shutil.rmtree(os.path.dirname(short_video_path))
+
+            # delete compressed and cropped video 
+            os.remove(compressed_cropped_video_path)
 
     def make(self, key):
         print("Tracking for case {}".format(key))
