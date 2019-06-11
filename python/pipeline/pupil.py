@@ -879,17 +879,16 @@ class FittedPupil(dj.Computed):
             config['shuffle'] = dlc_config['shuffle']
             config['trainingsetindex'] = dlc_config['trainingsetindex']
 
-            # find path to compressed_cropped_video
+            # find path to original video symlink
             base_path = os.path.splitext((Eye() & key).get_video_path())[0] + '_tracking'
-            
-            for root, _, files in os.walk(base_path):
-                for file in files:
-                    if file.endswith('compressed_cropped.avi'):
-                        cc_vid_path = os.path.join(root, file)
+            video_path = os.path.join(base_path, os.path.basename((Eye() & key).get_video_path()))
 
-            config['video_path'] = cc_vid_path
+            config['orig_video_path'] = video_path
 
-            pupil_fit = DLC_tools.PupilFitting(config=config, bodyparts='all')
+            # find croppoing coords
+            coords = (Tracking.Deeplabcut & key).fetch1('cropped_x0','cropped_x1','cropped_y0','cropped_y1')
+
+            pupil_fit = DLC_tools.PupilFitting(config=config, bodyparts='all', cropped=True, cropped_coords=coords)
 
             for frame_num in tqdm(range(pupil_fit.clip.nframes)):
 
