@@ -829,7 +829,7 @@ class FittedPupil(dj.Computed):
             # for manual tracking, we did not track eyelids, hence put -1.0 to be 
             # consistent with how we defined under PupilFitting.detect_visible_pupil_area
             visible_portion = -1.0 
-            for frame_num in tdqm(range(video.nframes)):
+            for frame_num in tqdm(range(video.nframes)):
                 ckey = contours[frame_num]
 
                 if ckey['contour'] is not None:
