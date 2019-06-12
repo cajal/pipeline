@@ -979,10 +979,7 @@ def obtain_cropping_coords(short_h5_path, DLCscorer, config):
 
             coords_dict[coord+'min'].append(eyelid_coord_68.min())
             coords_dict[coord+'max'].append(eyelid_coord_68.max())
-
-
-                
-
+            
     cropped_coords = {}
     cropped_coords['cropped_x0'] = int(min(coords_dict['xmin']))
     cropped_coords['cropped_x1'] = int(max(coords_dict['xmax']))
