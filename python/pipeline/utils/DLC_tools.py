@@ -960,12 +960,28 @@ def obtain_cropping_coords(short_h5_path, DLCscorer, config):
             eyelid_coord_pcutoff = df_eyelid_coord[coord][(
                 df_eyelid_likelihood.loc[:, eyelid_label].values > config['pcutoff'])][eyelid_label][coord].values
 
+            # if the video is in bad quality, it is possible that none of the labels are above pcutoff results in an empty array.
+            # If this happens, append original height and width
+            if not eyelid_coord_pcutoff.size:
+                if coord == 'x':
+                    coords_dict[coord+'min'].append(0)
+                    coords_dict[coord+'max'].append(config['original_width'])
+                elif coord == 'y':
+                    coords_dict[coord+'min'].append(0)
+                    coords_dict[coord+'max'].append(config['original_height'])
+                
+                break
+
+            # only retain values within 1 std deviation from mean
             eyelid_coord_68 = eyelid_coord_pcutoff[(eyelid_coord_pcutoff < np.mean(eyelid_coord_pcutoff) + np.std(eyelid_coord_pcutoff)) *
                                                    (eyelid_coord_pcutoff > np.mean(
                                                     eyelid_coord_pcutoff) - np.std(eyelid_coord_pcutoff))]
 
             coords_dict[coord+'min'].append(eyelid_coord_68.min())
             coords_dict[coord+'max'].append(eyelid_coord_68.max())
+
+
+                
 
     cropped_coords = {}
     cropped_coords['cropped_x0'] = int(min(coords_dict['xmin']))

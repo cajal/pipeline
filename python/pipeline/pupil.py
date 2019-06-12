@@ -725,6 +725,10 @@ class Tracking(dj.Computed):
             short_video_path, original_width, original_height, mid_frame_num = DLC_tools.make_short_video(
                 tracking_dir)
 
+            # add original width and height to config
+            config['original_width'] = original_width
+            config['original_height'] = original_height
+
             # save info about short video
             key['short_vid_starting_index'] = mid_frame_num
             
