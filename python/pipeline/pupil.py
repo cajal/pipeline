@@ -596,6 +596,18 @@ class Tracking(dj.Computed):
     tracking_ts=CURRENT_TIMESTAMP   : timestamp  # automatic
     """
 
+    class ManualTrackingParameter(dj.Part):
+        definition="""
+        -> master.ManualTracking
+        min_lambda=NULL         : float     # minimum mixing weight for current frame in running average computation (1 means no running avg was used)
+        roi=NULL                : longblob  # roi of eye
+        gauss_blur=NULL         : float     # bluring of ROI
+        exponent=NULL           : tinyint   # exponent for contrast enhancement
+        dilation_iter=NULL      : tinyint   # number of dilation and erosion operations
+        min_contour_len=NULL    : tinyint   # minimal contour length
+        running_avg_mix=NULL    : float     # weight a in a * current_frame + (1-a) * running_avg
+        """
+
     class ManualTracking(dj.Part):
         definition="""
         -> master
@@ -603,20 +615,55 @@ class Tracking(dj.Computed):
         ---
         contour=NULL                : longblob              # eye contour relative to ROI
         """
-        def make(self, key):
-            print("""
-            This method is deprecated!
-            Simply re-inserting data that were manually tracked before (ManuallyTrackedContours)!
-            If data that matches with key does not exist, it will not be stored!
-            """)
-
+        def make(self, key, backup_file=None):
+            
             if (ManuallyTrackedContours() & key).fetch1() is not None:
+
+                print("""
+                The given key has been tracked manually before (from ManuallyTrackedContours)! 
+                Simply re-inserting previously tracked data here!
+                """)
                 for frame_id in range((ManuallyTrackedContours.Frame & key).fetch('frame_id').max()):
-                    ckey = (ManuallyTrackedContours.Frame & dict(key, frame_id=frame_id)).fetch1()
-                    self.insert1(dict(ckey, tracking_method= key['tracking_method']))
+                    # copy Frame info
+                    frame_key = (ManuallyTrackedContours.Frame & dict(key, frame_id=frame_id)).fetch1()
+                    self.insert1(dict(frame_key, tracking_method= key['tracking_method']))
+                    # copy Parameter info
+                    param_key = (ManuallyTrackedContours.Parameter & dict(key, frame_id=frame_id)).fetch1()
+                    min_lambda = (ManuallyTrackedContours & key).fetch1('min_lambda')
+                    Tracking.ManualTrackingParameter.insert1(
+                        dict(param_key, min_lambda=min_lambda, tracking_method= key['tracking_method']))
             else:
-                print("Given key does not exist in ManuallyTrackedContours table!")
-                print("Either manually track by populating ManuallyTrackedContours or use deeplabcut method!")
+                print("Manually Tracking!")
+            
+                if backup_file is None:
+                    avi_path = (Eye() & key).get_video_path()
+                    tracker = ManualTracker(avi_path)
+                    tracker.backup_file = '/tmp/tracker_state{animal_id}-{session}-{scan_idx}.pkl'.format(
+                        **key)
+                else:
+                    tracker = ManualTracker.from_backup(backup_file)
+
+                try:
+                    tracker.run()
+                except:
+                    tracker.backup()
+                    raise
+
+                logtrace = tracker.mixing_constant.logtrace.astype(float)
+                min_lambda = min_lambda=logtrace[logtrace > 0].min()
+                frame = Tracking.ManualTracking()
+                parameters = self.Parameter()
+                for frame_id, ok, contour, params in tqdm(zip(count(), tracker.contours_detected, tracker.contours,
+                                                            tracker.parameter_iter()),
+                                                        total=len(tracker.contours)):
+                    assert frame_id == params['frame_id']
+                    if ok:
+                        frame.insert1(dict(key, frame_id=frame_id, contour=contour))
+                    else:
+                        frame.insert1(dict(key, frame_id=frame_id))
+                    parameters.insert1(dict(key, **params), ignore_extra_fields=True)
+
+
 
     class Deeplabcut(dj.Part):
         definition="""
