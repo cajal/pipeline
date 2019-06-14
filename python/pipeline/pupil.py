@@ -652,7 +652,7 @@ class Tracking(dj.Computed):
                 logtrace = tracker.mixing_constant.logtrace.astype(float)
                 min_lambda = min_lambda=logtrace[logtrace > 0].min()
                 frame = Tracking.ManualTracking()
-                parameters = self.Parameter()
+                parameters = Tracking.ManualTrackingParameter()
                 for frame_id, ok, contour, params in tqdm(zip(count(), tracker.contours_detected, tracker.contours,
                                                             tracker.parameter_iter()),
                                                         total=len(tracker.contours)):
@@ -661,7 +661,7 @@ class Tracking(dj.Computed):
                         frame.insert1(dict(key, frame_id=frame_id, contour=contour))
                     else:
                         frame.insert1(dict(key, frame_id=frame_id))
-                    parameters.insert1(dict(key, **params), ignore_extra_fields=True)
+                    parameters.insert1(dict(key, **params, min_lambda=min_lambda), ignore_extra_fields=True)
 
 
 
