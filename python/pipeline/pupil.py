@@ -617,7 +617,8 @@ class Tracking(dj.Computed):
         """
         def make(self, key, backup_file=None):
             
-            if (ManuallyTrackedContours() & key).fetch1() is not None:
+            # key does exist in ManuallyTrackedContours (i.e. we tracked before)
+            if len(ManuallyTrackedContours() & key):
 
                 print("""
                 The given key has been tracked manually before (from ManuallyTrackedContours)! 
@@ -632,6 +633,8 @@ class Tracking(dj.Computed):
                     min_lambda = (ManuallyTrackedContours & key).fetch1('min_lambda')
                     Tracking.ManualTrackingParameter.insert1(
                         dict(param_key, min_lambda=min_lambda, tracking_method= key['tracking_method']))
+            
+            # key does not exist in ManuallyTrackedContours, hence need to trace manually
             else:
                 print("Manually Tracking!")
             
