@@ -624,7 +624,7 @@ class Tracking(dj.Computed):
                 The given key has been tracked manually before (from ManuallyTrackedContours)! 
                 Simply re-inserting previously tracked data here!
                 """)
-                for frame_id in range((ManuallyTrackedContours.Frame & key).fetch('frame_id').max()):
+                for frame_id in range(len(ManuallyTrackedContours.Frame & key)):
                     # copy Frame info
                     frame_key = (ManuallyTrackedContours.Frame & dict(key, frame_id=frame_id)).fetch1()
                     self.insert1(dict(frame_key, tracking_method= key['tracking_method']))
@@ -665,8 +665,6 @@ class Tracking(dj.Computed):
                     else:
                         frame.insert1(dict(key, frame_id=frame_id))
                     parameters.insert1(dict(key, **params, min_lambda=min_lambda), ignore_extra_fields=True)
-
-
 
     class Deeplabcut(dj.Part):
         definition="""
