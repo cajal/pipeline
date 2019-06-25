@@ -599,6 +599,7 @@ class Tracking(dj.Computed):
     class ManualTrackingParameter(dj.Part):
         definition="""
         -> master.ManualTracking
+        ---
         min_lambda=NULL         : float     # minimum mixing weight for current frame in running average computation (1 means no running avg was used)
         roi=NULL                : longblob  # roi of eye
         gauss_blur=NULL         : float     # bluring of ROI
@@ -618,7 +619,7 @@ class Tracking(dj.Computed):
         def make(self, key, backup_file=None):
             
             # key does exist in ManuallyTrackedContours (i.e. we tracked before)
-            if len(ManuallyTrackedContours() & key):
+            if len(ManuallyTrackedContours() & key) > 0:
 
                 print("""
                 The given key has been tracked manually before (from ManuallyTrackedContours)! 
