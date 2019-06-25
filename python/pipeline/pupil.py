@@ -423,89 +423,11 @@ class ManuallyTrackedContours(dj.Manual, AutoPopulate):
         """
 
     def make(self, key, backup_file=None):
-        print("Populating", key)
-
-        if backup_file is None:
-            avi_path = (Eye() & key).get_video_path()
-            tracker = ManualTracker(avi_path)
-            tracker.backup_file = '/tmp/tracker_state{animal_id}-{session}-{scan_idx}.pkl'.format(
-                **key)
-        else:
-            tracker = ManualTracker.from_backup(backup_file)
-
-        try:
-            tracker.run()
-        except:
-            tracker.backup()
-            raise
-
-        logtrace = tracker.mixing_constant.logtrace.astype(float)
-        self.insert1(dict(key, min_lambda=logtrace[logtrace > 0].min()))
-        self.log_git(key)
-        frame = self.Frame()
-        parameters = self.Parameter()
-        for frame_id, ok, contour, params in tqdm(zip(count(), tracker.contours_detected, tracker.contours,
-                                                      tracker.parameter_iter()),
-                                                  total=len(tracker.contours)):
-            assert frame_id == params['frame_id']
-            if ok:
-                frame.insert1(dict(key, frame_id=frame_id, contour=contour))
-            else:
-                frame.insert1(dict(key, frame_id=frame_id))
-            parameters.insert1(dict(key, **params), ignore_extra_fields=True)
-
-    def warm_start(self, key, backup_file):
-        assert not key in self, '{} should not be in the table already!'
-        with self.connection.transaction:
-            self.make(key, backup_file)
-
-    def update(self, key):
-        print("Populating", key)
-
-        avi_path = (Eye() & key).get_video_path()
-
-        tracker = ManualTracker(avi_path)
-        contours = (self.Frame() & key).fetch('contour', order_by='frame_id')
-        tracker.contours = np.array(contours)
-        tracker.contours_detected = np.array([e is not None for e in contours])
-        tracker.backup_file = '/tmp/tracker_update_state{animal_id}-{session}-{scan_idx}.pkl'.format(
-            **key)
-
-        try:
-            tracker.run()
-        except Exception as e:
-            print(str(e))
-            answer = input(
-                'Tracker crashed. Do you want to save the content anyway [y/n]?').lower()
-            while answer not in ['y', 'n']:
-                answer = input(
-                    'Tracker crashed. Do you want to save the content anyway [y/n]?').lower()
-            if answer == 'n':
-                raise
-        if input('Do you want to delete and replace the existing entries? Type "YES" for acknowledgement.') == "YES":
-            with dj.config(safemode=False):
-                with self.connection.transaction:
-                    (self & key).delete()
-
-                    logtrace = tracker.mixing_constant.logtrace.astype(float)
-                    self.insert1(
-                        dict(key, min_lambda=logtrace[logtrace > 0].min()))
-                    self.log_key(key)
-
-                    frame = self.Frame()
-                    parameters = self.Parameter()
-                    for frame_id, ok, contour, params in tqdm(zip(count(), tracker.contours_detected, tracker.contours,
-                                                                  tracker.parameter_iter()),
-                                                              total=len(tracker.contours)):
-                        assert frame_id == params['frame_id']
-                        if ok:
-                            frame.insert1(
-                                dict(key, frame_id=frame_id, contour=contour))
-                        else:
-                            frame.insert1(dict(key, frame_id=frame_id))
-                        parameters.insert1(
-                            dict(key, **params), ignore_extra_fields=True)
-
+        
+        print("""
+        ManuallyTrackedContours table is now deprecated! 
+        If you wanna track manually, please use Tracking.ManualTracking table!
+        """)
 
 @schema
 class FittedContour(dj.Computed):
