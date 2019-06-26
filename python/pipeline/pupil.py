@@ -811,7 +811,7 @@ class FittedPupil(dj.Computed):
 
                     # fit circle. This is consistent with fitting method for DLC
                     if len(ckey['contour']) >= 3:
-                        x, y, radius = DLC_tools.smallest_enclosing_circle_naive(ckey['contour'])
+                        x, y, radius = DLC_tools.smallest_enclosing_circle_naive(ckey['contour'].squeeze())
                         center = (x, y)
                         self.Circle().insert1(dict(key, frame_id=frame_num,
                                                    center=center,
@@ -827,7 +827,7 @@ class FittedPupil(dj.Computed):
 
                     # fit ellipse. This is consistent with fitting method for DLC
                     if len(ckey['contour']) >= 6:
-                        rotated_rect = cv2.fitEllipse(ckey['contour'])
+                        rotated_rect = cv2.fitEllipse(ckey['contour'].squeeze())
                         self.Ellipse().insert1(dict(key, frame_id=frame_num,
                                             center=rotated_rect[0],
                                             major_radius=rotated_rect[1][1]/2.0,
