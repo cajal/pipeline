@@ -424,10 +424,13 @@ class ManuallyTrackedContours(dj.Manual, AutoPopulate):
 
     def make(self, key, backup_file=None):
         
-        print("""
+        msg = """
         ManuallyTrackedContours table is now deprecated! 
-        If you wanna track manually, please use Tracking.ManualTracking table!
-        """)
+        If you wanna track manually, please use Tracking.ManualTracking table:
+        pupil.Tracking.populate(key, 'tracking_method=1')
+        """
+
+        print(msg)
 
 @schema
 class FittedContour(dj.Computed):
