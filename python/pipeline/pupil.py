@@ -423,89 +423,11 @@ class ManuallyTrackedContours(dj.Manual, AutoPopulate):
         """
 
     def make(self, key, backup_file=None):
-        print("Populating", key)
-
-        if backup_file is None:
-            avi_path = (Eye() & key).get_video_path()
-            tracker = ManualTracker(avi_path)
-            tracker.backup_file = '/tmp/tracker_state{animal_id}-{session}-{scan_idx}.pkl'.format(
-                **key)
-        else:
-            tracker = ManualTracker.from_backup(backup_file)
-
-        try:
-            tracker.run()
-        except:
-            tracker.backup()
-            raise
-
-        logtrace = tracker.mixing_constant.logtrace.astype(float)
-        self.insert1(dict(key, min_lambda=logtrace[logtrace > 0].min()))
-        self.log_git(key)
-        frame = self.Frame()
-        parameters = self.Parameter()
-        for frame_id, ok, contour, params in tqdm(zip(count(), tracker.contours_detected, tracker.contours,
-                                                      tracker.parameter_iter()),
-                                                  total=len(tracker.contours)):
-            assert frame_id == params['frame_id']
-            if ok:
-                frame.insert1(dict(key, frame_id=frame_id, contour=contour))
-            else:
-                frame.insert1(dict(key, frame_id=frame_id))
-            parameters.insert1(dict(key, **params), ignore_extra_fields=True)
-
-    def warm_start(self, key, backup_file):
-        assert not key in self, '{} should not be in the table already!'
-        with self.connection.transaction:
-            self.make(key, backup_file)
-
-    def update(self, key):
-        print("Populating", key)
-
-        avi_path = (Eye() & key).get_video_path()
-
-        tracker = ManualTracker(avi_path)
-        contours = (self.Frame() & key).fetch('contour', order_by='frame_id')
-        tracker.contours = np.array(contours)
-        tracker.contours_detected = np.array([e is not None for e in contours])
-        tracker.backup_file = '/tmp/tracker_update_state{animal_id}-{session}-{scan_idx}.pkl'.format(
-            **key)
-
-        try:
-            tracker.run()
-        except Exception as e:
-            print(str(e))
-            answer = input(
-                'Tracker crashed. Do you want to save the content anyway [y/n]?').lower()
-            while answer not in ['y', 'n']:
-                answer = input(
-                    'Tracker crashed. Do you want to save the content anyway [y/n]?').lower()
-            if answer == 'n':
-                raise
-        if input('Do you want to delete and replace the existing entries? Type "YES" for acknowledgement.') == "YES":
-            with dj.config(safemode=False):
-                with self.connection.transaction:
-                    (self & key).delete()
-
-                    logtrace = tracker.mixing_constant.logtrace.astype(float)
-                    self.insert1(
-                        dict(key, min_lambda=logtrace[logtrace > 0].min()))
-                    self.log_key(key)
-
-                    frame = self.Frame()
-                    parameters = self.Parameter()
-                    for frame_id, ok, contour, params in tqdm(zip(count(), tracker.contours_detected, tracker.contours,
-                                                                  tracker.parameter_iter()),
-                                                              total=len(tracker.contours)):
-                        assert frame_id == params['frame_id']
-                        if ok:
-                            frame.insert1(
-                                dict(key, frame_id=frame_id, contour=contour))
-                        else:
-                            frame.insert1(dict(key, frame_id=frame_id))
-                        parameters.insert1(
-                            dict(key, **params), ignore_extra_fields=True)
-
+        
+        print("""
+        ManuallyTrackedContours table is now deprecated! 
+        If you wanna track manually, please use Tracking.ManualTracking table!
+        """)
 
 @schema
 class FittedContour(dj.Computed):
@@ -596,6 +518,19 @@ class Tracking(dj.Computed):
     tracking_ts=CURRENT_TIMESTAMP   : timestamp  # automatic
     """
 
+    class ManualTrackingParameter(dj.Part):
+        definition="""
+        -> master.ManualTracking
+        ---
+        min_lambda=NULL         : float     # minimum mixing weight for current frame in running average computation (1 means no running avg was used)
+        roi=NULL                : longblob  # roi of eye
+        gauss_blur=NULL         : float     # bluring of ROI
+        exponent=NULL           : tinyint   # exponent for contrast enhancement
+        dilation_iter=NULL      : tinyint   # number of dilation and erosion operations
+        min_contour_len=NULL    : tinyint   # minimal contour length
+        running_avg_mix=NULL    : float     # weight a in a * current_frame + (1-a) * running_avg
+        """
+
     class ManualTracking(dj.Part):
         definition="""
         -> master
@@ -603,20 +538,56 @@ class Tracking(dj.Computed):
         ---
         contour=NULL                : longblob              # eye contour relative to ROI
         """
-        def make(self, key):
-            print("""
-            This method is deprecated!
-            Simply re-inserting data that were manually tracked before (ManuallyTrackedContours)!
-            If data that matches with key does not exist, it will not be stored!
-            """)
+        def make(self, key, backup_file=None):
+            
+            # key does exist in ManuallyTrackedContours (i.e. we tracked before)
+            if len(ManuallyTrackedContours() & key) > 0:
 
-            if (ManuallyTrackedContours() & key).fetch1() is not None:
-                for frame_id in range((ManuallyTrackedContours.Frame & key).fetch('frame_id').max()):
-                    ckey = (ManuallyTrackedContours.Frame & dict(key, frame_id=frame_id)).fetch1()
-                    self.insert1(dict(ckey, tracking_method= key['tracking_method']))
+                print("""
+                The given key has been tracked manually before (from ManuallyTrackedContours)! 
+                Simply re-inserting previously tracked data here!
+                """)
+                for frame_id in range(len(ManuallyTrackedContours.Frame & key)):
+                    # copy Frame info
+                    frame_key = (ManuallyTrackedContours.Frame & dict(key, frame_id=frame_id)).fetch1()
+                    self.insert1(dict(frame_key, tracking_method= key['tracking_method']))
+                    # copy Parameter info
+                    param_key = (ManuallyTrackedContours.Parameter & dict(key, frame_id=frame_id)).fetch1()
+                    min_lambda = (ManuallyTrackedContours & key).fetch1('min_lambda')
+                    Tracking.ManualTrackingParameter.insert1(
+                        dict(param_key, min_lambda=min_lambda, tracking_method= key['tracking_method']))
+            
+            # key does not exist in ManuallyTrackedContours, hence need to trace manually
             else:
-                print("Given key does not exist in ManuallyTrackedContours table!")
-                print("Either manually track by populating ManuallyTrackedContours or use deeplabcut method!")
+                print("Manually Tracking!")
+            
+                if backup_file is None:
+                    avi_path = (Eye() & key).get_video_path()
+                    tracker = ManualTracker(avi_path)
+                    tracker.backup_file = '/tmp/tracker_state{animal_id}-{session}-{scan_idx}.pkl'.format(
+                        **key)
+                else:
+                    tracker = ManualTracker.from_backup(backup_file)
+
+                try:
+                    tracker.run()
+                except:
+                    tracker.backup()
+                    raise
+
+                logtrace = tracker.mixing_constant.logtrace.astype(float)
+                min_lambda = min_lambda=logtrace[logtrace > 0].min()
+                frame = Tracking.ManualTracking()
+                parameters = Tracking.ManualTrackingParameter()
+                for frame_id, ok, contour, params in tqdm(zip(count(), tracker.contours_detected, tracker.contours,
+                                                            tracker.parameter_iter()),
+                                                        total=len(tracker.contours)):
+                    assert frame_id == params['frame_id']
+                    if ok:
+                        frame.insert1(dict(key, frame_id=frame_id, contour=contour))
+                    else:
+                        frame.insert1(dict(key, frame_id=frame_id))
+                    parameters.insert1(dict(key, **params, min_lambda=min_lambda), ignore_extra_fields=True)
 
     class Deeplabcut(dj.Part):
         definition="""
@@ -725,6 +696,10 @@ class Tracking(dj.Computed):
             short_video_path, original_width, original_height, mid_frame_num = DLC_tools.make_short_video(
                 tracking_dir)
 
+            # add original width and height to config
+            config['original_width'] = original_width
+            config['original_height'] = original_height
+
             # save info about short video
             key['short_vid_starting_index'] = mid_frame_num
             
@@ -829,7 +804,7 @@ class FittedPupil(dj.Computed):
             # for manual tracking, we did not track eyelids, hence put -1.0 to be 
             # consistent with how we defined under PupilFitting.detect_visible_pupil_area
             visible_portion = -1.0 
-            for frame_num in tdqm(range(video.nframes)):
+            for frame_num in tqdm(range(video.nframes)):
                 ckey = contours[frame_num]
 
                 if ckey['contour'] is not None:
@@ -879,17 +854,16 @@ class FittedPupil(dj.Computed):
             config['shuffle'] = dlc_config['shuffle']
             config['trainingsetindex'] = dlc_config['trainingsetindex']
 
-            # find path to compressed_cropped_video
+            # find path to original video symlink
             base_path = os.path.splitext((Eye() & key).get_video_path())[0] + '_tracking'
-            
-            for root, _, files in os.walk(base_path):
-                for file in files:
-                    if file.endswith('compressed_cropped.avi'):
-                        cc_vid_path = os.path.join(root, file)
+            video_path = os.path.join(base_path, os.path.basename((Eye() & key).get_video_path()))
 
-            config['video_path'] = cc_vid_path
+            config['orig_video_path'] = video_path
 
-            pupil_fit = DLC_tools.PupilFitting(config=config, bodyparts='all')
+            # find croppoing coords
+            coords = (Tracking.Deeplabcut & key).fetch1('cropped_x0','cropped_x1','cropped_y0','cropped_y1')
+
+            pupil_fit = DLC_tools.PupilFitting(config=config, bodyparts='all', cropped=True, cropped_coords=coords)
 
             for frame_num in tqdm(range(pupil_fit.clip.nframes)):
 

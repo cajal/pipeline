@@ -949,7 +949,7 @@ class ManualTracker:
         return thres, blur, mask
 
     def find_contours(self, thres):
-        _, contours, hierarchy = cv2.findContours(thres.copy(), cv2.RETR_TREE,
+        contours, hierarchy = cv2.findContours(thres, cv2.RETR_TREE,
                                                   cv2.CHAIN_APPROX_SIMPLE)  # remove copy when cv2=3.2 is installed
         if len(contours) > 1:
             contours = [c for i, c in enumerate(contours) if hierarchy[0, i, 3] == -1]
