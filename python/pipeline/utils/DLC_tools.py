@@ -886,17 +886,21 @@ def make_short_video(tracking_dir):
     minutes, seconds = divmod(duration, 60)
     hours, minutes = divmod(minutes, 60)
 
-    print('\nMaking a short video!')
+    if os.path.exists(out_vid_path):
+        print('\nShort video already exists!')
 
-    cmd = ['ffmpeg', '-i', input_video_path, '-ss',
-           '{}:{}:{}'.format(hours, minutes, seconds), '-t', '5', '-c', 'copy', out_vid_path]
+    else:
+        print('\nMaking a short video!')
 
-    # call ffmpeg to make a short video
-    p = Popen(cmd, stdin=PIPE)
-    # close ffmpeg
-    p.wait()
+        cmd = ['ffmpeg', '-i', input_video_path, '-ss',
+            '{}:{}:{}'.format(hours, minutes, seconds), '-t', '5', '-c', 'copy', out_vid_path]
 
-    print('\nSuccessfully created a short video!')
+        # call ffmpeg to make a short video
+        p = Popen(cmd, stdin=PIPE)
+        # close ffmpeg
+        p.wait()
+
+        print('\nSuccessfully created a short video!')
 
     return out_vid_path, original_width, original_height, mid_frame_num
 
@@ -1053,19 +1057,24 @@ def make_compressed_cropped_video(tracking_dir, cropped_coords):
     out_vid_path = os.path.join(
         tracking_dir, 'compressed_cropped', case + suffix)
 
-    out_w = cropped_coords['cropped_x1'] - cropped_coords['cropped_x0']
-    out_h = cropped_coords['cropped_y1'] - cropped_coords['cropped_y0']
-    print('\nMaking a compressed and cropped video!')
+    if os.path.exists(out_vid_path):
+        # video already exists, do nothing
+        print("\ncompressed and cropped video already exists!")
+    
+    else:
+        out_w = cropped_coords['cropped_x1'] - cropped_coords['cropped_x0']
+        out_h = cropped_coords['cropped_y1'] - cropped_coords['cropped_y0']
+        print('\nMaking a compressed and cropped video!')
 
-    # crf: use value btw 17 and 28 (lower the number, higher the quality of the video)
-    # intra: no compressing over time. only over space
-    cmd = ['ffmpeg', '-i', '{}'.format(input_video_path), '-vcodec', 'libx264', '-crf', '17', '-intra', '-filter:v',
-           "crop={}:{}:{}:{}".format(out_w, out_h, cropped_coords['cropped_x0'], cropped_coords['cropped_y0']), '{}'.format(out_vid_path)]
+        # crf: use value btw 17 and 28 (lower the number, higher the quality of the video)
+        # intra: no compressing over time. only over space
+        cmd = ['ffmpeg', '-i', '{}'.format(input_video_path), '-vcodec', 'libx264', '-crf', '17', '-intra', '-filter:v',
+            "crop={}:{}:{}:{}".format(out_w, out_h, cropped_coords['cropped_x0'], cropped_coords['cropped_y0']), '{}'.format(out_vid_path)]
 
-    # call ffmpeg to make a short video
-    p = Popen(cmd, stdin=PIPE)
-    # close ffmpeg
-    p.wait()
-    print('\nSuccessfully created a compressed & cropped video!\n')
+        # call ffmpeg to make a short video
+        p = Popen(cmd, stdin=PIPE)
+        # close ffmpeg
+        p.wait()
+        print('\nSuccessfully created a compressed & cropped video!\n')
 
     return out_vid_path
