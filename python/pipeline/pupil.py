@@ -825,11 +825,11 @@ class FittedPupil(dj.Computed):
 
                 if contours[frame_num] is not None and len(contours[frame_num].squeeze()) >= 3:
                     x, y, radius = DLC_tools.smallest_enclosing_circle_naive(contours[frame_num].squeeze())
-                        center = (x, y)
-                        self.Circle().insert1(dict(key, frame_id=frame_num,
-                                                   center=center,
-                                                   radius=radius,
-                                                   visible_portion=visible_portion))
+                    center = (x, y)
+                    self.Circle().insert1(dict(key, frame_id=frame_num,
+                                                center=center,
+                                                radius=radius,
+                                                visible_portion=visible_portion))
                 
                 if contours[frame_num] is not None and len(contours[frame_num]) >= 6:
                         rotated_rect = cv2.fitEllipse(ckey['contour'].squeeze())
@@ -840,7 +840,6 @@ class FittedPupil(dj.Computed):
                                             rotation_angle=rotated_rect[2],
                                             visible_portion=visible_portion))
 
-)
 
         # deeplabcut 2
         elif key['tracking_method'] == 2:
