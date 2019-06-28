@@ -800,7 +800,7 @@ class FittedPupil(dj.Computed):
             avi_path = (Eye & key).get_video_path()
 
             contours = (Tracking.ManualTracking & key).fetch(
-                order_by='frame_id ASC', as_dict=True)
+                'contour', order_by='frame_id ASC')
             
             video = DLC_tools.video_processor.VideoProcessorCV(fname=avi_path)
 
@@ -808,28 +808,30 @@ class FittedPupil(dj.Computed):
             # consistent with how we defined under PupilFitting.detect_visible_pupil_area
             visible_portion = -1.0 
             for frame_num in tqdm(range(video.nframes)):
-                ckey = contours[frame_num]
 
-                if ckey['contour'] is not None:
+                if contours[frame_num] is None or len(contours[frame_num].squeeze()) < 3:
+                    self.Circle().insert1(dict(key, frame_id=frame_num,
+                                                center=None,
+                                                radius=None,
+                                                visible_portion=-3.0))
+                
+                if contours[frame_num] is None or len(contours[frame_num].squeeze()) < 6:
+                    self.Ellipse().insert1(dict(key, frame_id=frame_num, 
+                                            center=None,
+                                            major_radius=None,
+                                            minor_radius=None,
+                                            rotation_angle=None,
+                                            visible_portion=-3.0))
 
-                    # fit circle. This is consistent with fitting method for DLC
-                    if len(ckey['contour']) >= 3:
-                        x, y, radius = DLC_tools.smallest_enclosing_circle_naive(ckey['contour'].squeeze())
+                if contours[frame_num] is not None and len(contours[frame_num].squeeze()) >= 3:
+                    x, y, radius = DLC_tools.smallest_enclosing_circle_naive(contours[frame_num].squeeze())
                         center = (x, y)
                         self.Circle().insert1(dict(key, frame_id=frame_num,
                                                    center=center,
                                                    radius=radius,
                                                    visible_portion=visible_portion))
-                    else:
-                        # if less than 3, then we do not have enough pupil labels nor
-                        # we have eyelid labels
-                        self.Circle().insert1(dict(key, frame_id=frame_num,
-                                                   center=None,
-                                                   radius=None,
-                                                   visible_portion=-3.0))   
-
-                    # fit ellipse. This is consistent with fitting method for DLC
-                    if len(ckey['contour']) >= 6:
+                
+                if contours[frame_num] is not None and len(contours[frame_num]) >= 6:
                         rotated_rect = cv2.fitEllipse(ckey['contour'].squeeze())
                         self.Ellipse().insert1(dict(key, frame_id=frame_num,
                                             center=rotated_rect[0],
@@ -837,15 +839,8 @@ class FittedPupil(dj.Computed):
                                             minor_radius=rotated_rect[1][0]/2.0,
                                             rotation_angle=rotated_rect[2],
                                             visible_portion=visible_portion))
-                    else:
-                        # if less than 3, then we do not have enough pupil labels nor
-                        # we have eyelid labels
-                        self.Ellipse().insert1(dict(key, frame_id=frame_num, 
-                                            center=None,
-                                            major_radius=None,
-                                            minor_radius=None,
-                                            rotation_angle=None,
-                                            visible_portion=-3.0))
+
+)
 
         # deeplabcut 2
         elif key['tracking_method'] == 2:
