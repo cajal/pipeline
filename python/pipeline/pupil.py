@@ -832,7 +832,7 @@ class FittedPupil(dj.Computed):
                                                 visible_portion=visible_portion))
                 
                 if contours[frame_num] is not None and len(contours[frame_num]) >= 6:
-                        rotated_rect = cv2.fitEllipse(ckey['contour'].squeeze())
+                        rotated_rect = cv2.fitEllipse(contours[frame_num].squeeze())
                         self.Ellipse().insert1(dict(key, frame_id=frame_num,
                                             center=rotated_rect[0],
                                             major_radius=rotated_rect[1][1]/2.0,
