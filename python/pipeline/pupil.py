@@ -878,3 +878,131 @@ class FittedPupil(dj.Computed):
                                     rotation_angle=fit_dict['ellipse_fit']['rotation_angle'],
                                     visible_portion=fit_dict['ellipse_visible']['visible_portion']))
         
+
+def plot_fitting(key, start, end=-1, fit_type='Circle'):
+    """Plot the fitted frame. Note this plotting method only works for Circle, not an ellipse
+
+    Args:
+        key (dict): A dictionary that contains animal_id, session, scan_idx, and tracking_method as keys
+        start (int): A number indicating the start of the frame. 
+            If only start is provided, then plot only one frame.
+        end (int, optional): A number indicating the end of the frame. 
+            If both start and end provided, then plot multiple frames. Otherwise, Default to -1.
+        type (str, optional): A string indicating what to plot. Default to 'Circle'. Other option is 'Ellipse'
+    
+    Returns:
+        None
+
+    """
+    from IPython import display
+    import pylab as pl
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Ellipse
+    import time
+
+    if 'tracking_method' not in key.keys():
+        raise KeyError('tracking_method is not define!')
+
+    if end == -1:
+        end = start + 1
+
+    fit_type = fit_type.lower()
+    if fit_type not in ['circle', 'ellipse']:
+        raise ValueError('fit_type must be either circle or ellipse')
+
+    if fit_type == 'circle':
+        center, radius = (FittedPupil.Circle() & key & 'frame_id >= {}'.format(start) & 'frame_id < {}'.format(end+1)).fetch(
+            'center','radius',order_by ='frame_id')
+    else:
+        center, major_r, minor_r, angle = (FittedPupil.Ellipse() & key & 'frame_id >= {}'.format(start) & 'frame_id < {}'.format(end+1)).fetch(
+            'center','major_radius', 'minor_radius', 'rotation_angle', order_by ='frame_id')
+    
+    # get video path 
+    avi_path = (Eye & key).get_video_path()
+    cap = cv2.VideoCapture(avi_path)
+
+    # find croppoing coords
+    # It is possible that the provided key was not tracked with DLC. Then cropped_coords is the same size as the original frame size
+    if len(Tracking.Deeplabcut & dict(key, tracking_method=2)) == 0:
+        cropped_coords = (0, int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), 0, int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT)) )
+    elif len(Tracking.Deeplabcut & dict(key, tracking_method=2)) == 1:
+        cropped_coords = (Tracking.Deeplabcut & dict(key, tracking_method=2)).fetch1('cropped_x0','cropped_x1','cropped_y0','cropped_y1')
+    else:
+        raise ValueError('Fitting is corrupted! Ensure that Tracking.Deeplabcut & dict(key, tracking_method=2) is unique!')
+
+    if key['tracking_method'] == 1:
+        # manual
+        contours = (Tracking.ManualTracking & key & 'frame_id >= {}'.format(start) & 'frame_id < {}'.format(end+1)).fetch(
+            'contour', order_by ='frame_id')
+
+        # prepare plotting
+        fig = plt.figure(frameon=False, figsize=(12,8))
+        ax = fig.add_subplot(1, 1, 1)
+        plt.subplots_adjust(left=0, bottom=0, right=1,
+                            top=1, wspace=0, hspace=0)
+        plt.xlim(0, cap.get(cv2.CAP_PROP_FRAME_WIDTH) - cropped_coords[0])
+        plt.ylim(0, cap.get(cv2.CAP_PROP_FRAME_HEIGHT) - cropped_coords[2])
+
+        plt.gca().invert_yaxis()
+                
+        for frame_num in range(start, end):
+
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_num)
+            _, img = cap.read()
+            img = np.flip(img, 2)[cropped_coords[2]: cropped_coords[3], cropped_coords[0]: cropped_coords[1]]
+            
+            ax_frame = ax.imshow(img, cmap='gray')
+            
+            if contours[frame_num-start] is not None:
+                ind = frame_num-start
+                
+                if fit_type == 'circle':
+                    
+                    plt_fit = plt.Circle((center[ind][0]-cropped_coords[0], center[ind][1]-cropped_coords[2]), 
+                                        radius[ind], color='b', fill=False)
+
+                else:
+                    plt_fit = Ellipse((center[ind][0]-cropped_coords[0], center[ind][1]-cropped_coords[2]), 
+                                        major_r[ind]*2, minor_r[ind]*2, angle[ind]-90, color='b',fill=False)
+
+                ax.add_artist(plt_fit)
+                ax.scatter(contours[ind].squeeze()[:,0] - cropped_coords[0], 
+                            contours[ind].squeeze()[:,1] - cropped_coords[2], 
+                            s=4**2, color='red', alpha=.5)
+
+            plt.axis('off')
+            plt.title('frame num: ' + str(frame_num), fontsize=30)
+            plt.tight_layout()
+
+            fig.canvas.draw()
+
+            display.clear_output(wait=True)
+            display.display(pl.gcf())
+            time.sleep(0.5)
+
+            plt.cla()
+        plt.close('all')
+
+    elif key['tracking_method'] == 2:
+        # deeplabcut
+        dlc_config = (ConfigDeeplabcut & (Tracking.Deeplabcut & key)).fetch1()
+
+        config = auxiliaryfunctions.read_config(dlc_config['config_path'])
+        config['config_path'] = dlc_config['config_path']
+        config['shuffle'] = dlc_config['shuffle']
+        config['trainingsetindex'] = dlc_config['trainingsetindex']
+
+        # find path to original video symlink
+        base_path = os.path.splitext((Eye() & key).get_video_path())[0] + '_tracking'
+        video_path = os.path.join(base_path, os.path.basename((Eye() & key).get_video_path()))
+
+        config['orig_video_path'] = video_path
+        
+        pupil_fit = DLC_tools.PupilFitting(config=config, bodyparts='all', cropped=True, cropped_coords=cropped_coords)
+        
+        if end != start:
+            pupil_fit.plot_fitted_multi_frames(start=start, end=end, fitting_method = fit_type)
+        
+        else:
+            pupil_fit.plot_fitted_frame(start, fitting_method=fit_type)
+    
