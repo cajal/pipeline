@@ -789,6 +789,9 @@ class PupilFitting(PlotBodyparts):
         if save_fig:
             plt.savefig(os.path.join(
                 self.compressed_cropped_dir_path, 'fitted_frame_' + str(frame_num) + '.png'))
+        
+        if ax is not None:
+            return ax
 
     def plot_fitted_multi_frames(self, start, end, fitting_method='circle', save_gif=False):
 
