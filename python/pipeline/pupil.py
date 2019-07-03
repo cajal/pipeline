@@ -879,7 +879,7 @@ class FittedPupil(dj.Computed):
                                     visible_portion=fit_dict['ellipse_visible']['visible_portion']))
         
 
-def plot_fitting(key, start, end=-1, fit_type='Circle'):
+def plot_fitting(key, start, end=-1, fit_type='Circle', ax=None):
     """Plot the fitted frame. Note this plotting method only works for Circle, not an ellipse
 
     Args:
@@ -889,6 +889,7 @@ def plot_fitting(key, start, end=-1, fit_type='Circle'):
         end (int, optional): A number indicating the end of the frame. 
             If both start and end provided, then plot multiple frames. Otherwise, Default to -1.
         type (str, optional): A string indicating what to plot. Default to 'Circle'. Other option is 'Ellipse'
+        ax (:obj matplotlib.axes._subplots.AxesSubplot, optional): Axes object to pass. Dafualt to None
     
     Returns:
         None
@@ -930,20 +931,20 @@ def plot_fitting(key, start, end=-1, fit_type='Circle'):
     else:
         raise ValueError('Fitting is corrupted! Ensure that Tracking.Deeplabcut & dict(key, tracking_method=2) is unique!')
 
+    # prepare plotting
+    fig = plt.figure(frameon=False, figsize=(12,8))
+    ax = fig.add_subplot(1, 1, 1)
+    plt.subplots_adjust(left=0, bottom=0, right=1,
+                        top=1, wspace=0, hspace=0)
+    plt.xlim(0, cap.get(cv2.CAP_PROP_FRAME_WIDTH) - cropped_coords[0])
+    plt.ylim(0, cap.get(cv2.CAP_PROP_FRAME_HEIGHT) - cropped_coords[2])
+
+    plt.gca().invert_yaxis()
+
     if key['tracking_method'] == 1:
         # manual
         contours = (Tracking.ManualTracking & key & 'frame_id >= {}'.format(start) & 'frame_id < {}'.format(end+1)).fetch(
             'contour', order_by ='frame_id')
-
-        # prepare plotting
-        fig = plt.figure(frameon=False, figsize=(12,8))
-        ax = fig.add_subplot(1, 1, 1)
-        plt.subplots_adjust(left=0, bottom=0, right=1,
-                            top=1, wspace=0, hspace=0)
-        plt.xlim(0, cap.get(cv2.CAP_PROP_FRAME_WIDTH) - cropped_coords[0])
-        plt.ylim(0, cap.get(cv2.CAP_PROP_FRAME_HEIGHT) - cropped_coords[2])
-
-        plt.gca().invert_yaxis()
                 
         for frame_num in range(start, end):
 
@@ -1004,5 +1005,5 @@ def plot_fitting(key, start, end=-1, fit_type='Circle'):
             pupil_fit.plot_fitted_multi_frames(start=start, end=end, fitting_method = fit_type)
         
         else:
-            pupil_fit.plot_fitted_frame(start, fitting_method=fit_type)
+            pupil_fit.plot_fitted_frame(start, ax=ax, fitting_method=fit_type)
     
