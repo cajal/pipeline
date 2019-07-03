@@ -879,7 +879,7 @@ class FittedPupil(dj.Computed):
                                     visible_portion=fit_dict['ellipse_visible']['visible_portion']))
         
 
-def plot_fitting(key, start, end=-1, fit_type='Circle', ax=None):
+def plot_fitting(key, start, end=-1, fit_type='Circle', mask=True, fig=None, ax=None):
     """Plot the fitted frame. Note this plotting method only works for Circle, not an ellipse
 
     Args:
@@ -892,8 +892,8 @@ def plot_fitting(key, start, end=-1, fit_type='Circle', ax=None):
         ax (:obj matplotlib.axes._subplots.AxesSubplot, optional): Axes object to pass. Dafualt to None
     
     Returns:
-        None
-
+        ax (:obj matplotlib.axes._subplots.AxesSubplot, optional): Axes object to pass. if ax provided as an arg,
+            return the same ax object
     """
     from IPython import display
     import pylab as pl
@@ -909,7 +909,7 @@ def plot_fitting(key, start, end=-1, fit_type='Circle', ax=None):
 
     fit_type = fit_type.lower()
     if fit_type not in ['circle', 'ellipse']:
-        raise ValueError('fit_type must be either circle or ellipse')
+        raise ValueError('fit_type must be either a circle or an ellipse')
 
     if fit_type == 'circle':
         center, radius = (FittedPupil.Circle() & key & 'frame_id >= {}'.format(start) & 'frame_id < {}'.format(end+1)).fetch(
@@ -932,10 +932,11 @@ def plot_fitting(key, start, end=-1, fit_type='Circle', ax=None):
         raise ValueError('Fitting is corrupted! Ensure that Tracking.Deeplabcut & dict(key, tracking_method=2) is unique!')
 
     # prepare plotting
-    fig = plt.figure(frameon=False, figsize=(12,8))
-    ax = fig.add_subplot(1, 1, 1)
-    plt.subplots_adjust(left=0, bottom=0, right=1,
-                        top=1, wspace=0, hspace=0)
+    if ax is None:    
+        fig = plt.figure(frameon=False, figsize=(12,8))
+        ax = fig.add_subplot(1, 1, 1)
+        plt.subplots_adjust(left=0, bottom=0, right=1,
+                            top=1, wspace=0, hspace=0)
     plt.xlim(0, cap.get(cv2.CAP_PROP_FRAME_WIDTH) - cropped_coords[0])
     plt.ylim(0, cap.get(cv2.CAP_PROP_FRAME_HEIGHT) - cropped_coords[2])
 
@@ -966,16 +967,20 @@ def plot_fitting(key, start, end=-1, fit_type='Circle', ax=None):
                     plt_fit = Ellipse((center[ind][0]-cropped_coords[0], center[ind][1]-cropped_coords[2]), 
                                         major_r[ind]*2, minor_r[ind]*2, angle[ind]-90, color='b',fill=False)
 
-                ax.add_artist(plt_fit)
-                ax.scatter(contours[ind].squeeze()[:,0] - cropped_coords[0], 
+                ax.add_patch(plt_fit)
+                ax_scatter = ax.scatter(contours[ind].squeeze()[:,0] - cropped_coords[0], 
                             contours[ind].squeeze()[:,1] - cropped_coords[2], 
                             s=4**2, color='red', alpha=.5)
+                # ax.add_collection(ax_scatter)
 
-            plt.axis('off')
-            plt.title('frame num: ' + str(frame_num), fontsize=30)
+            ax.axis('off')
+            ax.set_title('frame num: ' + str(frame_num), fontsize=10)
             plt.tight_layout()
 
             fig.canvas.draw()
+            # check if we plot only a single frame. If so, return fig and ax
+            if end == start + 1:
+                return fig, ax
 
             display.clear_output(wait=True)
             display.display(pl.gcf())
@@ -1000,10 +1005,24 @@ def plot_fitting(key, start, end=-1, fit_type='Circle', ax=None):
         config['orig_video_path'] = video_path
         
         pupil_fit = DLC_tools.PupilFitting(config=config, bodyparts='all', cropped=True, cropped_coords=cropped_coords)
-        
-        if end != start:
-            pupil_fit.plot_fitted_multi_frames(start=start, end=end, fitting_method = fit_type)
+
+        # play with these parameters for better visualization of the fitting
+        pupil_fit.line_thickness = 2
+        pupil_fit.fontsize = 10
+        pupil_fit.circle_color = (0,0,255)
+        pupil_fit.ellipse_color = (0,0,255)
+        pupil_fit.dotsize = 4
+
+        if end == start + 1:
+            # only a single frame
+            ax = pupil_fit.plot_fitted_frame(start, ax=ax, fitting_method=fit_type)
+
+            # remove mask (i.e. visible area)
+            if not mask:
+                del ax.images[1]
+
+            return fig, ax
         
         else:
-            pupil_fit.plot_fitted_frame(start, ax=ax, fitting_method=fit_type)
-    
+            pupil_fit.plot_fitted_multi_frames(start=start, end=end, fitting_method = fit_type)
+        
