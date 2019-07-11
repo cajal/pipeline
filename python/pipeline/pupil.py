@@ -942,8 +942,8 @@ class FittedPupil(dj.Computed):
         
 
         # now filter out the outliers by 5.5 std away from mean
-        data_circle = self.filter_by_std(data_circle,fitting_method='circle', std=5.5)
-        data_ellipse = self.filter_by_std(data_ellipse,fitting_method='ellipse', std=5.5)
+        data_circle = self.filter_by_std(data_circle,fitting_method='circle', std_magnitude=5.5)
+        data_ellipse = self.filter_by_std(data_ellipse,fitting_method='ellipse', std_magnitude=5.5)
 
         # insert data
         self.Circle.insert(data_circle)
