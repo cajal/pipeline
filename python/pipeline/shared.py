@@ -153,7 +153,8 @@ class TrackingMethod(dj.Lookup):
         [1, 'manual', 'manually tracking', 'python'],
         [2, 'deeplabcut', 'automatically tracking using deeplabcut package', 'python'],
     ]
-    
+
+@schema
 class SurfaceMethod(dj.Lookup):
     definition = """ # Methods used to compute surface of the brain
 
