@@ -1004,6 +1004,7 @@ def plot_fitting(key, start, end=-1, fit_type='Circle', fig=None, ax=None, mask_
         config['config_path'] = dlc_config['config_path']
         config['shuffle'] = dlc_config['shuffle']
         config['trainingsetindex'] = dlc_config['trainingsetindex']
+        config['cropped_coords'] =cropped_coords
 
         # find path to original video symlink
         base_path = os.path.splitext(avi_path)[0] + '_tracking'
@@ -1011,7 +1012,7 @@ def plot_fitting(key, start, end=-1, fit_type='Circle', fig=None, ax=None, mask_
 
         config['orig_video_path'] = video_path
         
-        pupil_fit = DLC_tools.PupilFitting(config=config, bodyparts='all', cropped=True, cropped_coords=cropped_coords)
+        pupil_fit = DLC_tools.PupilFitting(config=config, bodyparts='all', cropped=True)
 
         # play with these parameters for better visualization of the fitting
         pupil_fit.line_thickness = 2
