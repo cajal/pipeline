@@ -789,7 +789,7 @@ class FittedPupil(dj.Computed):
         visible_portion=NULL     : float         # portion of visible pupil area given a fitted ellipse frame. Please refer DLC_tools.PupilFitting.detect_visible_pupil_area for more details
         """
 
-    def filter_by_std(self, data, fitting_method, std_magnitude=5.5, ):
+    def filter_by_std(self, data, fitting_method, std_magnitude=5.5):
         """Filter out outliers based on std specified by user. The outliers are replaced by np.nan
 
         Args:
@@ -808,46 +808,48 @@ class FittedPupil(dj.Computed):
         if fitting_method.lower() == 'circle':
             # filter out circles
             data = np.array(data)
-            center, radius = data[5], data[6]
+            center, radius = data[:,5], data[:,6].astype(np.float64)
 
             detectedFrames = ~np.isnan(radius)
             xy = np.full((len(radius), 2), np.nan)
             xy[detectedFrames, :] = np.vstack(center[detectedFrames])
 
-            x = center[:,0]
-            y = center[:,1]
+            x = xy[:,0]
+            y = xy[:,1]
             
             rejected_radius_ind = np.greater(abs(radius - np.nanmean(radius)), std_magnitude * np.nanstd(radius), where=~np.isnan(radius))
             rejected_x_ind = np.greater(abs(x - np.nanmean(x)), std_magnitude * np.nanstd(x), where=~np.isnan(x))
             rejected_y_ind = np.greater(abs(y - np.nanmean(y)), std_magnitude * np.nanstd(y), where=~np.isnan(y))
-            final_ind = np.logical_or(np.logical_or(rejected_radius_ind, rejected_x_ind), rejected_y_ind)
+            
+            rejected_ind = np.logical_or(np.logical_or(rejected_radius_ind, rejected_x_ind), rejected_y_ind)
 
-            # loop through outlier indices and reject them
-            data[final_ind,5:] = (np.nan, np.nan), np.nan, -3.0
+            # reject the outlier indices
+            data[rejected_ind,5:] = None, None, -3.0
         
         elif fitting_method.lower() == 'ellipse':
 
             # filter out ellipses
             data = np.array(data)
-            center, major_r, minor_r = data[5], data[6], data[7]
+            center, major_r, minor_r = data[:,5], data[:,6].astype(np.float64), data[:,7].astype(np.float64)
 
             detectedFrames = ~np.isnan(major_r)
-            xy = np.full((len(radius), 2), np.nan)
+            xy = np.full((len(major_r), 2), np.nan)
             xy[detectedFrames, :] = np.vstack(center[detectedFrames])
 
-            x = center[:,0]
-            y = center[:,1]
+            x = xy[:,0]
+            y = xy[:,1]
             
             rejected_major_r_ind = np.greater(abs(major_r - np.nanmean(major_r)), std_magnitude * np.nanstd(major_r), where=~np.isnan(major_r))
             rejected_minor_r_ind = np.greater(abs(minor_r - np.nanmean(minor_r)), std_magnitude * np.nanstd(minor_r), where=~np.isnan(minor_r))
             rejected_x_ind = np.greater(abs(x - np.nanmean(x)), std_magnitude * np.nanstd(x), where=~np.isnan(x))
             rejected_y_ind = np.greater(abs(y - np.nanmean(y)), std_magnitude * np.nanstd(y), where=~np.isnan(y))
-            final_ind = np.logical_or(np.logical_or(np.logical_or(rejected_major_r_ind, rejected_minor_r_ind), rejected_x_ind), rejected_y_ind)
 
-            # loop through outlier indices and reject them
-            data[final_ind,5:] = (np.nan, np.nan), np.nan, np.nan, -3.0
+            rejected_ind = np.logical_or(np.logical_or(np.logical_or(rejected_major_r_ind, rejected_minor_r_ind), rejected_x_ind), rejected_y_ind)
 
-            return data.tolist()
+            # reject the outlier indices
+            data[rejected_ind,5:] = None, None, None, None, -3.0
+
+        return data.tolist()
 
 
     def make(self, key):
@@ -873,7 +875,7 @@ class FittedPupil(dj.Computed):
             # consistent with how we defined under PupilFitting.detect_visible_pupil_area
             visible_portion = -1.0 
 
-            for frame_num in tqdm(nframes):
+            for frame_num in tqdm(range(nframes)):
 
                 if contours[frame_num] is None or len(contours[frame_num].squeeze()) < 3:
                                         
@@ -885,7 +887,7 @@ class FittedPupil(dj.Computed):
 
                 if contours[frame_num] is not None and len(contours[frame_num].squeeze()) >= 3:
                     x, y, radius = DLC_tools.smallest_enclosing_circle_naive(contours[frame_num].squeeze())
-                    center = (x, y)
+                    center = np.array(x, y)
 
                     data_circle.append([*common_entry, frame_num, center, radius, visible_portion])
                 
@@ -919,7 +921,7 @@ class FittedPupil(dj.Computed):
 
             pupil_fit = DLC_tools.PupilFitting(config=config, bodyparts='all', cropped=True)
 
-            for frame_num in tqdm(nframes):
+            for frame_num in tqdm(range(nframes)):
 
                 fit_dict = pupil_fit.fitted_core(frame_num=frame_num)
 
@@ -928,6 +930,8 @@ class FittedPupil(dj.Computed):
                 radius=fit_dict['circle_fit']['radius']
                 visible_portion=fit_dict['circle_visible']['visible_portion']
 
+                data_circle.append([*common_entry, frame_num, center, radius, visible_portion])
+
                 # ellipse info
                 center=fit_dict['ellipse_fit']['center']
                 major_radius=fit_dict['ellipse_fit']['major_radius']
@@ -935,19 +939,17 @@ class FittedPupil(dj.Computed):
                 rotation_angle=fit_dict['ellipse_fit']['rotation_angle']
                 visible_portion=fit_dict['ellipse_visible']['visible_portion']
 
-                data_circle.append([*common_entry, frame_num, center, radius, visible_portion])
                 data_ellipse.append([*common_entry, frame_num, center, 
                                             major_radius, minor_radius, 
                                             rotation_angle, visible_portion])
         
-
         # now filter out the outliers by 5.5 std away from mean
         data_circle = self.filter_by_std(data_circle,fitting_method='circle', std_magnitude=5.5)
         data_ellipse = self.filter_by_std(data_ellipse,fitting_method='ellipse', std_magnitude=5.5)
 
         # insert data
         self.Circle.insert(data_circle)
-        self.Ellipse.inser(data_ellipse)
+        self.Ellipse.insert(data_ellipse)
 
 def plot_fitting(key, start, end=-1, fit_type='Circle', fig=None, ax=None, mask_flag=True):
     """Plot the fitted frame. Note this plotting method only works for Circle, not an ellipse
