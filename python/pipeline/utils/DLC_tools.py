@@ -17,10 +17,10 @@ import os
 # disable DLC GUI
 os.environ["DLClight"] = "True"
 
-import deeplabcut as dlc
-from deeplabcut.utils import auxiliaryfunctions
-from deeplabcut.utils import video_processor
 from deeplabcut.utils import plotting
+from deeplabcut.utils import video_processor
+from deeplabcut.utils import auxiliaryfunctions
+import deeplabcut as dlc
 
 def key_dict_generater(case):
     case_key = {'animal_id': None, 'session': None, 'scan_idx': None}
@@ -87,7 +87,7 @@ def smallest_enclosing_circle_naive(points):
 
 class PlotBodyparts():
 
-    def __init__(self, config, bodyparts='all', cropped=False, cropped_coords=None):
+    def __init__(self, config, bodyparts='all', cropped=False):
         """
         Input:
             config: dictionary
@@ -110,13 +110,14 @@ class PlotBodyparts():
             self.bodyparts = self.config['bodyparts']
 
         self.cropped = cropped
-        self.cropped_coords = cropped_coords
+        self.cropped_coords = config['cropped_coords']
 
         self.shuffle = self.config['shuffle']
         self.trainingsetindex = self.config['trainingsetindex']
 
         self.project_path = self.config['project_path']
         self.orig_video_path = self.config['orig_video_path']
+        self.base_dir = os.path.dirname(self.orig_video_path)
         self.compressed_cropped_dir_path = os.path.join(
             os.path.dirname(self.orig_video_path), 'compressed_cropped')
         self._case = os.path.basename(config['orig_video_path']).split('.')[0]
@@ -145,6 +146,10 @@ class PlotBodyparts():
 
             self.nx = self.clip.width()
             self.ny = self.clip.height()
+            self.df_bodyparts_x = self.df_bodyparts.iloc[:,
+                                                         self.df_bodyparts.columns.get_level_values(1) == 'x'] + self.cropped_coords[0]
+            self.df_bodyparts_y = self.df_bodyparts.iloc[:,
+                                                         self.df_bodyparts.columns.get_level_values(1) == 'y'] + self.cropped_coords[2]
 
         else:
 
@@ -297,7 +302,7 @@ class PlotBodyparts():
 
         return fig, ax
 
-    def plot_core(self, fig, ax, frame_num):
+    def plot_core(self, ax, frame_num):
         # it's given in 3 channels but every channel is the same i.e. grayscale
         image = self.clip._read_specific_frame(frame_num)
 
@@ -319,12 +324,12 @@ class PlotBodyparts():
 
         return {'ax_frame': ax_frame, 'ax_scatter': ax_scatter}
 
-    def plot_one_frame(self, frame_num, save_fig=False):
+    def plot_one_frame(self, frame_num, ax=None, save_fig=False):
         # TODO refactor to reflect the sytle of plot_fitted_frame
+        if ax is None:
+            fig, ax = self.configure_plot()
 
-        fig, ax = self.configure_plot()
-
-        ax_dict = self.plot_core(fig, ax, frame_num)
+        ax_dict = self.plot_core(ax, frame_num)
 
         ax.axis('off')
         ax.set_title('frame num: ' + str(frame_num), fontsize=self.fontsize)
@@ -335,15 +340,17 @@ class PlotBodyparts():
                 self.video_path.split('.')[0] + '_frame_' + str(frame_num) + '.png'))
 
         # return ax_dict
+        if ax is not None:
+            return ax
 
     def plot_multi_frames(self, start, end, save_gif=False):
 
-        plt_list = []
-
         fig, ax = self.configure_plot()
 
+        plt_list = []
+
         for frame_num in range(start, end):
-            ax_dict = self.plot_core(fig, ax, frame_num)
+            ax_dict = self.plot_core(ax, frame_num)
 
             plt.axis('off')
             plt.title('frame num: ' + str(frame_num), fontsize=self.fontsize)
@@ -370,9 +377,41 @@ class PlotBodyparts():
 
         plt.close('all')
 
+    def make_movie(self, start, end):
+
+        import matplotlib.animation as animation
+
+        # initlize with start frame
+        fig, ax = self.configure_plot()
+
+        self.plot_one_frame(frame_num=start, ax=ax)
+
+        def update_frame(frame_num):
+
+            # clear out the axis
+            plt.cla()
+
+            self.plot_one_frame(frame_num=frame_num, ax=ax)
+
+        ani = animation.FuncAnimation(fig, update_frame, range(
+            start+1, end))  # , interval=int(1/self.clip.FPS)
+        # ani = animation.FuncAnimation(fig, self.plot_fitted_frame, 10)
+        writer = animation.writers['ffmpeg'](fps=self.clip.FPS)
+
+        # dpi=self.dpi, fps=self.clip.FPS
+        if self.cropped:
+            crop_flag = 'cropped'
+        else:
+            crop_flag = 'orig'
+        save_video_path = os.path.join(self.base_dir,
+                                       '{}_{}_{}_labeled.avi'.format(crop_flag,start, end))
+        ani.save(save_video_path, writer=writer, dpi=self.dpi)
+
+        return ani
+
 
 class PupilFitting(PlotBodyparts):
-    def __init__(self, config, bodyparts='all', cropped=False, cropped_coords=None):
+    def __init__(self, config, bodyparts='all', cropped=False):
         """
         Input:
             config: dictionary
@@ -383,7 +422,7 @@ class PupilFitting(PlotBodyparts):
 
         """
         super().__init__(config, bodyparts=bodyparts,
-                         cropped=cropped, cropped_coords=cropped_coords)
+                         cropped=cropped)
 
         self.complete_eyelid_graph = {'eyelid_top': 'eyelid_top_right',
                                       'eyelid_top_right': 'eyelid_right',
@@ -876,9 +915,13 @@ class PupilFitting(PlotBodyparts):
         # ani = animation.FuncAnimation(fig, self.plot_fitted_frame, 10)
         writer = animation.writers['ffmpeg'](fps=self.clip.FPS)
 
-        # dpi=self.dpi, fps=self.clip.FPS
-        save_video_path = self.video_path.split('.')[0] + '_fitted_' + \
-            str(start) + '_' + str(end) + '_labeled.avi'
+        if self.cropped:
+            crop_flag = 'cropped'
+        else:
+            crop_flag = 'orig'
+        save_video_path = os.path.join(self.base_dir,
+                                       '{}_{}_{}_labeled.avi'.format(crop_flag,start, end))
+
         ani.save(save_video_path, writer=writer, dpi=self.dpi)
 
         return ani
