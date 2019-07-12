@@ -48,7 +48,7 @@ class SegmentationMethod(dj.Lookup):
 @schema
 class StackSegmMethod(dj.Lookup):
     definition = """ # methods for 3-d stack segmentations
-    stacksegm_method         : tinyint
+    stacksegm_method            : tinyint
     ---
     name                        : varchar(16)
     details                     : varchar(255)
