@@ -1444,8 +1444,8 @@ class Registration(dj.Computed):
         px_z = field_z - stack_z + stack.shape[0] / 2 - 0.5
         mini_stack = stack[max(0, int(round(px_z - rigid_zrange))): int(round(
             px_z + rigid_zrange))]
-        corrs = np.stack(feature.match_template(s, field, pad_input=True) for s in
-                         mini_stack)
+        corrs = np.stack([feature.match_template(s, field, pad_input=True) for s in
+                          mini_stack])
         smooth_corrs = ndimage.gaussian_filter(corrs, 0.7)
 
         # Get results
@@ -2063,8 +2063,8 @@ class RegistrationOverTime(dj.Computed):
             px_z = field_z - stack_z + stack.shape[0] / 2 - 0.5
             mini_stack = stack[max(0, int(round(px_z - rigid_zrange))): int(round(
                 px_z + rigid_zrange))]
-            corrs = np.stack(feature.match_template(s, field, pad_input=True) for s in
-                             mini_stack)
+            corrs = np.stack([feature.match_template(s, field, pad_input=True) for s in
+                              mini_stack])
             smooth_corrs = ndimage.gaussian_filter(corrs, 0.7)
 
             # Get results
@@ -2580,7 +2580,7 @@ class StackSet(dj.Computed):
 
         # Create distance matrix
         # For memory efficiency we use an adjacency list with only the units at less than 10 microns
-        centroids = np.stack(u.centroid for u in units)
+        centroids = np.stack([u.centroid for u in units])
         distance_list = []  # list of triples (distance, unit1, unit2)
         for i in range(len(units)):
             indices, distances = find_close_units(centroids[i], centroids[i + 1:],
