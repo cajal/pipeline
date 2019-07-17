@@ -1,8 +1,8 @@
-version: '2'
+version: '2.3'
 
 services:
   notebook:
-    image: ninai/pipeline
+    image: ninai/stimulus-pipeline:latest
     ports:
       - "8888:8888"
     volumes:
@@ -18,11 +18,11 @@ services:
       - --ip=0.0.0.0
       - --allow-root
       - --NotebookApp.token=''
-      - --no-browser 
+      - --no-browser
 
 
   minion:
-    image: ninai/stimulus-pipeline
+    image: ninai/stimulus-pipeline:latest
     volumes:
       - /mnt/:/mnt/
       - /home/pipeline_data:/tmp/
@@ -32,13 +32,27 @@ services:
       - python3 
       - /data/pipeline/python/scripts/populate-minion.py
 
+
+  minion-gpu:
+    image: ninai/pipeline:tf-gpu
+    runtime: nvidia
+    volumes:
+      - /mnt/:/mnt/
+      - /home/pipeline_data:/tmp/
+      - .:/data/pipeline
+    env_file: .env
+    entrypoint:
+      - python3 
+      - /data/pipeline/python/scripts/populate-minion_gpu.py
+
   
   bash:
-    image: ninai/stimulus-pipeline
+    image: ninai/stimulus-pipeline:latest
     volumes:
       - /mnt/:/mnt/
       - /home/pipeline_data/:/tmp/
-      - .:/data/pipeline/
+      - .:/data/pipeline
+      - /etc/localtime:/etc/localtime:ro
       - /tmp/.X11-unix:/tmp/.X11-unix
     env_file: .env
     environment:
