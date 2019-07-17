@@ -1,0 +1,51 @@
+apiVersion: batch/v1beta1
+kind: CronJob # This tells kubernetes what kind of class it is working with
+metadata:
+  name: minion
+spec:
+  schedule: "0 */1 * * *" # every hour
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      completions: 15  # how many actual completions of that jobs I want (should be > parallelism)
+      parallelism: 15  # how many process in parallel I want
+      template:
+        spec:
+          restartPolicy: Never
+          hostNetwork: true # This option will allow the pod to use the host network for internet access
+          containers:
+          - name: minion
+            image: ninai/stimulus-pipeline:latest
+            volumeMounts:
+            - name: mnt
+              mountPath: /mnt
+            resources:
+              requests:
+                memory: 32Gi
+                # storage: 64Gi
+                cpu: 12 
+            env:
+            - name: DJ_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: dj-login
+                  key: DJ_HOST
+            - name: DJ_USER
+              valueFrom:
+                secretKeyRef:
+                  name: dj-login
+                  key: DJ_USER
+            - name: DJ_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: dj-login
+                  key: DJ_PASS
+            command: ["/bin/sh"]
+            args: ["-c", "python3 /data/pipeline/python/scripts/populate-minion.py"]
+          imagePullSecrets:  # to pull private images
+            - name: docker-login
+          volumes:
+          - name: mnt
+            hostPath:
+              path: /mnt
+#TODO: Restrict to non-gpu machines
