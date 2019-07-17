@@ -295,8 +295,13 @@ classdef OptImageBar < dj.Imported
             params = ne7.mat.getParams(params,varargin);
             
             % find horizontal & verical map keys
-            Hkeys = fetch(map.OptImageBar & (experiment.Session & obj) & 'axis="horizontal"');
-            Vkeys = fetch(map.OptImageBar & (experiment.Session & obj) & 'axis="vertical"');
+            if ~exists(obj & 'axis = "horizontal"') ||  ~exists(obj & 'axis = "vertical"')
+                Hkeys = fetch(map.OptImageBar & (experiment.Session & obj) & 'axis="horizontal"');
+                Vkeys = fetch(map.OptImageBar & (experiment.Session & obj) & 'axis="vertical"');
+            else
+                Hkeys = fetch(obj & 'axis="horizontal"');
+                Vkeys = fetch(obj & 'axis="vertical"');
+            end
             
             % fetch horizontal & vertical maps
             [Hor(:,:,1),Hor(:,:,2),Hor(:,:,3)] = plot(map.OptImageBar & Hkeys(end),'exp',params.exp,'vcontrast',params.vcontrast);
