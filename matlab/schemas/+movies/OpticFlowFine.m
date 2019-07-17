@@ -1,22 +1,28 @@
 %{
 # Optical Flow for all frames using Lucas-Kanade method
+-> movies.OpticFlowOpt
 -> stimulus.MovieClip
 ---
 orientation          : mediumblob   # mean phase angle of optical flow
 magnitude            : mediumblob   # Magnitude of optical flow
 %}
 
-classdef  OpticFlowFine < dj.Imported
+classdef  OpticFlowFine < dj.Computed
+    
+    properties
+        keySource  = stimulus.MovieClip * (movies.OpticFlowOpt & 'process = "yes"')
+    end
+    
     methods(Access=protected)
-        function makeTuples(obj,key) %create clips
-            rsz = 10;
+        function makeTuples(self,key) %create clips
+            [rsz,algorithm,params] = fetch1(movies.OpticFlowOpt & key,'rsz','algorithm','params');
             
             % get video file
             filename = exportMovie(stimulus.MovieClip & key);
             vidReader = VideoReader(filename{1});
             
             % construct optic flow algorithm
-            opticFlow = opticalFlowLK('NoiseThreshold',0.001);
+            opticFlow = eval(sprintf('%s(%s)',algorithm,params));
             
             % initialize
             iframe = 0;
@@ -37,20 +43,33 @@ classdef  OpticFlowFine < dj.Imported
             % insert key
             key.orientation = single(Orientation(:,:,1:iframe));
             key.magnitude =single( Magnitude(:,:,1:iframe));
-            insert( obj, key );
+            insert( self, key );
             
             % cleanup
-            delete(filename)
+            delete(filename{1})
         end
     end
     
     methods
-        function play(self)
+        function play(self,export)
+            
+            if nargin<2
+                export = false;
+            end
+            
             %fetch stuff
             filename = exportMovie(stimulus.MovieClip & self);
             vidReader = VideoReader(filename{1});
             [Orientation,Magnitude] = fetch1(self,'orientation','magnitude');
             sz = size(Orientation);
+            rsz = fetch1(movies.OpticFlowOpt & self,'rsz');
+            
+            if export
+                [~,name] = fileparts(filename);
+                vw = VideoWriter(sprintf('%s_of',name),'MPEG-4');
+                vw.FrameRate = vidReader.FrameRate;
+                open(vw)
+            end
             
             % setup figure
             figure
@@ -63,18 +82,24 @@ classdef  OpticFlowFine < dj.Imported
                 clf
                 image(readFrame(vidReader))
                 hold on
-                quiver(x*10- 9,y*10 - 9,cos(Orientation(:,:,i)).*Magnitude(:,:,i),...
+                quiver(x*rsz- (rsz-1),y*rsz - (rsz-1),cos(Orientation(:,:,i)).*Magnitude(:,:,i),...
                     sin(Orientation(:,:,i)).*Magnitude(:,:,i))
                 set(gca,'YDir','reverse')
                 axis off
                 axis image
-                xlim([-5 sz(2)*10+5])
-                ylim([-5 sz(1)*10+5])
+                xlim([-rsz/2 sz(2)*rsz+rsz/2])
+                ylim([-rsz/2 sz(1)*rsz+rsz/2])
                 drawnow
+                if export
+                   writeVideo(vw, getframe);
+                end
             end
             
             % cleanup
-            delete(filename)
+            delete(filename{1})
+            if export
+                close(vw)
+            end
         end
         
         function avgFlow(self)

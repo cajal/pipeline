@@ -205,32 +205,14 @@ classdef OptImageBar < dj.Imported
                 vessels = single(vessels);
                 
                 % process image range
-                imP = imP - 1.5;
-                imP(imP<-3.14) = imP(imP<-3.14) +3.14*2;
-                imP(imP>3.14) = imP(imP>3.14) -3.14*2;
-                uv =linspace(-3.14,3.14,20) ;
-                n = histc(imP(:),uv);
-                [~,i] = min(n(1:end-1)) ;
-                minmode = uv(i);
-                imP = imP+minmode+3.14;
-                imP(imP<-3.14) = imP(imP<-3.14) +3.14*2;
-                imP(imP>3.14) = imP(imP>3.14) -3.14*2;
-                if ~isempty(params.exp)
-                    imP = imP-nanmedian(imP(:));
-                    imP(imP<-3.14) = imP(imP<-3.14) +3.14*2;
-                    imP(imP>3.14) = imP(imP>3.14) -3.14*2;
-                    imP = imP+params.shift;
-                    imP(imP<0) = normalize(exp((normalize((imP(imP<0)))+1).^params.exp))-1;
-                    imP(imP>0) =  normalize(-exp((normalize((-imP(imP>0)))+1).^params.exp));
-                end
-                imA(imA>prctile(imA(:),99)) = prctile(imA(:),99);
-                
+                imP = wrapTo2Pi(imP);
                 mn = prctile(imP(:),1);
                 mx = prctile(imP(:),99);
                 imP(imP<mn) = mn;
                 imP(imP>mx) = mx;
                 imP = normalize(imP)*2*pi - pi;
-                
+                imA(imA>prctile(imA(:),99)) = prctile(imA(:),99);
+                  
                 % create the hsv map
                 h = imgaussfilt(normalize(imP),params.sigma);
                 s = imgaussfilt(normalize(imA),params.sigma)*params.saturation;

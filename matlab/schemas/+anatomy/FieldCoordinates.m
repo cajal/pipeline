@@ -150,6 +150,7 @@ classdef FieldCoordinates < dj.Manual
             params.exp = 1;
             params.inv = 0;
             params.vcontrast = 1;
+            params.red = 1;
             
             params = ne7.mat.getParams(params,varargin);
             
@@ -212,6 +213,13 @@ classdef FieldCoordinates < dj.Manual
             end
             im(:,:,2) = ne7.mat.normalize(im(:,:,2));
             im = im(mnY+(1:size(ref_map,1)),mnX+(1:size(ref_map,2)),:);
+            
+            if ~params.red
+                A = repmat(im(:,:,1),1,1,3);
+                A(:,:,1) = (im(:,:,2)>0)*.3;
+                A(:,:,2) = normalize(im(:,:,2).^1.5);
+                im = hsv2rgb(A);
+            end
             
             % plot
             if ~nargout
