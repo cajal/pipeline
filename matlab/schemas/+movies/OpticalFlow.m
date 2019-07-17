@@ -17,7 +17,7 @@ classdef  OpticalFlow < dj.Imported
         function makeTuples(obj,key) %create clips
             
             % get video file
-            filename = export(stimulus.MovieClip & key);
+            filename = exportMovie(stimulus.MovieClip & key);
             vidReader = VideoReader(filename{1});
             
             % construct optic flow algorithm

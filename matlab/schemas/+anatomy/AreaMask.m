@@ -10,7 +10,7 @@ mask                     : mediumblob            # mask of area
 
 classdef AreaMask < dj.Manual
     methods
-        function createMasks(obj, key, varargin)
+        function createMasks(self, key, varargin)
             
             params.exp = 1.5;
             params.sigma = 2;
@@ -21,7 +21,7 @@ classdef AreaMask < dj.Manual
             
             % populate if retinotopy map doesn't exist
             ret_key = getRetKey(map.RetMap, key);
-            key = rmfield(ret_key,'ret_idx');
+%             key = rmfield(ret_key,'ret_idx');
             
             % get maps
             background = getBackground(map.RetMap & ret_key, params);
@@ -39,8 +39,8 @@ classdef AreaMask < dj.Manual
                 contiguous = 0;
             end
             
-            if exists(obj & key)
-                [area_map, keys] = getContiguousMask(obj, key,contiguous);
+            if exists(self & key)
+                [area_map, keys] = getContiguousMask(self, key,contiguous);
             else
                 area_map = zeros(size(background,1),size(background,2));
             end
@@ -60,10 +60,10 @@ classdef AreaMask < dj.Manual
                 area_map = single(uint8(imresize(area_map,1/params.downsample,'nearest')));
             end
             
-            % delete previous keys if existed
-            if exists(obj & key)
-                del(anatomy.AreaMask & keys)
-            end
+%             % delete previous keys if existed
+%             if exists(self & key)
+%                 del(anatomy.AreaMask & keys)
+%             end
             
             % image
             figure;
@@ -106,7 +106,7 @@ classdef AreaMask < dj.Manual
             
             if ~contiguous
                 % get field specific area map
-                [field_area_maps, fields] = splitContiguousMask(obj, tuple, area_map);
+                [field_area_maps, fields] = splitContiguousMask(self, tuple, area_map);
             else
                 field_area_maps{1} = area_map;
                 fields(1) = 1;
@@ -124,7 +124,7 @@ classdef AreaMask < dj.Manual
                     % get area name
                     tuple.brain_area = brain_areas{iarea};
                     tuple.mask = field_area_maps{ifield} == iarea;
-                    insert(obj,tuple)
+                    insert(self,tuple)
                 end
             end
         end
@@ -248,6 +248,15 @@ classdef AreaMask < dj.Manual
             params.bcontrast = 0.4;
             params.contrast = 1;
             params.exp = 1;
+            params.sat = 1;
+            params.colors = [];
+            params.linewidth = 1;
+            params.fill = 1;
+            params.restrict = [];
+            params.red = 1;
+            params.fontsize = 12;
+            params.fontcolor = [0.4 0 0];
+            params.vcontrast = 1;
             
             params = ne7.mat.getParams(params,varargin);
             
@@ -256,7 +265,6 @@ classdef AreaMask < dj.Manual
             else
                 contiguous = 0;
             end
-            contiguous = 0;
             
             % get masks
             [area_map, keys, mask_background] = getContiguousMask(obj,fetch(obj),contiguous);
@@ -265,13 +273,13 @@ classdef AreaMask < dj.Manual
             % get maps
             if exists(map.RetMap & (map.RetMapScan &  obj))
                 background = getBackground(map.RetMap & (map.RetMapScan &  obj));
-                for iback = 1:size(background,4);
-                   background(:,:,:,iback) = imadjust(background(:,:,:,iback),[.2 .3 0.2; .65 .65 .65],[0 0 0; 1 1 1]); 
-                end
+%                 for iback = 1:size(background,4);
+%                    background(:,:,:,iback) = imadjust(background(:,:,:,iback),[0 .1 0.2; .65 .65 .65],[0 0 0; 1 1 1]); 
+%                 end
                 % if FieldCoordinates exists add it to the background
-                if exists(anatomy.FieldCoordinates & proj(anatomy.RefMap & obj))
+                if exists(anatomy.FieldCoordinates & proj(anatomy.RefMap & obj) & params.restrict)
                     background = cat(4,background,plot(anatomy.FieldCoordinates & ...
-                        proj(anatomy.RefMap & obj),params));
+                        proj(anatomy.RefMap & obj) & params.restrict,params));
                     if isempty(params.back_idx)
                         params.back_idx = size(background,4);
                     end
@@ -285,23 +293,46 @@ classdef AreaMask < dj.Manual
             
             % merge masks with background
             figure
-            sat = background(:,:,1,1);
-            sat(area_map==0) = 0;
-            im = hsv2rgb(cat(3,ne7.mat.normalize(area_map),sat,background(:,:,1,1)));
+            sat = background(:,:,1,1)*params.sat;
+              sat(area_map==0) = 0;
+%             im = sat;
+%           
+%             if nargin<2 || isempty(params.back_idx) || params.back_idx > size(background,4)
+%                 image((im));
+%             else
+%                  if params.fill
+%                     imshowpair(im,background(:,:,:,params.back_idx)*params.contrast,'blend')
+%                  else
+%                     imshow(background(:,:,:,params.back_idx))
+%                  end
+%             end
+im = hsv2rgb(cat(3,ne7.mat.normalize(area_map),sat,background(:,:,1,1)));
             if nargin<2 || isempty(params.back_idx) || params.back_idx > size(background,4)
                 image((im));
             else
                 imshowpair(im,background(:,:,:,params.back_idx)*params.contrast,'blend')
             end
+            hold on
             axis image;
             key = fetch(proj(experiment.Scan) & obj);
             set(gcf,'name',sprintf('Animal:%d Session:%d Scan:%d',key.animal_id,key.session,key.scan_idx))
             
             % place area labels
-            un_areas = unique(areas);
+             un_areas = unique(areas);
+            if isempty(params.colors)
+                params.colors = hsv(length(un_areas));
+            elseif size(params.colors,1)==1
+                params.colors =  repmat(params.colors,length(un_areas),1);
+            end
+           
             for iarea = 1:length(un_areas)
                 s = regionprops(area_map==iarea,'Centroid');
-                text(s(1).Centroid(1),s(1).Centroid(2),un_areas{iarea},'color',[1 0 0],'fontsize',16,'rotation',0)
+                if ~params.fill
+                    bw = bwboundaries(area_map==iarea);
+                    plot(bw{1}(:,2),bw{1}(:,1),'color',params.colors(iarea,:),'linewidth',params.linewidth);
+                end
+                text(s(1).Centroid(1),s(1).Centroid(2),un_areas{iarea},'color',params.fontcolor,'fontsize',params.fontsize,'rotation',0,...
+                    'HorizontalAlignment','center')
             end
         end
         

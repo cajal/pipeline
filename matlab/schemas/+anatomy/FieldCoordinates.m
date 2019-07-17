@@ -150,6 +150,7 @@ classdef FieldCoordinates < dj.Manual
             params.exp = 1;
             params.inv = 0;
             params.vcontrast = 1;
+            params.red = 1;
             
             params = ne7.mat.getParams(params,varargin);
             
@@ -212,6 +213,13 @@ classdef FieldCoordinates < dj.Manual
             end
             im(:,:,2) = ne7.mat.normalize(im(:,:,2));
             im = im(mnY+(1:size(ref_map,1)),mnX+(1:size(ref_map,2)),:);
+            
+            if ~params.red
+                A = repmat(im(:,:,1),1,1,3);
+                A(:,:,1) = (im(:,:,2)>0)*.3;
+                A(:,:,2) = normalize(im(:,:,2).^1.5);
+                im = hsv2rgb(A);
+            end
             
             % plot
             if ~nargout
@@ -350,20 +358,20 @@ classdef FieldCoordinates < dj.Manual
                             redraw
                         end
                     case 'uparrow'
-                        if x>0
+%                         if x>0
                             x = x-1*fine;
                             redraw
-                        end
+%                         end
                     case 'rightarrow'
                         if y<size(im1,2)/2
                             y = y+1*fine;
                             redraw
                         end
                     case 'leftarrow'
-                        if y>0
+%                         if y>0
                             y = y-1*fine;
                             redraw
-                        end
+%                         end
                     case 'comma'
                         rot = rot+0.5*fine;
                         redraw
@@ -407,10 +415,13 @@ classdef FieldCoordinates < dj.Manual
             function redraw
                 % draw image with masks
                 im1 = (imrotate(imresize(vessels,1/scale),-rot,'crop'));
-                im3 = zeros(size(im1,1),size(im1,2),3);
-                im3(:,:,1) = im1;
-                im3(ceil((x+1)/scale):size(im2,1)+ceil((x+1)/scale) - 1,...
-                    ceil((y+1)/scale):size(im2,2)+ceil((y+1)/scale) - 1,2) = im2;
+                x_idx = round((x+1)/scale):size(im2,1)+round((x+1)/scale) - 1;
+                y_idx =  round((y+1)/scale):size(im2,2)+round((y+1)/scale) - 1;
+                mn_x =  abs(min([x_idx-1,0]));
+                mn_y = abs(min([y_idx-1,0]));
+                im3 = zeros(size(im1,1)+mn_x,size(im1,2)+mn_y,3);
+                im3((1:size(im1,1))+mn_x,(1:size(im1,2))+mn_y,1) = im1;
+                im3(x_idx+mn_x,y_idx+mn_y,2) = im2;
                 set(gcf,'name',['X:' num2str(x/params.resize) ' Y:' num2str(y/params.resize) 'rot:' num2str(rot) ' scale:' num2str(scale)])
                 imh.CData = (im3);
             end
