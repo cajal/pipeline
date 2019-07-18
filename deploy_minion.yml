@@ -40,7 +40,7 @@ spec:
                 secretKeyRef:
                   name: dj-login
                   key: DJ_PASS
-            command: ["/bin/sh"]
+            command: ["/bin/bash"]
             args: ["-c", "python3 /data/pipeline/python/scripts/populate-minion.py"]
           imagePullSecrets:  # to pull private images
             - name: docker-login
@@ -48,4 +48,3 @@ spec:
           - name: mnt
             hostPath:
               path: /mnt
-#TODO: Restrict to non-gpu machines
