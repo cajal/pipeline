@@ -1,7 +1,6 @@
 #!/usr/local/bin/python3
-import time
-
 from pipeline import stack, pupil, experiment
+
 
 # 3-d segmentation
 stack.Segmentation.populate(reserve_jobs=True, suppress_errors=True)

@@ -1,6 +1,4 @@
 #!/usr/local/bin/python3
-import time
-
 from pipeline import experiment, reso, meso, fuse, stack, pupil, treadmill, posture
 from stimulus import stimulus
 from stimline import tune
