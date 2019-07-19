@@ -3,7 +3,7 @@ kind: CronJob # This tells kubernetes what kind of class it is working with
 metadata:
   name: minion-gpu
 spec:
-  schedule: "27 */1 * * *" # every hour
+  schedule: "*/30 * * * *" # every hour
   concurrencyPolicy: Forbid
   jobTemplate:
     spec:
@@ -51,4 +51,14 @@ spec:
             operator: "Equal"
             value: "true"
             effect: "NoSchedule"
-#TODO: Restric to GPU higher than 11 GB
+          affinity: # Place this in the pod.spec level in the yaml file
+            nodeAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                nodeSelectorTerms:
+                - matchExpressions:
+                  - key: gpu_mem_size
+                    operator: In
+                    values: # You can remove certain mem_size if your code need more memory
+                    - 11GB
+                    - 12GB
+                    - 24GB
