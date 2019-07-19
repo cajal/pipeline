@@ -4,11 +4,11 @@ metadata:
   name: minion
 spec:
   schedule: "*/30 * * * *" # every 30 minutes
-  concurrencyPolicy: Forbid
+  concurrencyPolicy: Allow # starts 5 new pods every 30 minutes
   jobTemplate:
     spec:
-      completions: 15  # how many actual completions of that jobs I want (should be > parallelism)
-      parallelism: 15  # how many process in parallel I want
+      completions: 5  # how many actual completions of that jobs I want (should be > parallelism)
+      parallelism: 5  # how many process in parallel I want
       template:
         spec:
           restartPolicy: Never
