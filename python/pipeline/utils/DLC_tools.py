@@ -1,3 +1,4 @@
+
 from IPython import display
 import pylab as pl
 
@@ -17,10 +18,10 @@ import os
 # disable DLC GUI
 os.environ["DLClight"] = "True"
 
-from deeplabcut.utils import plotting
-from deeplabcut.utils import video_processor
-from deeplabcut.utils import auxiliaryfunctions
 import deeplabcut as dlc
+from deeplabcut.utils import auxiliaryfunctions
+from deeplabcut.utils import video_processor
+from deeplabcut.utils import plotting
 
 def key_dict_generater(case):
     case_key = {'animal_id': None, 'session': None, 'scan_idx': None}
@@ -85,7 +86,7 @@ def smallest_enclosing_circle_naive(points):
     return result
 
 
-class PlotBodyparts():
+class DeeplabcutPlotBodyparts():
 
     def __init__(self, config, bodyparts='all', cropped=False):
         """
@@ -404,13 +405,13 @@ class PlotBodyparts():
         else:
             crop_flag = 'orig'
         save_video_path = os.path.join(self.base_dir,
-                                       '{}_{}_{}_labeled.avi'.format(crop_flag,start, end))
+                                       '{}_{}_{}_labeled.avi'.format(crop_flag, start, end))
         ani.save(save_video_path, writer=writer, dpi=self.dpi)
 
         return ani
 
 
-class PupilFitting(PlotBodyparts):
+class DeeplabcutPupilFitting(DeeplabcutPlotBodyparts):
     def __init__(self, config, bodyparts='all', cropped=False):
         """
         Input:
@@ -920,7 +921,7 @@ class PupilFitting(PlotBodyparts):
         else:
             crop_flag = 'orig'
         save_video_path = os.path.join(self.base_dir,
-                                       '{}_{}_{}_labeled.avi'.format(crop_flag,start, end))
+                                       '{}_{}_{}_labeled.avi'.format(crop_flag, start, end))
 
         ani.save(save_video_path, writer=writer, dpi=self.dpi)
 
@@ -1173,3 +1174,80 @@ def make_compressed_cropped_video(tracking_dir, cropped_coords):
         print('\nSuccessfully created a compressed & cropped video!\n')
 
     return cc_vid_path
+
+
+def filter_by_std(data, fitting_method, std_magnitude=5.5):
+    """Filter out outliers based on std specified by user. The outliers are replaced by np.nan
+
+    Args:
+        data (numpy array): 
+        if fitting_method is a circle
+            0th column: center
+            1st column: radius
+            2nd column: visible portion
+        if fitting method is an ellipse:
+            0th column: center
+            1st column: major_r
+            2nd column: minor_r
+            3rd column: visible portion
+            
+        fitting_method (str): A string specifying which fitting method used. Must be either a circle or an ellipse
+        std_magnitude (float): A number that specifies how many std away from mean to be used as a cutoff.
+            Default to 5.5 (emperically obtained value)
+
+    Returns:
+        rejected inds: filtered indices after filtered by std deviations
+
+    """
+    if fitting_method.lower() == 'circle':
+        # at minium we need center and radius info
+        assert data.shape[1] >= 2
+
+        # filter out circles
+        center, radius = data[:, 0], data[:, 1].astype(np.float64)
+
+        detectedFrames = ~np.isnan(radius)
+        xy = np.full((len(radius), 2), np.nan)
+        xy[detectedFrames, :] = np.vstack(center[detectedFrames])
+
+        x = xy[:, 0]
+        y = xy[:, 1]
+
+        rejected_radius_ind = np.greater(abs(
+            radius - np.nanmean(radius)), std_magnitude * np.nanstd(radius), where=~np.isnan(radius))
+        rejected_x_ind = np.greater(
+            abs(x - np.nanmean(x)), std_magnitude * np.nanstd(x), where=~np.isnan(x))
+        rejected_y_ind = np.greater(
+            abs(y - np.nanmean(y)), std_magnitude * np.nanstd(y), where=~np.isnan(y))
+
+        rejected_ind = np.logical_or(np.logical_or(
+            rejected_radius_ind, rejected_x_ind), rejected_y_ind)
+
+    elif fitting_method.lower() == 'ellipse':
+        # at minimum we need center, major_r, and minor_r info
+        assert data.shape[1] >= 3
+
+        # filter out ellipses
+        center, major_r, minor_r = data[:, 0], data[:, 1].astype(
+            np.float64), data[:, 2].astype(np.float64)
+
+        detectedFrames = ~np.isnan(major_r)
+        xy = np.full((len(major_r), 2), np.nan)
+        xy[detectedFrames, :] = np.vstack(center[detectedFrames])
+
+        x = xy[:, 0]
+        y = xy[:, 1]
+
+        rejected_major_r_ind = np.greater(abs(
+            major_r - np.nanmean(major_r)), std_magnitude * np.nanstd(major_r), where=~np.isnan(major_r))
+        rejected_minor_r_ind = np.greater(abs(
+            minor_r - np.nanmean(minor_r)), std_magnitude * np.nanstd(minor_r), where=~np.isnan(minor_r))
+        rejected_x_ind = np.greater(
+            abs(x - np.nanmean(x)), std_magnitude * np.nanstd(x), where=~np.isnan(x))
+        rejected_y_ind = np.greater(
+            abs(y - np.nanmean(y)), std_magnitude * np.nanstd(y), where=~np.isnan(y))
+
+        rejected_ind = np.logical_or(np.logical_or(np.logical_or(
+            rejected_major_r_ind, rejected_minor_r_ind), rejected_x_ind), rejected_y_ind)
+
+    return rejected_ind
