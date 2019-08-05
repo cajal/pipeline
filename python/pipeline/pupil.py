@@ -1,4 +1,7 @@
 # Disable DLC GUI first, then import deeplabcut
+import os
+os.environ["DLClight"] = "True"
+
 import deeplabcut as dlc
 from .utils import DLC_tools
 from deeplabcut.utils import auxiliaryfunctions
@@ -28,8 +31,6 @@ from matplotlib.patches import Ellipse
 import time
 import datetime
 
-import os
-os.environ["DLClight"] = "True"
 
 schema = dj.schema('pipeline_eye', locals())
 
@@ -50,7 +51,8 @@ DEFAULT_PARAMETERS = {'relative_area_threshold': 0.002,
 
 @schema
 class Eye(dj.Imported):
-    definition = """  # eye movie timestamps synchronized to behavior clock
+    definition = """  
+    # eye movie timestamps synchronized to behavior clock
 
     -> experiment.Scan
     ---
@@ -663,7 +665,7 @@ class Tracking(dj.Computed):
 
             tracking_dir = os.path.join(vid_dir, tracking_dir_name)
 
-            symlink_path = os.path.join(
+            hardlink_path = os.path.join(
                 tracking_dir, os.path.basename(os.path.normpath(vid_path)))
 
             if not os.path.exists(tracking_dir):
@@ -672,12 +674,12 @@ class Tracking(dj.Computed):
                 os.mkdir(os.path.join(tracking_dir, 'compressed_cropped'))
                 os.mkdir(os.path.join(tracking_dir, 'short'))
 
-                os.symlink(vid_path, symlink_path)
+                os.link(vid_path, hardlink_path)
 
             else:
                 print('{} already exists!'.format(tracking_dir))
 
-            return tracking_dir, symlink_path
+            return tracking_dir, hardlink_path
 
         def make(self, key):
             """
@@ -873,7 +875,7 @@ class FittedPupil(dj.Computed):
 
             config['cropped_coords'] = cropped_coords
 
-            pupil_fit = DLC_tools.PupilFitting(
+            pupil_fit = DLC_tools.DeeplabcutPupilFitting(
                 config=config, bodyparts='all', cropped=True)
 
             for frame_num in tqdm(range(nframes)):
@@ -1068,7 +1070,7 @@ def plot_fitting(key, start, end=-1, fit_type='Circle', fig=None, ax=None, mask_
 
         config['orig_video_path'] = video_path
 
-        pupil_fit = DLC_tools.PupilFitting(
+        pupil_fit = DLC_tools.DeeplabcutPupilFitting(
             config=config, bodyparts='all', cropped=True)
 
         # play with these parameters for better visualization of the fitting
@@ -1217,7 +1219,7 @@ class PlotFitting(object):
             end = start + 1
 
         if ax is None:
-            fig = plt.figure(frameon=False, figsize=(12, 8))
+            fig = plt.figure(frameon=False, figsize=(8, 6))
             ax = fig.add_subplot(1, 1, 1)
             plt.subplots_adjust(left=0, bottom=0, right=1,
                                 top=1, wspace=0, hspace=0)
@@ -1330,14 +1332,14 @@ class PlotFitting(object):
 
                         ax_frame = ax.imshow(img, cmap='gray')
 
-                        plt_fit = plt.Circle((self.circle_center[ind][0]-self.cropped_coords[0], 
-                                            self.circle_center[ind][1]-self.cropped_coords[2]), 
+                        plt_fit = plt.Circle((self.circle_center[ind][0], 
+                                            self.circle_center[ind][1]), 
                                             self.circle_radius[ind], color='b', fill=False)
 
                         ax.add_patch(plt_fit)
-                        ax_scatter = ax.scatter(contours[ind].squeeze()[:, 0] - self.cropped_coords[0],
-                                                contours[ind].squeeze()[:, 1] -
-                                                self.cropped_coords[2],
+                        ax_scatter = ax.scatter(contours[ind].squeeze()[:, 0],
+                                                contours[ind].squeeze()[:, 1]
+                                                ,
                                                 s=4**2, color='red', alpha=.5)
                         
                         ax.axis('off')
@@ -1412,14 +1414,13 @@ class PlotFitting(object):
 
                         ax_frame = ax.imshow(img, cmap='gray')
 
-                        plt_fit = plt.Circle((self.circle_center[ind][0]-self.cropped_coords[0], 
-                                            self.circle_center[ind][1]-self.cropped_coords[2]), 
+                        plt_fit = plt.Circle((self.circle_center[ind][0], 
+                                            self.circle_center[ind][1]), 
                                             self.circle_radius[ind], color='b', fill=False)
 
                         ax.add_patch(plt_fit)
-                        ax_scatter = ax.scatter(contours[ind].squeeze()[:, 0] - self.cropped_coords[0],
-                                                contours[ind].squeeze()[:, 1] -
-                                                self.cropped_coords[2],
+                        ax_scatter = ax.scatter(contours[ind].squeeze()[:, 0] ,
+                                                contours[ind].squeeze()[:, 1] ,
                                                 s=4**2, color='red', alpha=.5)
                         
                         ax.axis('off')
