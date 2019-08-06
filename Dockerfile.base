@@ -1,6 +1,6 @@
-FROM nvidia/cuda:9.2-cudnn7-devel-ubuntu18.04
+FROM nvidia/cuda:10.0-cudnn7-devel-ubuntu18.04
 
-LABEL maintainer="Erick Cobos <ecobos@bcm.edu>"
+LABEL maintainer="Erick Cobos <ecobos@bcm.edu>, Donnie Kim <donniek@bcm.edu>"
 ARG DEBIAN_FRONTEND=noninteractive
 
 ###############################################################################
@@ -16,36 +16,8 @@ RUN apt-get update && \
         python3-matplotlib
 
 ###############################################################################
-# Install OpenCV 3.4.3 with CUDA support (take a seat, this takes hours)
-# With no CUDA support: sudo apt-get install python3-opencv
-
-## Get dependencies
-RUN apt-get update && \
-    apt-get install -y build-essential cmake git pkg-config libgtk-3-dev \
-                       libavcodec-dev libavformat-dev libswscale-dev \
-    # To recompile CUDA we need an slightly older compiler (current is gcc 7)
-                       gcc-6 g++-6 \
-    # Optional dependencies
-                       libtbb2 libtbb-dev libjpeg-dev libpng-dev libtiff-dev \
-                       libxvidcore-dev libx264-dev libhdf5-dev ffmpeg
-    # Camera support
-#                      libdc1394-22-dev libv4l-devel # camera support
-
-# Install
-RUN git clone https://github.com/opencv/opencv && \
-    cd opencv && \
-    git checkout 3.4.3 && \
-    mkdir build && \
-    cd build && \ 
-    cmake -D CUDA_HOST_COMPILER="/usr/bin/gcc-6" \
-          -D CUDA_NVCC_FLAGS="--expt-relaxed-constexpr" .. && \
-    make install && \
-    cd ../.. && \
-    rm -r opencv
-
-###############################################################################
 # Instal FFTW (C library) and pyfftw (its python wrapper)
-RUN apt-get install wget && \
+RUN apt-get install -y wget && \
     wget http://www.fftw.org/fftw-3.3.8.tar.gz && \
     tar -xvzf fftw-3.3.8.tar.gz && \
     cd fftw-3.3.8 && \
@@ -65,9 +37,9 @@ RUN apt-get install wget && \
 
 ###############################################################################
 # Install CaImAn
-# Install dependencies
-RUN apt-get install -y python3-tk && \
-    pip3 install future cvxpy scikit-learn scikit-image tensorflow keras \
+# Install dependencies.
+RUN apt-get install -y git python3-tk && \
+    pip3 install future cvxpy scikit-learn scikit-image tensorflow==1.13.1 keras \
                  peakutils \
     # Unused but required (imported in code)
                  ipyparallel Cython h5py tqdm psutil
@@ -79,7 +51,7 @@ RUN pip3 install git+https://github.com/ecobost/CaImAn.git
 # Install spike deconvolution packages
 RUN pip3 install git+https://github.com/cajal/PyFNND # oopsie
 
-RUN apt-get install autoconf automake libtool && \
+RUN apt-get install -y autoconf automake libtool && \
     git clone https://github.com/lucastheis/cmt.git && \
     cd cmt/code/liblbfgs && \
     ./autogen.sh && \
@@ -94,6 +66,10 @@ RUN apt-get install autoconf automake libtool && \
     pip3 install git+https://github.com/cajal/c2s.git # stm (spike-triggered mixture model)
 
 ###############################################################################
+# install Deeplabcut and its dependencies
+RUN pip3 install git+https://github.com/cajal/DeepLabCut.git
+
+###############################################################################
 # Install pytorch
 RUN pip3 install http://download.pytorch.org/whl/cu92/torch-0.4.1-cp36-cp36m-linux_x86_64.whl && \
     pip3 install torchvision
@@ -104,10 +80,17 @@ RUN pip3 install git+https://github.com/datajoint/datajoint-python.git && \
     pip3 install git+https://github.com/atlab/scanreader.git && \
     pip3 install git+https://github.com/cajal/bl3d.git && \
     pip3 install seaborn slacker imreg_dft pandas imageio
-RUN apt-get install -y python3-git
+RUN apt-get update && \
+    apt-get install -y python3-git ffmpeg
 
 # Optional
-RUN apt-get install -y nano graphviz && \
+RUN apt-get install -y nano vim graphviz && \
     pip3 install nose2 jupyterlab
+
+# Install commons
+RUN git clone https://github.com/atlab/commons.git && \
+    pip3 install commons/python && \
+    rm -r commons
+
 
 ENTRYPOINT ["/bin/bash"]

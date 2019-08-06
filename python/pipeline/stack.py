@@ -6,6 +6,7 @@ import numpy as np
 import scanreader
 from scipy import signal
 from scipy import ndimage
+from scipy import optimize
 import itertools
 
 from . import experiment, notify, shared, reso, meso
@@ -979,6 +980,198 @@ class PreprocessedStack(dj.Computed):
 
 
 @schema
+class Surface(dj.Computed):
+    definition = """ # Calculated surface of the brain
+
+    -> PreprocessedStack
+    -> shared.SurfaceMethod
+    ---
+    guessed_points    : longblob              # Array of guessed depths stored in (z,y,x) format
+    surface_im        : longblob          # Matrix of fitted depth for each pixel in stack. Value is number of pixels to surface from top of array.
+    lower_bound_im    : longblob          # Lower bound of 95th percentile confidence interval
+    upper_bound_im    : longblob          # Upper bound of 95th percentile confidence interval
+    """
+
+    def make(self, key):
+
+        # WARNINGS
+        #  - This code assumes the surface will be in the top half of the stack
+        #      - Only the top half of z-values are analyzed
+        #  - Points along the edge are dropped to avoid errors due to blank space left by stack registration
+        #  - This code assumes the surface median intensity should be in the bottom 60% of the range of values over z
+        #      - ex. Intensities ranges from 10-20. Surface points must have an intensity < .6*(20-10) + 10 = 17.5
+        #      - This is within the 2r x 2r window being analyzed
+        #  - This code drops any 2r x 2r field where the first median value is above the 30th-percentile of the whole stack.
+        #  - Windows where the final median intensity is below 10 are removed
+        #      - Attempts to replace this with a percentile all fail
+        #  - This code drops guessed depths > 95th-percentile and < 5th-percentile to be more robust to outliers
+
+        valid_method_ids = [1]  # Used to check if method is implemented
+
+        # SETTINGS
+        # Note: Intial parameters for fitting set further down
+        r = 50  # Radius of square in pixels
+        upper_threshold_percent = 0.6  # Surface median intensity should be in the bottom X% of the *range* of medians
+        gaussian_blur_size = 5  # Size of gaussian blur applied to slice
+        min_points_allowed = 10  # If there are less than X points after filtering, throw an error
+        bounds = ([0, 0, np.NINF, np.NINF, np.NINF], [np.Inf, np.Inf, np.Inf, np.Inf, np.Inf])  # Bounds for paraboloid fit
+        ss_percent = 0.40  # Percentage of points to subsample for robustness check
+        num_iterations = 1000  # Number of iterations to use for robustness check
+
+        # DEFINITIONS
+        def surface_eqn(data, a, b, c, d, f):
+            x, y = data
+            return a * x ** 2 + b * y ** 2 + c * x + d * y + f
+
+        # MAIN BODY
+        if int(key['surface_method_id']) not in valid_method_ids:
+            raise PipelineException(f'Error: surface_method_id {key["surface_method_id"]} is not implemented')
+
+        print('Calculating surface of brain for stack', key)
+        full_stack = (PreprocessedStack & key).fetch1('resized')
+        depth, height, width = full_stack.shape
+
+        surface_guess_map = []
+        r_xs = np.arange(r, width - width % r, r * 2)[1:-1]
+        r_ys = np.arange(r, height - height % r, r * 2)[1:-1]
+        full_mesh_x, full_mesh_y = np.meshgrid(np.arange(width), np.arange(height))
+
+        # Surface z should be below this value
+        z_lim = int(depth / 2)
+        # Mean intensity of the first frame in the slice should be less than this value
+        z_0_upper_threshold = np.percentile(full_stack, 30)
+
+        for x in r_xs:
+            for y in r_ys:
+                stack_slice_medians = np.percentile(full_stack[0:z_lim, y - r:y + r, x - r:x + r], 50, axis=(1, 2))
+                blurred_slice = ndimage.gaussian_filter1d(stack_slice_medians, gaussian_blur_size)
+
+                upper_threshold_value = upper_threshold_percent * (
+                        (blurred_slice.max() - blurred_slice.min()) - blurred_slice.min())
+                upper_threshold_idx = np.where(blurred_slice > upper_threshold_value)[0][0]
+
+                stack_slice_derivative = ndimage.sobel(blurred_slice)
+                surface_z = np.argmax(stack_slice_derivative)
+
+                if ((surface_z < upper_threshold_idx) and (blurred_slice[0] < z_0_upper_threshold) and
+                        (blurred_slice[-1] > 10)):
+                    surface_guess_map.append((surface_z, y, x))
+
+        if len(surface_guess_map) < min_points_allowed:
+            raise PipelineException(f"Surface calculation could not find enough valid points for {key}. Only "
+                                    f"{len(surface_guess_map)} detected")
+
+        # Drop the z-values lower than 5th-percentile or greater than 95th-percentile
+        arr = np.array(surface_guess_map)
+        top = np.percentile(arr[:, 0], 95)
+        bot = np.percentile(arr[:, 0], 5)
+        surface_guess_map = arr[np.logical_and(arr[:, 0] > bot, arr[:, 0] < top)]
+
+        # Guess for initial parameters
+        initial = [1, 1, int(width / 2), int(height / 2), 1]
+
+        popt, pcov = optimize.curve_fit(surface_eqn, (surface_guess_map[:, 2], surface_guess_map[:, 1]),
+                                        surface_guess_map[:, 0], p0=initial, maxfev=10000, bounds=bounds)
+
+        calculated_surface_map = surface_eqn((full_mesh_x, full_mesh_y), *popt)
+
+        all_sub_fitted_z = np.zeros((num_iterations, height, width))
+        for i in np.arange(num_iterations):
+            indices = np.random.choice(surface_guess_map.shape[0], int(surface_guess_map.shape[0] * ss_percent),
+                                       replace=False)
+            subsample = surface_guess_map[indices]
+            sub_popt, sub_pcov = optimize.curve_fit(surface_eqn, (subsample[:, 2], subsample[:, 1]), subsample[:, 0],
+                                                    p0=initial, maxfev=10000, bounds=bounds)
+            all_sub_fitted_z[i, :, :] = surface_eqn((full_mesh_x, full_mesh_y), *sub_popt)
+
+        z_min_matrix = np.percentile(all_sub_fitted_z, 5, axis=0)
+        z_max_matrix = np.percentile(all_sub_fitted_z, 95, axis=0)
+
+        surface_key = {**key, 'guessed_points': surface_guess_map, 'surface_im': calculated_surface_map,
+                       'lower_bound_im': z_min_matrix, 'upper_bound_im': z_max_matrix}
+
+        self.insert1(surface_key)
+
+    def plot_surface3d(self, fig_height=7, fig_width=9):
+        """ Plot guessed surface points and fitted surface mesh in 3D
+
+        :param fig_height: Height of returned figure
+        :param fig_width: Width of returned figure
+        :returns Figure. You can call show() on it.
+        :rtype: matplotlib.figure.Figure
+        """
+
+        from mpl_toolkits.mplot3d import Axes3D
+        from matplotlib import cm
+
+        surface_guess_map, fitted_surface = self.fetch1('guessed_points', 'surface_im')
+        surface_height, surface_width = fitted_surface.shape
+        mesh_x, mesh_y = np.meshgrid(np.arange(surface_width), np.arange(surface_height))
+
+        fig = plt.figure(figsize=(fig_width, fig_height))
+        ax = fig.gca(projection='3d')
+
+        surf = ax.plot_surface(mesh_x, mesh_y, fitted_surface, cmap=cm.coolwarm, linewidth=0, antialiased=False,
+                               alpha=0.5)
+        ax.scatter(surface_guess_map[:, 2], surface_guess_map[:, 1], surface_guess_map[:, 0], color='grey')
+        fig.colorbar(surf, shrink=0.5, aspect=5)
+        ax.invert_zaxis()
+
+        return fig
+
+    def plot_surface2d(self, r=50, z=None, fig_height=10, fig_width=20):
+        """ Plot grid of guessed points and fitted surface depths spaced 2r apart on top of stack slice at depth = z
+
+        :param r: Defines radius of square for each grid point
+        :param z: Pixel depth of stack to show behind depth grid
+        :param fig_height: Height of returned figure
+        :param fig_width: Width of returned figure
+        :returns Figure. You can call show() on it.
+        :rtype: matplotlib.figure.Figure
+        """
+
+        from matplotlib import cm
+
+        full_stack = (PreprocessedStack & self).fetch1('resized')
+        stack_depth, stack_height, stack_width = full_stack.shape
+        surface_guess_map, fitted_surface = self.fetch1('guessed_points', 'surface_im')
+        fig, axes = plt.subplots(1, 2, figsize=(fig_width, fig_height))
+
+        r_xs = np.arange(r, stack_width - stack_width % r, r * 2)
+        r_ys = np.arange(r, stack_height - stack_height % r, r * 2)
+        r_mesh_x, r_mesh_y = np.meshgrid(r_xs, r_ys)
+
+        # Using median of depth to pick slice of stack to show if not defined
+        if z is None:
+            z = np.median(fitted_surface)
+        if z < 0 or z > stack_depth:
+            raise PipelineException(f'Error: Z parameter {z} is out of bounds for stack with depth {depth}')
+
+        vmin = np.min((np.min(fitted_surface), np.min(surface_guess_map[:, 0])))
+        vmax = np.max((np.max(fitted_surface), np.max(surface_guess_map[:, 0])))
+        guessed_scatter = axes[0].scatter(x=surface_guess_map[:, 2], y=surface_guess_map[:, 1],
+                                          c=surface_guess_map[:, 0], cmap=cm.hot, vmin=vmin, vmax=vmax)
+        fitted_scatter = axes[1].scatter(x=r_mesh_x, y=r_mesh_y, c=fitted_surface[r_mesh_y, r_mesh_x], cmap=cm.hot,
+                                         vmin=vmin, vmax=vmax)
+
+        for point in surface_guess_map:
+            axes[0].annotate(int(point[0]), (point[2], point[1]), color='white')
+        for x in r_xs:
+            for y in r_ys:
+                axes[1].annotate(int(fitted_surface[y, x]), (x, y), color='white')
+
+        fig.colorbar(guessed_scatter, ax=axes[0], fraction=0.05)
+        axes[0].set_title(f'Guessed Depth, Z = {int(z)}')
+        fig.colorbar(fitted_scatter, ax=axes[1], fraction=0.05)
+        axes[1].set_title(f'Fitted Depth, Z = {int(z)}')
+        for ax in axes:
+            ax.imshow(full_stack[int(z), :, :])
+            ax.set_axis_off()
+
+        return fig
+
+
+@schema
 class SegmentationTask(dj.Manual):
     definition = """ # defines the target, the method and the channel to use for segmentation
 
@@ -1252,8 +1445,8 @@ class Registration(dj.Computed):
         px_z = field_z - stack_z + stack.shape[0] / 2 - 0.5
         mini_stack = stack[max(0, int(round(px_z - rigid_zrange))): int(round(
             px_z + rigid_zrange))]
-        corrs = np.stack(feature.match_template(s, field, pad_input=True) for s in
-                         mini_stack)
+        corrs = np.stack([feature.match_template(s, field, pad_input=True) for s in
+                          mini_stack])
         smooth_corrs = ndimage.gaussian_filter(corrs, 0.7)
 
         # Get results
@@ -1871,8 +2064,8 @@ class RegistrationOverTime(dj.Computed):
             px_z = field_z - stack_z + stack.shape[0] / 2 - 0.5
             mini_stack = stack[max(0, int(round(px_z - rigid_zrange))): int(round(
                 px_z + rigid_zrange))]
-            corrs = np.stack(feature.match_template(s, field, pad_input=True) for s in
-                             mini_stack)
+            corrs = np.stack([feature.match_template(s, field, pad_input=True) for s in
+                              mini_stack])
             smooth_corrs = ndimage.gaussian_filter(corrs, 0.7)
 
             # Get results
@@ -2388,7 +2581,7 @@ class StackSet(dj.Computed):
 
         # Create distance matrix
         # For memory efficiency we use an adjacency list with only the units at less than 10 microns
-        centroids = np.stack(u.centroid for u in units)
+        centroids = np.stack([u.centroid for u in units])
         distance_list = []  # list of triples (distance, unit1, unit2)
         for i in range(len(units)):
             indices, distances = find_close_units(centroids[i], centroids[i + 1:],

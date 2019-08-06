@@ -48,7 +48,7 @@ class SegmentationMethod(dj.Lookup):
 @schema
 class StackSegmMethod(dj.Lookup):
     definition = """ # methods for 3-d stack segmentations
-    stacksegm_method         : tinyint
+    stacksegm_method            : tinyint
     ---
     name                        : varchar(16)
     details                     : varchar(255)
@@ -139,7 +139,6 @@ class CurationMethod(dj.Lookup):
         [2, 'manual', 'manually inspect each field estimate', 'matlab'],
     ]
 
-
 @schema
 class AreaMaskMethod(dj.Lookup):
     definition = """
@@ -153,4 +152,32 @@ class AreaMaskMethod(dj.Lookup):
 
     contents = [
         [1, 'manual', '', 'matlab'],
+    ]
+@schema
+class TrackingMethod(dj.Lookup):
+    definition = """
+    tracking_method : tinyint                       # method used for pupil tracking
+    ---
+    name                : varchar(16)               # short name to identify the tracking method
+    details             : varchar(255)              # more details
+    language            : enum('matlab', 'python')  # implementation language
+    """
+
+    contents = [
+        [1, 'manual', 'manually tracking', 'python'],
+        [2, 'deeplabcut', 'automatically tracking using deeplabcut package', 'python'],
+    ]
+
+@schema
+class SurfaceMethod(dj.Lookup):
+    definition = """ # Methods used to compute surface of the brain
+
+    surface_method_id   : tinyint unsigned   # Unique ID given to each surface calculation method
+    ---
+    method_title        : varchar(32)        # Title of surface calculation method
+    method_description  : varchar(256)       # Details on surface calculation
+    """
+
+    contents = [
+        [1, 'Paraboloid Fit', 'Fit ax^2 + by^2 + cx + dy + f to surface after finding max of sobel']
     ]
