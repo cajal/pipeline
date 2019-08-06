@@ -1177,7 +1177,7 @@ def make_compressed_cropped_video(tracking_dir, cropped_coords):
 
 
 def filter_by_std(data, fitting_method, std_magnitude=5.5):
-    """Filter out outliers based on std specified by user. The outliers are replaced by np.nan
+    """Filter out outliers based on std specified by user. The outlier indices are returned
 
     Args:
         data (numpy array): 
@@ -1206,6 +1206,7 @@ def filter_by_std(data, fitting_method, std_magnitude=5.5):
         # filter out circles
         center, radius = data[:, 0], data[:, 1].astype(np.float64)
 
+        # only obtain real numbers, not nans.
         detectedFrames = ~np.isnan(radius)
         xy = np.full((len(radius), 2), np.nan)
         xy[detectedFrames, :] = np.vstack(center[detectedFrames])
