@@ -86,9 +86,19 @@ def smallest_enclosing_circle_naive(points):
     return result
 
 
+def online_median_filter(x, kernel_size=3):
+
+    online_medfilt = [x[0]]
+    for i in range(1, len(x)-1):
+        online_medfilt.append(np.median(x[i-1:i+1]))
+    online_medfilt.append(x[-1])
+
+    return online_medfilt
+
+
 class DeeplabcutPlotBodyparts():
 
-    def __init__(self, config, bodyparts='all', cropped=False):
+    def __init__(self, config, bodyparts='all', cropped=False, filtering=None):
         """
         Input:
             config: dictionary
@@ -98,8 +108,7 @@ class DeeplabcutPlotBodyparts():
                 then by default it plots ALL existing bodyplots in config.yaml file.
             cropped: boolean
                 whether to crop the video or not. Default False
-            cropped_coords: list
-                Provide 4 coordinates to crop the video if cropped is True. Otherwise, set to None
+            filtering (dict):
 
         """
 
@@ -135,6 +144,15 @@ class DeeplabcutPlotBodyparts():
         self.df_label = pd.read_hdf(self.label_path)
 
         self.df_bodyparts = self.df_label[self._DLCscorer][self.bodyparts]
+
+        if filtering is not None:
+            if filtering['method'] == 'online_medfilt':
+                for i in range(24):
+                    if i%3 !=2:
+                        data = online_median_filter(self.df_bodyparts.iloc[:,i].values, kernel_size=filtering['kernel_size'])
+                        self.df_bodyparts.iloc[:,i] = data
+        
+
         self.df_bodyparts_likelihood = self.df_bodyparts.iloc[:, self.df_bodyparts.columns.get_level_values(
             1) == 'likelihood']
 
@@ -412,7 +430,7 @@ class DeeplabcutPlotBodyparts():
 
 
 class DeeplabcutPupilFitting(DeeplabcutPlotBodyparts):
-    def __init__(self, config, bodyparts='all', cropped=False):
+    def __init__(self, config, bodyparts='all', cropped=False, filtering=None):
         """
         Input:
             config: dictionary
@@ -423,7 +441,7 @@ class DeeplabcutPupilFitting(DeeplabcutPlotBodyparts):
 
         """
         super().__init__(config, bodyparts=bodyparts,
-                         cropped=cropped)
+                         cropped=cropped, filtering=None)
 
         self.complete_eyelid_graph = {'eyelid_top': 'eyelid_top_right',
                                       'eyelid_top_right': 'eyelid_right',
