@@ -88,9 +88,11 @@ def smallest_enclosing_circle_naive(points):
 
 def online_median_filter(x, kernel_size=3):
 
-    online_medfilt = [x[0]]
-    for i in range(1, len(x)-1):
-        online_medfilt.append(np.median(x[i-1:i+1]))
+    interval = kernel_size//2
+
+    online_medfilt = x[0:interval]
+    for i in range(interval, len(x)-interval):
+        online_medfilt.append(np.median(x[i-interval:i+interval+1]))
     online_medfilt.append(x[-1])
 
     return online_medfilt
@@ -441,7 +443,7 @@ class DeeplabcutPupilFitting(DeeplabcutPlotBodyparts):
 
         """
         super().__init__(config, bodyparts=bodyparts,
-                         cropped=cropped, filtering=None)
+                         cropped=cropped, filtering=filtering)
 
         self.complete_eyelid_graph = {'eyelid_top': 'eyelid_top_right',
                                       'eyelid_top_right': 'eyelid_right',
