@@ -1,27 +1,26 @@
+import os
+# disable DLC GUI
+os.environ["DLClight"] = "True"
+
+from deeplabcut.utils import plotting
+from deeplabcut.utils import video_processor
+from deeplabcut.utils import auxiliaryfunctions
+import deeplabcut as dlc
 
 from IPython import display
 import pylab as pl
 
 import math
 import yaml
+import ruamel.yaml
 import cv2
 from pathlib import Path
 import numpy as np
 import pandas as pd
-import ruamel.yaml
 import imageio
 import time
 import shutil
 import matplotlib.pyplot as plt
-
-import os
-# disable DLC GUI
-os.environ["DLClight"] = "True"
-
-import deeplabcut as dlc
-from deeplabcut.utils import auxiliaryfunctions
-from deeplabcut.utils import video_processor
-from deeplabcut.utils import plotting
 
 def key_dict_generater(case):
     case_key = {'animal_id': None, 'session': None, 'scan_idx': None}
@@ -140,20 +139,40 @@ class DeeplabcutPlotBodyparts():
         self._DLCscorer = auxiliaryfunctions.GetScorerName(
             self.config, self.shuffle, self._trainFraction)
 
-        self.label_path = os.path.join(
-            self.compressed_cropped_dir_path, self._case + '_compressed_cropped' + self._DLCscorer + '.h5')
+        self.filtering = filtering
 
-        self.df_label = pd.read_hdf(self.label_path)
+        label_basename = os.path.join(self.compressed_cropped_dir_path,
+                                      self._case + '_compressed_cropped' +
+                                      self._DLCscorer)
+
+        if filtering is None:
+            self.filtering = 'no filtering'
+            self.label_path = label_basename + '.h5'
+            self.df_label = pd.read_hdf(self.label_path)
+
+        else:
+            if filtering['filter_kind'] == 'online_medfilt':
+                label_path = label_basename + \
+                    '_online_medfilt_kernel_{}.h5'.format(
+                        filtering['kernel_size'])
+                try:
+                    self.df_label = pd.read_hdf(label_path)
+                except:
+                    print("no pre-computed online_medfilt data! Computing now!")
+                    df_label = pd.read_hdf(label_basename + '.h5')
+                    for i in range(df_label.shape[1]):
+                        if i % 3 != 2:
+                            data = online_median_filter(
+                                x=df_label.iloc[:, i].values, 
+                                kernel_size=filtering['kernel_size'])
+                            df_label.iloc[:, i] = data
+                    df_label.to_hdf(label_path, 'df_with_missing',
+                                    format='table', mode='w')
+                    self.df_label = df_label
+
+                self.label_path = label_path
 
         self.df_bodyparts = self.df_label[self._DLCscorer][self.bodyparts]
-
-        if filtering is not None:
-            if filtering['method'] == 'online_medfilt':
-                for i in range(24):
-                    if i%3 !=2:
-                        data = online_median_filter(self.df_bodyparts.iloc[:,i].values, kernel_size=filtering['kernel_size'])
-                        self.df_bodyparts.iloc[:,i] = data
-        
 
         self.df_bodyparts_likelihood = self.df_bodyparts.iloc[:, self.df_bodyparts.columns.get_level_values(
             1) == 'likelihood']
@@ -1210,7 +1229,7 @@ def filter_by_std(data, fitting_method, std_magnitude=5.5):
             1st column: major_r
             2nd column: minor_r
             3rd column: visible portion
-            
+
         fitting_method (str): A string specifying which fitting method used. Must be either a circle or an ellipse
         std_magnitude (float): A number that specifies how many std away from mean to be used as a cutoff.
             Default to 5.5 (emperically obtained value)
