@@ -87,14 +87,17 @@ def smallest_enclosing_circle_naive(points):
 
 def online_median_filter(x, kernel_size=3):
 
+    assert kernel_size%2 == 1, "kernel size must be odd number!"
+
     interval = kernel_size//2
 
     online_medfilt = x[0:interval].tolist()
     for i in range(interval, len(x)-interval):
         online_medfilt.append(np.median(x[i-interval:i+interval+1]))
-    online_medfilt.append(x[-1])
+        
+    online_medfilt += x[-interval:].tolist()
 
-    return online_medfilt
+    return np.array(online_medfilt)
 
 
 class DeeplabcutPlotBodyparts():
@@ -151,14 +154,14 @@ class DeeplabcutPlotBodyparts():
             self.df_label = pd.read_hdf(self.label_path)
 
         else:
-            if filtering['filter_kind'] == 'online_medfilt':
+            if filtering['filter_name'] == 'online_median':
                 label_path = label_basename + \
-                    '_online_medfilt_kernel_{}.h5'.format(
+                    '_online_median_kernel_{}.h5'.format(
                         filtering['kernel_size'])
                 try:
                     self.df_label = pd.read_hdf(label_path)
                 except:
-                    print("no pre-computed online_medfilt data! Computing now!")
+                    print("no pre-computed online_median filtered data! Computing now!")
                     df_label = pd.read_hdf(label_basename + '.h5')
                     for i in range(df_label.shape[1]):
                         if i % 3 != 2:
