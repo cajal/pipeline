@@ -34,6 +34,14 @@ import datetime
 
 schema = dj.schema('pipeline_eye', locals())
 
+if os.name == 'nt':
+   dj.config['external-storage'] = dict(protocol='file',
+       location='\\\\at-storage3.ad.bcm.edu\\stor04\\pupil_fitting')
+elif os.name == 'posix':
+   dj.config['external-storage'] = dict(protocol='file',
+       location='//at-storage.ad.bcm.edu/stor04/pupil_fitting')
+
+
 DEFAULT_PARAMETERS = {'relative_area_threshold': 0.002,
                       'ratio_threshold': 1.5,
                       'error_threshold': 0.1,
@@ -932,13 +940,22 @@ class FittedPupil(dj.Computed):
 
 
 @schema
+class OnlineMedianFilter(dj.Manual):
+    definition = """
+    # online median filter parameters
+    filter_name="online_median"                         : varchar(16)           # filter_name
+    kernel_size                                         : tinyint unsigned      # kernel size
+    """
+
+
+@schema
 class ProcessedFittedPupil(dj.Computed):
     definition = """
-    # Fit a circle and an ellipse after online filtering
+    # Fit a circle and an ellipse after filtering. filter info must be provided as a dict
     -> Tracking
+    -> OnlineMedianFilter
     ---
-    filter_kind                     : varchar(64)   # filtering method
-    fitting_ts=CURRENT_TIMESTAMP    : timestamp     # automatic
+    fitting_ts=CURRENT_TIMESTAMP        : timestamp         # automatic
     """
 
     class Circle(dj.Part):
@@ -964,10 +981,13 @@ class ProcessedFittedPupil(dj.Computed):
         visible_portion=NULL     : float         # portion of visible pupil area given a fitted ellipse frame. Please refer DLC_tools.PupilFitting.detect_visible_pupil_area for more details
         """
 
-    def make(self, key):
-        print("Fitting:", key)
+    @property
+    def key_source(self):
+        return (Tracking() & 'tracking_method=2') * OnlineMedianFilter()   
 
-        self.insert1(key)
+    def make(self, key):
+
+        print("Fitting:", key)
 
         avi_path = (Eye & key).get_video_path()
         nframes = (Eye & key).fetch1('total_frames')
@@ -975,95 +995,51 @@ class ProcessedFittedPupil(dj.Computed):
         data_circle = []
         data_ellipse = []
 
-        # manual == 1
-        if key['tracking_method'] == 1:
+        dlc_config = (ConfigDeeplabcut & (
+            Tracking.Deeplabcut & key)).fetch1()
 
-            contours = (Tracking.ManualTracking & key).fetch(
-                'contour', order_by='frame_id ASC')
+        config = auxiliaryfunctions.read_config(dlc_config['config_path'])
+        config['config_path'] = dlc_config['config_path']
+        config['shuffle'] = dlc_config['shuffle']
+        config['trainingsetindex'] = dlc_config['trainingsetindex']
 
-            # for manual tracking, we did not track eyelids, hence put -1.0 to be
-            # consistent with how we defined under PupilFitting.detect_visible_pupil_area
-            visible_portion = -1.0
+        # find path to original video symlink
+        base_path = os.path.splitext(avi_path)[0] + '_tracking'
+        video_path = os.path.join(base_path, os.path.basename(avi_path))
 
-            for frame_num in tqdm(range(nframes)):
+        config['orig_video_path'] = video_path
 
-                if contours[frame_num] is None or len(contours[frame_num].squeeze()) < 3:
+        # find croppoing coords
+        cropped_coords = (Tracking.Deeplabcut & key).fetch1(
+            'cropped_x0', 'cropped_x1', 'cropped_y0', 'cropped_y1')
 
-                    data_circle.append(
-                        [None, None, -3.0])
+        config['cropped_coords'] = cropped_coords
 
-                if contours[frame_num] is None or len(contours[frame_num].squeeze()) < 6:
+        pupil_fit = DLC_tools.DeeplabcutPupilFitting(
+            config=config, bodyparts='all', cropped=True, filtering=key)
 
-                    data_ellipse.append(
-                        [None, None, None, None, -3.0])
+        for frame_num in tqdm(range(nframes)):
 
-                if contours[frame_num] is not None and len(contours[frame_num].squeeze()) >= 3:
-                    x, y, radius = DLC_tools.smallest_enclosing_circle_naive(
-                        contours[frame_num].squeeze())
-                    center = np.array(x, y)
+            fit_dict = pupil_fit.fitted_core(frame_num=frame_num)
 
-                    data_circle.append(
-                        [center, radius, visible_portion])
+            # circle info
+            center = fit_dict['circle_fit']['center']
+            radius = fit_dict['circle_fit']['radius']
+            visible_portion = fit_dict['circle_visible']['visible_portion']
 
-                if contours[frame_num] is not None and len(contours[frame_num]) >= 6:
-                    rotated_rect = cv2.fitEllipse(
-                        contours[frame_num].squeeze())
+            data_circle.append(
+                [center, radius, visible_portion])
 
-                    data_ellipse.append([rotated_rect[0],
-                                         rotated_rect[1][1] /
-                                         2.0, rotated_rect[1][0]/2.0,
-                                         rotated_rect[2], visible_portion])
+            # ellipse info
+            center = fit_dict['ellipse_fit']['center']
+            major_radius = fit_dict['ellipse_fit']['major_radius']
+            minor_radius = fit_dict['ellipse_fit']['minor_radius']
+            rotation_angle = fit_dict['ellipse_fit']['rotation_angle']
+            visible_portion = fit_dict['ellipse_visible']['visible_portion']
 
-        # deeplabcut 2
-        elif key['tracking_method'] == 2:
-
-            dlc_config = (ConfigDeeplabcut & (
-                Tracking.Deeplabcut & key)).fetch1()
-
-            config = auxiliaryfunctions.read_config(dlc_config['config_path'])
-            config['config_path'] = dlc_config['config_path']
-            config['shuffle'] = dlc_config['shuffle']
-            config['trainingsetindex'] = dlc_config['trainingsetindex']
-
-            # find path to original video symlink
-            base_path = os.path.splitext(avi_path)[0] + '_tracking'
-            video_path = os.path.join(base_path, os.path.basename(avi_path))
-
-            config['orig_video_path'] = video_path
-
-            # find croppoing coords
-            cropped_coords = (Tracking.Deeplabcut & key).fetch1(
-                'cropped_x0', 'cropped_x1', 'cropped_y0', 'cropped_y1')
-
-            config['cropped_coords'] = cropped_coords
-
-            pupil_fit = DLC_tools.DeeplabcutPupilFitting(
-                config=config, bodyparts='all', cropped=True)
-
-            # filter via online median filter
-
-            for frame_num in tqdm(range(nframes)):
-
-                fit_dict = pupil_fit.fitted_core(frame_num=frame_num)
-
-                # circle info
-                center = fit_dict['circle_fit']['center']
-                radius = fit_dict['circle_fit']['radius']
-                visible_portion = fit_dict['circle_visible']['visible_portion']
-
-                data_circle.append(
-                    [center, radius, visible_portion])
-
-                # ellipse info
-                center = fit_dict['ellipse_fit']['center']
-                major_radius = fit_dict['ellipse_fit']['major_radius']
-                minor_radius = fit_dict['ellipse_fit']['minor_radius']
-                rotation_angle = fit_dict['ellipse_fit']['rotation_angle']
-                visible_portion = fit_dict['ellipse_visible']['visible_portion']
-
-                data_ellipse.append([center,
-                                     major_radius, minor_radius,
-                                     rotation_angle, visible_portion])
+            data_ellipse.append([center,
+                                major_radius, minor_radius,
+                                rotation_angle, visible_portion])
 
         data_circle = np.array(data_circle)
         data_ellipse = np.array(data_ellipse)
@@ -1073,7 +1049,7 @@ class ProcessedFittedPupil(dj.Computed):
             data=data_circle, fitting_method='circle', std_magnitude=5.5)
 
         data_circle[rejected_ind] = None, None, -3.0
-
+        
         common_entry = np.array(list(key.values()))
         common_matrix = np.tile(common_entry, (nframes, 1))
 
