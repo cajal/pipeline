@@ -90,7 +90,7 @@ def online_median_filter(x, kernel_size=3):
 
     interval = kernel_size//2
 
-    online_medfilt = x[0:interval]
+    online_medfilt = x[0:interval].tolist()
     for i in range(interval, len(x)-interval):
         online_medfilt.append(np.median(x[i-interval:i+interval+1]))
     online_medfilt.append(x[-1])
