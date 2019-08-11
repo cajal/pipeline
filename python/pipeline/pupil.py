@@ -37,10 +37,10 @@ schema = dj.schema('pipeline_eye', locals())
 
 if os.name == 'nt':
    dj.config['external-storage'] = dict(protocol='file',
-       location='\\\\at-storage3.ad.bcm.edu\\stor04\\pupil_fitting')
+       location='\\\\mnt\\stor04\\pupil_fitting')
 elif os.name == 'posix':
    dj.config['external-storage'] = dict(protocol='file',
-       location='//at-storage.ad.bcm.edu/stor04/pupil_fitting')
+       location='/mnt/stor04/pupil_fitting')
 
 
 DEFAULT_PARAMETERS = {'relative_area_threshold': 0.002,
@@ -941,7 +941,7 @@ class FittedPupil(dj.Computed):
 
 
 @schema
-class ProcessedFittedPupil(dj.Computed):
+class OnlineMedianFilteredFittedPupil(dj.Computed):
     definition = """
     # Fit a circle and an ellipse after filtering.
     -> Tracking
