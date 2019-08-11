@@ -14,11 +14,12 @@ import numpy as np
 import pandas as pd
 import json
 from commons import lab
+import datajoint as dj
 from datajoint.jobs import key_hash
 from datajoint.autopopulate import AutoPopulate
-import datajoint as dj
+
 from .utils.decorators import gitlog
-from .utils import eye_tracking, h5
+from .utils import eye_tracking, h5, filter_config
 from .utils.eye_tracking import PupilTracker, ManualTracker
 from . import config
 from . import experiment, notify, shared
@@ -940,50 +941,34 @@ class FittedPupil(dj.Computed):
 
 
 @schema
-class OnlineMedianFilter(dj.Manual):
-    definition = """
-    # online median filter parameters
-    filter_name="online_median"                         : varchar(16)           # filter_name
-    kernel_size                                         : tinyint unsigned      # kernel size
-    """
-
-
-@schema
 class ProcessedFittedPupil(dj.Computed):
     definition = """
-    # Fit a circle and an ellipse after filtering. filter info must be provided as a dict
+    # Fit a circle and an ellipse after filtering.
     -> Tracking
-    -> OnlineMedianFilter
+    -> filter_config.OnlineMedianFilter
     ---
     fitting_ts=CURRENT_TIMESTAMP        : timestamp         # automatic
     """
 
     class Circle(dj.Part):
         definition = """
+        # blob def: center_x, center_y, radius, visible_portion
         -> master
-        frame_id                 : int           # frame id with matlab based 1 indexing
         ---
-        center=NULL              : tinyblob      # center of the circle in (x, y) of image
-        radius=NULL              : float         # radius of the circle
-        visible_portion=NULL     : float         # portion of visible pupil area given a fitted circle frame. Please refer DLC_tools.PupilFitting.detect_visible_pupil_area for more details
-
+        circle_fit          : external-storage      # circle fit np array 
         """
 
     class Ellipse(dj.Part):
         definition = """
+        # blob def: center_x, center_y, major_r, minor_r, rotation_angle, visible_portion
         -> master
-        frame_id                 : int           # frame id with matlab based 1 indexing
         ---
-        center=NULL              : tinyblob      # center of the ellipse in (x, y) of image
-        major_radius=NULL        : float         # major radius of the ellipse
-        minor_radius=NULL        : float         # minor radius of the ellipse
-        rotation_angle=NULL      : float         # ellipse rotation angle in degrees w.r.t. major_radius
-        visible_portion=NULL     : float         # portion of visible pupil area given a fitted ellipse frame. Please refer DLC_tools.PupilFitting.detect_visible_pupil_area for more details
+        ellipse_fit         : external-storage      # ellipse fit np array
         """
 
     @property
     def key_source(self):
-        return (Tracking() & 'tracking_method=2') * OnlineMedianFilter()   
+        return (Tracking.proj() & 'tracking_method=2') * filter_config.OnlineMedianFilter.proj()
 
     def make(self, key):
 
@@ -1015,60 +1000,61 @@ class ProcessedFittedPupil(dj.Computed):
 
         config['cropped_coords'] = cropped_coords
 
-        pupil_fit = DLC_tools.DeeplabcutPupilFitting(
-            config=config, bodyparts='all', cropped=True, filtering=key)
+        filter_dict = (filter_config.OnlineMedianFilter & key).fetch1()
 
-        for frame_num in tqdm(range(nframes)):
+        pupil_fit = DLC_tools.DeeplabcutPupilFitting(
+            config=config, bodyparts='all', cropped=True, filtering=filter_dict)
+
+        for frame_num in tqdm(range(1000)):
 
             fit_dict = pupil_fit.fitted_core(frame_num=frame_num)
 
             # circle info
-            center = fit_dict['circle_fit']['center']
+            if fit_dict['circle_fit']['center'] is None:
+                center_x, center_y = None, None
+            else:
+                center_x, center_y = fit_dict['circle_fit']['center']
             radius = fit_dict['circle_fit']['radius']
             visible_portion = fit_dict['circle_visible']['visible_portion']
 
             data_circle.append(
-                [center, radius, visible_portion])
+                [center_x, center_y, radius, visible_portion])
 
             # ellipse info
-            center = fit_dict['ellipse_fit']['center']
+            if fit_dict['ellipse_fit']['center'] is None:
+                center_x, center_y = None, None
+            else:
+                center_x, center_y =  fit_dict['ellipse_fit']['center']
+
             major_radius = fit_dict['ellipse_fit']['major_radius']
             minor_radius = fit_dict['ellipse_fit']['minor_radius']
             rotation_angle = fit_dict['ellipse_fit']['rotation_angle']
             visible_portion = fit_dict['ellipse_visible']['visible_portion']
 
-            data_ellipse.append([center,
+            data_ellipse.append([center_x, center_y,
                                 major_radius, minor_radius,
                                 rotation_angle, visible_portion])
 
-        data_circle = np.array(data_circle)
-        data_ellipse = np.array(data_ellipse)
+        data_circle = np.array(data_circle).astype("float")
+        data_ellipse = np.array(data_ellipse).astype("float")
 
         # now filter out the outliers by 5.5 std away from mean
         rejected_ind = DLC_tools.filter_by_std(
             data=data_circle, fitting_method='circle', std_magnitude=5.5)
 
-        data_circle[rejected_ind] = None, None, -3.0
+        data_circle[rejected_ind] = np.nan, np.nan, np.nan, -3.0
+    
         
-        common_entry = np.array(list(key.values()))
-        common_matrix = np.tile(common_entry, (nframes, 1))
-
-        data_circle = np.hstack(
-            (common_matrix, np.arange(nframes).reshape(-1, 1), data_circle))
-
         # insert data
-        self.Circle.insert(data_circle)
+        self.Circle.insert1(dict(key, circle_fit=data_circle))
 
         # now repeat the process for ellipse
         rejected_ind = DLC_tools.filter_by_std(
             data=data_ellipse, fitting_method='ellipse', std_magnitude=5.5)
 
-        data_ellipse[rejected_ind, :] = None, None, None, None, -3.0
+        data_ellipse[rejected_ind, :] = np.nan, np.nan, np.nan, np.nan, np.nan, -3.0
 
-        data_ellipse = np.hstack(
-            (common_matrix, np.arange(nframes).reshape(-1, 1), data_ellipse))
-
-        self.Ellipse.insert(data_ellipse)
+        self.Ellipse.insert1(dict(key, ellipse_fit=data_ellipse))
 
 
 def plot_fitting(key, start, end=-1, fit_type='Circle', fig=None, ax=None, mask_flag=True):
