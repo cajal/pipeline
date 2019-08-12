@@ -971,7 +971,8 @@ class OnlineMedianFilteredFittedPupil(dj.Computed):
         return (Tracking.proj() & 'tracking_method=2') * filter_config.OnlineMedianFilter.proj()
 
     def make(self, key):
-
+        
+        print("Only for DLC tracked cases!")
         print("Fitting:", key)
 
         avi_path = (Eye & key).get_video_path()
@@ -1043,17 +1044,17 @@ class OnlineMedianFilteredFittedPupil(dj.Computed):
             data=data_circle, fitting_method='circle', std_magnitude=5.5)
 
         data_circle[rejected_ind] = np.nan, np.nan, np.nan, -3.0
-    
-        
-        # insert data
-        self.Circle.insert1(dict(key, circle_fit=data_circle))
 
-        # now repeat the process for ellipse
         rejected_ind = DLC_tools.filter_by_std(
             data=data_ellipse, fitting_method='ellipse', std_magnitude=5.5)
 
         data_ellipse[rejected_ind, :] = np.nan, np.nan, np.nan, np.nan, np.nan, -3.0
 
+        # detect blinks and drop those
+    
+        
+        # insert data
+        self.Circle.insert1(dict(key, circle_fit=data_circle))
         self.Ellipse.insert1(dict(key, ellipse_fit=data_ellipse))
 
 
