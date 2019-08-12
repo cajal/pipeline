@@ -185,6 +185,17 @@ class DeeplabcutPlotBodyparts():
         self.df_bodyparts_y = self.df_bodyparts.iloc[:,
                                                      self.df_bodyparts.columns.get_level_values(1) == 'y']
 
+        # in mm. https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3310398/#R13
+        self._pupil_diameter = 3.0 
+
+        right = self.df_bodyparts['eyelid_right'].values[:, :2]
+        left = self.df_bodyparts['eyelid_left'].values[:, :2]
+
+        self.median_left_right = np.median(
+            np.sqrt(np.einsum('ij,ij->i', left-right, left-right)))
+
+        self._pixel_to_diameter_ratio = self.median_left_right/self._pupil_diameter
+
         if not self.cropped:
 
             self.nx = self.clip.width()
@@ -303,6 +314,18 @@ class DeeplabcutPlotBodyparts():
     def fontsize(self, value):
         self._fontsize = value
 
+    @property
+    def pupil_diameter(self):
+        return self._pupil_diameter
+
+    @pupil_diameter.setter
+    def pupil_diameter(self, value):
+        self._pupil_diameter = value
+
+    @property
+    def pupil_to_diameter_ratio(self):
+        return self.median_left_right/self._pupil_diameter
+    
     def coords_pcutoff(self, frame_num):
         """
         Given a frame number, return bpindex, x & y coordinates that meet pcutoff criteria
@@ -1218,7 +1241,7 @@ def make_compressed_cropped_video(tracking_dir, cropped_coords):
     return cc_vid_path
 
 
-def filter_by_std(data, fitting_method, std_magnitude=5.5):
+def filter_by_fitting_std(data, fitting_method, std_magnitude=5.5):
     """Filter out outliers based on std specified by user. The outlier indices are returned
 
     Args:
@@ -1294,3 +1317,5 @@ def filter_by_std(data, fitting_method, std_magnitude=5.5):
             rejected_major_r_ind, rejected_minor_r_ind), rejected_x_ind), rejected_y_ind)
 
     return rejected_ind
+
+
