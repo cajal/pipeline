@@ -29,7 +29,7 @@ class OnlineMedianFilter(dj.Lookup):
     @property
     def contents(self):
         filter_name = ["online_median"]
-        kernel_size = [3, 5, 7, 9]
+        kernel_size = [3, 5, 7, 9, 11, 13]
 
         for p in product(filter_name, kernel_size):
             k = dict(zip(self.heading.dependent_attributes,p))
