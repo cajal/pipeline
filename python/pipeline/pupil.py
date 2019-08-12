@@ -1040,12 +1040,12 @@ class OnlineMedianFilteredFittedPupil(dj.Computed):
         data_ellipse = np.array(data_ellipse).astype("float")
 
         # now filter out the outliers by 5.5 std away from mean
-        rejected_ind = DLC_tools.filter_by_std(
+        rejected_ind = DLC_tools.filter_by_fitting_std(
             data=data_circle, fitting_method='circle', std_magnitude=5.5)
 
         data_circle[rejected_ind] = np.nan, np.nan, np.nan, -3.0
 
-        rejected_ind = DLC_tools.filter_by_std(
+        rejected_ind = DLC_tools.filter_by_fitting_std(
             data=data_ellipse, fitting_method='ellipse', std_magnitude=5.5)
 
         data_ellipse[rejected_ind, :] = np.nan, np.nan, np.nan, np.nan, np.nan, -3.0
