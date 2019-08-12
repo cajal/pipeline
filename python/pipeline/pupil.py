@@ -1006,7 +1006,7 @@ class OnlineMedianFilteredFittedPupil(dj.Computed):
         pupil_fit = DLC_tools.DeeplabcutPupilFitting(
             config=config, bodyparts='all', cropped=True, filtering=filter_dict)
 
-        for frame_num in tqdm(range(1000)):
+        for frame_num in tqdm(range(nframes)):
 
             fit_dict = pupil_fit.fitted_core(frame_num=frame_num)
 
