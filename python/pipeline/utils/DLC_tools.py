@@ -148,7 +148,7 @@ class DeeplabcutPlotBodyparts():
                                       self._case + '_compressed_cropped' +
                                       self._DLCscorer)
 
-        if filtering is None:
+        if filtering is None or filtering['filter_name'] is None:
             self.filtering = 'no filtering'
             self.label_path = label_basename + '.h5'
             self.df_label = pd.read_hdf(self.label_path)
