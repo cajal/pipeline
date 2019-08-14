@@ -323,7 +323,7 @@ class DeeplabcutPlotBodyparts():
         self._pupil_diameter = value
 
     @property
-    def pupil_to_diameter_ratio(self):
+    def pixel_to_diameter_ratio(self):
         return self.median_left_right/self._pupil_diameter
     
     def coords_pcutoff(self, frame_num):
@@ -1261,7 +1261,7 @@ def filter_by_fitting_std(data, fitting_method, std_magnitude=5.5):
             Default to 5.5 (emperically obtained value)
 
     Returns:
-        rejected inds: filtered indices after filtered by std deviations
+        rejected inds: rejected indices after filtered by std deviations. True is rejected.
 
     """
     if fitting_method.lower() == 'circle':
