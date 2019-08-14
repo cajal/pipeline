@@ -1061,8 +1061,8 @@ class OnlineMedianFilteredFittedPupil(dj.Computed):
 @schema
 class ProcessedFittedPupil(dj.Computed):
     definition = """
-    # Fit a circle and an ellipse after filtering.
-    -> Tracking
+    # Fit a circle and an ellipse after filtering and blink detection.
+    -> FittedPupil
     -> filter_config.OnlineMedianFilter
     ---
     fitting_ts=CURRENT_TIMESTAMP        : timestamp         # automatic
