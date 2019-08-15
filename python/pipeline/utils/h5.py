@@ -1,8 +1,8 @@
 import h5py
 import numpy as np
-# from ..exceptions import PipelineException
-# from .eye_tracking import ANALOG_PACKET_LEN
-# from .signal import mirrconv, spaced_max
+from ..exceptions import PipelineException
+from .eye_tracking import ANALOG_PACKET_LEN
+from .signal import mirrconv, spaced_max
 
 
 def read_behavior_file(filename):
