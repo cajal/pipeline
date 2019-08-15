@@ -1,8 +1,8 @@
 import h5py
 import numpy as np
-from ..exceptions import PipelineException
-from .eye_tracking import ANALOG_PACKET_LEN
-from .signal import mirrconv, spaced_max
+# from ..exceptions import PipelineException
+# from .eye_tracking import ANALOG_PACKET_LEN
+# from .signal import mirrconv, spaced_max
 
 
 def read_behavior_file(filename):
@@ -94,6 +94,106 @@ def read_behavior_file(filename):
 
     return data
 
+def read_patchmaster(F):
+    if type(F)==str:
+        F=F[:-4]+'%d.h5' # chanage oneCell10_01.h5 to oneCell10_%d.h5
+        # Append '%d.h5' to filename in place of trailing 'x.h5'
+        # right now this way will only work for one digit file names, are we doing two digit names in the future? if so i suggest use the 0d format instead of having 9 and suddently 10 for eg.
+    else:
+        raise Exception ('currently the input format as {} is not surrpoted, please use str'.format(type(F)))
+    f=h5py.File(F,"r+",driver='family',memb_size=0) # read only, mimic if we are reading a batch of files, but the batch only have 0 member size
+    #begin case 7
+    '''
+        %% Files recorded after 03-28-2014 using the NPI ELC-03XS amplifier as amp 1 and the AxoClamp 2B (.1x headstage) as amp 2
+        %% Amp 2 current low-pass is set to 3000Hz.
+        %% Skips settings telegraph from NPI if any(~sets), i.e. if NPI amp is turned off.
+        %% Adds scanimage sync channel
+        %% Ball data is from optical encoder
+        %% ts2sec now takes 'packetLen' argument in order to correctly assign timestamps to end of data packets. This version adds a analogPacketLen field to data struct
+        % *** Packet length is set at 2000 for analog channels ***
+        '''
+    ANALOG_PACKET_LEN=2000
+    databall=f['ball']
+    wf=f['waveform']
+    sets=f['settings']
+    cam1ts=f['behaviorvideotimestamp']
+    cam2ts=f['eyetrackingvideotimestamp']
+    waveformDescStr=f.attrs['waveform Channels Description']
+    standardstr=b'Current Input 1, Voltage Input 1, Sync Photodiode, Stimulation Photodiode, LED Level Input, Patch Command Input, Shutter, Current Input 2, Voltage Input 2, Scan Image Sync'
+    if waveformDescStr!=standardstr:
+        raise Exception ('waveform Channels Description is wrong for this file version')
+    data={}
+    data['i1']=wf[0,:]# the wf is of shape 11, 6160000
+    data['v1']=wf[1,:]
+    data['i2']=wf[7,:]
+    data['v2']=wf[8,:]
+    data['syncPd']=wf[2,:]
+    data['stimPd']=wf[3,:]
+    data['led']=wf[4,:]
+    data['command']=wf[5,:]
+    data['shutter']=wf[6,:]
+    data['scanImage']=wf[9,:]
+    data['ts']=wf[10,:]
+    data['analogPacketLen']=ANALOG_PACKET_LEN
+    #now dealing with NPI amp settings
+    #settings are saved in var sets, of shape 6, 6160
+    settings1={}
+    settings2={}
+    # the result from unique are index, need to convert to int
+    # and use the index to get the gain settings.	
+    iGains=[0.1,0.2,0.5,1,2,5,10]
+    if np.unique(sets[0,:].round()).size==1:
+        settings1['iGain']=iGains[int(np.unique(sets[0,:])[0])-1]
+    else:
+        print('igain changed')
+        raise Exception('igain changed ')
+    vGains = [10, 20 ,50 ,100, 200, 500, 1000]
+    if np.unique(sets[1,:].round()).size==1:
+        settings1['vGain']=vGains[int(np.unique(sets[1,:])[0])-1]
+    else:
+        print('vgain changed')	
+        raise Exception('vgain changed ')
+
+    iLowPassCorners = [20, 50, 100, 200, 300 ,500, 700, 1000, 1300, 2000, 3000, 5000, 8000, 10000, 13000, 20000]
+    if np.unique(sets[2,:].round()).size==1:
+        settings1['iLowPass']=iLowPassCorners[int(np.unique(sets[2,:])[0])-1+9]# +9 ,the setting nobes output has neagative values.
+    else:
+        print('i low pass gain changed')	
+        raise Exception('ilowpasscorner changed ')
+
+    vLowPassCorners = [20, 50, 100, 200, 300, 500, 700, 1000, 1300, 2000, 3000, 5000, 8000, 10000, 13000, 20000]
+    if np.unique(sets[3,:].round()).size==1:
+        settings1['vLowPass']=vLowPassCorners[int(round(np.unique(sets[3,:])[0]))-1+9]
+    else:
+        print('v low pass gain changed')	
+        raise Exception('vlowpasscorner changed ')
+
+    vHighPassCorners = [0, 0.1, 0.3, 0.5, 1, 3, 5, 10 ,30 ,50 ,100, 300, 500, 800 ,1000, 3000]
+    if np.unique(sets[4,:].round()).size==1:
+        settings1['vHighPass']=vHighPassCorners[int(round(np.unique(sets[4,:])[0]))-1+9]
+    else:
+        print('v high pass gain changed')	
+        raise Exception('vhighpasscorner changed ')
+    '''
+    except:
+        print("using default setting!")
+        settings1['iGain'] = 1
+        settings1['vGain'] = 1
+        settings1['iLowPass'] = 1
+        settings1['vLowPass'] = 1
+        settings1['vHighPass'] = 1
+    '''
+    settings2['iGain'] = 0.1
+    settings2['vGain'] = 10
+    settings2['iLowPass'] = 3000
+    settings2['vLowPass'] = 30000
+    settings2['vHighPass'] = 0
+    #applying the gains
+    data['v1']= data['v1']/settings1['vGain']
+    data['i1']= data['i1']/settings1['iGain']
+    data['v2']= data['v2']/settings2['vGain']
+    data['i2']= data['i2']/settings2['iGain']
+    return data
 
 def ts2sec(ts, sampling_rate=1e7, is_packeted=False):
     """ Convert timestamps from master clock (ts) to seconds (s)
