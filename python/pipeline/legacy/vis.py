@@ -2,7 +2,7 @@
 This schema copies recent data from common_psy for uploaded to the cloud
 """
 import datajoint as dj
-from . import mice  # needed for referencing
+from pipeline import mice  # needed for referencing
 import numpy as np
 
 schema = dj.schema('pipeline_vis', locals())

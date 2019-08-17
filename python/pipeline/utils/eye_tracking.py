@@ -89,80 +89,199 @@ class CVROIGrabber:
                 self.mask = 0 * self.mask + 1
 
 
-class ROIGrabber:
-    """
-    Interactive matplotlib figure to grab an ROI from an image.
+import math
+class Point:
+    """ A point in a 2-d figure. """
+    def __init__(self, x=None, y=None):
+        self.x = x
+        self.y = y
+
+    def is_near(self, x, y, thresh=4):
+        distance = math.sqrt((self.x - x)**2 + (self.y - y)**2)
+        return distance < thresh
+
+    def __repr__(self):
+        return 'Point({}, {})'.format(self.x, self.y)
+
+
+class ROISelector:
+    """ Matplotlib interface to select an ROI from an image
+
+    Arguments:
+        image (np.array): A 2-d image to use for background.
 
     Usage:
-
-    rg = ROIGrabber(img)
-    # select roi
-    print(rg.roi) # get ROI
+        roi_selector = ROISelector(img)  # opens a window that lets you select an ROI
+        (x1, y1), (x2, y2) = roi_selector.roi # P1 is always the upper left corner and P2 is the lower right one
     """
-
-    def __init__(self, img):
-        plt.switch_backend('GTK3Agg')
-        self.img = img
-        self.start = None
+    def __init__(self, image):
+        self.image = image
+        self.point1 = None
+        self.point2 = None
         self.current = None
-        self.end = None
-        self.pressed = False
-        self.fig, self.ax = plt.subplots(facecolor='w')
 
-        self.fig.canvas.mpl_connect('button_press_event', self.on_press)
-        self.fig.canvas.mpl_connect('button_release_event', self.on_release)
-        self.fig.canvas.mpl_connect('motion_notify_event', self.on_move)
-        self.replot()
+        # Create figure
+        fig = plt.figure()
+        plt.imshow(image)
+        plt.gca().set_aspect('equal')
+        plt.gray()
+        plt.title('Click and drag to select ROI. Press <ENTER> to save.')
+
+        # Bind events
+        fig.canvas.mpl_connect('button_press_event', self.on_click)
+        fig.canvas.mpl_connect('motion_notify_event', self.on_move)
+        fig.canvas.mpl_connect('button_release_event', self.on_release)
+        fig.canvas.mpl_connect('key_press_event', self.on_press)
+
         plt.show(block=True)
-
-    def draw_rect(self, fr, to, color='dodgerblue'):
-        x = np.vstack((fr, to))
-        fr = x.min(axis=0)
-        to = x.max(axis=0)
-        self.ax.plot(fr[0] * np.ones(2), [fr[1], to[1]], color=color, lw=2)
-        self.ax.plot(to[0] * np.ones(2), [fr[1], to[1]], color=color, lw=2)
-        self.ax.plot([fr[0], to[0]], fr[1] * np.ones(2), color=color, lw=2)
-        self.ax.plot([fr[0], to[0]], to[1] * np.ones(2), color=color, lw=2)
-        self.ax.plot(fr[0], fr[1], 'ok', mfc='gold')
-        self.ax.plot(to[0], to[1], 'ok', mfc='deeppink')
-
-    def replot(self):
-        self.ax.clear()
-        self.ax.imshow(self.img, cmap=plt.cm.gray)
-
-        if self.pressed:
-            self.draw_rect(self.start, self.current, color='lime')
-        elif self.start is not None and self.end is not None:
-            self.draw_rect(self.start, self.current)
-        self.ax.axis('tight')
-        self.ax.set_aspect(1)
-        self.ax.set_title('Close window when done', fontsize=16, fontweight='bold')
-        plt.draw()
 
     @property
     def roi(self):
-        x = np.vstack((self.start, self.end))
-        tmp = np.hstack((x.min(axis=0), x.max(axis=0)))
-        return np.asarray([[tmp[1], tmp[3]], [tmp[0], tmp[2]]], dtype=int) + 1
-
-    def on_press(self, event):
-        if event.xdata is not None and event.ydata is not None:
-            self.pressed = True
-            self.start = np.asarray([event.xdata, event.ydata])
-
-    def on_release(self, event):
-        if event.xdata is not None and event.ydata is not None:
-            self.end = np.asarray([event.xdata, event.ydata])
+        if self.point1 is None or self.point2 is None:
+            raise ValueError('No ROI was drawn')
         else:
-            self.end = self.current
-        self.pressed = False
-        self.replot()
+            points = np.sort([[self.point1.x, self.point1.y],
+                              [self.point2.x, self.point2.y]], axis=0) + 0.5
+            # we add 0.5 to have the upper corner be (0, 0) rather than (-0.5, -0.5)
+        return tuple(points[0]), tuple(points[1])
+
+    def on_click(self, event):
+        """ Start a new ROI or modify a previously drawn ROI"""
+        if event.xdata is not None and event.ydata is not None:
+            first_click = self.point1 is None or self.point2 is None
+            if (first_click or not (self.point1.is_near(event.xdata, event.ydata) or
+                                    self.point2.is_near(event.xdata, event.ydata))):
+                self.point1 = Point(event.xdata, event.ydata)
+                self.point2 = Point(event.xdata, event.ydata)
+                self.current = self.point2
+            else: # click is close to a previous point
+                self.current = (self.point2 if self.point2.is_near(event.xdata, event.ydata)
+                                else self.point1)
+                self.current.x = event.xdata
+                self.current.y = event.ydata
+            self.redraw()
 
     def on_move(self, event):
+        """ Update the current point if it is being dragged. """
+        if (self.current is not None and event.xdata is not None and
+                event.ydata is not None):
+            self.current.x = event.xdata
+            self.current.y = event.ydata
+            self.redraw()
+
+    def on_release(self, event):
+        """ Release the current point."""
+        self.current = None
+        self.redraw()
+
+    def on_press(self, event):
+        """ Close window if <ENTER> is pressed."""
+        if event.key == 'enter':
+            plt.close()
+
+    def redraw(self):
+        """ Draw points and a rectangle between them"""
+        plt.gca().clear()
+        plt.title('Click and drag to select ROI. Press <ENTER> to save.')
+        plt.imshow(self.image)
+        self.draw_rectangle(self.point1, self.point2, color=('dodgerblue' if self.current
+                                                              else 'lime'))
+        plt.draw()
+
+    def draw_rectangle(self, p1, p2, color='dodgerblue'):
+        low_x, high_x = (p1.x, p2.x) if p1.x <= p2.x else (p2.x, p1.x)
+        low_y, high_y = (p1.y, p2.y) if p1.y <= p2.y else (p2.y, p1.y)
+        plt.plot([low_x, low_x], [low_y, high_y], color=color, lw=2)
+        plt.plot([high_x, high_x], [low_y, high_y], color=color, lw=2)
+        plt.plot([low_x, high_x], [low_y, low_y], color=color, lw=2)
+        plt.plot([low_x, high_x], [high_y, high_y], color=color, lw=2)
+
+        plt.plot(p1.x, p1.y, 'ok', mfc='gold')
+        plt.plot(p2.x, p2.y, 'ok', mfc='deeppink')
+
+
+class PointLabeler:
+    """ Matplotlib interface to label points in an image.
+
+    Arguments:
+        image (np.array): A 2-d image to use for background.
+        percentile (float): Higher percentile used to clip the image to improve contrast.
+
+    Usage:
+        point_labeler = PointLabeler(img)  # opens a window that lets you select an ROI
+        [[p1.x, p1.y], [p2.x, p2.y], ...] = point_labeler.points
+    """
+    def __init__(self, image, percentile=100):
+        self.image = image
+        self._points = []
+        self.current = None
+        self.percentile = percentile
+        self._vmax = np.percentile(image, percentile) # vmax send to plt.imshow()
+
+        # Create figure
+        fig = plt.figure(figsize=(12, 12))
+        plt.imshow(image, vmax=self._vmax)
+        plt.gca().set_aspect('equal')
+        plt.gray()
+        plt.title('Click/drag points. Press d to delete last point, <ENTER> to save.')
+
+        # Bind events
+        fig.canvas.mpl_connect('button_press_event', self.on_click)
+        fig.canvas.mpl_connect('button_release_event', self.on_release)
+        fig.canvas.mpl_connect('key_press_event', self.on_press)
+
+        plt.show(block=True)
+
+    @property
+    def points(self):
+        return [[p.x + 0.5, p.y + 0.5] for p in self._points] # 0.5 to have the upper corner be (0, 0) rather than (-0.5, -0.5)
+
+    def on_click(self, event):
+        """ Create a new point or select a previous point. """
         if event.xdata is not None and event.ydata is not None:
-            self.current = np.asarray([event.xdata, event.ydata])
-            if self.pressed:
-                self.replot()
+            nearby_point = [p.is_near(event.xdata, event.ydata) for p in self._points]
+            if len(self._points) == 0 or not any(nearby_point):
+                new_point = Point()
+                self._points.append(new_point)
+                self.current = new_point
+            else:
+                self.current = self._points[nearby_point.index(True)]
+
+    def on_release(self, event):
+        """ Save point and release."""
+        if (self.current is not None and event.xdata is not None and
+                event.ydata is not None):
+            self.current.x = event.xdata
+            self.current.y = event.ydata
+            self.current = None
+            self.redraw()
+
+    def on_press(self, event):
+        """ Close window if <ENTER> is pressed."""
+        if event.key == 'enter':
+            plt.close()
+        if event.key == 'd':
+            if len(self._points) > 0:
+                self._points.pop()
+                self.redraw()
+        if event.key == '=' or event.key == '-':
+            self.percentile += (1 if event.key == '-' else -1)
+            self.percentile = np.clip(self.percentile, 0, 100)
+            self._vmax = np.percentile(self.image, self.percentile)
+            self.redraw()
+
+    def redraw(self):
+        """ Draw the points and lines between them. """
+        plt.gca().clear()
+        plt.title('Click/drag points. Press d to delete last point, <ENTER> to save.')
+        plt.imshow(self.image, vmax=self._vmax)
+
+        for i, p in enumerate(self._points):
+            plt.plot(p.x, p.y, 'ok', mfc='C{}'.format(i%10))
+        for p1, p2 in zip(self._points[:-1], self._points[1:]):
+            plt.plot([p1.x, p2.x], [p1.y, p2.y], color='lime', lw=1.5)
+
+        plt.draw()
 
 
 class PupilTracker:
@@ -830,7 +949,7 @@ class ManualTracker:
         return thres, blur, mask
 
     def find_contours(self, thres):
-        _, contours, hierarchy = cv2.findContours(thres.copy(), cv2.RETR_TREE,
+        contours, hierarchy = cv2.findContours(thres, cv2.RETR_TREE,
                                                   cv2.CHAIN_APPROX_SIMPLE)  # remove copy when cv2=3.2 is installed
         if len(contours) > 1:
             contours = [c for i, c in enumerate(contours) if hierarchy[0, i, 3] == -1]

@@ -14,6 +14,5 @@ classdef SummaryImagesAverage < dj.Computed
 		%!!! compute missing fields for key here
 % 			 self.insert(key)
 		end
-	end
-
+    end
 end
