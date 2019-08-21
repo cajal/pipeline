@@ -595,7 +595,7 @@ class Tracking(dj.Computed):
                     raise
 
                 logtrace = tracker.mixing_constant.logtrace.astype(float)
-                min_lambda = min_lambda = logtrace[logtrace > 0].min()
+                min_lambda = logtrace[logtrace > 0].min()
                 frame = Tracking.ManualTracking()
                 parameters = Tracking.ManualTrackingParameter()
                 for frame_id, ok, contour, params in tqdm(zip(count(), tracker.contours_detected, tracker.contours,
@@ -833,8 +833,7 @@ class FittedPupil(dj.Computed):
 
                 if contours[frame_num] is None or len(contours[frame_num].squeeze()) < 3:
 
-                    data_circle.append(
-                        [None, None, -3.0])
+                    data_circle.append([None, None, -3.0])
 
                 if contours[frame_num] is None or len(contours[frame_num].squeeze()) < 6:
 
