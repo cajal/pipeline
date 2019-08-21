@@ -35,12 +35,9 @@ import datetime
 
 schema = dj.schema('pipeline_eye', locals())
 
-if os.name == 'nt':
-   dj.config['external-storage'] = dict(protocol='file',
-       location='\\\\mnt\\stor04\\pupil_fitting')
-elif os.name == 'posix':
-   dj.config['external-storage'] = dict(protocol='file',
-       location='/mnt/stor04/pupil_fitting')
+
+dj.config['external-pupil'] = dict(protocol='file',
+       location='/mnt/dj-stor01/pupil_fitting')
 
 
 DEFAULT_PARAMETERS = {'relative_area_threshold': 0.002,
