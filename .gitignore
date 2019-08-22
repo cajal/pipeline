@@ -83,4 +83,4 @@ matlab/scripts/Eye_Movements/CircleMaps/
 docker-compose-private.yml
 
 # ignore filter_config.py
-filter_config.py
+/python/pipeline/utils/filter_config.py
