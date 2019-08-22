@@ -84,4 +84,3 @@ docker-compose-private.yml
 
 # ignore filter_config.py
 /python/pipeline/utils/filter_config.py
-/python/pipeline/utils/foo.py
