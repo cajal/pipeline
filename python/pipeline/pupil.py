@@ -837,16 +837,14 @@ class FittedPupil(dj.Computed):
 
                 if contours[frame_num] is None or len(contours[frame_num].squeeze()) < 6:
 
-                    data_ellipse.append(
-                        [None, None, None, None, -3.0])
+                    data_ellipse.append([None, None, None, None, -3.0])
 
                 if contours[frame_num] is not None and len(contours[frame_num].squeeze()) >= 3:
                     x, y, radius = DLC_tools.smallest_enclosing_circle_naive(
                         contours[frame_num].squeeze())
                     center = np.array(x, y)
 
-                    data_circle.append(
-                        [center, radius, visible_portion])
+                    data_circle.append([center, radius, visible_portion])
 
                 if contours[frame_num] is not None and len(contours[frame_num]) >= 6:
                     rotated_rect = cv2.fitEllipse(
@@ -892,8 +890,7 @@ class FittedPupil(dj.Computed):
                 radius = fit_dict['circle_fit']['radius']
                 visible_portion = fit_dict['circle_visible']['visible_portion']
 
-                data_circle.append(
-                    [center, radius, visible_portion])
+                data_circle.append([center, radius, visible_portion])
 
                 # ellipse info
                 center = fit_dict['ellipse_fit']['center']
@@ -902,8 +899,7 @@ class FittedPupil(dj.Computed):
                 rotation_angle = fit_dict['ellipse_fit']['rotation_angle']
                 visible_portion = fit_dict['ellipse_visible']['visible_portion']
 
-                data_ellipse.append([center,
-                                     major_radius, minor_radius,
+                data_ellipse.append([center, major_radius, minor_radius,
                                      rotation_angle, visible_portion])
 
         data_circle = np.array(data_circle)
