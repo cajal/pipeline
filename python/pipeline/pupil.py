@@ -932,122 +932,122 @@ class FittedPupil(dj.Computed):
         self.Ellipse.insert(data_ellipse)
 
 
-@schema
-class OnlineMedianFilteredFittedPupil(dj.Computed):
-    definition = """
-    # Fit a circle and an ellipse after filtering.
-    -> Tracking
-    -> filter_config.OnlineMedianFilter
-    ---
-    fitting_ts=CURRENT_TIMESTAMP        : timestamp         # automatic
-    """
+# @schema
+# class OnlineMedianFilteredFittedPupil(dj.Computed):
+#     definition = """
+#     # Fit a circle and an ellipse after filtering.
+#     -> Tracking
+#     -> filter_config.OnlineMedianFilter
+#     ---
+#     fitting_ts=CURRENT_TIMESTAMP        : timestamp         # automatic
+#     """
 
-    class Circle(dj.Part):
-        definition = """
-        # blob def: center_x, center_y, radius, visible_portion
-        -> master
-        ---
-        circle_fit          : external-storage      # circle fit np array 
-        """
+#     class Circle(dj.Part):
+#         definition = """
+#         # blob def: center_x, center_y, radius, visible_portion
+#         -> master
+#         ---
+#         circle_fit          : external-storage      # circle fit np array 
+#         """
 
-    class Ellipse(dj.Part):
-        definition = """
-        # blob def: center_x, center_y, major_r, minor_r, rotation_angle, visible_portion
-        -> master
-        ---
-        ellipse_fit         : external-storage      # ellipse fit np array
-        """
+#     class Ellipse(dj.Part):
+#         definition = """
+#         # blob def: center_x, center_y, major_r, minor_r, rotation_angle, visible_portion
+#         -> master
+#         ---
+#         ellipse_fit         : external-storage      # ellipse fit np array
+#         """
 
-    @property
-    def key_source(self):
-        return (Tracking.proj() & 'tracking_method=2') * filter_config.OnlineMedianFilter.proj()
+#     @property
+#     def key_source(self):
+#         return (Tracking.proj() & 'tracking_method=2') * filter_config.OnlineMedianFilter.proj()
 
-    def make(self, key):
+#     def make(self, key):
         
-        print("Only for DLC tracked cases!")
-        print("Fitting:", key)
+#         print("Only for DLC tracked cases!")
+#         print("Fitting:", key)
 
-        avi_path = (Eye & key).get_video_path()
-        nframes = (Eye & key).fetch1('total_frames')
+#         avi_path = (Eye & key).get_video_path()
+#         nframes = (Eye & key).fetch1('total_frames')
 
-        data_circle = []
-        data_ellipse = []
+#         data_circle = []
+#         data_ellipse = []
 
-        dlc_config = (ConfigDeeplabcut & (
-            Tracking.Deeplabcut & key)).fetch1()
+#         dlc_config = (ConfigDeeplabcut & (
+#             Tracking.Deeplabcut & key)).fetch1()
 
-        config = auxiliaryfunctions.read_config(dlc_config['config_path'])
-        config['config_path'] = dlc_config['config_path']
-        config['shuffle'] = dlc_config['shuffle']
-        config['trainingsetindex'] = dlc_config['trainingsetindex']
+#         config = auxiliaryfunctions.read_config(dlc_config['config_path'])
+#         config['config_path'] = dlc_config['config_path']
+#         config['shuffle'] = dlc_config['shuffle']
+#         config['trainingsetindex'] = dlc_config['trainingsetindex']
 
-        # find path to original video symlink
-        base_path = os.path.splitext(avi_path)[0] + '_tracking'
-        video_path = os.path.join(base_path, os.path.basename(avi_path))
+#         # find path to original video symlink
+#         base_path = os.path.splitext(avi_path)[0] + '_tracking'
+#         video_path = os.path.join(base_path, os.path.basename(avi_path))
 
-        config['orig_video_path'] = video_path
+#         config['orig_video_path'] = video_path
 
-        # find croppoing coords
-        cropped_coords = (Tracking.Deeplabcut & key).fetch1(
-            'cropped_x0', 'cropped_x1', 'cropped_y0', 'cropped_y1')
+#         # find croppoing coords
+#         cropped_coords = (Tracking.Deeplabcut & key).fetch1(
+#             'cropped_x0', 'cropped_x1', 'cropped_y0', 'cropped_y1')
 
-        config['cropped_coords'] = cropped_coords
+#         config['cropped_coords'] = cropped_coords
 
-        filter_dict = (filter_config.OnlineMedianFilter & key).fetch1()
+#         filter_dict = (filter_config.OnlineMedianFilter & key).fetch1()
 
-        pupil_fit = DLC_tools.DeeplabcutPupilFitting(
-            config=config, bodyparts='all', cropped=True, filtering=filter_dict)
+#         pupil_fit = DLC_tools.DeeplabcutPupilFitting(
+#             config=config, bodyparts='all', cropped=True, filtering=filter_dict)
 
-        for frame_num in tqdm(range(nframes)):
+#         for frame_num in tqdm(range(nframes)):
 
-            fit_dict = pupil_fit.fitted_core(frame_num=frame_num)
+#             fit_dict = pupil_fit.fitted_core(frame_num=frame_num)
 
-            # circle info
-            if fit_dict['circle_fit']['center'] is None:
-                center_x, center_y = None, None
-            else:
-                center_x, center_y = fit_dict['circle_fit']['center']
-            radius = fit_dict['circle_fit']['radius']
-            visible_portion = fit_dict['circle_visible']['visible_portion']
+#             # circle info
+#             if fit_dict['circle_fit']['center'] is None:
+#                 center_x, center_y = None, None
+#             else:
+#                 center_x, center_y = fit_dict['circle_fit']['center']
+#             radius = fit_dict['circle_fit']['radius']
+#             visible_portion = fit_dict['circle_visible']['visible_portion']
 
-            data_circle.append(
-                [center_x, center_y, radius, visible_portion])
+#             data_circle.append(
+#                 [center_x, center_y, radius, visible_portion])
 
-            # ellipse info
-            if fit_dict['ellipse_fit']['center'] is None:
-                center_x, center_y = None, None
-            else:
-                center_x, center_y =  fit_dict['ellipse_fit']['center']
+#             # ellipse info
+#             if fit_dict['ellipse_fit']['center'] is None:
+#                 center_x, center_y = None, None
+#             else:
+#                 center_x, center_y =  fit_dict['ellipse_fit']['center']
 
-            major_radius = fit_dict['ellipse_fit']['major_radius']
-            minor_radius = fit_dict['ellipse_fit']['minor_radius']
-            rotation_angle = fit_dict['ellipse_fit']['rotation_angle']
-            visible_portion = fit_dict['ellipse_visible']['visible_portion']
+#             major_radius = fit_dict['ellipse_fit']['major_radius']
+#             minor_radius = fit_dict['ellipse_fit']['minor_radius']
+#             rotation_angle = fit_dict['ellipse_fit']['rotation_angle']
+#             visible_portion = fit_dict['ellipse_visible']['visible_portion']
 
-            data_ellipse.append([center_x, center_y,
-                                major_radius, minor_radius,
-                                rotation_angle, visible_portion])
+#             data_ellipse.append([center_x, center_y,
+#                                 major_radius, minor_radius,
+#                                 rotation_angle, visible_portion])
 
-        data_circle = np.array(data_circle).astype("float")
-        data_ellipse = np.array(data_ellipse).astype("float")
+#         data_circle = np.array(data_circle).astype("float")
+#         data_ellipse = np.array(data_ellipse).astype("float")
 
-        # now filter out the outliers by 5.5 std away from mean
-        rejected_ind = DLC_tools.filter_by_fitting_std(
-            data=data_circle, fitting_method='circle', std_magnitude=5.5)
+#         # now filter out the outliers by 5.5 std away from mean
+#         rejected_ind = DLC_tools.filter_by_fitting_std(
+#             data=data_circle, fitting_method='circle', std_magnitude=5.5)
 
-        data_circle[rejected_ind] = np.nan, np.nan, np.nan, -3.0
+#         data_circle[rejected_ind] = np.nan, np.nan, np.nan, -3.0
 
-        rejected_ind = DLC_tools.filter_by_fitting_std(
-            data=data_ellipse, fitting_method='ellipse', std_magnitude=5.5)
+#         rejected_ind = DLC_tools.filter_by_fitting_std(
+#             data=data_ellipse, fitting_method='ellipse', std_magnitude=5.5)
 
-        data_ellipse[rejected_ind, :] = np.nan, np.nan, np.nan, np.nan, np.nan, -3.0
+#         data_ellipse[rejected_ind, :] = np.nan, np.nan, np.nan, np.nan, np.nan, -3.0
 
-        # detect blinks and drop those
+#         # detect blinks and drop those
     
         
-        # insert data
-        self.Circle.insert1(dict(key, circle_fit=data_circle))
-        self.Ellipse.insert1(dict(key, ellipse_fit=data_ellipse))
+#         # insert data
+#         self.Circle.insert1(dict(key, circle_fit=data_circle))
+#         self.Ellipse.insert1(dict(key, ellipse_fit=data_ellipse))
 
 
 def plot_fitting(key, start, end=-1, fit_type='Circle', fig=None, ax=None, mask_flag=True):
