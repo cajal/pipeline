@@ -19,7 +19,7 @@ from datajoint.jobs import key_hash
 from datajoint.autopopulate import AutoPopulate
 
 from .utils.decorators import gitlog
-from .utils import eye_tracking, h5, filter_config
+from .utils import eye_tracking, h5
 from .utils.eye_tracking import PupilTracker, ManualTracker
 from . import config
 from . import experiment, notify, shared
