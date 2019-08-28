@@ -684,6 +684,15 @@ class Tracking(dj.Computed):
 
             else:
                 print('{} already exists!'.format(tracking_dir))
+                print('Removing existing tracking directory and recreating')
+
+                os.shutil.rmtree(tracking_dir)
+
+                os.mkdir(tracking_dir)
+                os.mkdir(os.path.join(tracking_dir, 'compressed_cropped'))
+                os.mkdir(os.path.join(tracking_dir, 'short'))
+
+                os.link(vid_path, hardlink_path)
 
             return tracking_dir, hardlink_path
 
