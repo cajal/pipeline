@@ -19,7 +19,7 @@ from datajoint.jobs import key_hash
 from datajoint.autopopulate import AutoPopulate
 
 from .utils.decorators import gitlog
-from .utils import eye_tracking, h5, filter_config
+from .utils import eye_tracking, h5
 from .utils.eye_tracking import PupilTracker, ManualTracker
 from . import config
 from . import experiment, notify, shared
@@ -684,6 +684,15 @@ class Tracking(dj.Computed):
 
             else:
                 print('{} already exists!'.format(tracking_dir))
+                print('Removing existing tracking directory and recreating')
+
+                shutil.rmtree(tracking_dir)
+
+                os.mkdir(tracking_dir)
+                os.mkdir(os.path.join(tracking_dir, 'compressed_cropped'))
+                os.mkdir(os.path.join(tracking_dir, 'short'))
+
+                os.link(vid_path, hardlink_path)
 
             return tracking_dir, hardlink_path
 
