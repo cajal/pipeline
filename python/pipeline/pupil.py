@@ -915,7 +915,7 @@ class FittedPupil(dj.Computed):
         data_ellipse = np.array(data_ellipse)
 
         # now filter out the outliers by 5.5 std away from mean
-        rejected_ind = DLC_tools.filter_by_std(
+        rejected_ind = DLC_tools.filter_by_fitting_std(
             data=data_circle, fitting_method='circle', std_magnitude=5.5)
 
         data_circle[rejected_ind] = None, None, -3.0
@@ -930,7 +930,7 @@ class FittedPupil(dj.Computed):
         self.Circle.insert(data_circle)
 
         # now repeat the process for ellipse
-        rejected_ind = DLC_tools.filter_by_std(
+        rejected_ind = DLC_tools.filter_by_fitting_std(
             data=data_ellipse, fitting_method='ellipse', std_magnitude=5.5)
 
         data_ellipse[rejected_ind, :] = None, None, None, None, -3.0
