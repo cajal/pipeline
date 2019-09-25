@@ -140,6 +140,20 @@ class CurationMethod(dj.Lookup):
     ]
 
 @schema
+class AreaMaskMethod(dj.Lookup):
+    definition = """
+    # method for assigning cortex to visual areas
+    mask_method                 : tinyint           # method to assign membership to visual areas
+    ---
+    name                        : varchar(16)
+    details                     : varchar(255)
+    language                    : enum('matlab', 'python')  # implementation language
+    """
+
+    contents = [
+        [1, 'manual', '', 'matlab'],
+    ]
+@schema
 class TrackingMethod(dj.Lookup):
     definition = """
     tracking_method : tinyint                       # method used for pupil tracking

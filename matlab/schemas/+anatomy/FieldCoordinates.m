@@ -14,7 +14,7 @@ pxpitch                 : double          # estimated pixel pitch of the referen
 classdef FieldCoordinates < dj.Manual
     methods
         function alignScan(self,keyI, varargin)
-            
+
             params.contrast = 1;
             params.global_rotation =[]; % rotation of the ref_map
             params.scan_rotation = 0;
@@ -26,14 +26,14 @@ classdef FieldCoordinates < dj.Manual
             params.noref = false;
 
             params = ne7.mat.getParams(params,varargin);
-            
+
             % init tform params, specific to each setup
             tfp = struct('scale',1,'rotation',params.scan_rotation,'fliplr',0,'flipud',0);
-            
+
              % get the scamimage reader
             [setup, depth] = fetch1(experiment.Scan * experiment.Session & keyI,...
                 'rig','depth');
-            
+
              % get information from the scans depending on the setup
             if strcmp(setup,'2P4')
                 [x_pos, y_pos, slice_pos, fieldWidths, fieldHeights, fieldWidthsInMicrons, frames, field_num] = ...
@@ -48,7 +48,7 @@ classdef FieldCoordinates < dj.Manual
                 depth = 0; % because this is included in slice_pos of the reso
                 x_pos = zeros(size(fieldWidths));y_pos = x_pos;
             end
-            
+
             % if no input is given then scan coordinates are going to be used
             if params.noref
                 ref_key = createRef(anatomy.RefMap,experiment.Scan & keyI);
@@ -65,13 +65,13 @@ classdef FieldCoordinates < dj.Manual
                 end
                 return
             end
-            
+
             % get reference map information
             ref_key = fetch(proj(anatomy.RefMap) & keyI);
             if ~exists(anatomy.RefMap & ref_key)
                 ref_key = createRef(anatomy.RefMap,fetch(mice.Mice & keyI));
             end
-            
+
             if isfield(keyI,'ret_idx');keyI = rmfield(keyI,'ret_idx');end
             [ref_map, ref_pxpitch, software] = fetch1(anatomy.RefMap * experiment.Scan  & ref_key,...
                 'ref_map','pxpitch','software');
@@ -88,7 +88,7 @@ classdef FieldCoordinates < dj.Manual
 
             % calculate initial scale
             pxpitch = mean(fieldWidths.\fieldWidthsInMicrons);
-            
+
             if length(frames)>1
                 % construct a big field of view
                 x_pos = (x_pos - min(x_pos))/pxpitch;
@@ -105,17 +105,17 @@ classdef FieldCoordinates < dj.Manual
                 x_pos = 0;
                 y_pos = 0;
             end
-            
+
             if isempty(params.scale)
                 params.scale = pxpitch/ref_pxpitch;
             end
-            
+
             % Align scans
             [x_offset, y_offset, rotation, tfp.scale, go] = ...
                 self.alignImages(ne7.mat.normalize(abs(double(ref_map).^params.amp)),ne7.mat.normalize(im),...
                 'scale',params.scale,'rotation',params.global_rotation,'x',params.x_offset,'y',params.y_offset,'figure',params.figure);
             tfp.rotation = tfp.rotation + rotation;
-            
+
             % Insert overlaping masks
             if go
                 for islice = 1:length(frames)
@@ -144,31 +144,30 @@ classdef FieldCoordinates < dj.Manual
                 disp 'Exiting...'
             end
         end
-        
+
         function out_im = plot(self,varargin)
-            
+
             params.exp = 1;
             params.inv = 0;
             params.vcontrast = 1;
             params.red = 1;
-            
             params = ne7.mat.getParams(params,varargin);
-            
+
             assert(exists(self),'No fields found!')
 
             % get the ref_map
             ref_map = fetchn(proj(anatomy.RefMap,'ref_map') & self,'ref_map');
             ref_map = single(ref_map{1});
-            
+
             % get the setup
             setups = fetchn(experiment.Session & self, 'rig');
             setup = setups{1};
- 
+
             % fetch images
             if strcmp(setup,'2P4')
                 [frames1,x,y,tforms] = fetchn(meso.SummaryImagesAverage * self ,...
                     'average_image','x_offset','y_offset','tform');
-                
+
                   [frames2,x,y,tforms] = fetchn(meso.SummaryImagesCorrelation * self ,...
                     'correlation_image','x_offset','y_offset','tform');
                 for iframe = 1:length(frames1);
@@ -178,7 +177,7 @@ classdef FieldCoordinates < dj.Manual
                 [frames,x,y,tforms,keys] = fetchn(reso.SummaryImagesAverage * self & fuse.ScanSet,...
                     'average_image','x_offset','y_offset','tform');
             end
-            
+
             % apply field transformations
             ref_map = ne7.mat.normalize(abs(ref_map.^params.vcontrast));
             if params.inv; ref_map = 1-ref_map;end
@@ -193,7 +192,7 @@ classdef FieldCoordinates < dj.Manual
                 idxY{islice} = YY:size(imS,1)+YY-1;
                 frame{islice} = self.processImage(imS,'exp',params.exp);
             end
-            
+
             % find negetive indexes and expand mask
             y_range = range([0 size(ref_map,1) cellfun(@min,idxY) cellfun(@max,idxY)])+1;
             x_range = range([0 size(ref_map,2) cellfun(@min,idxX) cellfun(@max,idxX)])+1;
@@ -201,7 +200,7 @@ classdef FieldCoordinates < dj.Manual
             mnY = abs(min([0 cellfun(@min,idxY)]))+1;
             idxX = cellfun(@(x) x+mnX,idxX,'uni',0);
             idxY = cellfun(@(x) x+mnY,idxY,'uni',0);
-            
+
             % construct image
             im = zeros(y_range,x_range,3);
              im(1+mnY:size(ref_map,1)+mnY,1+mnX:size(ref_map,2)+mnX,1) = ref_map;
@@ -213,7 +212,7 @@ classdef FieldCoordinates < dj.Manual
             end
             im(:,:,2) = ne7.mat.normalize(im(:,:,2));
             im = im(mnY+(1:size(ref_map,1)),mnX+(1:size(ref_map,2)),:);
-            
+
             if ~params.red
                 A = repmat(im(:,:,1),1,1,3);
                 A(:,:,1) = (im(:,:,2)>0)*.3;
@@ -233,12 +232,12 @@ classdef FieldCoordinates < dj.Manual
                 out_im = im;
             end
         end
-        
+
         function plot3D(self)
-            
+
             % get the ref_map
             ref_map = fetchn(proj(anatomy.RefMap,'ref_map') & self,'ref_map');
-            
+
             % fetch images
             setup = fetchn(experiment.Session & self, 'rig');
             if strcmp(setup{1},'2P4')
@@ -248,7 +247,7 @@ classdef FieldCoordinates < dj.Manual
                 [frames,x,y,tforms,pxpitch,depth] = fetchn(reso.SummaryImagesAverage * self & fuse.ScanSet,...
                     'average_image','x_offset','y_offset','tform','pxpitch','field_depth');
             end
-            
+
             % plot
             figure
             ref_map = ne7.mat.normalize(ref_map{1}*2.^2)*0.5;
@@ -265,9 +264,9 @@ classdef FieldCoordinates < dj.Manual
             cmap2 =  bsxfun(@times,[0 1 0],[0:0.02:1]');
             colormap([cmap;cmap2])
         end
-        
+
         function fmask = filterMask(self, ref_mask)
-            
+
             % fetch images
             setup = fetch1(experiment.Session & self, 'rig');
             if strcmp(setup,'2P4')
@@ -277,10 +276,10 @@ classdef FieldCoordinates < dj.Manual
                 [frame,x_offset,y_offset,tform] = fetch1(reso.SummaryImagesAverage * self & fuse.ScanSet,...
                     'average_image','x_offset','y_offset','tform');
             end
-            
+
             sz = size(frame);
             ref_mask = padarray(ref_mask,[100 100]); % pad image in case the ref_mask is not large enough
-            imS = self.filterImage(ne7.mat.normalize(frame),tform);            % apply rotation/flips 
+            imS = self.filterImage(ne7.mat.normalize(frame),tform);            % apply rotation/flips
             YY = round(y_offset + size(ref_mask,1)/2 - size(imS,1)/2); % convert center coordinates to 0,0 coordinates
             XX = round(x_offset + size(ref_mask,2)/2 - size(imS,2)/2); % convert center coordinates to 0,0 coordinates
             fmask = ref_mask(YY+1:size(imS,1)+YY,XX+1:size(imS,2)+XX);
@@ -290,10 +289,10 @@ classdef FieldCoordinates < dj.Manual
                 round(size(fmask,2)/2)-floor(sz(2)/2)+1:floor(size(fmask,2)/2)+floor(sz(2)/2));
         end
     end
-    
+
     methods (Static)
         function [x,y,rot,scale,go] = alignImages(image1,image2,varargin)
-            
+
             % set initial parameters
             params.rotation = 0;
             params.scale = 1;
@@ -301,20 +300,20 @@ classdef FieldCoordinates < dj.Manual
             params.y = [];
             params.resize = .5;
             params.figure = [];
-            
+
             params = ne7.mat.getParams(params,varargin);
-            
+
             if isempty(params.x) || isempty(params.y)
                 params.x = max([0 round(size(image1,1)/2 - size(image2,1)*params.scale/2)]);
                 params.y = max([0 round(size(image1,2)/2 - size(image2,2)*params.scale/2)]);
             end
-            
+
             rot = params.rotation;
             scale = params.scale;
             x = params.x * params.resize;
             y = params.y * params.resize;
             fine = 1;
-            
+
             % assign images
             vessels = imresize(ne7.mat.normalize(image1),params.resize);
             im1 = vessels;
@@ -325,7 +324,7 @@ classdef FieldCoordinates < dj.Manual
             imh = image(im2); axis image; axis off
             redraw
             disp 'Align the images'
-            
+
             % wait until done
             go = false;esc = false;
             while ~go && ~esc
@@ -338,11 +337,11 @@ classdef FieldCoordinates < dj.Manual
             else
                 clf(hf,'reset')
             end
-            
+
             % adjust x,y
             x = x/params.resize;
             y = y/params.resize;
-            
+
             function eval_input(~, event)
                 global temp
                 switch event.Key
@@ -411,7 +410,7 @@ classdef FieldCoordinates < dj.Manual
                         set(hf,'units','pixels')
                 end
             end
-            
+
             function redraw
                 % draw image with masks
                 im1 = (imrotate(imresize(vessels,1/scale),-rot,'crop'));

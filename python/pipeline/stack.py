@@ -10,6 +10,8 @@ from scipy import optimize
 import itertools
 
 from . import experiment, notify, shared, reso, meso
+anatomy = dj.create_virtual_module('pipeline_anatomy','pipeline_anatomy')
+
 from .utils import galvo_corrections, stitching, performance, enhancement
 from .utils.signal import mirrconv, float2uint8
 from .exceptions import PipelineException
@@ -19,7 +21,6 @@ Our stack/motor coordinate system is consistent with numpy's: z in the first axi
 downwards, y in the second axis pointing towards you and x on the third axis pointing to 
 the right.
 """
-
 dj.config['external-stack'] = {'protocol': 'file',
                                'location': '/mnt/dj-stor01/pipeline-externals'}
 dj.config['cache'] = '/tmp/dj-cache'
@@ -2662,3 +2663,135 @@ class StackSet(dj.Computed):
         ax.set_zlabel('z (um)')
 
         return fig
+
+
+@schema
+class Area(dj.Computed):
+    definition = """ # transform area masks from annotated retinotopic maps into stack space
+
+    -> PreprocessedStack.proj(stack_session='session',stack_channel='channel')
+    -> experiment.Scan.proj(scan_session='session')
+    -> shared.Channel.proj(scan_channel='channel')
+    -> shared.RegistrationMethod
+    -> shared.AreaMaskMethod
+    ret_idx              : smallint                     # retinotopy map index for each animal
+    ret_hash             : varchar(32)                  # single attribute representation of the key (used to avoid going over 16 attributes in the key)
+    ---
+    """
+
+    class Mask(dj.Part):
+        definition = """ # mask per area indicating membership
+
+        -> master
+        -> anatomy.Area
+        ---
+        mask             : blob                        # 2D mask of pixel area membership
+        """
+
+    @property
+    def key_source(self):
+        # anatomy code outputs masks per field for aim 2pScan and per concatenated plane for aim widefield
+        map_rel = (anatomy.AreaMask.proj('ret_idx', scan_session='session') &
+                   (experiment.Scan & 'aim="2pScan"').proj(scan_session='session'))
+        stack_rel = Registration & 'registration_method = 5'
+
+        heading = list(set(list(map_rel.heading.attributes) + list(stack_rel.heading.attributes)))
+        heading.remove('field')
+        heading.remove('brain_area')
+        key_source = dj.U(*heading, 'mask_method') & (map_rel * stack_rel * shared.AreaMaskMethod)
+
+        return key_source
+
+    def make(self, key):
+        from scipy.interpolate import griddata
+        import cv2
+
+        #same as key source but retains brain area attribute
+        key['ret_hash'] = key_hash(key)
+        map_rel = (anatomy.AreaMask.proj('ret_idx', scan_session='session') &
+                   (experiment.Scan & 'aim="2pScan"').proj(stack_session='session'))
+        stack_rel = Registration & 'registration_method = 5'
+
+        heading = list(set(list(map_rel.heading.attributes) + list(stack_rel.heading.attributes)))
+        heading.remove('field')
+        area_keys = (dj.U(*heading, 'mask_method') & (map_rel * stack_rel * shared.AreaMaskMethod) & key).fetch('KEY')
+
+
+        fetch_str = ['x', 'y', 'um_width', 'um_height', 'px_width', 'px_height']
+        stack_rel = CorrectedStack.proj(*fetch_str, stack_session='session') & key
+        cent_x, cent_y, um_w, um_h, px_w, px_h = stack_rel.fetch1(*fetch_str)
+
+        # subtract edges so that all coordinates are relative to the field
+        stack_edges = np.array((cent_x - um_w / 2, cent_y - um_h / 2))
+        stack_px_dims = np.array((px_w, px_h))
+        stack_um_dims = np.array((um_w, um_h))
+
+        # 0.5 displacement returns the center of each pixel
+        stack_px_grid = np.meshgrid(*[np.arange(d) + 0.5 for d in stack_px_dims])
+
+        # for each area, transfer mask from all fields into the stack
+        area_masks = []
+        for area_key in area_keys:
+            mask_rel = anatomy.AreaMask & area_key
+            field_keys, masks = mask_rel.fetch('KEY', 'mask')
+            stack_masks = []
+            for field_key, field_mask in zip(field_keys, masks):
+                field_res = (meso.ScanInfo.Field & field_key).microns_per_pixel
+                grid_key = {**key, 'field': field_key['field']}
+
+                # fetch transformation grid using built in function
+                field2stack_um = (Registration & grid_key).get_grid(type='affine', desired_res=field_res)
+                field2stack_um = (field2stack_um[..., :2]).transpose([2, 0, 1])
+
+                # convert transformation grid into stack pixel space
+                field2stack_px = [(grid - edge) * px_per_um for grid, edge, px_per_um
+                                  in zip(field2stack_um, stack_edges, stack_px_dims / stack_um_dims)]
+
+
+                grid_locs = np.array([f2s.ravel() for f2s in field2stack_px]).T
+                grid_vals = field_mask.ravel()
+                grid_query = np.array([stack_grid.ravel() for stack_grid in stack_px_grid]).T
+
+                # griddata because scipy.interpolate.interp2d wasn't working for some reason
+                # linear because nearest neighbor doesn't handle nans at the edge of the image
+                stack_mask = griddata(grid_locs, grid_vals, grid_query, method='linear')
+                stack_mask = np.round(np.reshape(stack_mask, (px_h, px_w)))
+
+                stack_masks.append(stack_mask)
+
+            # flatten all masks for area
+            stack_masks = np.array(stack_masks)
+            stack_masks[np.isnan(stack_masks)] = 0
+            area_mask = np.max(stack_masks, axis=0)
+
+            # close gaps in mask with 100 um kernel
+            kernel_width = 100
+            kernel = np.ones(np.round(kernel_width * (stack_px_dims / stack_um_dims)).astype(int))
+            area_mask = cv2.morphologyEx(area_mask, cv2.MORPH_CLOSE, kernel)
+
+            area_masks.append(area_mask)
+
+        # locate areas where masks overlap and set to nan
+        overlap_locs = np.sum(area_masks, axis=0) > 1
+
+        # create reference map of non-overlapping area masks
+        mod_masks = np.stack(area_masks.copy())
+        mod_masks[:, overlap_locs] = np.nan
+        ref_mask = np.max([mm * (i + 1) for i, mm in enumerate(mod_masks)], axis=0)
+
+        # interpolate overlap pixels into reference mask
+        non_nan_idx = np.invert(np.isnan(ref_mask))
+        grid_locs = np.array([stack_grid[non_nan_idx].ravel() for stack_grid in stack_px_grid]).T
+        grid_vals = ref_mask[non_nan_idx].ravel()
+        grid_query = np.array([stack_grid[overlap_locs] for stack_grid in stack_px_grid]).T
+
+        mask_assignments = griddata(grid_locs, grid_vals, grid_query, method='nearest')
+
+        for loc, assignment in zip((np.array(grid_query) - 0.5).astype(int), mask_assignments):
+            mod_masks[:, loc[1], loc[0]] = 0
+            mod_masks[int(assignment - 1)][loc[1]][loc[0]] = 1
+
+        area_keys = [{**area_key,**key,'mask': mod_mask} for area_key, mod_mask in zip(area_keys, mod_masks)]
+
+        self.insert1(key)
+        self.Mask.insert(area_keys)
