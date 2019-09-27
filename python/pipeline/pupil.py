@@ -33,7 +33,7 @@ import time
 import datetime
 
 
-schema = dj.schema('pipeline_eye', locals())
+schema = dj.schema('pipeline_eye')
 
 
 dj.config['external-pupil'] = dict(protocol='file',
