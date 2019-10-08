@@ -1,7 +1,7 @@
 apiVersion: batch/v1 # Jobs Default K8 API
 kind: Job # This tells kubernetes what kind of class it is working with
 metadata:
-  name: donnie-behavior-study # Name of the Job
+  name: donnie-pupil-table-copy # Name of the Job
 spec:
   completions: 1
   parallelism: 1
