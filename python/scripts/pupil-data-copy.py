@@ -6,6 +6,6 @@ already_processed = (dj.U('animal_id', 'session', 'scan_idx') & (pupil.Tracking 
 to_be_processed = old_table - already_processed
 
 pupil.Tracking.populate(to_be_processed, {'tracking_method':1},
-                        reserve_jobs=True)
+                        reserve_jobs=True, suppress_errors=True)
 pupil.FittedPupil.populate(to_be_processed, {'tracking_method':1},
-                           reserve_jobs=True)
+                           reserve_jobs=True, suppress_errors=True)
