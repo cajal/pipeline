@@ -1745,7 +1745,8 @@ class Func2StructMatching(dj.Computed):
         # Get caiman masks and resize them
         field_dims = (ScanInfo & key).fetch1('um_height', 'um_width')
         masks = np.moveaxis((Segmentation & key).get_all_masks(), -1, 0)
-        masks = np.stack(registration.resize(m, field_dims, desired_res=1) for m in masks)
+        masks = np.stack([registration.resize(m, field_dims, desired_res=1) for m in
+                          masks])
         scansetunit_keys = (ScanSet.Unit & key).fetch('KEY', order_by='mask_id')
 
         # Binarize masks

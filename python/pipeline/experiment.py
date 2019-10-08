@@ -298,7 +298,8 @@ class LaserCalibration(dj.Manual):
 
 @schema
 class MonitorCalibration(dj.Manual):
-    definition = """ # Monitor luminance calibration
+    definition = """ # monitor luminance calibration
+    
     -> experiment.Scan
     ---
     pixel_value             : mediumblob      # control pixel value (0-255)
@@ -342,12 +343,14 @@ class MouseRoom(dj.Lookup):
         ['T019'],
         ['T057'],
         ['T082C'],
+        ['Other'],
     ]
 
 
 @schema
 class SurgeryType(dj.Lookup):
-    definition = """ # Surgery types used in experiment.Surgery
+    definition = """ # diff types of surgery
+    
     surgery_type                : varchar(64)         # Types of surgery performed on mice
     """
     contents = [
@@ -362,7 +365,8 @@ class SurgeryType(dj.Lookup):
 
 @schema
 class SurgeryOutcome(dj.Lookup):
-    definition = """ # Surgery outcomes used in experiment.Surgery
+    definition = """ # surgery outcomes
+    
     surgery_outcome             : varchar(32)         # Possible outcomes of surgeries performed on mice
     """
     contents = [
@@ -373,14 +377,14 @@ class SurgeryOutcome(dj.Lookup):
 
 @schema
 class Surgery(dj.Manual):
-    definition = """ # List of surgeries performed on mice
+    definition = """ # surgeries performed on mice
     -> mice.Mice
     surgery_id                   : smallint               # Unique number given to each surgery
     ---
     date                         : date                   # YYYY-MM-DD Format. Date surgery was performed
     time                         : time                   # Start of mouse recovery
-    -> experiment.MouseRoom
-    -> experiment.Person            
+    -> Person
+    -> MouseRoom            
     -> SurgeryOutcome
     -> SurgeryType
     surgery_quality              : tinyint                # 0-5 self-rating, 0 being worst and 5 best
@@ -392,7 +396,8 @@ class Surgery(dj.Manual):
 
 @schema
 class SurgeryStatus(dj.Manual):
-    definition = """ # Updates to surgeries performed on mice
+    definition = """ # updates to surgeries
+    
     -> Surgery
     timestamp                           : timestamp              # Timestamp of entry
     ---

@@ -48,7 +48,7 @@ class SegmentationMethod(dj.Lookup):
 @schema
 class StackSegmMethod(dj.Lookup):
     definition = """ # methods for 3-d stack segmentations
-    stacksegm_method         : tinyint
+    stacksegm_method            : tinyint
     ---
     name                        : varchar(16)
     details                     : varchar(255)
@@ -139,6 +139,20 @@ class CurationMethod(dj.Lookup):
         [2, 'manual', 'manually inspect each field estimate', 'matlab'],
     ]
 
+@schema
+class AreaMaskMethod(dj.Lookup):
+    definition = """
+    # method for assigning cortex to visual areas
+    mask_method                 : tinyint           # method to assign membership to visual areas
+    ---
+    name                        : varchar(16)
+    details                     : varchar(255)
+    language                    : enum('matlab', 'python')  # implementation language
+    """
+
+    contents = [
+        [1, 'manual', '', 'matlab'],
+    ]
 @schema
 class TrackingMethod(dj.Lookup):
     definition = """
