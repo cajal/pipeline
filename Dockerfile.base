@@ -76,7 +76,7 @@ RUN pip3 install http://download.pytorch.org/whl/cu92/torch-0.4.1-cp36-cp36m-lin
 
 ###############################################################################
 # Miscelaneous packages
-RUN pip3 install git+https://github.com/datajoint/datajoint-python.git && \
+RUN pip3 install --upgrade datajoint~=0.11 && \
     pip3 install git+https://github.com/atlab/scanreader.git && \
     pip3 install git+https://github.com/cajal/bl3d.git && \
     pip3 install seaborn slacker imreg_dft pandas imageio

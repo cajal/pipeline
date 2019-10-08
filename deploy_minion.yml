@@ -15,7 +15,7 @@ spec:
           hostNetwork: true # This option will allow the pod to use the host network for internet access
           containers:
           - name: minion
-            image: ninai/stimulus-pipeline:latest
+            image: ninai/stimulus-pipeline
             volumeMounts:
             - name: mnt
               mountPath: /mnt
