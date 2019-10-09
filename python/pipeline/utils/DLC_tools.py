@@ -1136,8 +1136,14 @@ def obtain_cropping_coords(short_h5_path, DLCscorer, config):
                                                    (eyelid_coord_pcutoff > np.mean(
                                                     eyelid_coord_pcutoff) - np.std(eyelid_coord_pcutoff))]
 
-            coords_dict[coord+'min'].append(eyelid_coord_68.min())
-            coords_dict[coord+'max'].append(eyelid_coord_68.max())
+            # sometimes, eyelid_coord_68 can return an empty array. If so, dont bother with 1st dev from mean 
+            # but directly use eyelid_coord_pcutoff
+            if len(eyelid_coord_68) == 0:
+                coords_dict[coord+'min'].append(eyelid_coord_pcutoff.min())
+                coords_dict[coord+'max'].append(eyelid_coord_pcutoff.max())
+            else:
+                coords_dict[coord+'min'].append(eyelid_coord_68.min())
+                coords_dict[coord+'max'].append(eyelid_coord_68.max())
 
     cropped_coords = {}
     cropped_coords['cropped_x0'] = int(min(coords_dict['xmin']))
