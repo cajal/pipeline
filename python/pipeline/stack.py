@@ -1467,17 +1467,6 @@ class Registration(dj.Computed):
         # AFFINE REGISTRATION
         import torch
         from torch import optim
-        import torch.nn.functional as F
-
-        def sample_grid(volume, grid):
-            """ Volume is a d x h x w arrray, grid is a d1 x d2 x 3 (x, y, z) coordinates
-            and output is a d1 x d2 array"""
-            norm_factor = torch.as_tensor([s / 2 - 0.5 for s in volume.shape[::-1]])
-            norm_grid = grid / norm_factor  # between -1 and 1
-            resampled = F.grid_sample(volume.view(1, 1, *volume.shape),
-                                      norm_grid.view(1, 1, *norm_grid.shape),
-                                      padding_mode='zeros')
-            return resampled.squeeze()
 
         # Create field grid (height x width x 2)
         grid = registration.create_grid(field.shape)
@@ -1500,7 +1489,7 @@ class Registration(dj.Computed):
 
             # Compute gradients
             pred_grid = registration.affine_product(grid_, linear, translation) # w x h x 3
-            pred_field = sample_grid(stack_, pred_grid)
+            pred_field = registration.sample_grid(stack_, pred_grid)
             corr_loss = -(pred_field * field_).sum() / (torch.norm(pred_field) *
                                                         torch.norm(field_))
             print('Corr at iteration {}: {:5.4f}'.format(i, -corr_loss))
@@ -1545,7 +1534,7 @@ class Registration(dj.Computed):
             affine_grid = registration.affine_product(grid_, linear, translation)
             warping_field = torch.einsum('whl,lt->wht', (grid_scores, deformations))
             pred_grid = affine_grid + warping_field
-            pred_field = sample_grid(stack_, pred_grid)
+            pred_field = registration.sample_grid(stack_, pred_grid)
 
             # Compute loss
             corr_loss = -(pred_field * field_).sum() / (torch.norm(pred_field) *
@@ -1579,12 +1568,12 @@ class Registration(dj.Computed):
         # Rigid
         pred_grid = registration.affine_product(grid_, torch.eye(3)[:, :2],
                                                 torch.tensor([rig_x, rig_y, rig_z]))
-        pred_field = sample_grid(stack_, pred_grid).numpy()
+        pred_field = registration.sample_grid(stack_, pred_grid).numpy()
         rig_score = np.corrcoef(field.ravel(), pred_field.ravel())[0, 1]
 
         # Affine
         pred_grid = registration.affine_product(grid_, affine_linear, affine_translation)
-        pred_field = sample_grid(stack_, pred_grid).numpy()
+        pred_field = registration.sample_grid(stack_, pred_grid).numpy()
         affine_score = np.corrcoef(field.ravel(), pred_field.ravel())[0, 1]
 
         # Non-rigid
@@ -1592,7 +1581,7 @@ class Registration(dj.Computed):
                                                   nonrigid_translation)
         warping_field = torch.einsum('whl,lt->wht', (grid_scores, nonrigid_deformations))
         pred_grid = affine_grid + warping_field
-        pred_field = sample_grid(stack_, pred_grid).numpy()
+        pred_field = registration.sample_grid(stack_, pred_grid).numpy()
         nonrigid_score = np.corrcoef(field.ravel(), pred_field.ravel())[0, 1]
 
 
@@ -1607,12 +1596,12 @@ class Registration(dj.Computed):
         # Rigid
         pred_grid = registration.affine_product(original_grid_, torch.eye(3)[:, :2],
                                                 torch.tensor([rig_x, rig_y, rig_z]))
-        rig_field = sample_grid(original_stack_, pred_grid).numpy()
+        rig_field = registration.sample_grid(original_stack_, pred_grid).numpy()
 
         # Affine
         pred_grid = registration.affine_product(original_grid_, affine_linear,
                                                 affine_translation)
-        affine_field = sample_grid(original_stack_, pred_grid).numpy()
+        affine_field = registration.sample_grid(original_stack_, pred_grid).numpy()
 
         # Non-rigid
         affine_grid = registration.affine_product(original_grid_, nonrigid_linear,
@@ -1623,7 +1612,7 @@ class Registration(dj.Computed):
         warping_field = torch.einsum('whl,lt->wht', (original_grid_scores,
                                                      nonrigid_deformations))
         pred_grid = affine_grid + warping_field
-        nonrigid_field = sample_grid(original_stack_, pred_grid).numpy()
+        nonrigid_field = registration.sample_grid(original_stack_, pred_grid).numpy()
 
 
         # Insert
@@ -2085,17 +2074,6 @@ class RegistrationOverTime(dj.Computed):
             # AFFINE REGISTRATION
             import torch
             from torch import optim
-            import torch.nn.functional as F
-
-            def sample_grid(volume, grid):
-                """ Volume is a d x h x w arrray, grid is a d1 x d2 x 3 (x, y, z)
-                coordinates and output is a d1 x d2 array"""
-                norm_factor = torch.as_tensor([s / 2 - 0.5 for s in volume.shape[::-1]])
-                norm_grid = grid / norm_factor  # between -1 and 1
-                resampled = F.grid_sample(volume.view(1, 1, *volume.shape),
-                                          norm_grid.view(1, 1, *norm_grid.shape),
-                                          padding_mode='zeros')
-                return resampled.squeeze()
 
             # Create field grid (height x width x 2)
             grid = registration.create_grid(field.shape)
@@ -2118,7 +2096,7 @@ class RegistrationOverTime(dj.Computed):
 
                 # Compute gradients
                 pred_grid = registration.affine_product(grid_, linear, translation)  # w x h x 3
-                pred_field = sample_grid(stack_, pred_grid)
+                pred_field = registration.sample_grid(stack_, pred_grid)
                 corr_loss = -(pred_field * field_).sum() / (torch.norm(pred_field) *
                                                             torch.norm(field_))
                 print('Corr at iteration {}: {:5.4f}'.format(i, -corr_loss))
@@ -2162,7 +2140,7 @@ class RegistrationOverTime(dj.Computed):
                 affine_grid = registration.affine_product(grid_, linear, translation)
                 warping_field = torch.einsum('whl,lt->wht', (grid_scores, deformations))
                 pred_grid = affine_grid + warping_field
-                pred_field = sample_grid(stack_, pred_grid)
+                pred_field = registration.sample_grid(stack_, pred_grid)
 
                 # Compute loss
                 corr_loss = -(pred_field * field_).sum() / (torch.norm(pred_field) *
@@ -2195,13 +2173,13 @@ class RegistrationOverTime(dj.Computed):
             # Rigid
             pred_grid = registration.affine_product(grid_, torch.eye(3)[:, :2],
                                                     torch.tensor([rig_x, rig_y, rig_z]))
-            pred_field = sample_grid(stack_, pred_grid).numpy()
+            pred_field = registration.sample_grid(stack_, pred_grid).numpy()
             rig_score = np.corrcoef(field.ravel(), pred_field.ravel())[0, 1]
 
             # Affine
             pred_grid = registration.affine_product(grid_, affine_linear,
                                                     affine_translation)
-            pred_field = sample_grid(stack_, pred_grid).numpy()
+            pred_field = registration.sample_grid(stack_, pred_grid).numpy()
             affine_score = np.corrcoef(field.ravel(), pred_field.ravel())[0, 1]
 
             # Non-rigid
@@ -2209,7 +2187,7 @@ class RegistrationOverTime(dj.Computed):
                                                       nonrigid_translation)
             warping_field = torch.einsum('whl,lt->wht', (grid_scores, nonrigid_deformations))
             pred_grid = affine_grid + warping_field
-            pred_field = sample_grid(stack_, pred_grid).numpy()
+            pred_field = registration.sample_grid(stack_, pred_grid).numpy()
             nonrigid_score = np.corrcoef(field.ravel(), pred_field.ravel())[0, 1]
 
             # FIND FIELDS IN STACK
@@ -2223,12 +2201,12 @@ class RegistrationOverTime(dj.Computed):
             # Rigid
             pred_grid = registration.affine_product(original_grid_, torch.eye(3)[:, :2],
                                                     torch.tensor([rig_x, rig_y, rig_z]))
-            rig_field = sample_grid(original_stack_, pred_grid).numpy()
+            rig_field = registration.sample_grid(original_stack_, pred_grid).numpy()
 
             # Affine
             pred_grid = registration.affine_product(original_grid_, affine_linear,
                                                     affine_translation)
-            affine_field = sample_grid(original_stack_, pred_grid).numpy()
+            affine_field = registration.sample_grid(original_stack_, pred_grid).numpy()
 
             # Non-rigid
             affine_grid = registration.affine_product(original_grid_, nonrigid_linear,
@@ -2240,7 +2218,7 @@ class RegistrationOverTime(dj.Computed):
             warping_field = torch.einsum('whl,lt->wht', (original_grid_scores,
                                                          nonrigid_deformations))
             pred_grid = affine_grid + warping_field
-            nonrigid_field = sample_grid(original_stack_, pred_grid).numpy()
+            nonrigid_field = registration.sample_grid(original_stack_, pred_grid).numpy()
 
 
             # Insert chunk
