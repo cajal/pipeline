@@ -162,7 +162,12 @@ switch version
                 data.scanImage = wf(:,2);
                 data.ts = wf(:,3);
             case 2.1
-                assert(strcmp(deblank(waveformDescStr),'Photodiode, ScanImageFrameSync, LaserPower, Time'),...
+                idx1 = find(waveformDescStr == ',') ; % need to take care of a comma misplacement in some files
+                waveformDescStr(idx1) = ' ' ;
+                teststr = 'Photodiode, ScanImageFrameSync, LaserPower, Time' ;
+                idx2 = find(teststr == ',') ;
+                teststr(idx2) = ' ' ;
+                assert(strcmp(deblank(waveformDescStr),deblank(teststr)),...
             'waveform Channels Description is wrong for this file version');
                 wf = H5Tools.readDataset(fp,'Analog Signals') ;
                 data.syncPd = wf(:,1);
