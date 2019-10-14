@@ -593,4 +593,38 @@ class AutoProcessing(dj.Manual):
     autosegment=false   :boolean       # segment somas in the first channel with default method
     """
 
+@schema
+class Projector(dj.Lookup):
+    definition = """
+    # projector specifications
+    projector_id        : tinyint                       # projector id
+    ---
+    pixel_width         : smallint                      # number of pixels in width
+    pixel_height        : smallint                      # number of pixels in height
+    red                 : enum('UV', 'Green', 'None')   # color to be used for red channel
+    green               : enum('UV', 'Green', 'None')   # color to be used for green channel
+    blue                : enum('UV', 'Green', 'None')   # color to be used for blue channel
+    refresh_rate        : tinyint                       # refresh rate in Hz
+    """
+    contents = [
+        [1],
+        [1140],
+        [912],
+        ['UV'],
+        ['UV'],
+        ['Green'],
+        [60]
+    ]
+
+@schema
+class ProjectorDisplay(dj.Manual):
+    definition = """
+    # projected display specification
+    -> Projector
+    -> Rig
+    ---
+    displayed_width     : float     # width in cm
+    displayed_height    : float     # height in cm
+    """
+
 schema.spawn_missing_classes()
