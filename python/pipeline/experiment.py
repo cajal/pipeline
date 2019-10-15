@@ -607,13 +607,13 @@ class Projector(dj.Lookup):
     refresh_rate        : tinyint                       # refresh rate in Hz
     """
     contents = [
-        [1],
-        [1140],
-        [912],
-        ['UV'],
-        ['UV'],
-        ['Green'],
-        [60]
+        [1,1,1],
+        [1140,1140,1140],
+        [912,912,912],
+        ['UV','UV','None'],
+        ['UV','UV','None'],
+        ['Green','None','UV'],
+        [60,60,60]
     ]
 
 @schema
