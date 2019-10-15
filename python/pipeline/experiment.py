@@ -597,23 +597,18 @@ class AutoProcessing(dj.Manual):
 class Projector(dj.Lookup):
     definition = """
     # projector specifications
-    projector_id        : tinyint                       # projector id
+    projector_id        : tinyint                               # projector id
     ---
-    pixel_width         : smallint                      # number of pixels in width
-    pixel_height        : smallint                      # number of pixels in height
-    red                 : enum('UV', 'Green', 'None')   # color to be used for red channel
-    green               : enum('UV', 'Green', 'None')   # color to be used for green channel
-    blue                : enum('UV', 'Green', 'None')   # color to be used for blue channel
-    refresh_rate        : tinyint                       # refresh rate in Hz
+    red                 : enum('UV', 'Green', 'Blue', 'None')   # color to be used for red channel
+    green               : enum('UV', 'Green', 'Blue', 'None')   # color to be used for green channel
+    blue                : enum('UV', 'Green', 'Blue', 'None')   # color to be used for blue channel
+    pixel_width         : smallint                              # number of pixels in width
+    pixel_height        : smallint                              # number of pixels in height
+    refresh_rate        : tinyint                               # refresh rate in Hz
     """
     contents = [
-        [1,1,1],
-        [1140,1140,1140],
-        [912,912,912],
-        ['UV','UV','None'],
-        ['UV','UV','None'],
-        ['Green','None','UV'],
-        [60,60,60]
+        [0, 'UV', 'Green', 'Blue', 1920, 1080, 60],
+        [1, 'UV', 'UV', 'Green', 1140, 912, 60]
     ]
 
 @schema
@@ -625,6 +620,7 @@ class ProjectorDisplay(dj.Manual):
     ---
     displayed_width     : float     # width in cm
     displayed_height    : float     # height in cm
+    target_distance     : float     # distance from mouse to the projected display
     """
 
 schema.spawn_missing_classes()
