@@ -598,17 +598,17 @@ class Projector(dj.Lookup):
     definition = """
     # projector specifications
     projector_id        : tinyint                               # projector id
+    refresh_rate        : tinyint                               # refresh rate in Hz
     ---
     red                 : enum('UV', 'Green', 'Blue', 'None')   # color to be used for red channel
     green               : enum('UV', 'Green', 'Blue', 'None')   # color to be used for green channel
     blue                : enum('UV', 'Green', 'Blue', 'None')   # color to be used for blue channel
     pixel_width         : smallint                              # number of pixels in width
     pixel_height        : smallint                              # number of pixels in height
-    refresh_rate        : tinyint                               # refresh rate in Hz
     """
     contents = [
-        [0, 'UV', 'Green', 'Blue', 1920, 1080, 60],
-        [1, 'UV', 'UV', 'Green', 1140, 912, 60]
+        [0, 60, 'UV', 'Green', 'Blue', 1920, 1080],
+        [1, 60, 'UV', 'UV', 'Green', 1140, 912]
     ]
 
 @schema
@@ -617,10 +617,10 @@ class ProjectorDisplay(dj.Manual):
     # projected display specification
     -> Projector
     -> Rig
+    target_distance     : decimal(6,3)  # distance from mouse to the projected display in cm
     ---
-    displayed_width     : float     # width in cm
-    displayed_height    : float     # height in cm
-    target_distance     : float     # distance from mouse to the projected display
+    displayed_width     : float         # width in cm
+    displayed_height    : float         # height in cm
     """
 
 schema.spawn_missing_classes()
