@@ -562,19 +562,31 @@ class Tracking(dj.Computed):
                 The given key has been tracked manually before (from ManuallyTrackedContours)! 
                 Simply re-inserting previously tracked data here!
                 """)
-                for frame_id in range(len(ManuallyTrackedContours.Frame & key)):
-                    # copy Frame info
-                    frame_key = (ManuallyTrackedContours.Frame &
-                                 dict(key, frame_id=frame_id)).fetch1()
-                    self.insert1(
-                        dict(frame_key, tracking_method=key['tracking_method']))
-                    # copy Parameter info
-                    param_key = (ManuallyTrackedContours.Parameter &
-                                 dict(key, frame_id=frame_id)).fetch1()
-                    min_lambda = (ManuallyTrackedContours &
-                                  key).fetch1('min_lambda')
-                    Tracking.ManualTrackingParameter.insert1(
-                        dict(param_key, min_lambda=min_lambda, tracking_method=key['tracking_method']))
+
+                # check if parameter table was populated b4. 
+                # If not, we can skip inserting param information
+                if len(ManuallyTrackedContours.Parameter & key) == 0:
+                    for frame_id in range(len(ManuallyTrackedContours.Frame & key)):
+                        # copy Frame info
+                        frame_key = (ManuallyTrackedContours.Frame &
+                                    dict(key, frame_id=frame_id)).fetch1()
+                        self.insert1(
+                            dict(frame_key, tracking_method=key['tracking_method']))
+
+                else:
+                    for frame_id in range(len(ManuallyTrackedContours.Frame & key)):
+                        # copy Frame info
+                        frame_key = (ManuallyTrackedContours.Frame &
+                                    dict(key, frame_id=frame_id)).fetch1()
+                        self.insert1(
+                            dict(frame_key, tracking_method=key['tracking_method']))
+                        # copy Parameter info
+                        param_key = (ManuallyTrackedContours.Parameter &
+                                    dict(key, frame_id=frame_id)).fetch1()
+                        min_lambda = (ManuallyTrackedContours &
+                                    key).fetch1('min_lambda')
+                        Tracking.ManualTrackingParameter.insert1(
+                            dict(param_key, min_lambda=min_lambda, tracking_method=key['tracking_method']))
 
             # key does not exist in ManuallyTrackedContours, hence need to trace manually
             else:
