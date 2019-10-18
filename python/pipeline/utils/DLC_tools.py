@@ -461,8 +461,7 @@ class DeeplabcutPupilFitting(DeeplabcutPlotBodyparts):
                 then by default it plots ALL existing bodyplots in config.yaml file.
 
         """
-        super().__init__(config, bodyparts=bodyparts,
-                         cropped=cropped, filtering=filtering)
+        super().__init__(config, bodyparts=bodyparts, cropped=cropped)
 
         self.complete_eyelid_graph = {'eyelid_top': 'eyelid_top_right',
                                       'eyelid_top_right': 'eyelid_right',
