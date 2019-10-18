@@ -608,7 +608,8 @@ class Projector(dj.Lookup):
     """
     contents = [
         [0, 60, 'UV', 'Green', 'Blue', 1920, 1080],
-        [1, 60, 'UV', 'UV', 'Green', 1140, 912]
+        [1, 60, 'UV', 'UV', 'Green', 1140, 912],
+        [1, 30, 'UV', 'UV', 'Green', 1140, 912]
     ]
 
 @schema
