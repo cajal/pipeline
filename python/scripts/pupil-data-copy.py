@@ -2,10 +2,7 @@ from pipeline import pupil
 import datajoint as dj
 
 # Tracking
-
-tracking_old_table = pupil.ManuallyTrackedContours.proj()
-tracking_already_processed = (dj.U('animal_id', 'session', 'scan_idx') & (pupil.FittedPupil & 'tracking_method=1'))
-tracking_to_be_processed = tracking_old_table - tracking_already_processed
+jobs = (pupil.Tracking & 'tracking_method=1').proj() - (pupil.FittedPupil & 'tracking_method=1').proj() 
 
 # Fitting
 # Fitting_old_table = pupil.FittedContour.proj()
@@ -14,8 +11,7 @@ tracking_to_be_processed = tracking_old_table - tracking_already_processed
 
 # pupil.Tracking.populate(tracking_to_be_processed, {'tracking_method':1},
 #                         reserve_jobs=True, suppress_errors=True)
-pupil.FittedPupil.populate(tracking_to_be_processed, {'tracking_method':1},
-                        reserve_jobs=True, suppress_errors=True)
+pupil.FittedPupil.populate(jobs, reserve_jobs=True, suppress_errors=True)
 
 # fittin for zhiwei
 
