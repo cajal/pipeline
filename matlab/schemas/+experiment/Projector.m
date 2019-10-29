@@ -1,5 +1,5 @@
 %{
-experiment.Projector (lookup) # 
+# projector specifications
 projector_id        : tinyint                       # projector id
 ---
 pixel_width         : smallint                      # number of pixels in width
@@ -9,7 +9,6 @@ green               : enum('UV', 'Green', 'None')   # color to be used for green
 blue                : enum('UV', 'Green', 'None')   # color to be used for blue channel
 refresh_rate        : tinyint                       # refresh rate in Hz
 %}
-
 
 classdef Projector < dj.Lookup
 end
