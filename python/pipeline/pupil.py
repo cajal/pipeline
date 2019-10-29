@@ -1,3 +1,18 @@
+"""
+Date: 10/29/2019
+This module is for pupil related tables and computation.
+Current version is at 1.0.0 
+
+What's changed in this version:
+1. Got rid of filter_config table
+2. Added a functionality of removing tracking directory and its sub-directories if the job was not done completely
+3. Method name changed from DLC_tools.filter_by_std to DLC_tools.filter_by_fitting_std
+4. Deleted OnlineMedianFilteredFittedPupil table (it is already dropped on DB side)
+5. Added a missing schema decorator on SurfaceMethod table
+6. Bug fixed when finding cropping coords from short video (DLC related bug) (commit a861127)
+7. Projector and ProjectorDisplay tables added
+"""
+
 # Disable DLC GUI first, then import deeplabcut
 import os
 os.environ["DLClight"] = "True"
@@ -32,6 +47,8 @@ from matplotlib.patches import Ellipse
 import time
 import datetime
 
+
+__VERSION__ = "1.0.0"
 
 schema = dj.schema('pipeline_eye')
 
