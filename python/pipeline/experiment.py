@@ -597,15 +597,36 @@ class AutoProcessing(dj.Manual):
 class ProjectorColor(dj.Lookup):
     definition = """
     # color options for projector channels
-    color_id        : tinyint     # color id
+    color_id            : tinyint                   # color id
     ---
-    color           : varchar(32) # color name      
+    color               : varchar(32)               # color name
     """
-    contents = [[0, 'none'],
-                [1, 'red'],
-                [2, 'green'],
-                [3, 'Blue'],
-                [4, 'UV']]
+    contents = [
+        [0, 'none'],
+        [1, 'red'],
+        [2, 'green'],
+        [3, 'blue'],
+        [4, 'UV']
+    ]
+
+@schema
+class ProjectorConfig(dj.Lookup):
+    definition = """
+    # projector configuration
+    projector_config_id         : tinyint                       # projector config    
+    ---
+    -> ProjectorColor.proj(channel_1="color_id")                # channel 1 means 1st color channel. Usually red
+    -> ProjectorColor.proj(channel_2="color_id")                # channel 2 means 2nd color channel. Usually green
+    -> ProjectorColor.proj(channel_3="color_id")                # channel 3 means 3rd color channel. Usually blue
+    refresh_rate                : float                         # refresh rate in Hz
+
+    """
+    contents = [
+        [0, 4, 2, 3, 60],
+        [1, 4, 4, 2, 60],
+        [2, 4, 4, 2, 30]
+    ]
+
 
 @schema
 class Projector(dj.Lookup):
@@ -613,29 +634,27 @@ class Projector(dj.Lookup):
     # projector specifications
     projector_id        : tinyint                               # projector id
     ---
-    red                 : tinyint                               # color to be used for red channel
-    green               : tinyint                               # color to be used for green channel
-    blue                : tinyint                               # color to be used for blue channel
-    refresh_rate        : tinyint                               # refresh rate in Hz
     pixel_width         : smallint                              # number of pixels in width
     pixel_height        : smallint                              # number of pixels in height
     """
     contents = [
-        [0, 4, 2, 3, 60, 1920, 1080],
-        [1, 4, 4, 2, 60, 1140, 912],
-        [1, 4, 4, 2, 30, 1140, 912]
+        [0, 1920, 1080],
+        [1, 1140, 912]
     ]
 
+
 @schema
-class ProjectorDisplay(dj.Manual):
+class ProjectorSetup(dj.Lookup):
     definition = """
-    # projected display specification
+    # projector set up
     -> Projector
+    -> ProjectorConfig
     -> Rig
-    target_distance     : decimal(6,3)  # distance from mouse to the projected display in cm
     ---
-    displayed_width     : float         # width in cm
-    displayed_height    : float         # height in cm
+    display_width       : float         # projected display width in cm
+    display_height      : float         # projected display height in cm
+    target_distance     : float         # distance from mouse to the display in cm
     """
+
 
 schema.spawn_missing_classes()
