@@ -8,5 +8,5 @@ projector_config_id         : tinyint                       # projector config
 refresh_rate                : float                         # refresh rate in Hz
 %}
 
-classdef Projector < dj.Lookup
+classdef ProjectorConfig < dj.Lookup
 end
