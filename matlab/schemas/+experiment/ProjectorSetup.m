@@ -9,5 +9,5 @@ display_height      : float         # projected display height in cm
 target_distance     : float         # distance from mouse to the display in cm
 %}
 
-classdef Projector < dj.Lookup
+classdef ProjectorSetup < dj.Lookup
 end
