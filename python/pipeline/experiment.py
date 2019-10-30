@@ -594,22 +594,36 @@ class AutoProcessing(dj.Manual):
     """
 
 @schema
+class ProjectorColor(dj.Lookup):
+    definition = """
+    # color options for projector channels
+    color_id        : tinyint     # color id
+    ---
+    color           : varchar(32) # color name      
+    """
+    contents = [[0, 'none'],
+                [1, 'red'],
+                [2, 'green'],
+                [3, 'Blue'],
+                [4, 'UV']]
+
+@schema
 class Projector(dj.Lookup):
     definition = """
     # projector specifications
     projector_id        : tinyint                               # projector id
-    refresh_rate        : tinyint                               # refresh rate in Hz
     ---
-    red                 : enum('UV', 'Green', 'Blue', 'None')   # color to be used for red channel
-    green               : enum('UV', 'Green', 'Blue', 'None')   # color to be used for green channel
-    blue                : enum('UV', 'Green', 'Blue', 'None')   # color to be used for blue channel
+    red                 : tinyint                               # color to be used for red channel
+    green               : tinyint                               # color to be used for green channel
+    blue                : tinyint                               # color to be used for blue channel
+    refresh_rate        : tinyint                               # refresh rate in Hz
     pixel_width         : smallint                              # number of pixels in width
     pixel_height        : smallint                              # number of pixels in height
     """
     contents = [
-        [0, 60, 'UV', 'Green', 'Blue', 1920, 1080],
-        [1, 60, 'UV', 'UV', 'Green', 1140, 912],
-        [1, 30, 'UV', 'UV', 'Green', 1140, 912]
+        [0, 4, 2, 3, 60, 1920, 1080],
+        [1, 4, 4, 2, 60, 1140, 912],
+        [1, 4, 4, 2, 30, 1140, 912]
     ]
 
 @schema
