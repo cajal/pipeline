@@ -648,7 +648,6 @@ class ProjectorSetup(dj.Lookup):
     # projector set up
     -> Projector
     -> ProjectorConfig
-    -> Rig
     ---
     display_width       : float         # projected display width in cm
     display_height      : float         # projected display height in cm
