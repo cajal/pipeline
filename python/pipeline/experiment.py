@@ -597,28 +597,27 @@ class AutoProcessing(dj.Manual):
 class ProjectorColor(dj.Lookup):
     definition = """
     # color options for projector channels
-    color_id            : tinyint                   # color id
-    ---
     color               : varchar(32)               # color name
+    ---
     """
     contents = [
-        [0, 'none'],
-        [1, 'red'],
-        [2, 'green'],
-        [3, 'blue'],
-        [4, 'UV']
+        ['none'],
+        ['red'],
+        ['green'],
+        ['blue'],
+        ['UV']
     ]
 
 @schema
 class ProjectorConfig(dj.Lookup):
     definition = """
     # projector configuration
-    projector_config_id         : tinyint                       # projector config    
+    projector_config_id         : tinyint                   # projector config    
     ---
-    -> ProjectorColor.proj(channel_1="color_id")                # channel 1 means 1st color channel. Usually red
-    -> ProjectorColor.proj(channel_2="color_id")                # channel 2 means 2nd color channel. Usually green
-    -> ProjectorColor.proj(channel_3="color_id")                # channel 3 means 3rd color channel. Usually blue
-    refresh_rate                : float                         # refresh rate in Hz
+    -> ProjectorColor.proj(channel_1="color")               # channel 1 means 1st color channel. Usually red
+    -> ProjectorColor.proj(channel_2="color")               # channel 2 means 2nd color channel. Usually green
+    -> ProjectorColor.proj(channel_3="color")               # channel 3 means 3rd color channel. Usually blue
+    refresh_rate                : float                     # refresh rate in Hz
 
     """
     contents = [
