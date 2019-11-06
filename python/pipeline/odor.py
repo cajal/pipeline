@@ -10,7 +10,6 @@ from pipeline.utils import h5
 from commons import lab
 
 schema = dj.schema('pipeline_odor', locals(), create_tables=False)
-CURRENT_VERSION = 1
 
 @schema
 class Odorant(dj.Lookup):
