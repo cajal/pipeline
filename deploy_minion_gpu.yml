@@ -14,6 +14,7 @@ spec:
           containers:
           - name: minion-gpu
             image: ninai/pipeline:tf-gpu
+            imagePullPolicy: Always  # needed because the image tag is not latest
             volumeMounts:
             - name: mnt
               mountPath: /mnt

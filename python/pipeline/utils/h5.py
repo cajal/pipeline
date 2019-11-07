@@ -235,3 +235,71 @@ def find_flips(signal, fps, monitor_fps):
     flip_nums = flip_nums[~np.isnan(flip_nums)].astype(int)
 
     return flip_indices, flip_nums
+
+
+def read_digital_olfaction_file(filename):
+    """ Reads hdf5 files with olfaction digital signals.
+    :param filename: path of the file. Needs a %d where 2GB file split counter is located.
+    :returns: A dictionary with these fields:
+        version: string. File version
+        delay: float. Time in milliseconds between puffs of odor
+        duration: float. Duration of odor presentation in milliseconds.
+        valves: 1-d array (num_samples). State of valve stored as decimal of binary
+            representation. 0 = Closed, 1 = Open.
+            ex. 2028 = 0b100000100000 = 12th and 6th valve are open.
+        ts: 1-d array (num_samples). Timestamps for valve state changes in master clock
+            time.
+    ..note:: Master clock time is an integer counter that increases every 0.1 usecs.
+    """
+    with h5py.File(filename, 'r', driver='family', memb_size=0) as f:
+
+        file_version = str(f.attrs['Version'][0])
+        data = {'version': file_version}
+
+        if file_version in ['1.0']:
+            data['delay'] = f.attrs['Delay'][0]
+            data['duration'] = f.attrs['Puff Duration'][0]
+            data['valves'] = f['Digital Pattern'][0, :]
+            data['ts'] = f['Digital Pattern'][1, :]
+
+        else:
+            msg = 'Unknown file version {} in file {}'.format(file_version, filename)
+            raise PipelineException(msg)
+
+        return data
+
+
+def read_analog_olfaction_file(filename):
+    """ Reads hdf5 files with olfaction analog signals.
+    :param filename: path of the file. Needs a %d where 2GB file split counter is located.
+    :returns: A dictionary with these fields:
+        version: string. File version
+        analogPacketLen: int. Number of samples received in a single packet coming from
+            analog channels. See ts for why this is relevant.
+        fs: sampling rate  in Hz
+        breath: 1-d array (num_samples). Respiration recording.
+        ts: 1-d array (num_samples). Timestamps for analog signals in master clock time.
+            All samples in the same packet are given the same timestamp: the clock time
+            when they arrived.
+        scanImage: 1-d array (num_samples). ScanImage frame clock signal in volts at
+            10 KHz; high value (~5 V) during aqcquisiton.
+    ..note:: Master clock time is an integer counter that increases every 0.1 usecs.
+    """
+
+    with h5py.File(filename, 'r', driver='family', memb_size=0) as f:
+
+        file_version = str(f.attrs['Version'][0])
+        data = {'version': file_version}
+
+        if file_version in ['1.0']:
+            data['analogPacketLen'] = f.attrs['waveform Frame Size'][0]
+            data['fs'] = f.attrs['waveform Fs'][0]
+            data['breath'] = f['waveform'][1, :]
+            data['ts'] = f['waveform'][2, :]
+            data['scanImage'] = f['waveform'][0, :]
+
+        else:
+            msg = 'Unknown file version {} in file {}'.format(file_version, filename)
+            raise PipelineException(msg)
+
+        return data
