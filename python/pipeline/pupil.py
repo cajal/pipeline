@@ -1,7 +1,6 @@
 """
-Date: 10/29/2019
 This module is for pupil related tables and computation.
-Current version is at 1.0.0 
+Current version is at 1.0.0 as of 10/29/2019
 
 What's changed in this version:
 1. Got rid of filter_config table
