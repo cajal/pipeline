@@ -1365,8 +1365,8 @@ class ScanSet(dj.Computed):
 
         -> ScanSet.Unit
         ---
-        um_x                : smallint      # x-coordinate of centroid in motor coordinate system
-        um_y                : smallint      # y-coordinate of centroid in motor coordinate system
+        um_x                : int           # x-coordinate of centroid in motor coordinate system
+        um_y                : int           # y-coordinate of centroid in motor coordinate system
         um_z                : smallint      # z-coordinate of mask relative to surface of the cortex
         px_x                : smallint      # x-coordinate of centroid in the frame
         px_y                : smallint      # y-coordinate of centroid in the frame
