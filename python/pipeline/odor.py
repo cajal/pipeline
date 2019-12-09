@@ -9,7 +9,12 @@ from pipeline import meso
 from pipeline.utils import h5
 from commons import lab
 
+
+dj.config['external-odor'] = {'protocol': 'file',
+                              'location': '/mnt/dj-stor01/pipeline-externals'}
+
 schema = dj.schema('pipeline_odor', locals(), create_tables=False)
+
 
 @schema
 class Odorant(dj.Lookup):
@@ -209,8 +214,8 @@ class Respiration(dj.Imported):
     definition = """ # Analog recording of mouse respiration
     -> OdorRecording
     ---
-    trace                       : longblob             # mouse respiration (arbitrary units)
-    times                       : longblob             # trace times on olfactory clock (seconds)
+    trace                       : external-odor        # mouse respiration (arbitrary units)
+    times                       : external-odor        # trace times on olfactory clock (seconds)
     """
 
     def make(self, key):

@@ -593,4 +593,66 @@ class AutoProcessing(dj.Manual):
     autosegment=false   :boolean       # segment somas in the first channel with default method
     """
 
+@schema
+class ProjectorColor(dj.Lookup):
+    definition = """
+    # color options for projector channels
+    color               : varchar(32)               # color name
+    ---
+    """
+    contents = [
+        ['none'],
+        ['red'],
+        ['green'],
+        ['blue'],
+        ['UV']
+    ]
+
+@schema
+class ProjectorConfig(dj.Lookup):
+    definition = """
+    # projector configuration
+    projector_config_id         : tinyint                   # projector config    
+    ---
+    -> ProjectorColor.proj(channel_1="color")               # channel 1 means 1st color channel. Usually red
+    -> ProjectorColor.proj(channel_2="color")               # channel 2 means 2nd color channel. Usually green
+    -> ProjectorColor.proj(channel_3="color")               # channel 3 means 3rd color channel. Usually blue
+    refresh_rate                : float                     # refresh rate in Hz
+
+    """
+    contents = [
+        [0, 4, 2, 3, 60],
+        [1, 4, 4, 2, 60],
+        [2, 4, 4, 2, 30]
+    ]
+
+
+@schema
+class Projector(dj.Lookup):
+    definition = """
+    # projector specifications
+    projector_id        : tinyint                               # projector id
+    ---
+    pixel_width         : smallint                              # number of pixels in width
+    pixel_height        : smallint                              # number of pixels in height
+    """
+    contents = [
+        [0, 1920, 1080],
+        [1, 1140, 912]
+    ]
+
+
+@schema
+class ProjectorSetup(dj.Lookup):
+    definition = """
+    # projector set up
+    -> Projector
+    -> ProjectorConfig
+    ---
+    display_width       : float         # projected display width in cm
+    display_height      : float         # projected display height in cm
+    target_distance     : float         # distance from mouse to the display in cm
+    """
+
+
 schema.spawn_missing_classes()
