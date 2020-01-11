@@ -12,10 +12,24 @@ spec:
         spec:
           restartPolicy: Never
           hostNetwork: true # This option will allow the pod to use the host network for internet access
+          priorityClassName: high-priority  
           volumes:
           - name: mnt
             hostPath:
               path: /mnt
+          affinity: # Affinity to select certain nodes with 11GB, 12GB, or 24GB memory
+            nodeAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution: # Require nodes to have this label
+                nodeSelectorTerms:
+                - matchExpressions:
+                  - key: kubernetes.io/hostname # Target label is gpu_mem_size
+                    operator: In # Key must have one of the following values
+                    values:
+                    - at-compute003
+                    - at-compute004
+                    - at-compute005
+                    - at-compute006
+                    - jr-compute001
           containers:
           - name: minion
             image: ninai/pipeline:latest
@@ -24,8 +38,8 @@ spec:
               mountPath: /mnt
             resources:
               requests:
-                cpu: 4
-                memory: 30Gi
+                cpu: 1
+                memory: 32Gi
                 ephemeral-storage: 50Gi
             env:
             - name: DJ_HOST
