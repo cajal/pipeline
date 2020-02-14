@@ -1,0 +1,57 @@
+apiVersion: batch/v1 # Jobs Default K8 API
+kind: Job # This tells kubernetes what kind of class it is working with
+metadata:
+  name: donnie-jake-table # Name of the Job
+spec:
+  parallelism: 10
+  template: # Pod Templete
+    spec:
+      volumes:
+          - name: mnt
+            hostPath:
+              path: /mnt
+      restartPolicy: Never # Options are Always, OnFailure, and Never.
+      hostNetwork: true # This option will allow the pod to use the host network for internet access
+      containers:
+      - name: donnie-jake-table # Container name (Can be set to whatever)
+        image: kdk411/pipeline:latest # Docker Image hosted on at-docker.ad.bcm.edu:5000
+        resources:
+              requests:
+                memory: 32Gi
+                # storage: 64Gi
+                cpu: 12
+        volumeMounts:
+            - name: mnt
+              mountPath: /mnt
+        env:
+        - name: DJ_HOST
+          valueFrom:
+            secretKeyRef:
+              name: datajoint-credentials
+              key: DJ_HOST
+        - name: DJ_USER
+          valueFrom:
+            secretKeyRef:
+              name: datajoint-credentials
+              key: DJ_USER
+        - name: DJ_PASS
+          valueFrom:
+            secretKeyRef:
+              name: datajoint-credentials
+              key: DJ_PASS
+        - name: GITHUB_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: github-credentials
+              key: GITHUB_USERNAME
+        - name: GITHUB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: github-credentials
+              key: GITHUB_PASSWORD
+        command: ["/bin/bash"]
+        args: ["-c", "git clone https://$(GITHUB_USERNAME):$(GITHUB_PASSWORD)@github.com/cajal/stimulus-pipeline.git \
+            && pip3 install stimulus-pipeline/python/ \
+            && git clone https://$(GITHUB_USERNAME):$(GITHUB_PASSWORD)@github.com/cajal/stimuli.git \
+            && pip3 install stimuli/python/ \
+            && python3 /data/pipeline/python/scripts/personal_pipeline_jobs.py"]
