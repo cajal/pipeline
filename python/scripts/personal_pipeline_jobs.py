@@ -3,9 +3,7 @@ import numpy as np
 from stimline import tune
 
 """
-    Copying the old tracking (pupil.ManuallyTrackedContours) and fitting (pupil.FittedContour) data 
-    to the new tables (pupil.Tracking & pupil.FittedPupil)
-    
+    Modify here if you wanna process your own jobs. Use this as a template
 """
 
 #jake's diamond scans
