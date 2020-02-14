@@ -57,6 +57,9 @@ fuse.ScanSet().populate(next_scans, reserve_jobs=True, suppress_errors=True)
 fuse.Activity().populate(next_scans, reserve_jobs=True, suppress_errors=True)
 fuse.ScanDone().populate(next_scans, reserve_jobs=True, suppress_errors=True)
 
+
+# Temporary disable due to issues with dj stor1
+'''
 # more stack (needs corrected fields)
 stack.PreprocessedStack().populate(stack.SegmentationTask(), reserve_jobs=True,
                                    suppress_errors=True)
@@ -84,3 +87,4 @@ tune.OriMapQuality().populate(next_scans, reserve_jobs=True, suppress_errors=Tru
 
 tune.CaTimes().populate(next_scans, reserve_jobs=True, suppress_errors=True)
 tune.Ori().populate(next_scans, reserve_jobs=True, suppress_errors=True)
+'''
