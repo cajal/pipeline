@@ -8,8 +8,8 @@ from stimline import tune
 #     next_scans = (experiment.AutoProcessing() & 'priority > {}'.format(priority) &
 #                   (experiment.Scan() & 'scan_ts > "2019-01-01 00:00:00"'))
 
-next_scans = (experiment.AutoProcessing()  &
-              (experiment.Scan() & 'scan_ts > "2019-01-01 00:00:00"'))
+next_scans = (experiment.AutoProcessing  &
+              (experiment.Scan & 'scan_ts > "2019-01-01 00:00:00"'))
 
 # stimulus
 stimulus.Sync.populate(next_scans, reserve_jobs=True, suppress_errors=True)
@@ -22,8 +22,7 @@ pupil.FittedPupil.populate(next_scans, reserve_jobs=True, suppress_errors=True)
 posture.Posture.populate(next_scans, reserve_jobs=True, suppress_errors=True)
 
 # stack
-stack.StackInfo.populate(stack.CorrectionChannel(), reserve_jobs=True,
-                         suppress_errors=True)
+stack.StackInfo.populate(stack.CorrectionChannel, reserve_jobs=True, suppress_errors=True)
 stack.Quality.populate(reserve_jobs=True, suppress_errors=True)
 stack.RasterCorrection.populate(reserve_jobs=True, suppress_errors=True)
 stack.MotionCorrection.populate(reserve_jobs=True, suppress_errors=True)
@@ -56,29 +55,31 @@ fuse.Activity.populate(next_scans, reserve_jobs=True, suppress_errors=True)
 fuse.ScanDone.populate(next_scans, reserve_jobs=True, suppress_errors=True)
 
 # more stack (needs corrected fields)
-stack.PreprocessedStack.populate(stack.SegmentationTask(), reserve_jobs=True,
-                                   suppress_errors=True)
+stack.PreprocessedStack.populate(stack.RegistrationTask, reserve_jobs=True,
+                                 suppress_errors=True)
+stack.PreprocessedStack.populate(stack.SegmemtationTask, reserve_jobs=True,
+                                 suppress_errors=True)
 stack.FieldSegmentation.populate(reserve_jobs=True, suppress_errors=True)
-stack.PreprocessedStack.populate(stack.RegistrationTask().proj(session='stack_session',
-                                                               channel='stack_channel'),
+stack.PreprocessedStack.populate(stack.RegistrationTask.proj(session='stack_session',
+                                                             channel='stack_channel'),
                                  reserve_jobs=True, suppress_errors=True)
 stack.Registration.populate(reserve_jobs=True, suppress_errors=True)
 
-# tune (these are memory intensive)
-tune.STA.populate(next_scans, reserve_jobs=True, suppress_errors=True)
-tune.STAQual.populate(next_scans, reserve_jobs=True, suppress_errors=True)
-tune.STAExtent.populate(next_scans, reserve_jobs=True, suppress_errors=True)
-
-tune.CaMovie.populate(next_scans, reserve_jobs=True, suppress_errors=True)
-tune.Drift.populate(next_scans, reserve_jobs=True, suppress_errors=True)
-tune.OriDesign.populate(next_scans, reserve_jobs=True, suppress_errors=True)
-tune.OriMap.populate(next_scans, reserve_jobs=True, suppress_errors=True)
-tune.Cos2Map.populate(next_scans, reserve_jobs=True, suppress_errors=True)
-tune.OriMapQuality.populate(next_scans, reserve_jobs=True, suppress_errors=True)
-
-# tune.OracleMap.populate(next_scans, reserve_jobs=True, suppress_errors=True)
-# tune.MovieOracle.populate(next_scans, reserve_jobs=True, suppress_errors=True)
-# tune.MovieOracleTimeCourse.populate(next_scans, reserve_jobs=True, suppress_errors=True)
-
-tune.CaTimes.populate(next_scans, reserve_jobs=True, suppress_errors=True)
-tune.Ori.populate(next_scans, reserve_jobs=True, suppress_errors=True)
+# # tune (these are memory intensive)
+# tune.STA.populate(next_scans, reserve_jobs=True, suppress_errors=True)
+# tune.STAQual.populate(next_scans, reserve_jobs=True, suppress_errors=True)
+# tune.STAExtent.populate(next_scans, reserve_jobs=True, suppress_errors=True)
+#
+# tune.CaMovie.populate(next_scans, reserve_jobs=True, suppress_errors=True)
+# tune.Drift.populate(next_scans, reserve_jobs=True, suppress_errors=True)
+# tune.OriDesign.populate(next_scans, reserve_jobs=True, suppress_errors=True)
+# tune.OriMap.populate(next_scans, reserve_jobs=True, suppress_errors=True)
+# tune.Cos2Map.populate(next_scans, reserve_jobs=True, suppress_errors=True)
+# tune.OriMapQuality.populate(next_scans, reserve_jobs=True, suppress_errors=True)
+#
+# # tune.OracleMap.populate(next_scans, reserve_jobs=True, suppress_errors=True)
+# # tune.MovieOracle.populate(next_scans, reserve_jobs=True, suppress_errors=True)
+# # tune.MovieOracleTimeCourse.populate(next_scans, reserve_jobs=True, suppress_errors=True)
+#
+# tune.CaTimes.populate(next_scans, reserve_jobs=True, suppress_errors=True)
+# tune.Ori.populate(next_scans, reserve_jobs=True, suppress_errors=True)
