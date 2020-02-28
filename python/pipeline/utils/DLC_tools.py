@@ -1,18 +1,3 @@
-from IPython import display
-import pylab as pl
-
-import math
-import yaml
-import cv2
-from pathlib import Path
-import numpy as np
-import pandas as pd
-import ruamel.yaml
-import imageio
-import time
-import shutil
-import matplotlib.pyplot as plt
-
 import os
 # disable DLC GUI
 os.environ["DLClight"] = "True"
@@ -21,6 +6,21 @@ from deeplabcut.utils import plotting
 from deeplabcut.utils import video_processor
 from deeplabcut.utils import auxiliaryfunctions
 import deeplabcut as dlc
+
+from IPython import display
+import pylab as pl
+
+import math
+import yaml
+import ruamel.yaml
+import cv2
+from pathlib import Path
+import numpy as np
+import pandas as pd
+import imageio
+import time
+import shutil
+import matplotlib.pyplot as plt
 
 def key_dict_generater(case):
     case_key = {'animal_id': None, 'session': None, 'scan_idx': None}
@@ -85,7 +85,22 @@ def smallest_enclosing_circle_naive(points):
     return result
 
 
-class PlotBodyparts():
+def online_median_filter(x, kernel_size=3):
+
+    assert kernel_size%2 == 1, "kernel size must be odd number!"
+
+    interval = kernel_size//2
+
+    online_medfilt = x[0:interval].tolist()
+    for i in range(interval, len(x)-interval):
+        online_medfilt.append(np.median(x[i-interval:i+interval+1]))
+        
+    online_medfilt += x[-interval:].tolist()
+
+    return np.array(online_medfilt)
+
+
+class DeeplabcutPlotBodyparts():
 
     def __init__(self, config, bodyparts='all', cropped=False):
         """
@@ -97,8 +112,7 @@ class PlotBodyparts():
                 then by default it plots ALL existing bodyplots in config.yaml file.
             cropped: boolean
                 whether to crop the video or not. Default False
-            cropped_coords: list
-                Provide 4 coordinates to crop the video if cropped is True. Otherwise, set to None
+            filtering (dict):
 
         """
 
@@ -134,6 +148,7 @@ class PlotBodyparts():
         self.df_label = pd.read_hdf(self.label_path)
 
         self.df_bodyparts = self.df_label[self._DLCscorer][self.bodyparts]
+
         self.df_bodyparts_likelihood = self.df_bodyparts.iloc[:, self.df_bodyparts.columns.get_level_values(
             1) == 'likelihood']
 
@@ -141,6 +156,19 @@ class PlotBodyparts():
                                                      self.df_bodyparts.columns.get_level_values(1) == 'x']
         self.df_bodyparts_y = self.df_bodyparts.iloc[:,
                                                      self.df_bodyparts.columns.get_level_values(1) == 'y']
+
+        # in mm. https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3310398/#R13
+        self._pupil_diameter = 3.0 
+
+        # obtain median left to right eyelid distance
+        right = self.df_bodyparts['eyelid_right'].values[:, :2]
+        left = self.df_bodyparts['eyelid_left'].values[:, :2]
+
+        self.median_left_right = np.median(
+            np.sqrt(np.einsum('ij,ij->i', left-right, left-right)))
+
+        # obtain pixel to diameter ratio
+        self._pixel_to_diameter_ratio = self.median_left_right/self._pupil_diameter
 
         if not self.cropped:
 
@@ -260,6 +288,18 @@ class PlotBodyparts():
     def fontsize(self, value):
         self._fontsize = value
 
+    @property
+    def pupil_diameter(self):
+        return self._pupil_diameter
+
+    @pupil_diameter.setter
+    def pupil_diameter(self, value):
+        self._pupil_diameter = value
+
+    @property
+    def pixel_to_diameter_ratio(self):
+        return self.median_left_right/self._pupil_diameter
+    
     def coords_pcutoff(self, frame_num):
         """
         Given a frame number, return bpindex, x & y coordinates that meet pcutoff criteria
@@ -404,14 +444,14 @@ class PlotBodyparts():
         else:
             crop_flag = 'orig'
         save_video_path = os.path.join(self.base_dir,
-                                       '{}_{}_{}_labeled.avi'.format(crop_flag,start, end))
+                                       '{}_{}_{}_labeled.avi'.format(crop_flag, start, end))
         ani.save(save_video_path, writer=writer, dpi=self.dpi)
 
         return ani
 
 
-class PupilFitting(PlotBodyparts):
-    def __init__(self, config, bodyparts='all', cropped=False):
+class DeeplabcutPupilFitting(DeeplabcutPlotBodyparts):
+    def __init__(self, config, bodyparts='all', cropped=False, filtering=None):
         """
         Input:
             config: dictionary
@@ -421,8 +461,7 @@ class PupilFitting(PlotBodyparts):
                 then by default it plots ALL existing bodyplots in config.yaml file.
 
         """
-        super().__init__(config, bodyparts=bodyparts,
-                         cropped=cropped)
+        super().__init__(config, bodyparts=bodyparts, cropped=cropped)
 
         self.complete_eyelid_graph = {'eyelid_top': 'eyelid_top_right',
                                       'eyelid_top_right': 'eyelid_right',
@@ -920,7 +959,7 @@ class PupilFitting(PlotBodyparts):
         else:
             crop_flag = 'orig'
         save_video_path = os.path.join(self.base_dir,
-                                       '{}_{}_{}_labeled.avi'.format(crop_flag,start, end))
+                                       '{}_{}_{}_labeled.avi'.format(crop_flag, start, end))
 
         ani.save(save_video_path, writer=writer, dpi=self.dpi)
 
@@ -1070,8 +1109,14 @@ def obtain_cropping_coords(short_h5_path, DLCscorer, config):
                                                    (eyelid_coord_pcutoff > np.mean(
                                                     eyelid_coord_pcutoff) - np.std(eyelid_coord_pcutoff))]
 
-            coords_dict[coord+'min'].append(eyelid_coord_68.min())
-            coords_dict[coord+'max'].append(eyelid_coord_68.max())
+            # sometimes, eyelid_coord_68 can return an empty array. If so, dont bother with 1st dev from mean 
+            # but directly use eyelid_coord_pcutoff
+            if len(eyelid_coord_68) == 0:
+                coords_dict[coord+'min'].append(eyelid_coord_pcutoff.min())
+                coords_dict[coord+'max'].append(eyelid_coord_pcutoff.max())
+            else:
+                coords_dict[coord+'min'].append(eyelid_coord_68.min())
+                coords_dict[coord+'max'].append(eyelid_coord_68.max())
 
     cropped_coords = {}
     cropped_coords['cropped_x0'] = int(min(coords_dict['xmin']))
@@ -1173,3 +1218,83 @@ def make_compressed_cropped_video(tracking_dir, cropped_coords):
         print('\nSuccessfully created a compressed & cropped video!\n')
 
     return cc_vid_path
+
+
+def filter_by_fitting_std(data, fitting_method, std_magnitude=5.5):
+    """Filter out outliers based on std specified by user. The outlier indices are returned
+
+    Args:
+        data (numpy array): 
+        if fitting_method is a circle
+            0th column: center
+            1st column: radius
+            2nd column: visible portion
+        if fitting method is an ellipse:
+            0th column: center
+            1st column: major_r
+            2nd column: minor_r
+            3rd column: visible portion
+
+        fitting_method (str): A string specifying which fitting method used. Must be either a circle or an ellipse
+        std_magnitude (float): A number that specifies how many std away from mean to be used as a cutoff.
+            Default to 5.5 (emperically obtained value)
+
+    Returns:
+        rejected inds: rejected indices after filtered by std deviations. True is rejected.
+
+    """
+    if fitting_method.lower() == 'circle':
+        # at minium we need center and radius info
+        assert data.shape[1] >= 2
+
+        # filter out circles
+        center, radius = data[:, 0], data[:, 1].astype(np.float64)
+
+        # only obtain real numbers, not nans.
+        detectedFrames = ~np.isnan(radius)
+        xy = np.full((len(radius), 2), np.nan)
+        xy[detectedFrames, :] = np.vstack(center[detectedFrames])
+
+        x = xy[:, 0]
+        y = xy[:, 1]
+
+        rejected_radius_ind = np.greater(abs(
+            radius - np.nanmean(radius)), std_magnitude * np.nanstd(radius), where=~np.isnan(radius))
+        rejected_x_ind = np.greater(
+            abs(x - np.nanmean(x)), std_magnitude * np.nanstd(x), where=~np.isnan(x))
+        rejected_y_ind = np.greater(
+            abs(y - np.nanmean(y)), std_magnitude * np.nanstd(y), where=~np.isnan(y))
+
+        rejected_ind = np.logical_or(np.logical_or(
+            rejected_radius_ind, rejected_x_ind), rejected_y_ind)
+
+    elif fitting_method.lower() == 'ellipse':
+        # at minimum we need center, major_r, and minor_r info
+        assert data.shape[1] >= 3
+
+        # filter out ellipses
+        center, major_r, minor_r = data[:, 0], data[:, 1].astype(
+            np.float64), data[:, 2].astype(np.float64)
+
+        detectedFrames = ~np.isnan(major_r)
+        xy = np.full((len(major_r), 2), np.nan)
+        xy[detectedFrames, :] = np.vstack(center[detectedFrames])
+
+        x = xy[:, 0]
+        y = xy[:, 1]
+
+        rejected_major_r_ind = np.greater(abs(
+            major_r - np.nanmean(major_r)), std_magnitude * np.nanstd(major_r), where=~np.isnan(major_r))
+        rejected_minor_r_ind = np.greater(abs(
+            minor_r - np.nanmean(minor_r)), std_magnitude * np.nanstd(minor_r), where=~np.isnan(minor_r))
+        rejected_x_ind = np.greater(
+            abs(x - np.nanmean(x)), std_magnitude * np.nanstd(x), where=~np.isnan(x))
+        rejected_y_ind = np.greater(
+            abs(y - np.nanmean(y)), std_magnitude * np.nanstd(y), where=~np.isnan(y))
+
+        rejected_ind = np.logical_or(np.logical_or(np.logical_or(
+            rejected_major_r_ind, rejected_minor_r_ind), rejected_x_ind), rejected_y_ind)
+
+    return rejected_ind
+
+

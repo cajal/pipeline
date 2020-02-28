@@ -654,10 +654,9 @@ class SummaryImages(dj.Computed):
             # Insert
             field_key = {**key, 'channel': channel + 1}
             self.insert1(field_key)
-            SummaryImages.Average().insert1({**field_key, 'average_image': average_image})
-            SummaryImages.L6Norm().insert1({**field_key, 'l6norm_image': l6norm_image})
-            SummaryImages.Correlation().insert1({**field_key,
-                                                 'correlation_image': correlation_image})
+            self.Average().insert1({**field_key, 'average_image': average_image})
+            self.L6Norm().insert1({**field_key, 'l6norm_image': l6norm_image})
+            self.Correlation().insert1({**field_key, 'correlation_image': correlation_image})
 
         self.notify(key, scan.num_channels)
 
@@ -1699,6 +1698,71 @@ class StackCoordinates(dj.Computed):
             StackCoordinates.UnitInfo.insert1({**key, **unit_key, 'stack_x': unit_x,
                                                'stack_y': unit_y, 'stack_z': unit_z})
 
+anatomy = dj.create_virtual_module('pipeline_anatomy','pipeline_anatomy')
+@schema
+class AreaMembership(dj.Computed):
+    definition = """ # cell membership in visual areas according to stack registered retinotopy
+    ret_hash             : varchar(32)                  # single attribute representation of retinotopic map key
+    -> StackCoordinates
+    ---
+    """
+
+    class UnitInfo(dj.Part):
+        definition = """ # confidence in area assignment per unit according to stack coordinates
+        -> master
+        -> anatomy.Area
+        -> StackCoordinates.UnitInfo
+        ---
+        confidence             : float                        # confidence in area assignment
+        """
+    @property
+    def key_source(self):
+        ret_rel = stack.Area.proj(ret_session='scan_session',
+                                  ret_scan_idx='scan_idx',
+                                  ret_channel='scan_channel')
+        key_source = ret_rel * StackCoordinates
+        heading_str = list(self.heading)
+
+        return dj.U(*heading_str) & key_source
+
+    def make(self,key):
+
+        from scipy.interpolate import griddata
+
+        mask_rel = stack.Area.Mask.proj('mask',
+                                        ret_session='scan_session',
+                                        ret_scan_idx='scan_idx',
+                                        ret_channel='scan_channel')
+        mask_keys, masks = (mask_rel & key).fetch('KEY', 'mask')
+
+        fetch_str = ['x', 'y', 'um_width', 'um_height', 'px_width', 'px_height']
+        stack_rel = stack.CorrectedStack.proj(*fetch_str, stack_session='session') & key
+        cent_x, cent_y, um_w, um_h, px_w, px_h = stack_rel.fetch1(*fetch_str)
+
+        stack_edges = np.array((cent_x - um_w / 2, cent_y - um_h / 2))
+        stack_px_dims = np.array((px_w, px_h))
+        stack_um_dims = np.array((um_w, um_h))
+
+        stack_px_grid = np.meshgrid(*[np.arange(d) + 0.5 for d in stack_px_dims])
+
+        ks, sxs, sys = (StackCoordinates.UnitInfo & key).fetch('KEY', 'stack_x', 'stack_y')
+        pxs, pys = [np.array((coord - edge) * px_per_um) for coord, edge, px_per_um
+                    in zip((sxs, sys), stack_edges, stack_px_dims / stack_um_dims)]
+
+        unit_tups = []
+        for mask_key, mask in zip(mask_keys, masks):
+            grid_locs = np.array([grid.ravel() for grid in stack_px_grid]).T
+            grid_vals = mask.ravel()
+            grid_query = np.vstack((pxs, pys)).T
+
+            confs = griddata(grid_locs, grid_vals, grid_query, method='nearest')
+            mems = confs > 0
+
+            unit_tups.append([{**mask_key, **k, 'confidence': conf} for k, conf in zip(np.array(ks)[mems], confs[mems])])
+
+        self.insert1(key)
+        self.UnitInfo.insert(np.concatenate(unit_tups),ignore_extra_fields=True)
+
 
 @schema
 class Func2StructMatching(dj.Computed):
@@ -1813,3 +1877,5 @@ class Func2StructMatching(dj.Computed):
             # Deactivate match
             iou_matrix[best_mask, :] = 0
             iou_matrix[:, best_func] = 0
+
+
