@@ -81,9 +81,3 @@ matlab/scripts/Eye_Movements/CircleMaps/
 
 # docker-compose-private.yml
 docker-compose-private.yml
-
-# ignore /K8/JupyterNotebook/*
-/K8/JupyterNotebook/*
-
-# ig nore personal pipeline jobs script
-/python/scripts/personal_pipeline_jobs.py
