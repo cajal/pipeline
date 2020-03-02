@@ -84,3 +84,6 @@ docker-compose-private.yml
 
 # ignore /K8/JupyterNotebook/*
 /K8/JupyterNotebook/*
+
+# ig nore personal pipeline jobs script
+/python/scripts/personal_pipeline_jobs.py
