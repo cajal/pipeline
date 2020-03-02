@@ -1,9 +1,9 @@
 apiVersion: v1 # Jobs Default K8 API
 kind: Pod # This tells kubernetes what kind of class it is working with
 metadata:
-  name: stimuli-pipeline-jupyter #
+  name: stimuli-pipeline-jupyter-8889 #
   labels:
-    app: stimuli-pipeline-jupyter # Reference this in your service
+    app: stimuli-pipeline-jupyter-8889 # Reference this in your service
 spec:
   restartPolicy: Never # Options are OnFailure, and Never.
   hostNetwork: true # This option will allow the pod to use the host network for internet access
@@ -35,7 +35,7 @@ spec:
             values:
             - donniekim
   containers: # Container Level
-  - name: stimuli-pipeline # Container name (Can be set to whatever)
+  - name: stimuli-pipeline-jupyter-8889 # Container name (Can be set to whatever)
     image: at-docker.ad.bcm.edu:5000/stimulus-pipeline # Docker Image hosted on Docker Hub
     ports:
     - containerPort: 8889
