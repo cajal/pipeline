@@ -57,7 +57,7 @@ fuse.ScanDone.populate(next_scans, reserve_jobs=True, suppress_errors=True)
 # more stack (needs corrected fields)
 stack.PreprocessedStack.populate(stack.RegistrationTask, reserve_jobs=True,
                                  suppress_errors=True)
-stack.PreprocessedStack.populate(stack.SegmemtationTask, reserve_jobs=True,
+stack.PreprocessedStack.populate(stack.SegmentationTask, reserve_jobs=True,
                                  suppress_errors=True)
 stack.FieldSegmentation.populate(reserve_jobs=True, suppress_errors=True)
 stack.PreprocessedStack.populate(stack.RegistrationTask.proj(session='stack_session',
