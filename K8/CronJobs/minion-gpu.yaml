@@ -73,7 +73,8 @@ spec:
                   name: github-credentials
                   key: GITHUB_PASSWORD
             command: ["/bin/bash"]
-            args: ["-c", "git clone https://$(GITHUB_USERNAME):$(GITHUB_PASSWORD)@github.com/cajal/cajal/pipeline.git &&\
+            args: ["-c", "rm -r pipeline &&\
+            git clone https://$(GITHUB_USERNAME):$(GITHUB_PASSWORD)@github.com/cajal/pipeline.git &&\
             pip3 install pipeline/python/ &&\
             git clone https://$(GITHUB_USERNAME):$(GITHUB_PASSWORD)@github.com/cajal/stimulus-pipeline.git &&\
             pip3 install stimulus-pipeline/python/ &&\
