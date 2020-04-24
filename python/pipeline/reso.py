@@ -400,8 +400,8 @@ class MotionCorrection(dj.Computed):
         from scipy import ndimage
 
         # Get some params
-        px_height, px_width, nframes, nfields, fps = (reso.ScanInfo() & key).fetch1('px_height', 'px_width',
-                                                                                    'nframes', 'nfields', 'fps')
+        px_height, px_width, nframes, nfields, fps = (ScanInfo() & key).fetch1('px_height', 'px_width',
+                                                                               'nframes', 'nfields', 'fps')
         channel = (CorrectionChannel() & key).fetch1('channel') - 1
         field_id = key['field'] - 1
 
