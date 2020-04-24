@@ -9,6 +9,7 @@ from . import experiment, notify, shared
 from .utils import galvo_corrections, signal, quality, mask_classification, performance
 from .exceptions import PipelineException
 
+
 schema = dj.schema('pipeline_reso', locals(), create_tables=False)
 CURRENT_VERSION = 1
 
@@ -22,7 +23,6 @@ class Version(dj.Manual):
     description = ''                : varchar(256)      # any notes on this version
     date = CURRENT_TIMESTAMP        : timestamp         # automatic
     """
-
 
 @schema
 class ScanInfo(dj.Imported):
@@ -108,11 +108,11 @@ class ScanInfo(dj.Imported):
         # Compute field depths with respect to surface
         surf_z = (experiment.Scan() & key).fetch1('depth')  # surface depth in motor coordinates
         motor_zero = surf_z - scan.motor_position_at_zero[2]
-        if scan.is_slow_stack and not scan.is_slow_stack_with_fastZ:  # using motor
+        if scan.is_slow_stack and not scan.is_slow_stack_with_fastZ: # using motor
             # Correct for motor and fastZ pointing in different directions
             initial_fastZ = scan.initial_secondary_z or 0
             rel_field_depths = 2 * initial_fastZ - np.array(scan.field_depths)
-        else:  # using fastZ
+        else: # using fastZ
             rel_field_depths = np.array(scan.field_depths)
         field_depths = motor_zero + rel_field_depths
 
@@ -228,7 +228,7 @@ class Quality(dj.Computed):
                     mean_intensities[frames] = chunk_mis
                     contrasts[frames] = chunk_contrasts
                 sorted_results = sorted(results, key=lambda res: res[0])
-                mean_groups = np.array_split([r[3] for r in sorted_results], 16)  # 16 groups
+                mean_groups = np.array_split([r[3] for r in sorted_results], 16) # 16 groups
                 frames = np.stack([np.mean(g, axis=0) for g in mean_groups if g.any()], axis=-1)
 
                 # Compute quantal size
@@ -242,7 +242,7 @@ class Quality(dj.Computed):
                 # Compute abnormal event frequency
                 deviations = (mean_intensities - mean_intensities.mean()) / mean_intensities.mean()
                 peaks, prominences, widths = quality.find_peaks(deviations)
-                widths = [w / scan.fps for w in widths]  # in seconds
+                widths = [w / scan.fps for w in widths] # in seconds
                 abnormal = peaks[[p > 0.2 and w < 0.4 for p, w in zip(prominences, widths)]]
                 abnormal_freq = len(abnormal) / (scan.num_frames / scan.fps)
 
@@ -310,7 +310,7 @@ class CorrectionChannel(dj.Manual):
     def fill(self, key, channel=1):
         for field_key in (ScanInfo.Field() & key).fetch(dj.key):
             self.insert1({**field_key, 'channel': channel}, ignore_extra_fields=True,
-                         skip_duplicates=True)
+                          skip_duplicates=True)
 
 
 @schema
@@ -340,7 +340,7 @@ class RasterCorrection(dj.Computed):
         field_id = key['field'] - 1
 
         # Load some frames from the middle of the scan
-        middle_frame = int(np.floor(scan.num_frames / 2))
+        middle_frame =  int(np.floor(scan.num_frames / 2))
         frames = slice(max(middle_frame - 1000, 0), middle_frame + 1000)
         mini_scan = scan[field_id, :, :, channel, frames]
 
@@ -357,7 +357,7 @@ class RasterCorrection(dj.Computed):
         # Compute raster correction parameters
         if scan.is_bidirectional:
             tuple_['raster_phase'] = galvo_corrections.compute_raster_phase(template,
-                                                                            scan.temporal_fill_fraction)
+                                                         scan.temporal_fill_fraction)
         else:
             tuple_['raster_phase'] = 0
 
@@ -372,7 +372,7 @@ class RasterCorrection(dj.Computed):
             correct_raster = lambda scan: scan.astype(np.float32, copy=False)
         else:
             correct_raster = lambda scan: galvo_corrections.correct_raster(scan,
-                                                                           raster_phase, fill_fraction)
+                                                             raster_phase, fill_fraction)
         return correct_raster
 
 
@@ -400,7 +400,6 @@ class MotionCorrection(dj.Computed):
         from scipy import ndimage
 
         # Get some params
-<<<<<<< HEAD
         px_height, px_width, nframes, nfields, fps = (reso.ScanInfo() & key).fetch1('px_height', 'px_width',
                                                                                     'nframes', 'nfields', 'fps')
         channel = (CorrectionChannel() & key).fetch1('channel') - 1
@@ -408,17 +407,17 @@ class MotionCorrection(dj.Computed):
 
         # Motion correction fails if FPS is too high
         if fps < 100:
-
-            # Read the scan
-            scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
-            scan = scanreader.read_scan(scan_filename)
+			
+			# Read the scan
+			scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
+			scan = scanreader.read_scan(scan_filename)
 
             # Load some frames from middle of scan to compute template
             skip_rows = int(round(px_height * 0.10))  # we discard some rows/cols to avoid edge artifacts
             skip_cols = int(round(px_width * 0.10))
             middle_frame = int(np.floor(scan.num_frames / 2))
             mini_scan = scan[field_id, skip_rows: -skip_rows, skip_cols: -skip_cols, channel,
-                        max(middle_frame - 1000, 0): middle_frame + 1000]
+                             max(middle_frame - 1000, 0): middle_frame + 1000]
             mini_scan = mini_scan.astype(np.float32, copy=False)
 
             # Correct mini scan
@@ -468,58 +467,7 @@ class MotionCorrection(dj.Computed):
             x_shifts = np.zeros(nframes, dtype=np.float32)
             outliers = np.zeros(nframes, dtype=np.bool)
             template = np.zeros((px_height, px_height), dtype=np.float32)
-=======
-        px_height, px_width = (ScanInfo() & key).fetch1('px_height', 'px_width')
-        channel = (CorrectionChannel() & key).fetch1('channel') - 1
-        field_id = key['field'] - 1
 
-        # Load some frames from middle of scan to compute template
-        skip_rows = int(round(px_height * 0.10))  # we discard some rows/cols to avoid edge artifacts
-        skip_cols = int(round(px_width * 0.10))
-        middle_frame = int(np.floor(scan.num_frames / 2))
-        mini_scan = scan[field_id, skip_rows: -skip_rows, skip_cols: -skip_cols, channel,
-                         max(middle_frame - 1000, 0): middle_frame + 1000]
-        mini_scan = mini_scan.astype(np.float32, copy=False)
-
-        # Correct mini scan
-        correct_raster = (RasterCorrection() & key).get_correct_raster()
-        mini_scan = correct_raster(mini_scan)
-
-        # Create template
-        mini_scan = 2 * np.sqrt(mini_scan - mini_scan.min() + 3 / 8)  # *
-        template = np.mean(mini_scan, axis=-1)
-        template = ndimage.gaussian_filter(template, 0.7)  # **
-        # * Anscombe tranform to normalize noise, increase contrast and decrease outliers' leverage
-        # ** Small amount of gaussian smoothing to get rid of high frequency noise
-
-        # Map: compute motion shifts in parallel
-        f = performance.parallel_motion_shifts  # function to map
-        raster_phase = (RasterCorrection() & key).fetch1('raster_phase')
-        fill_fraction = (ScanInfo() & key).fetch1('fill_fraction')
-        kwargs = {'raster_phase': raster_phase, 'fill_fraction': fill_fraction,
-                  'template': template}
-        results = performance.map_frames(f, scan, field_id=field_id,
-                                         y=slice(skip_rows, -skip_rows),
-                                         x=slice(skip_cols, -skip_cols), channel=channel,
-                                         kwargs=kwargs)
-
-        # Reduce
-        y_shifts = np.zeros(scan.num_frames)
-        x_shifts = np.zeros(scan.num_frames)
-        for frames, chunk_y_shifts, chunk_x_shifts in results:
-            y_shifts[frames] = chunk_y_shifts
-            x_shifts[frames] = chunk_x_shifts
-
-        # Detect outliers
-        max_y_shift, max_x_shift = 20 / (ScanInfo() & key).microns_per_pixel
-        y_shifts, x_shifts, outliers = galvo_corrections.fix_outliers(y_shifts, x_shifts,
-                                                                      max_y_shift,
-                                                                      max_x_shift)
-
-        # Center shifts around zero
-        y_shifts -= np.median(y_shifts)
-        x_shifts -= np.median(x_shifts)
->>>>>>> parent of 6898324... Added motion correct passthrough for high FPS
 
         # Create results tuple
         tuple_ = key.copy()
@@ -546,7 +494,7 @@ class MotionCorrection(dj.Computed):
         seconds = np.arange(num_frames) / fps
 
         fig, axes = plt.subplots(num_fields, 1, figsize=(15, 4 * num_fields), sharey=True)
-        axes = [axes] if num_fields == 1 else axes  # make list if single axis object
+        axes = [axes] if num_fields == 1 else axes # make list if single axis object
         for i in range(num_fields):
             y_shifts, x_shifts = (self & key & {'field': i + 1}).fetch1('y_shifts',
                                                                         'x_shifts')
@@ -634,7 +582,7 @@ class MotionCorrection(dj.Computed):
         x_shifts, y_shifts = self.fetch1('x_shifts', 'y_shifts')
 
         return lambda scan, indices=slice(None): galvo_corrections.correct_motion(scan,
-                                                                                  x_shifts[indices], y_shifts[indices])
+                                                 x_shifts[indices], y_shifts[indices])
 
 
 @schema
@@ -680,7 +628,7 @@ class SummaryImages(dj.Computed):
 
         for channel in range(scan.num_channels):
             # Map: Compute some statistics in different chunks of the scan
-            f = performance.parallel_summary_images  # function to map
+            f = performance.parallel_summary_images # function to map
             raster_phase = (RasterCorrection() & key).fetch1('raster_phase')
             fill_fraction = (ScanInfo() & key).fetch1('fill_fraction')
             y_shifts, x_shifts = (MotionCorrection() & key).fetch1('y_shifts', 'x_shifts')
@@ -694,9 +642,9 @@ class SummaryImages(dj.Computed):
             l6norm_image = np.sum([r[1] for r in results], axis=0) ** (1 / 6)
 
             # Reduce: Compute correlation image
-            sum_x = np.sum([r[2] for r in results], axis=0)  # h x w
-            sum_sqx = np.sum([r[3] for r in results], axis=0)  # h x w
-            sum_xy = np.sum([r[4] for r in results], axis=0)  # h x w x 8
+            sum_x = np.sum([r[2] for r in results], axis=0) # h x w
+            sum_sqx = np.sum([r[3] for r in results], axis=0) # h x w
+            sum_xy = np.sum([r[4] for r in results], axis=0) # h x w x 8
             denom_factor = np.sqrt(scan.num_frames * sum_sqx - sum_x ** 2)
             corrs = np.zeros(sum_xy.shape)
             for k in [0, 1, 2, 3]:
@@ -717,9 +665,9 @@ class SummaryImages(dj.Computed):
                 corrs = np.rot90(rotated_corrs, k=4 - k)
 
             correlation_image = np.sum(corrs, axis=-1)
-            norm_factor = 5 * np.ones(correlation_image.shape)  # edges
-            norm_factor[[0, -1, 0, -1], [0, -1, -1, 0]] = 3  # corners
-            norm_factor[1:-1, 1:-1] = 8  # center
+            norm_factor = 5 * np.ones(correlation_image.shape) # edges
+            norm_factor[[0, -1, 0, -1], [0, -1, -1, 0]] = 3 # corners
+            norm_factor[1:-1, 1:-1] = 8 # center
             correlation_image /= norm_factor
 
             # Insert
@@ -802,12 +750,11 @@ class SegmentationTask(dj.Manual):
         elif compartment == 'axon':
             num_components = field_volume * 0.0005  # five times as many neurons
         elif compartment == 'bouton':
-            num_components = field_volume * 0.001  # 10 times as many neurons
+            num_components = field_volume * 0.001   # 10 times as many neurons
         else:
             PipelineException("Compartment type '{}' not recognized".format(compartment))
 
         return int(round(num_components))
-
 
 @schema
 class DoNotSegment(dj.Manual):
@@ -909,7 +856,7 @@ class Segmentation(dj.Computed):
             mmap_scan = np.memmap(filename, mode='w+', shape=mmap_shape, dtype=np.float32)
 
             # Map: Correct scan and save in memmap scan
-            f = performance.parallel_save_memmap  # function to map
+            f = performance.parallel_save_memmap # function to map
             raster_phase = (RasterCorrection() & key).fetch1('raster_phase')
             fill_fraction = (ScanInfo() & key).fetch1('fill_fraction')
             y_shifts, x_shifts = (MotionCorrection() & key).fetch1('y_shifts', 'x_shifts')
@@ -929,38 +876,38 @@ class Segmentation(dj.Computed):
 
             # Set params specific to method and segmentation target
             target = (SegmentationTask() & key).fetch1('compartment')
-            if key['segmentation_method'] == 2:  # nmf
+            if key['segmentation_method'] == 2: # nmf
                 if target == 'axon':
                     kwargs['init_on_patches'] = True
-                    kwargs['proportion_patch_overlap'] = 0.2  # 20% overlap
+                    kwargs['proportion_patch_overlap'] = 0.2 # 20% overlap
                     kwargs['num_components_per_patch'] = 15
                     kwargs['init_method'] = 'sparse_nmf'
                     kwargs['snmf_alpha'] = 500  # 10^2 to 10^3.5 is a good range
-                    kwargs['patch_size'] = tuple(50 / (ScanInfo() & key).microns_per_pixel)  # 50 x 50 microns
+                    kwargs['patch_size'] = tuple(50 / (ScanInfo() & key).microns_per_pixel) # 50 x 50 microns
                 elif target == 'bouton':
                     kwargs['init_on_patches'] = False
                     kwargs['num_components'] = (SegmentationTask() & key).estimate_num_components()
                     kwargs['init_method'] = 'greedy_roi'
                     kwargs['soma_diameter'] = tuple(2 / (ScanInfo() & key).microns_per_pixel)
-                else:  # soma
+                else: # soma
                     kwargs['init_on_patches'] = False
                     kwargs['num_components'] = (SegmentationTask() & key).estimate_num_components()
                     kwargs['init_method'] = 'greedy_roi'
                     kwargs['soma_diameter'] = tuple(14 / (ScanInfo() & key).microns_per_pixel)
-            else:  # nmf-new
+            else: #nmf-new
                 kwargs['init_on_patches'] = True
-                kwargs['proportion_patch_overlap'] = 0.2  # 20% overlap
+                kwargs['proportion_patch_overlap'] = 0.2 # 20% overlap
                 if target == 'axon':
                     kwargs['num_components_per_patch'] = 15
                     kwargs['init_method'] = 'sparse_nmf'
                     kwargs['snmf_alpha'] = 500  # 10^2 to 10^3.5 is a good range
-                    kwargs['patch_size'] = tuple(50 / (ScanInfo() & key).microns_per_pixel)  # 50 x 50 microns
+                    kwargs['patch_size'] = tuple(50 / (ScanInfo() & key).microns_per_pixel) # 50 x 50 microns
                 elif target == 'bouton':
                     kwargs['num_components_per_patch'] = 5
                     kwargs['init_method'] = 'greedy_roi'
-                    kwargs['patch_size'] = tuple(20 / (ScanInfo() & key).microns_per_pixel)  # 20 x 20 microns
+                    kwargs['patch_size'] = tuple(20 / (ScanInfo() & key).microns_per_pixel) # 20 x 20 microns
                     kwargs['soma_diameter'] = tuple(2 / (ScanInfo() & key).microns_per_pixel)
-                else:  # soma
+                else: # soma
                     kwargs['num_components_per_patch'] = 6
                     kwargs['init_method'] = 'greedy_roi'
                     kwargs['patch_size'] = tuple(50 / (ScanInfo() & key).microns_per_pixel)
@@ -987,7 +934,7 @@ class Segmentation(dj.Computed):
             ## Insert in CNMF, Segmentation and Fluorescence
             self.insert1({**key, 'params': json.dumps(kwargs)})
             Fluorescence().insert1(key, allow_direct_insert=True)  # we also insert traces
-
+            
             ## Insert background components
             Segmentation.CNMFBackground().insert1({**key, 'masks': background_masks,
                                                    'activity': background_traces})
@@ -1202,9 +1149,8 @@ class Segmentation(dj.Computed):
             mask = masks[:, :, i]
 
             ## Compute cumulative mass (similar to caiman)
-            indices = np.unravel_index(np.flip(np.argsort(mask, axis=None), axis=0),
-                                       mask.shape)  # max to min value in mask
-            cumsum_mask[indices] = np.cumsum(mask[indices] ** 2) / np.sum(mask ** 2)
+            indices = np.unravel_index(np.flip(np.argsort(mask, axis=None), axis=0), mask.shape) # max to min value in mask
+            cumsum_mask[indices] = np.cumsum(mask[indices]**2) / np.sum(mask**2)
 
             ## Plot contour at desired threshold (with random color)
             random_color = (np.random.rand(), np.random.rand(), np.random.rand())
@@ -1243,7 +1189,7 @@ class Fluorescence(dj.Computed):
 
         # Map: Extract traces
         print('Creating fluorescence traces...')
-        f = performance.parallel_fluorescence  # function to map
+        f = performance.parallel_fluorescence # function to map
         raster_phase = (RasterCorrection() & key).fetch1('raster_phase')
         fill_fraction = (ScanInfo() & key).fetch1('fill_fraction')
         y_shifts, x_shifts = (MotionCorrection() & key).fetch1('y_shifts', 'x_shifts')
@@ -1256,7 +1202,7 @@ class Fluorescence(dj.Computed):
         # Reduce: Concatenate
         traces = np.zeros((len(mask_ids), scan.num_frames), dtype=np.float32)
         for frames, chunk_traces in results:
-            traces[:, frames] = chunk_traces
+                traces[:, frames] = chunk_traces
 
         # Insert
         self.insert1(key)
@@ -1272,6 +1218,7 @@ class Fluorescence(dj.Computed):
         img_filename = '/tmp/' + key_hash(key) + '.png'
         fig.savefig(img_filename, bbox_inches='tight')
         plt.close(fig)
+
 
         msg = 'calcium traces for {animal_id}-{session}-{scan_idx} field {field}'.format(**key)
         slack_user = notify.SlackUser() & (experiment.Session() & key)
@@ -1356,8 +1303,7 @@ class MaskClassification(dj.Computed):
 
         msg = ('mask classification for {animal_id}-{session}-{scan_idx} field {field}: '
                '{somas} somas and {arts} artifacts').format(**key,
-                                                            somas=mask_types.count('soma'),
-                                                            arts=mask_types.count('artifact'))
+                   somas=mask_types.count('soma'), arts=mask_types.count('artifact'))
         slack_user = notify.SlackUser() & (experiment.Session() & key)
         slack_user.notify(file=img_filename, file_title=msg, channel='#pipeline_quality')
 
@@ -1376,6 +1322,7 @@ class MaskClassification(dj.Computed):
         mask_types = (MaskClassification.Type() & self).fetch('type')
         colormap = {'soma': 'b', 'axon': 'k', 'dendrite': 'c', 'neuropil': 'y',
                     'artifact': 'r', 'unknown': 'w'}
+
 
         # Get correlation image if defined, black background otherwise.
         image_rel = SummaryImages.Correlation() & self
@@ -1397,9 +1344,8 @@ class MaskClassification(dj.Computed):
             color = colormap[mask_types[i]]
 
             ## Compute cumulative mass (similar to caiman)
-            indices = np.unravel_index(np.flip(np.argsort(mask, axis=None), axis=0),
-                                       mask.shape)  # max to min value in mask
-            cumsum_mask[indices] = np.cumsum(mask[indices] ** 2) / np.sum(mask ** 2)
+            indices = np.unravel_index(np.flip(np.argsort(mask, axis=None), axis=0), mask.shape) # max to min value in mask
+            cumsum_mask[indices] = np.cumsum(mask[indices]**2) / np.sum(mask**2)
 
             ## Plot contour at desired threshold
             plt.contour(cumsum_mask, [threshold], linewidths=0.8, colors=[color])
@@ -1704,7 +1650,7 @@ class ScanDone(dj.Computed):
 
     @property
     def target(self):
-        return ScanDone.Partial()  # trigger make_tuples for fields in Activity that aren't in ScanDone.Partial
+        return ScanDone.Partial() # trigger make_tuples for fields in Activity that aren't in ScanDone.Partial
 
     def _job_key(self, key):
         # Force reservation key to be per scan so diff fields are not run in parallel
@@ -1732,19 +1678,17 @@ class ScanDone(dj.Computed):
 
 
 from . import stack
-
-
 @schema
 class StackCoordinates(dj.Computed):
     definition = """ # centroids of each unit in motor/stack coordinate system
-
+    
     -> ScanSet          # animal_id, session, scan_idx, channel, field, segmentation_method, pipe_version
     -> stack.Registration.proj(session='scan_session')  # animal_id, stack_session, stack_idx, volume_id, session, scan_idx, field, stack_channel, scan_channel, registration_method
     """
 
     class UnitInfo(dj.Part):
         definition = """ # ScanSet.UnitInfo centroids mapped to stack coordinates
-
+        
         -> master                       # this will add field and channels back
         -> ScanSet.Unit
         ---
@@ -1785,7 +1729,7 @@ class Func2StructMatching(dj.Computed):
 
     class AllMatches(dj.Part):
         definition = """ # store all possible matches (one functional cell could match with more than one structural mask and viceversa)
-
+        
         key_hash        : varchar(32)       # master key
         unit_id         : int               # functional unit id
         sunit_id        : int               # structural unit id
@@ -1798,7 +1742,7 @@ class Func2StructMatching(dj.Computed):
 
     class Match(dj.Part):
         definition = """ # match of a functional mask to a structural mask (1:1 relation)
-
+        
         -> master
         -> ScanSet.Unit
         ---
@@ -1825,7 +1769,7 @@ class Func2StructMatching(dj.Computed):
             ## Compute cumulative mass (similar to caiman)
             indices = np.unravel_index(np.flip(np.argsort(mask, axis=None), axis=0),
                                        mask.shape)  # max to min value in mask
-            cumsum_mask = np.cumsum(mask[indices] ** 2) / np.sum(mask ** 2)  # + 1e-9)
+            cumsum_mask = np.cumsum(mask[indices] ** 2) / np.sum(mask ** 2)# + 1e-9)
             binary_masks[i][indices] = cumsum_mask < 0.9
 
         # Get structural segmentation and registration grid
