@@ -407,10 +407,10 @@ class MotionCorrection(dj.Computed):
 
         # Motion correction fails if FPS is too high
         if fps < 100:
-			
-			# Read the scan
-			scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
-			scan = scanreader.read_scan(scan_filename)
+
+            # Read the scan
+            scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
+            scan = scanreader.read_scan(scan_filename)
 
             # Load some frames from middle of scan to compute template
             skip_rows = int(round(px_height * 0.10))  # we discard some rows/cols to avoid edge artifacts
