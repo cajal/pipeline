@@ -1102,7 +1102,7 @@ def obtain_cropping_coords(short_h5_path, DLCscorer, config):
                     coords_dict[coord+'min'].append(0)
                     coords_dict[coord+'max'].append(config['original_height'])
 
-                break
+                continue
 
             # only retain values within 1 std deviation from mean
             eyelid_coord_68 = eyelid_coord_pcutoff[(eyelid_coord_pcutoff < np.mean(eyelid_coord_pcutoff) + np.std(eyelid_coord_pcutoff)) *

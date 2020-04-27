@@ -12,7 +12,6 @@ spec:
         spec:
           restartPolicy: Never
           hostNetwork: true # This option will allow the pod to use the host network for internet access
-          priorityClassName: high-priority  
           volumes:
           - name: mnt
             hostPath:
@@ -68,9 +67,11 @@ spec:
                   name: github-credentials
                   key: GITHUB_PASSWORD
             command: ["/bin/bash"]
-            args: ["-c", "git clone https://$(GITHUB_USERNAME):$(GITHUB_PASSWORD)@github.com/cajal/stimulus-pipeline.git \
-            && pip3 install stimulus-pipeline/python/ \
-            && git clone https://$(GITHUB_USERNAME):$(GITHUB_PASSWORD)@github.com/cajal/stimuli.git \
-            && pip3 install stimuli/python/ \
-            && python3 /data/pipeline/python/scripts/populate-minion.py"]
-
+            args: ["-c", "rm -r pipeline &&\
+            git clone https://$(GITHUB_USERNAME):$(GITHUB_PASSWORD)@github.com/cajal/pipeline.git &&\
+            pip3 install pipeline/python/ &&\
+            git clone https://$(GITHUB_USERNAME):$(GITHUB_PASSWORD)@github.com/cajal/stimulus-pipeline.git &&\
+            pip3 install stimulus-pipeline/python/ &&\
+            git clone https://$(GITHUB_USERNAME):$(GITHUB_PASSWORD)@github.com/cajal/stimuli.git &&\
+            pip3 install stimuli/python/ &&\
+            python3 /data/pipeline/python/scripts/populate-minion.py"]
