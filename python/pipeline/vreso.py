@@ -1,6 +1,8 @@
+import os
 import scanreader
 import numpy as np
 import datajoint as dj
+from commons import lab
 from pipeline.exceptions import PipelineException
 from pipeline import reso, experiment, mice, notify, shared
 from pipeline.utils import galvo_corrections, signal, quality, mask_classification, performance, h5
@@ -17,10 +19,12 @@ CURRENT_VERSION = 1
 class Amplifier(dj.Lookup):
     definition = """ # Electrophysiology rig setup
     amplifier                     : varchar(32)         # name and model of patch rig
+    ---
+    description                   : varchar(256)        # description of patch rig
     """
     contents = [
-        ['Axoclamp 2B'],
-        ['NPI ELC-03XS']
+        ['Axoclamp 2B', ''],
+        ['NPI ELC-03XS', '']
     ]
 
 
@@ -79,14 +83,15 @@ class RecordingInfo(dj.Imported):
     current_lowpass=null          : float               # (Hz) lowpass filter applied to current
     """
 
-    @property
     def make(self, key):
         """ Read ephys data and insert into table """
         import h5py
 
         # Read the scan
         print('Reading file...')
-        filename = key['filename'][:-4] + '%d.h5'
+        vreso_path, filename_base = (PatchSession * (Recording() & key)).fetch1('recording_path', 'file_name')
+        local_path = lab.Paths().get_local_path(vreso_path)
+        filename = os.path.join(local_path, filename_base + '_%d.h5')
         with h5py.File(filename, 'r', driver='family', memb_size=0) as f:
 
             # Load timing info
@@ -124,11 +129,14 @@ class RecordingInfo(dj.Imported):
                 num_gaps = int(len(nan_limits) / 2)
                 nan_length = sum(nan_limits[1::2] - nan_limits[::2]) * frame_period  # secs
 
+
+            ####### WARNING: FRAME INTERVALS NOT ERROR CHECKED - TEMP CODE #######
             # Check that frame times occur at the same period
             frame_intervals = np.diff(frame_times)
             frame_period = np.median(frame_intervals)
-            if np.any(abs(frame_intervals - frame_period) > 0.15 * frame_period):
-                raise PipelineException('Frame time period is irregular')
+            #if np.any(abs(frame_intervals - frame_period) > 0.15 * frame_period):
+            #    raise PipelineException('Frame time period is irregular')
+
 
             # Drop last frame time if scan crashed or was stopped before completion
             valid_times = ~np.isnan(patch_times[rising_edges[0]: rising_edges[-1]])  # restricted to scan period
@@ -141,16 +149,14 @@ class RecordingInfo(dj.Imported):
                 frame_times = frame_times[:-1]
 
             ####### WARNING: NO CORRECTION APPLIED - TEMP CODE #######
-            voltage = f['waveform'][1, :]
-            current = f['waveform'][0, :]
-            command = f['waveform'][5, :]
+            voltage = np.array(f['waveform'][1, :], dtype='float32')
+            current = np.array(f['waveform'][0, :], dtype='float32')
+            command = np.array(f['waveform'][5, :], dtype='float32')
 
             ####### WARNING: DUMMY VARIABLES - TEMP CODE #######
             vgain = 0
             igain = 0
             command_gain = 0
-
-            h5py.File.close(f)
 
             self.insert1({**key, 'voltage': voltage, 'current': current, 'command': command, 'patch_times': patch_times,
                           'frame_times': frame_times, 'vgain': vgain, 'igain': igain, 'command_gain': command_gain})
@@ -173,3 +179,13 @@ class ManualPatchSpikes(dj.Manual):
         spike_ts                  : external            # (seconds) array of times spikes occurred on timestamp/master clock
         method_notes = ''         : varchar(256)
         """
+
+
+@schema
+class ResoMatch(dj.Manual):
+    definition = """ # Match between Patch Recording and Scan Session
+    -> Recording
+    ---
+    -> reso.ScanInfo
+    """
+
