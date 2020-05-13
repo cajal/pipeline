@@ -183,9 +183,8 @@ class ManualPatchSpikes(dj.Manual):
 
 @schema
 class ResoMatch(dj.Manual):
-    definition = """ # Match between Patch Recording and Scan Session
+    definition = """ # Match between Patch Recording and Segmented Cell
     -> Recording
     ---
-    -> reso.ScanInfo
+    -> reso.Segmentation.Mask
     """
-
