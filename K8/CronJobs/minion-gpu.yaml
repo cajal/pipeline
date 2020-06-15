@@ -3,7 +3,7 @@ kind: CronJob # This tells kubernetes what kind of class it is working with
 metadata:
   name: minion-gpu
 spec:
-  schedule: "*/30 * * * *" # every hour
+  schedule: "*/5 * * * *" # every hour
   concurrencyPolicy: Allow
   jobTemplate:
     spec:

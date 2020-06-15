@@ -50,18 +50,3 @@ spec:
     command: ["/bin/bash"] # Entry point for the container
     args: ["-c", "pip3 install jupyter \
     && jupyter notebook --ip='*' --port=8888 --allow-root --no-browser --NotebookApp.token=${GITHUB_PASSWORD}"] # sh commands to clone and run python script
-
----
-kind: Service
-apiVersion: v1
-metadata:
-  name: stimuli-pipeline-jupyter-service
-spec:
-  type: NodePort
-  selector:
-    app: stimuli-pipeline-jupyter
-  ports:
-  - protocol: TCP
-    nodePort: 30000 # Port might be taken so switch it to something else
-    port: 8888
-    targetPort: 8888

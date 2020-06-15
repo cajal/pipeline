@@ -7,7 +7,7 @@ spec:
   concurrencyPolicy: Allow # starts 5 new pods every 30 minutes
   jobTemplate:
     spec:
-      parallelism: 5  # how many process in parallel I want
+      parallelism: 1  # how many process in parallel I want
       template:
         spec:
           restartPolicy: Never
