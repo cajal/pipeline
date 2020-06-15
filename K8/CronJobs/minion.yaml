@@ -3,7 +3,7 @@ kind: CronJob # This tells kubernetes what kind of class it is working with
 metadata:
   name: minion
 spec:
-  schedule: "*/30 * * * *" # every 30 minutes
+  schedule: "*/5 * * * *" # every 30 minutes
   concurrencyPolicy: Allow # starts 5 new pods every 30 minutes
   jobTemplate:
     spec:
