@@ -127,8 +127,8 @@ classdef SegmentationManual < dj.Computed
         % mask in the database is a vector containing the pixel locations in a 2-D image.
         % Pixel locations increment column wise in the image, i..e pixel 1
         % is row 1, col 1 and pixel 2 is row 2, col 1
-        function thresholdMasks(self,key)
-              self.clearOldThresholdMasks(self,key) ;
+        function thresholdMasks(self,key,new_segmentation_method)
+              self.clearOldThresholdMasks(self,key,new_segmentation_method) ;
               [masks ,tkeys]= fetchn(reso.SegmentationMask & key,'pixels'); % get all masks and their keys
               images = fetchn(reso.SummaryImagesAverage & key, 'average_image', 'ORDER BY channel'); % get an image that is averaged across time
               nmask = {} ;
@@ -146,7 +146,7 @@ classdef SegmentationManual < dj.Computed
               % Insert Masks
               for mask_id = 1:length(tkeys)
                     nkey = tkeys(mask_id) ; 
-                    nkey.segmentation_method = 8; % replace method by new method
+                    nkey.segmentation_method = new_segmentation_method; % replace method by new method
                     nkey.pixels = nmask{mask_id}; % replace mask by new mask
                     nkey.weights = ones(size(nkey.pixels)) ;
                     k = reso.SegmentationTask & nkey ; % make sure parent tables have the new key
@@ -172,15 +172,17 @@ classdef SegmentationManual < dj.Computed
         end 
         
         
-        function clearOldThresholdMasks(self,key)
+        function clearOldThresholdMasks(self,key,new_segmentation_method)
+              key.segmentation_method = new_segmentation_method ; % replace the source method because we are searching for the new method tuples
               [sm ,tkeys]= fetchn(reso.SegmentationMask & key,'segmentation_method'); % get all masks and their keys
               for ii=1:length(sm)
-                  if sm(ii) == 8
+                  if sm(ii) == new_segmentation_method
                       try
                           obj=vreso.getSchema ;
                           [msm ,mskeys] = fetchn(obj.v.ResoMatch, 'segmentation_method') ;
-                          for jj=1:length(mskeys)
-                              if (msm(jj) == 8)
+                          for jj=1:length(mskeys)                          
+                              [session,scan_idx] = fetchn(obj.v.ResoMatch & mskeys(jj), 'session', 'scan_idx') ;
+                              if session == key.session && scan_idx == key.scan_idx && msm(jj) == new_segmentation_method
                                   delQuick(obj.v.ResoMatch & mskeys(jj))
                               end
                           end
@@ -191,7 +193,19 @@ classdef SegmentationManual < dj.Computed
                       catch
                       end
                       try
+                        delQuick(reso.Fluorescence & tkeys(ii)) ;
+                      catch
+                      end
+                      try
                         delQuick(reso.SegmentationMask & tkeys(ii)) ;
+                      catch
+                      end
+                      try
+                        delQuick(reso.Segmentation & tkeys(ii)) ;
+                      catch
+                      end
+                      try
+                        delQuick(reso.SegmentationTask & tkeys(ii)) ;
                       catch
                       end
                   end
