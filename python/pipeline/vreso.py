@@ -185,6 +185,7 @@ class ManualPatchSpikes(dj.Manual):
 class ResoMatch(dj.Manual):
     definition = """ # Match between Patch Recording and Scan Session
     -> Recording
+    segmentation_method             : smallint          # segmentation method
     ---
     -> reso.ScanInfo
     """
