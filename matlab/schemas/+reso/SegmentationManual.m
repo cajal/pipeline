@@ -138,7 +138,7 @@ classdef SegmentationManual < dj.Computed
                   sel_im = im(nmask{imask}) ; % parts of image selected from image by this mask
                   sel_im = sel_im - mean(sel_im) ;
                   sd = std(sel_im) ;
-                  sd_th = 1.0 ; % arbitrarily chosen as threshold above which mask pixels should be accepted
+                  sd_th = 0.0 ; % arbitrarily chosen as threshold above which mask pixels should be accepted
                   idx = find(sel_im < sd_th*sd) ;
                   nmask{imask}(idx) = [] ; % delete the entries from mask that is below th
               end
@@ -173,16 +173,15 @@ classdef SegmentationManual < dj.Computed
         
         
         function clearOldThresholdMasks(self,key,new_segmentation_method)
+              obj=vreso.getSchema ;
               key.segmentation_method = new_segmentation_method ; % replace the source method because we are searching for the new method tuples
               [sm ,tkeys]= fetchn(reso.SegmentationMask & key,'segmentation_method'); % get all masks and their keys
               for ii=1:length(sm)
                   if sm(ii) == new_segmentation_method
                       try
-                          obj=vreso.getSchema ;
-                          [msm ,mskeys] = fetchn(obj.v.ResoMatch, 'segmentation_method') ;
+                          [msm,session,scan_idx,mskeys] = fetchn(obj.v.ResoMatch, 'segmentation_method', 'session', 'scan_idx') ;
                           for jj=1:length(mskeys)                          
-                              [session,scan_idx] = fetchn(obj.v.ResoMatch & mskeys(jj), 'session', 'scan_idx') ;
-                              if session == key.session && scan_idx == key.scan_idx && msm(jj) == new_segmentation_method
+                              if session(jj) == key.session && scan_idx(jj) == key.scan_idx && msm(jj) == new_segmentation_method
                                   delQuick(obj.v.ResoMatch & mskeys(jj))
                               end
                           end
