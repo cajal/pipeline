@@ -127,19 +127,30 @@ classdef SegmentationManual < dj.Computed
         % mask in the database is a vector containing the pixel locations in a 2-D image.
         % Pixel locations increment column wise in the image, i..e pixel 1
         % is row 1, col 1 and pixel 2 is row 2, col 1
-        function thresholdMasks(self,key,new_segmentation_method)
-              self.clearOldThresholdMasks(self,key,new_segmentation_method) ;
+        % key refers to the source segmentation method from which new masks
+        % will be derived and inserted into SegmentationMask table
+        % skey refers to the segmentation table and a tuple for
+        % new_segmentation_mask
+        function thresholdMasks(self,key,skey,new_segmentation_method)
+              self.clearOldThresholdMasks(self,key,skey,new_segmentation_method) ;
               [masks ,tkeys]= fetchn(reso.SegmentationMask & key,'pixels'); % get all masks and their keys
               images = fetchn(reso.SummaryImagesAverage & key, 'average_image', 'ORDER BY channel'); % get an image that is averaged across time
+              [th_type,th_value] = fetchn(reso.SegmentationMaskThreshold & skey, 'threshold_type', 'threshold_value') ;
+              
               nmask = {} ;
               for imask = 1:length(masks)
                   nmask{imask} = masks{imask} ;
                   im = images{tkeys(imask).channel} ; % use channel from database
                   sel_im = im(nmask{imask}) ; % parts of image selected from image by this mask
-                  sel_im = sel_im - mean(sel_im) ;
-                  sd = std(sel_im) ;
-                  sd_th = 1.0 ; % arbitrarily chosen as threshold above which mask pixels should be accepted
-                  idx = find(sel_im < sd_th*sd) ;
+                  mn = mean(sel_im) ;
+                  sel_im = sel_im - mn ;
+                  if (th_type==1)
+                    sd = std(sel_im) ;
+                    th = th_value*sd ; % threshold above which mask pixels should be accepted
+                  else
+                    th = th_value - mn ;
+                  end                    
+                  idx = find(sel_im < th) ;
                   nmask{imask}(idx) = [] ; % delete the entries from mask that is below th
               end
               
@@ -172,42 +183,24 @@ classdef SegmentationManual < dj.Computed
         end 
         
         
-        function clearOldThresholdMasks(self,key,new_segmentation_method)
+        function clearOldThresholdMasks(self,key,skey,new_segmentation_method)
+              obj=vreso.getSchema ;
               key.segmentation_method = new_segmentation_method ; % replace the source method because we are searching for the new method tuples
               [sm ,tkeys]= fetchn(reso.SegmentationMask & key,'segmentation_method'); % get all masks and their keys
               for ii=1:length(sm)
                   if sm(ii) == new_segmentation_method
                       try
-                          obj=vreso.getSchema ;
-                          [msm ,mskeys] = fetchn(obj.v.ResoMatch, 'segmentation_method') ;
+                          [msm,session,scan_idx,mskeys] = fetchn(obj.v.ResoMatch, 'segmentation_method', 'session', 'scan_idx') ; % ResoMatch does not have scan as primary key
                           for jj=1:length(mskeys)                          
-                              [session,scan_idx] = fetchn(obj.v.ResoMatch & mskeys(jj), 'session', 'scan_idx') ;
-                              if session == key.session && scan_idx == key.scan_idx && msm(jj) == new_segmentation_method
+                              if session(jj) == key.session && scan_idx(jj) == key.scan_idx && msm(jj) == new_segmentation_method
                                   delQuick(obj.v.ResoMatch & mskeys(jj))
                               end
                           end
                       catch
                       end
-                      try
-                        delQuick(reso.FluorescenceTrace & tkeys(ii)) ;
-                      catch
-                      end
-                      try
-                        delQuick(reso.Fluorescence & tkeys(ii)) ;
-                      catch
-                      end
-                      try
-                        delQuick(reso.SegmentationMask & tkeys(ii)) ;
-                      catch
-                      end
-                      try
-                        delQuick(reso.Segmentation & tkeys(ii)) ;
-                      catch
-                      end
-                      try
-                        delQuick(reso.SegmentationTask & tkeys(ii)) ;
-                      catch
-                      end
+                      delQuick(reso.FluorescenceTrace & tkeys(ii)) ;
+                      delQuick(reso.Fluorescence & tkeys(ii)) ;
+                      delQuick(reso.SegmentationMask & tkeys(ii)) ;
                   end
               end
         end
