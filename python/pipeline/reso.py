@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scanreader
 
-from . import experiment, notify, shared
+from . import experiment, injeciton, notify, shared
 from .utils import galvo_corrections, signal, quality, mask_classification, performance
 from .exceptions import PipelineException
 
@@ -135,6 +135,17 @@ class ScanInfo(dj.Imported):
         um_height, px_height, um_width, px_width = self.fetch1('um_height', 'px_height',
                                                                'um_width', 'px_width')
         return np.array([um_height / px_height, um_width / px_width])
+
+
+@schema
+class FieldAnnotation(dj.Manual):
+    definition = """ # Annotations for specific fields within one scan
+    -> ScanInfo.Field
+    -> shared.ExpressionConstruct
+    ---
+    -> [nullable] injection.InjectionSite
+    field_notes                   : varchar(256)
+    """
 
 
 @schema
