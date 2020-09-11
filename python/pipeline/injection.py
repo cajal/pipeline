@@ -2,7 +2,7 @@
 import numpy as np
 import datajoint as dj
 from commons import virus
-from . import meso, reso, shared, mice
+from . import mice
 from .exceptions import PipelineException
 
 

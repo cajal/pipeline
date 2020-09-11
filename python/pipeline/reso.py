@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scanreader
 
-from . import experiment, injeciton, notify, shared
+from . import experiment, injection, notify, shared
 from .utils import galvo_corrections, signal, quality, mask_classification, performance
 from .exceptions import PipelineException
 
