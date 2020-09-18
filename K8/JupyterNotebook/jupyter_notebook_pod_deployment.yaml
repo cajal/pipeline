@@ -64,4 +64,4 @@ spec:
   - protocol: TCP
     nodePort: 30000 # Port might be taken so switch it to something else
     port: 8888
-    targetPort: 8888
+    targetPort: 8888 
