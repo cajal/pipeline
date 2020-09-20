@@ -39,11 +39,11 @@ classdef UnitRetinotopy <  dj.Computed
                 
                 % fetch cell coordinates
                 if strcmp(setup,'2P4')
-                    [px,wt,keys] = fetchn(meso.SegmentationMask*meso.ScanSetUnit & key,'pixels','weights');
+                    [px,wt,keys] = fetchn(meso.SegmentationMask*meso.ScanSetUnit & field_key,'pixels','weights');
                     
                     
                 else
-                    [px,wt,keys] = fetchn(reso.SegmentationMask*reso.ScanSetUnit & key,'pixels','weights');
+                    [px,wt,keys] = fetchn(reso.SegmentationMask*reso.ScanSetUnit & field_key,'pixels','weights');
                     keys = rmfield(keys,{'field','mask_id','channel'});
                     
                 end
