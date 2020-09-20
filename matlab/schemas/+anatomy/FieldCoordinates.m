@@ -283,7 +283,7 @@ classdef FieldCoordinates < dj.Manual
             YY = round(y_offset + size(ref_mask,1)/2 - size(imS,1)/2); % convert center coordinates to 0,0 coordinates
             XX = round(x_offset + size(ref_mask,2)/2 - size(imS,2)/2); % convert center coordinates to 0,0 coordinates
             fmask = ref_mask(YY+1:size(imS,1)+YY,XX+1:size(imS,2)+XX);
-            fmask = self.filterImage(ne7.mat.normalize(fmask),tform,1)>0;
+            fmask = self.filterImage(fmask,tform,1);
             fmask = fmask(...
                 round(size(fmask,1)/2)-floor(sz(1)/2)+1:floor(size(fmask,1)/2)+floor(sz(1)/2),...
                 round(size(fmask,2)/2)-floor(sz(2)/2)+1:floor(size(fmask,2)/2)+floor(sz(2)/2));

@@ -158,7 +158,7 @@ classdef AreaMask < dj.Manual
                 for field_key = fetch(anatomy.FieldCoordinates & keyI)'
                     
                     % find corresponding mask area
-                    fmask = filterMask(anatomy.FieldCoordinates & field_key, area_masks{imask});
+                    fmask = ne7.mat.normalize(filterMask(anatomy.FieldCoordinates & field_key, area_masks{imask}))>0;
                     
                     % insert if overlap exists
                     if ~all(~fmask(:))
