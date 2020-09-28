@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import scanreader
 
-from . import experiment, notify, shared
+from . import experiment, injection, notify, shared
 from .utils import galvo_corrections, signal, quality, mask_classification, performance
 from .exceptions import PipelineException
 
@@ -133,6 +133,17 @@ class ScanInfo(dj.Imported):
         # Fill SegmentationTask if scan in autosegment
         if experiment.AutoProcessing() & key & {'autosegment': True}:
             SegmentationTask().fill(key)
+
+
+@schema
+class FieldAnnotation(dj.Manual):
+    definition = """ # Annotations for specific fields within one scan
+    -> ScanInfo.Field
+    -> shared.ExpressionConstruct
+    ---
+    -> [nullable] injection.InjectionSite
+    field_notes                   : varchar(256)
+    """
 
 
 @schema

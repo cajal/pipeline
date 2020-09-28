@@ -153,6 +153,7 @@ class AreaMaskMethod(dj.Lookup):
     contents = [
         [1, 'manual', '', 'matlab'],
     ]
+
 @schema
 class TrackingMethod(dj.Lookup):
     definition = """
@@ -181,3 +182,11 @@ class SurfaceMethod(dj.Lookup):
     contents = [
         [1, 'Paraboloid Fit', 'Fit ax^2 + by^2 + cx + dy + f to surface after finding max of sobel']
     ]
+
+@schema
+class ExpressionConstruct(dj.Lookup):
+    definition = """ # Construct expressed within certain fields
+    construct_label               : varchar(64)                        # name of construct expressed/injected within field
+    ---
+    construct_notes               : varchar(256)
+    """
