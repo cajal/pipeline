@@ -140,6 +140,7 @@ class FieldAnnotation(dj.Manual):
     definition = """ # Annotations for specific fields within one scan
     -> ScanInfo.Field
     -> shared.ExpressionConstruct
+    -> shared.Channel
     ---
     -> [nullable] injection.InjectionSite
     field_notes                   : varchar(256)
