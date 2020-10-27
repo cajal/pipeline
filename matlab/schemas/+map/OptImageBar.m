@@ -57,7 +57,7 @@ classdef OptImageBar < dj.Imported
                 case 'scanimage'
                     % get Optical data
                     disp 'loading movie...'
-                    if strcmp(setup,'2P4') % mesoscope
+                    if any(strcmp(setup,{'2P4','R2P1'})) % mesoscope
                         path = getLocalPath(fullfile(path, sprintf('%s*.tif', name)));
                         reader = ne7.scanreader.readscan(path,'int16',1);
                         pxpitch = reader.fieldHeightsInMicrons(1)/reader.fieldHeights(1);
