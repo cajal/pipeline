@@ -186,6 +186,10 @@ classdef AreaMask < dj.Manual
                 % calculate initial scale
                 pxpitch = mean(fieldWidths.\fieldWidthsInMicrons);
                 
+                % convert center coordinates to 0,0 coordinates
+                x_pos = x_pos - fieldWidths * pxpitch / 2;
+                y_pos = y_pos - fieldHeights * pxpitch / 2;
+                
                 % start indexes
                 XX = (x_pos - min(x_pos))/pxpitch;
                 YY = (y_pos - min(y_pos))/pxpitch;
@@ -218,6 +222,10 @@ classdef AreaMask < dj.Manual
                 
                 % calculate initial scale
                 pxpitch = mean(fieldWidths.\fieldWidthsInMicrons);
+                
+                % convert center coordinates to 0,0 coordinates
+                x_pos = x_pos - fieldWidths * pxpitch / 2;
+                y_pos = y_pos - fieldHeights * pxpitch / 2;
                 
                 % construct a big field of view
                 x_pos = (x_pos - min(x_pos))/pxpitch;
