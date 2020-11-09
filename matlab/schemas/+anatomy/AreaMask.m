@@ -124,7 +124,7 @@ classdef AreaMask < dj.Manual
                     % get area name
                     tuple.brain_area = brain_areas{iarea};
                     tuple.mask = field_area_maps{ifield} == iarea;
-                    insert(self,tuple)
+                    insert(self,tuple,'REPLACE')
                 end
             end
         end
