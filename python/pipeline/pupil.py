@@ -821,6 +821,16 @@ class FittedPupil(dj.Computed):
     ---
     fitting_ts=CURRENT_TIMESTAMP    : timestamp     # automatic
     """
+    
+    class EyePoints(dj.Part):
+        definition = """
+        -> master
+        ---
+        point_label       : string
+        x                 : longblob
+        y                 : longblob
+    
+        """"
 
     class Circle(dj.Part):
         definition = """
@@ -917,6 +927,13 @@ class FittedPupil(dj.Computed):
 
             pupil_fit = DLC_tools.DeeplabcutPupilFitting(
                 config=config, bodyparts='all', cropped=True)
+
+            for bodypart in pupil_fit.df_bodyparts:
+                self.EyePoints.insert({**key,
+                    'label': bodypart,
+                    'x': df[labels][bodypart]['x'],
+                    'y': df[labels][bodypart]['y']       
+                }
 
             for frame_num in tqdm(range(nframes)):
 
