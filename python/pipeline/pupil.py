@@ -830,7 +830,7 @@ class FittedPupil(dj.Computed):
         x                 : longblob
         y                 : longblob
     
-        """"
+        """
 
     class Circle(dj.Part):
         definition = """
@@ -933,7 +933,7 @@ class FittedPupil(dj.Computed):
                     'label': bodypart,
                     'x': df[labels][bodypart]['x'],
                     'y': df[labels][bodypart]['y']       
-                }
+                })
 
             for frame_num in tqdm(range(nframes)):
 
