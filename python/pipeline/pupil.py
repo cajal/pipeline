@@ -826,9 +826,9 @@ class FittedPupil(dj.Computed):
         definition = """
         -> master
         ---
-        point_label       : string
-        x                 : longblob
-        y                 : longblob
+        point_label       : string              # body part label for given points
+        x                 : longblob            # array with the x coordinates of point_label in the eye video
+        y                 : longblob            # array with the y coordinatess of point_label in the eye video
     
         """
 
