@@ -538,8 +538,7 @@ class ConfigDeeplabcut(dj.Manual):
     shuffle             : smallint unsigned     # shuffle number used for the trained dlc model. Needed for dlc.analyze_videos
     trainingsetindex    : smallint unsigned     # trainingset index used for the trained dlc. model. Needed for dlc.analyze_videos
     """
-
-
+    
 @schema
 class Tracking(dj.Computed):
     definition = """
@@ -825,8 +824,8 @@ class FittedPupil(dj.Computed):
     class EyePoints(dj.Part):
         definition = """
         -> master
+        label             : char(20)            # body part label for given points
         ---
-        point_label       : string              # body part label for given points
         x                 : longblob            # array with the x coordinates of point_label in the eye video
         y                 : longblob            # array with the y coordinatess of point_label in the eye video
     
@@ -928,11 +927,11 @@ class FittedPupil(dj.Computed):
             pupil_fit = DLC_tools.DeeplabcutPupilFitting(
                 config=config, bodyparts='all', cropped=True)
 
-            for bodypart in pupil_fit.df_bodyparts:
-                self.EyePoints.insert({**key,
+            for bodypart in pupil_fit.bodyparts:
+                self.EyePoints.insert1({**key,
                     'label': bodypart,
-                    'x': df[labels][bodypart]['x'],
-                    'y': df[labels][bodypart]['y']       
+                    'x': pupil_fit.df_bodyparts[bodypart]['x'].values,
+                    'y': pupil_fit.df_bodyparts[bodypart]['y'].values       
                 })
 
             for frame_num in tqdm(range(nframes)):
