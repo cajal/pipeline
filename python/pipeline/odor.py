@@ -8,8 +8,14 @@ from pipeline import mice
 from pipeline import meso
 from pipeline.utils import h5
 from commons import lab
+from .exceptions import PipelineException
+
+
+#dj.config['external-odor'] = {'protocol': 'file',
+#                              'location': '/mnt/dj-stor01/pipeline-externals'}
 
 schema = dj.schema('pipeline_odor', locals(), create_tables=False)
+
 
 @schema
 class Odorant(dj.Lookup):

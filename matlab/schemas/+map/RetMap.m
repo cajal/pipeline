@@ -103,30 +103,32 @@ classdef RetMap < dj.Manual
         
         function background = getBackground(self, varargin)
             
-            params.exp = 1.5;
             params.sigma = 2;
-            params.amp = 1;
-            
             params = ne7.mat.getParams(params,varargin);
             
             assert(exists(self), 'No retinotopy map exists!')
             
-            % get horizontal map
+            
+            % get vessels
             Hor = [];
             vessels = fetch1(map.OptImageBar & (map.RetMapScan & self) & 'axis="horizontal"','vessels');
             vessels = single(vessels);
-            [Hor(:,:,1),Hor(:,:,2),Hor(:,:,3)] = plot(map.OptImageBar & (map.RetMapScan & self) ...
-                & 'axis="horizontal"','exp',params.exp,'sigma',params.sigma);
-            Hor(:,:,2) = ne7.mat.normalize(abs(Hor(:,:,2).^params.amp));
-            background = cat(4,repmat(vessels/max(vessels(:)),1,1,3),hsv2rgb(Hor));
+            background = repmat(vessels/max(vessels(:)),1,1,3);
+            
+            
+            % get horizontal map
+            
+            [h, s, v] = plot(map.OptImageBar & (map.RetMapScan & self) ...
+                & 'axis="horizontal"', 'sigma', params.sigma);
+            horizontal = hsv2rgb(cat(3,h,cat(3,ones(size(s)),ones(size(v)))));
+            background = cat(4,background,horizontal);
            
             % get vertical map
             if exists(map.OptImageBar & (map.RetMapScan & self) & 'axis="vertical"')
-                Ver = [];
-                [Ver(:,:,1),Ver(:,:,2),Ver(:,:,3)] = plot(map.OptImageBar & (map.RetMapScan & self) ...
-                    & 'axis="vertical"','exp',params.exp,'sigma',params.sigma);
-                Ver(:,:,2) = ne7.mat.normalize(abs(Ver(:,:,2).^params.amp));
-                background = cat(4,background,hsv2rgb(Ver));
+                [h, s, v] = plot(map.OptImageBar & (map.RetMapScan & self) ...
+                    & 'axis="vertical"', 'sigma', params.sigma);
+                vertical = hsv2rgb(cat(3,h,cat(3,ones(size(s)),ones(size(v)))));
+                background = cat(4,background,vertical);
             end
             
             % get sign map

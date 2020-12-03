@@ -102,7 +102,7 @@ def online_median_filter(x, kernel_size=3):
 
 class DeeplabcutPlotBodyparts():
 
-    def __init__(self, config, bodyparts='all', cropped=False, filtering=None):
+    def __init__(self, config, bodyparts='all', cropped=False):
         """
         Input:
             config: dictionary
@@ -142,38 +142,10 @@ class DeeplabcutPlotBodyparts():
         self._DLCscorer = auxiliaryfunctions.GetScorerName(
             self.config, self.shuffle, self._trainFraction)
 
-        self.filtering = filtering
+        self.label_path = os.path.join(
+            self.compressed_cropped_dir_path, self._case + '_compressed_cropped' + self._DLCscorer + '.h5')
 
-        label_basename = os.path.join(self.compressed_cropped_dir_path,
-                                      self._case + '_compressed_cropped' +
-                                      self._DLCscorer)
-
-        if filtering is None or filtering['filter_name'] is None:
-            self.filtering = 'no filtering'
-            self.label_path = label_basename + '.h5'
-            self.df_label = pd.read_hdf(self.label_path)
-
-        else:
-            if filtering['filter_name'] == 'online_median':
-                label_path = label_basename + \
-                    '_online_median_kernel_{}.h5'.format(
-                        filtering['kernel_size'])
-                try:
-                    self.df_label = pd.read_hdf(label_path)
-                except:
-                    print("no pre-computed online_median filtered data! Computing now!")
-                    df_label = pd.read_hdf(label_basename + '.h5')
-                    for i in range(df_label.shape[1]):
-                        if i % 3 != 2:
-                            data = online_median_filter(
-                                x=df_label.iloc[:, i].values, 
-                                kernel_size=filtering['kernel_size'])
-                            df_label.iloc[:, i] = data
-                    df_label.to_hdf(label_path, 'df_with_missing',
-                                    format='table', mode='w')
-                    self.df_label = df_label
-
-                self.label_path = label_path
+        self.df_label = pd.read_hdf(self.label_path)
 
         self.df_bodyparts = self.df_label[self._DLCscorer][self.bodyparts]
 
@@ -188,12 +160,14 @@ class DeeplabcutPlotBodyparts():
         # in mm. https://www.ncbi.nlm.nih.gov/pmc/articles/PMC3310398/#R13
         self._pupil_diameter = 3.0 
 
+        # obtain median left to right eyelid distance
         right = self.df_bodyparts['eyelid_right'].values[:, :2]
         left = self.df_bodyparts['eyelid_left'].values[:, :2]
 
         self.median_left_right = np.median(
             np.sqrt(np.einsum('ij,ij->i', left-right, left-right)))
 
+        # obtain pixel to diameter ratio
         self._pixel_to_diameter_ratio = self.median_left_right/self._pupil_diameter
 
         if not self.cropped:
@@ -487,8 +461,7 @@ class DeeplabcutPupilFitting(DeeplabcutPlotBodyparts):
                 then by default it plots ALL existing bodyplots in config.yaml file.
 
         """
-        super().__init__(config, bodyparts=bodyparts,
-                         cropped=cropped, filtering=filtering)
+        super().__init__(config, bodyparts=bodyparts, cropped=cropped)
 
         self.complete_eyelid_graph = {'eyelid_top': 'eyelid_top_right',
                                       'eyelid_top_right': 'eyelid_right',
@@ -1129,15 +1102,21 @@ def obtain_cropping_coords(short_h5_path, DLCscorer, config):
                     coords_dict[coord+'min'].append(0)
                     coords_dict[coord+'max'].append(config['original_height'])
 
-                break
+                continue
 
             # only retain values within 1 std deviation from mean
             eyelid_coord_68 = eyelid_coord_pcutoff[(eyelid_coord_pcutoff < np.mean(eyelid_coord_pcutoff) + np.std(eyelid_coord_pcutoff)) *
                                                    (eyelid_coord_pcutoff > np.mean(
                                                     eyelid_coord_pcutoff) - np.std(eyelid_coord_pcutoff))]
 
-            coords_dict[coord+'min'].append(eyelid_coord_68.min())
-            coords_dict[coord+'max'].append(eyelid_coord_68.max())
+            # sometimes, eyelid_coord_68 can return an empty array. If so, dont bother with 1st dev from mean 
+            # but directly use eyelid_coord_pcutoff
+            if len(eyelid_coord_68) == 0:
+                coords_dict[coord+'min'].append(eyelid_coord_pcutoff.min())
+                coords_dict[coord+'max'].append(eyelid_coord_pcutoff.max())
+            else:
+                coords_dict[coord+'min'].append(eyelid_coord_68.min())
+                coords_dict[coord+'max'].append(eyelid_coord_68.max())
 
     cropped_coords = {}
     cropped_coords['cropped_x0'] = int(min(coords_dict['xmin']))

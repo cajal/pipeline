@@ -1,5 +1,6 @@
 import numpy as np
 import torch
+from torch.nn import functional as F
 
 
 def create_grid(um_sizes, desired_res=1):
@@ -78,3 +79,29 @@ def affine_product(X, A, b):
     :return: A (d1 x d2 x 3) torch.Tensor corresponding to the transformed coordinates.
     """
     return torch.einsum('ij,klj->kli', (A, X)) + b
+
+
+def sample_grid(volume, grid):
+    """ Sample grid in volume.
+
+    Assumes center of volume is at (0, 0, 0) and grid and volume have the same resolution.
+
+    :param torch.Tensor volume: A d x h x w tensor. The stack.
+    :param torch.Tensor grid: A d1 x d2 x 3 (x, y, z) tensor. The coordinates to sample.
+
+    :return: A d1 x d2 tensor. The grid sampled in the stack.
+    """
+    # Make sure input is tensor
+    volume = torch.as_tensor(volume, dtype=torch.float32)
+    grid = torch.as_tensor(grid, dtype=torch.float32)
+
+    # Rescale grid so it ranges from -1 to 1 (as expected by F.grid_sample)
+    norm_factor = torch.as_tensor([s / 2 - 0.5 for s in volume.shape[::-1]])
+    norm_grid = grid / norm_factor
+
+    # Resample
+    resampled = F.grid_sample(volume[None, None, ...], norm_grid[None, None, ...],
+                              padding_mode='zeros')
+    resampled = resampled.squeeze() # drop batch and channel dimension
+
+    return resampled

@@ -90,9 +90,15 @@ classdef FieldCoordinates < dj.Manual
             pxpitch = mean(fieldWidths.\fieldWidthsInMicrons);
 
             if length(frames)>1
-                % construct a big field of view
+                % convert center coordinates to 0,0 coordinates
+                x_pos = x_pos - fieldWidths * pxpitch / 2;
+                y_pos = y_pos - fieldHeights * pxpitch / 2;
+                
+                % shift and convert microns to pixels
                 x_pos = (x_pos - min(x_pos))/pxpitch;
                 y_pos = (y_pos - min(y_pos))/pxpitch;
+                
+                % construct a big field of view
                 im = zeros(ceil(max(y_pos+fieldHeights)),ceil(max(x_pos+fieldWidths)));
                 for islice =length(frames):-1:1
                     frame = self.filterImage(ne7.mat.normalize(frames{islice}),self.createTform(tfp));
@@ -283,7 +289,7 @@ classdef FieldCoordinates < dj.Manual
             YY = round(y_offset + size(ref_mask,1)/2 - size(imS,1)/2); % convert center coordinates to 0,0 coordinates
             XX = round(x_offset + size(ref_mask,2)/2 - size(imS,2)/2); % convert center coordinates to 0,0 coordinates
             fmask = ref_mask(YY+1:size(imS,1)+YY,XX+1:size(imS,2)+XX);
-            fmask = self.filterImage(ne7.mat.normalize(fmask),tform,1)>0;
+            fmask = self.filterImage(fmask,tform,1);
             fmask = fmask(...
                 round(size(fmask,1)/2)-floor(sz(1)/2)+1:floor(size(fmask,1)/2)+floor(sz(1)/2),...
                 round(size(fmask,2)/2)-floor(sz(2)/2)+1:floor(size(fmask,2)/2)+floor(sz(2)/2));

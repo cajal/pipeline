@@ -1,0 +1,86 @@
+apiVersion: batch/v1beta1
+kind: CronJob # This tells kubernetes what kind of class it is working with
+metadata:
+  name: minion-gpu
+spec:
+  schedule: "*/5 * * * *" # every 5 minutes
+  concurrencyPolicy: Allow
+  jobTemplate:
+    spec:
+      parallelism: 1  # how many process in parallel I want
+      template:
+        spec:
+          restartPolicy: Never
+          hostNetwork: true # This option will allow the pod to use the host network for internet access
+          tolerations:
+          - key: "gpu"
+            operator: "Equal"
+            value: "true"
+            effect: "NoSchedule"
+          affinity: # Place this in the pod.spec level in the yaml file
+            nodeAffinity:
+              requiredDuringSchedulingIgnoredDuringExecution:
+                nodeSelectorTerms:
+                - matchExpressions:
+                  - key: gpu_mem_size
+                    operator: In
+                    values: # You can remove certain mem_size if your code need more memory
+                    - 11GB
+                    - 12GB
+                    - 24GB
+                    - 32GB
+          volumes:
+          - name: mnt
+            hostPath:
+              path: /mnt
+          containers:
+          - name: minion-gpu
+            image: ninai/pipeline:tf-gpu
+            imagePullPolicy: Always  # needed because the image tag is not latest
+            volumeMounts:
+            - name: mnt
+              mountPath: /mnt
+            resources:
+              requests:
+                cpu: 4
+                memory: 30Gi
+              limits:
+                nvidia.com/gpu: 1
+            env:
+            - name: DJ_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: datajoint-credentials
+                  key: DJ_HOST
+            - name: DJ_USER
+              valueFrom:
+                secretKeyRef:
+                  name: datajoint-credentials
+                  key: DJ_USER
+            - name: DJ_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: datajoint-credentials
+                  key: DJ_PASS
+            - name: GITHUB_USERNAME
+              valueFrom:
+                secretKeyRef:
+                  name: github-credentials
+                  key: GITHUB_USERNAME
+            - name: GITHUB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: github-credentials
+                  key: GITHUB_PASSWORD
+            command: ["/bin/bash"]
+            args: ["-c", "rm -r pipeline &&\
+            git clone https://$(GITHUB_USERNAME):$(GITHUB_PASSWORD)@github.com/cajal/pipeline.git &&\
+            pip3 install pipeline/python/ &&\
+            git clone https://$(GITHUB_USERNAME):$(GITHUB_PASSWORD)@github.com/cajal/stimulus-pipeline.git &&\
+            pip3 install stimulus-pipeline/python/ &&\
+            git clone https://$(GITHUB_USERNAME):$(GITHUB_PASSWORD)@github.com/cajal/stimuli.git &&\
+            pip3 install stimuli/python/ &&\
+            python3 /data/pipeline/python/scripts/populate-minion_gpu.py"]
+          
+          
+          
