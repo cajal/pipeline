@@ -82,6 +82,9 @@ def read_behavior_file(filename):
             data['ts'] = analog_signals[channel_names.index('Time')]
             if 'Temperature' in channel_names:
                 data['temperature'] = analog_signals[channel_names.index('Temperature')]
+            
+            if 'AudioStimWindow' in channel_names:
+                data['auditory'] = analog_signals[channel_names.index('AudioStimWindow')]
 
             if str(f.attrs['AS_Version'][0]) == '2.1':
                 data['scanImage'] = analog_signals[channel_names.index('ScanImageFrameSync')]
