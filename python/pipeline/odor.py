@@ -8,6 +8,7 @@ from pipeline import mice
 from pipeline import meso
 from pipeline.utils import h5
 from commons import lab
+from .exceptions import PipelineException
 
 
 #dj.config['external-odor'] = {'protocol': 'file',
