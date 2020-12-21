@@ -72,6 +72,9 @@ target/
 *.m~
 matlab/startup.m
 matlab/scripts/Eye_Movements/CircleMaps/
+setDJ.m
+setPath.m
+startup.m
 
 #.vscode stuff
 .vscode/*
