@@ -6,7 +6,7 @@ from . import mice
 from .exceptions import PipelineException
 
 
-schema = dj.schema('pipeline_injection', locals(), create_tables=False)
+schema = dj.schema('pipeline_injection', locals())
 CURRENT_VERSION = 1
 
 

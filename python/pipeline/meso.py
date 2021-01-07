@@ -10,7 +10,7 @@ from .utils import galvo_corrections, signal, quality, mask_classification, perf
 from .exceptions import PipelineException
 
 
-schema = dj.schema('pipeline_meso', locals(), create_tables=False)
+schema = dj.schema('pipeline_meso', locals())
 CURRENT_VERSION = 1
 
 

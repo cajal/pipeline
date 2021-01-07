@@ -26,7 +26,7 @@ dj.config['external-stack'] = {'protocol': 'file',
 dj.config['cache'] = '/tmp/dj-cache'
 
 
-schema = dj.schema('pipeline_stack', locals(), create_tables=False)
+schema = dj.schema('pipeline_stack', locals())
 
 
 @schema
@@ -1397,11 +1397,14 @@ class Registration(dj.Computed):
         affine_iters = 200  # number of optimization iterations to learn the affine parameters
         random_seed = 1234  # seed for torch random number generator (used to initialize deformations)
         landmark_gap = 100  # spacing for the landmarks
-        rbf_radius = 150  # critical radius for the gaussian rbf
+        rbf_radius = key['rbf_radius']  # critical radius for the gaussian rbf
         lr_deformations = 0.1  # learning rate / step size for deformation values
         wd_deformations = 1e-4  # weight decay for deformations; controls their size
-        smoothness_factor = 0.01  # factor to keep the deformation field smooth
+        smoothness_factor = key['smoothness_factor']  # factor to keep the deformation field smooth
         nonrigid_iters = 200  # number of optimization iterations for the nonrigid parameters
+        
+        del key['rbf_radius']
+        del key['smoothness_factor']
 
         # Get enhanced stack
         stack_key = {'animal_id': key['animal_id'], 'session': key['stack_session'],
@@ -1618,7 +1621,7 @@ class Registration(dj.Computed):
 
         # Insert
         stack_z, stack_y, stack_x = (CorrectedStack & stack_key).fetch1('z', 'y', 'x')
-        self.insert1(key)
+        self.insert1(key,allow_direct_insert=True)
         self.Params.insert1({**key, 'rigid_zrange': rigid_zrange, 'lr_linear': lr_linear,
                              'lr_translation': lr_translation,
                              'affine_iters': affine_iters, 'random_seed': random_seed,
@@ -1626,10 +1629,10 @@ class Registration(dj.Computed):
                              'lr_deformations': lr_deformations,
                              'wd_deformations': wd_deformations,
                              'smoothness_factor': smoothness_factor,
-                             'nonrigid_iters': nonrigid_iters})
+                             'nonrigid_iters': nonrigid_iters},allow_direct_insert=True)
         self.Rigid.insert1({**key, 'reg_x': stack_x + rig_x, 'reg_y': stack_y + rig_y,
                             'reg_z': stack_z + rig_z, 'score': rig_score,
-                            'reg_field': rig_field})
+                            'reg_field': rig_field},allow_direct_insert=True)
         self.Affine.insert1({**key, 'a11': affine_linear[0, 0].item(),
                              'a21': affine_linear[1, 0].item(),
                              'a31': affine_linear[2, 0].item(),
@@ -1639,7 +1642,7 @@ class Registration(dj.Computed):
                              'reg_x': stack_x + affine_translation[0].item(),
                              'reg_y': stack_y + affine_translation[1].item(),
                              'reg_z': stack_z + affine_translation[2].item(),
-                             'score': affine_score, 'reg_field': affine_field})
+                             'score': affine_score, 'reg_field': affine_field},allow_direct_insert=True)
         self.NonRigid.insert1({**key, 'a11': nonrigid_linear[0, 0].item(),
                                'a21': nonrigid_linear[1, 0].item(),
                                'a31': nonrigid_linear[2, 0].item(),
@@ -1651,7 +1654,7 @@ class Registration(dj.Computed):
                                'reg_z': stack_z + nonrigid_translation[2].item(),
                                'landmarks': nonrigid_landmarks.numpy(),
                                'deformations': nonrigid_deformations.numpy(),
-                               'score': nonrigid_score, 'reg_field': nonrigid_field})
+                               'score': nonrigid_score, 'reg_field': nonrigid_field},allow_direct_insert=True)
         self.notify(key)
 
     @notify.ignore_exceptions

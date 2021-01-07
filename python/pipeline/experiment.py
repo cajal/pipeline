@@ -6,7 +6,7 @@ import os
 from commons import lab
 
 
-schema = dj.schema('pipeline_experiment', locals(), create_tables=False)
+schema = dj.schema('pipeline_experiment', locals())
 
 
 @schema
@@ -173,7 +173,7 @@ class Layer(dj.Lookup):
         ['L1', '', 0, 100],
         ['L2/3', '', 100, 370],
         ['L4', '', 370, 500],
-        {'layer': 'unset', 'layer_description': ''}
+        ['unset','',None,None]
     ]
 
     def get_layers(self, z):
@@ -620,10 +620,11 @@ class ProjectorConfig(dj.Lookup):
     refresh_rate                : float                     # refresh rate in Hz
 
     """
+
     contents = [
-        [0, 4, 2, 3, 60],
-        [1, 4, 4, 2, 60],
-        [2, 4, 4, 2, 30]
+        [0, 'UV', 'green', 'blue', 60],
+        [1, 'UV', 'green', 'blue', 60],
+        [2, 'UV', 'green', 'green', 30]
     ]
 
 
