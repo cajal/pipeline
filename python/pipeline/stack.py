@@ -1390,18 +1390,15 @@ class Registration(dj.Computed):
     def make(self, key):
         from .utils import registration
         from .utils import enhancement
-
+        landmark_gap,rbf_radius_smoothnes_factor = (RegistrationGridSearch & key).fetch1('landmark_gap','rbf_radius','smoothness_parameter')
         # Set params
         rigid_zrange = 80  # microns to search above and below estimated z for rigid registration
         lr_linear = 0.001  # learning rate / step size for the linear part of the affine matrix
         lr_translation = 1  # learning rate / step size for the translation vector
         affine_iters = 200  # number of optimization iterations to learn the affine parameters
         random_seed = 1234  # seed for torch random number generator (used to initialize deformations)
-        landmark_gap = key["landmark_gap"]  # spacing for the landmarks
-        rbf_radius = key['rbf_radius']  # critical radius for the gaussian rbf
         lr_deformations = 0.1  # learning rate / step size for deformation values
         wd_deformations = 1e-4  # weight decay for deformations; controls their size
-        smoothness_factor = key['smoothness_factor']  # factor to keep the deformation field smooth
         nonrigid_iters = 200  # number of optimization iterations for the nonrigid parameters
         
         del key['rbf_radius']
