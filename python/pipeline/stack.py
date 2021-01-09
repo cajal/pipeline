@@ -1400,10 +1400,6 @@ class Registration(dj.Computed):
         lr_deformations = 0.1  # learning rate / step size for deformation values
         wd_deformations = 1e-4  # weight decay for deformations; controls their size
         nonrigid_iters = 200  # number of optimization iterations for the nonrigid parameters
-        
-        del key['rbf_radius']
-        del key['smoothness_factor']
-        del key['landmark_gap']
 
         # Get enhanced stack
         stack_key = {'animal_id': key['animal_id'], 'session': key['stack_session'],
