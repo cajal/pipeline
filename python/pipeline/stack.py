@@ -1317,7 +1317,7 @@ class Registration(dj.Computed):
     @property
     def key_source(self):
         stacks = PreprocessedStack.proj(stack_session='session', stack_channel='channel')
-        return stacks * RegistrationTask * RegistrationGridSearch & "registration_method > 31'
+        return stacks * RegistrationTask * RegistrationGridSearch & "registration_method > 31"
 
     class Rigid(dj.Part):
         definition = """ # 3-d template matching keeping the stack straight
