@@ -1298,6 +1298,8 @@ class RegistrationTask(dj.Manual):
                                         'field': field['field']}, skip_duplicates=True)
 
 
+
+
 @schema
 class Registration(dj.Computed):
     """ Our affine matrix A is represented as the usual 4 x 4 matrix using homogeneous
@@ -1314,9 +1316,8 @@ class Registration(dj.Computed):
     """
     @property
     def key_source(self):
-        stacks = PreprocessedStack.proj(stack_session='session', stack_channel='channel')
-        return stacks * RegistrationTask & {'registration_method': 5}
-
+        stacks = PreprocessedStack.proj(stack_session='session', stack_channel='channel') & {'stack_session':9,'stack_idx':19,'stack_channel':1}
+        return stacks * RegistrationTask & "registration_method > 31'
 
     class Rigid(dj.Part):
         definition = """ # 3-d template matching keeping the stack straight
@@ -1396,7 +1397,7 @@ class Registration(dj.Computed):
         lr_translation = 1  # learning rate / step size for the translation vector
         affine_iters = 200  # number of optimization iterations to learn the affine parameters
         random_seed = 1234  # seed for torch random number generator (used to initialize deformations)
-        landmark_gap = 100  # spacing for the landmarks
+        landmark_gap = key["landmark_gap"]  # spacing for the landmarks
         rbf_radius = key['rbf_radius']  # critical radius for the gaussian rbf
         lr_deformations = 0.1  # learning rate / step size for deformation values
         wd_deformations = 1e-4  # weight decay for deformations; controls their size
@@ -1405,6 +1406,7 @@ class Registration(dj.Computed):
         
         del key['rbf_radius']
         del key['smoothness_factor']
+        del key['landmark_gap']
 
         # Get enhanced stack
         stack_key = {'animal_id': key['animal_id'], 'session': key['stack_session'],
@@ -1738,6 +1740,20 @@ class Registration(dj.Computed):
         ax.invert_zaxis()
 
         return fig
+    
+
+class RegistrationGridSearch(dj.Manual):
+    definition = '''
+        -> Registration
+        ---
+        smoothness_parameter    : float      #
+        rbf_radius              : float      #
+        landmark_gap            : int        #
+
+    '''
+
+
+
 
 
 @schema
