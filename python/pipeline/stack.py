@@ -1390,7 +1390,7 @@ class Registration(dj.Computed):
     def make(self, key):
         from .utils import registration
         from .utils import enhancement
-        landmark_gap,rbf_radius, smoothnes_factor = (RegistrationGridSearch & key).fetch1('landmark_gap','rbf_radius','smoothness_parameter')
+        landmark_gap,rbf_radius, smoothness_factor = (RegistrationGridSearch & key).fetch1('landmark_gap','rbf_radius','smoothness_parameter')
         # Set params
         rigid_zrange = 80  # microns to search above and below estimated z for rigid registration
         lr_linear = 0.001  # learning rate / step size for the linear part of the affine matrix
