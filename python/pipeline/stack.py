@@ -1741,10 +1741,10 @@ class Registration(dj.Computed):
 
         return fig
     
-
+@schema
 class RegistrationGridSearch(dj.Manual):
     definition = '''
-        -> Registration
+        -> RegistrationTask
         ---
         smoothness_parameter    : float      #
         rbf_radius              : float      #
