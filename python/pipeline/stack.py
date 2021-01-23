@@ -9,8 +9,10 @@ from scipy import ndimage
 from scipy import optimize
 import itertools
 
-from . import experiment, notify, shared, reso, meso
+from . import experiment, notify, shared, reso
 anatomy = dj.create_virtual_module('pipeline_anatomy','pipeline_anatomy')
+meso = dj.create_virtual_module('pipeline_meso','pipeline_meso')
+m65 = dj.create_virtual_module('microns_minnie_m65_02','microns_minnie_m65_02')
 
 from .utils import galvo_corrections, stitching, performance, enhancement
 from .utils.signal import mirrconv, float2uint8
@@ -1299,6 +1301,34 @@ class RegistrationTask(dj.Manual):
 
 
 
+@schema 
+class StackCoordinateInterm(dj.Manual):
+    definition = '''
+    -> meso.StackCoordinates.UnitInfo
+    ---
+    stack_x         : float
+    stack_y         : float
+    stack_z         : float
+    '''
+    def fill(self,grid,key):
+        from scipy import ndimage
+
+        # Get registration grid (px -> stack_coordinate)
+        stack_key = {**key, 'scan_session': key['session']}
+        field_res = (ScanInfo.Field & key).microns_per_pixel
+
+        
+        field_units = ScanSet.UnitInfo & (ScanSet.Unit & key)
+        for unit_key, px_x, px_y in zip(*field_units.fetch('KEY', 'px_x', 'px_y')):
+            px_coords = np.array([[px_y], [px_x]])
+            unit_x, unit_y, unit_z = [ndimage.map_coordinates(grid[..., i], px_coords,
+                                                              order=1)[0] for i in
+                                      range(3)]
+           self.insert1({**key, **unit_key, 'stack_x': unit_x,
+                                               'stack_y': unit_y, 'stack_z': unit_z})
+
+
+
 
 @schema
 class Registration(dj.Computed):
@@ -1538,6 +1568,23 @@ class Registration(dj.Computed):
             # Compute loss
             corr_loss = -(pred_field * field_).sum() / (torch.norm(pred_field) *
                                                         torch.norm(field_))
+            
+            ## recalculate matches with pred_grid
+            ## calculate loss
+
+            StackCoordinateInterm().fill(grid,key)
+            
+            train = pd.read_csv('/mnt/lab/users/ramosaj/registration_test_set.csv')
+            units = train[['animal_id','scan_session','scan_idx','unit_id']].to_dict(orient='records')
+            unit_stack_coords = StackCoordinateInterim.proj('stack_x','stack_y','stack_z',scan_session='session') & units & {'animal_id': 17797, 'segmentation_method': 6} & f"registration_method = {key['registration_method']}"
+            stack_params = CorrectedStack.proj('x','y','z','um_height','um_width','um_depth',stack_session='session') & {'animal_id': 17797}
+            unit_np_stack_coords = (unit_stack_coords * stack_params).proj(unit_x = 'round(stack_x - x + um_width/2, 2)', unit_y = 'round(stack_y - y + um_height/2, 2)', unit_z = 'round(stack_z - z + um_depth/2, 2)').fetch(format='frame').reset_index()
+            matches_with_distance = unit_np_stack_coords.merge(train[['animal_id','scan_session','scan_idx','unit_id','nucleus_x_2p','nucleus_y_2p','nucleus_z_2p']],on=['animal_id','scan_session','scan_idx'])
+            nuclei_coords = torch.from_numpy(matches_with_distance[['nucleus_x_2p','nucleus_y_2p','nucleus_z_2p']].values.astype(float))
+            unit_coords = torch.from_numpy(matches_with_distance['unit_x','unit_y','unit_z'].values.astype(float))
+
+
+            l2_norm_loss = torch.norm(nuclei_coords - unit_coords)
 
             # Compute cosine similarity between landmarks (and weight em by distance)
             norm_deformations = deformations / torch.norm(deformations, dim=-1,
@@ -1547,7 +1594,7 @@ class Registration(dj.Computed):
                          landmark_scores.sum())
 
             # Compute gradients
-            loss = corr_loss + smoothness_factor * reg_term
+            loss = l2_norm_loss + smoothness_factor * reg_term
             print('Corr/loss at iteration {}: {:5.4f}/{:5.4f}'.format(i, -corr_loss,
                                                                       loss))
             loss.backward()
@@ -1555,6 +1602,7 @@ class Registration(dj.Computed):
             # Update
             affine_optimizer.step()
             nonrigid_optimizer.step()
+            StackCoordinateInterm.delete()
 
         # Save final results
         nonrigid_linear = linear.detach().clone()
@@ -1651,6 +1699,11 @@ class Registration(dj.Computed):
                                'deformations': nonrigid_deformations.numpy(),
                                'score': nonrigid_score, 'reg_field': nonrigid_field},allow_direct_insert=True)
         self.notify(key)
+    
+    
+    def make_distances(self,grid,key):
+        pass
+
 
     @notify.ignore_exceptions
     def notify(self, key):
@@ -1733,6 +1786,8 @@ class Registration(dj.Computed):
         ax.invert_zaxis()
 
         return fig
+
+
     
 @schema
 class RegistrationGridSearch(dj.Manual):
