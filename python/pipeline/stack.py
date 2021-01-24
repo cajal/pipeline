@@ -1310,23 +1310,45 @@ class StackCoordinateInterm(dj.Manual):
     stack_y         : float
     stack_z         : float
     '''
-    def fill(self,grid,key):
+     def fill(self,key,a11,a21,a31,a12,a22,a32,delta_x,delta_y,delta_z,landmarks,deformations,rbf_radius):
         from scipy import ndimage
 
         # Get registration grid (px -> stack_coordinate)
         stack_key = {**key, 'scan_session': key['session']}
-        field_res = (ScanInfo.Field & key).microns_per_pixel
+        key['registration_method'] = 5
+        field_res,field_dims = (meso.ScanInfo.Field & key).fetch('microns_per_pixel','um_height','um_width')
+        grid = self.get_grid(a11,a21,a31,a12,a22,a32,delta_x,delta_y,delta_z,landmarks,deformations,rbf_radius,field_res,field_dims)       
 
         
-        field_units = ScanSet.UnitInfo & (ScanSet.Unit & key)
+        field_units = meso.ScanSet.UnitInfo & (meso.ScanSet.Unit & key)
         for unit_key, px_x, px_y in zip(*field_units.fetch('KEY', 'px_x', 'px_y')):
             px_coords = np.array([[px_y], [px_x]])
             unit_x, unit_y, unit_z = [ndimage.map_coordinates(grid[..., i], px_coords,
                                                               order=1)[0] for i in
                                       range(3)]
-           self.insert1({**key, **unit_key, 'stack_x': unit_x,
+            self.insert1({**key, **unit_key, 'stack_x': unit_x,
                                                'stack_y': unit_y, 'stack_z': unit_z})
+    
 
+    def get_grid(self,a11,a21,a31,a12,a22,a32,delta_x,delta_y,delta_z,landmarks,deformations,rbf_radius,desired_res,field_dims):
+        
+        # Create grid at desired resolution
+        grid = registration.create_grid(field_dims, desired_res=desired_res)  # h x w x 2
+        grid = torch.as_tensor(grid, dtype=torch.float32)
+
+        linear = torch.tensor([[a11, a12], [a21, a22], [a31, a32]])
+        translation = torch.tensor([delta_x, delta_y, delta_z])
+        landmarks = torch.from_numpy(landmarks)
+        deformations = torch.from_numpy(deformations)
+
+        affine_grid = registration.affine_product(grid, linear, translation)
+        grid_distances = torch.norm(grid.unsqueeze(-2) - landmarks, dim=-1)
+        grid_scores = torch.exp(-(grid_distances * (1 / rbf_radius)) ** 2)
+        warping_field = torch.einsum('whl,lt->wht', (grid_scores, deformations))
+
+        pred_grid = affine_grid + warping_field
+
+        return pred_grid
 
 
 
@@ -1347,7 +1369,7 @@ class Registration(dj.Computed):
     @property
     def key_source(self):
         stacks = PreprocessedStack.proj(stack_session='session', stack_channel='channel')
-        return stacks * RegistrationTask * RegistrationGridSearch & "registration_method > 31"
+        return stacks * RegistrationTask * RegistrationGridSearch & "registration_method = 100"
 
     class Rigid(dj.Part):
         definition = """ # 3-d template matching keeping the stack straight
@@ -1572,11 +1594,28 @@ class Registration(dj.Computed):
             ## recalculate matches with pred_grid
             ## calculate loss
 
-            StackCoordinateInterm().fill(grid,key)
+            stack_z, stack_y, stack_x = (CorrectedStack & stack_key).fetch1('z', 'y', 'x')
+            a11 = linear[0, 0].item()
+            a21 = linear[1, 0].item()
+            a31 = linear[2, 0].item()
+
+            a12 = linear[0, 1].item()
+            a22 = linear[1, 1].item()
+            a32_linear[2, 1].item()
+
+            delta_x =  stack_x + translation[0].item()
+            delta_y = stack_y + translation[1].item()
+            delta_z = stack_z + translation[2].item()
             
-            train = pd.read_csv('/mnt/lab/users/ramosaj/registration_test_set.csv')
+            ckey = key.copy()
+            ckey['registration_method'] = 5
+            ckey['session'] = ckey['scan_session']
+            match_key = ((meso.ScanSet * stack.Registration.proj(session='scan_session')) & ckey & 'segmentation_method = 6').fetch1()
+            StackCoordinateInterm().fill(match_key,a11,a21,a31,a12,a22,a32,delta_x,delta_y,delta_z,landmarks,deformations,rbf_radius)
+            
+            train = pd.read_csv('/mnt/lab/users/ramosaj/registration_test_set_1-22-21')
             units = train[['animal_id','scan_session','scan_idx','unit_id']].to_dict(orient='records')
-            unit_stack_coords = StackCoordinateInterim.proj('stack_x','stack_y','stack_z',scan_session='session') & units & {'animal_id': 17797, 'segmentation_method': 6} & f"registration_method = {key['registration_method']}"
+            unit_stack_coords = StackCoordinateInterim.proj('stack_x','stack_y','stack_z',scan_session='session') & units & {'animal_id': 17797, 'segmentation_method': 6} & f"registration_method = 5"
             stack_params = CorrectedStack.proj('x','y','z','um_height','um_width','um_depth',stack_session='session') & {'animal_id': 17797}
             unit_np_stack_coords = (unit_stack_coords * stack_params).proj(unit_x = 'round(stack_x - x + um_width/2, 2)', unit_y = 'round(stack_y - y + um_height/2, 2)', unit_z = 'round(stack_z - z + um_depth/2, 2)').fetch(format='frame').reset_index()
             matches_with_distance = unit_np_stack_coords.merge(train[['animal_id','scan_session','scan_idx','unit_id','nucleus_x_2p','nucleus_y_2p','nucleus_z_2p']],on=['animal_id','scan_session','scan_idx'])
@@ -1602,7 +1641,9 @@ class Registration(dj.Computed):
             # Update
             affine_optimizer.step()
             nonrigid_optimizer.step()
+            dj.config['safemode'] = False
             StackCoordinateInterm.delete()
+            dj.config['safemode'] = True
 
         # Save final results
         nonrigid_linear = linear.detach().clone()
