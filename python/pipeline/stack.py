@@ -12,7 +12,6 @@ import itertools
 from . import experiment, notify, shared, reso
 anatomy = dj.create_virtual_module('pipeline_anatomy','pipeline_anatomy')
 meso = dj.create_virtual_module('pipeline_meso','pipeline_meso')
-m65 = dj.create_virtual_module('microns_minnie_m65_02','microns_minnie_m65_02')
 
 from .utils import galvo_corrections, stitching, performance, enhancement
 from .utils.signal import mirrconv, float2uint8
