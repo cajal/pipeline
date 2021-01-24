@@ -1310,7 +1310,7 @@ class StackCoordinateInterm(dj.Manual):
     stack_y         : float
     stack_z         : float
     '''
-     def fill(self,key,a11,a21,a31,a12,a22,a32,delta_x,delta_y,delta_z,landmarks,deformations,rbf_radius):
+    def fill(self,key,a11,a21,a31,a12,a22,a32,delta_x,delta_y,delta_z,landmarks,deformations,rbf_radius):
         from scipy import ndimage
 
         # Get registration grid (px -> stack_coordinate)
@@ -1324,10 +1324,10 @@ class StackCoordinateInterm(dj.Manual):
         for unit_key, px_x, px_y in zip(*field_units.fetch('KEY', 'px_x', 'px_y')):
             px_coords = np.array([[px_y], [px_x]])
             unit_x, unit_y, unit_z = [ndimage.map_coordinates(grid[..., i], px_coords,
-                                                              order=1)[0] for i in
-                                      range(3)]
+                                                                order=1)[0] for i in
+                                        range(3)]
             self.insert1({**key, **unit_key, 'stack_x': unit_x,
-                                               'stack_y': unit_y, 'stack_z': unit_z})
+                                                'stack_y': unit_y, 'stack_z': unit_z})
     
 
     def get_grid(self,a11,a21,a31,a12,a22,a32,delta_x,delta_y,delta_z,landmarks,deformations,rbf_radius,desired_res,field_dims):
