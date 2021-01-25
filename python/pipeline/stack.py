@@ -1612,7 +1612,7 @@ class Registration(dj.Computed):
 
             match_key = ((meso.ScanSet * self.proj(session='scan_session')) & ckey & 'segmentation_method = 6').fetch1()
             
-            unit_list = self.get_units(match_key,a11,a21,a31,a12,a22,a32,delta_x,delta_y,delta_z,landmarks,deformations,rbf_radius)
+            unit_list = self.get_units(match_key,a11,a21,a31,a12,a22,a32,delta_x,delta_y,delta_z,landmarks,deformations.detach(),rbf_radius)
             train = pd.read_csv('/mnt/lab/users/ramosaj/registration/registration_test_set_1-22-21')
             units = train[['animal_id','scan_session','scan_idx','unit_id']]
             unit_stack_coords = pd.DataFrame(unit_list).rename({'session':'scan_session'},axis=1).merge(units,on=['animal_id','scan_session','scan_idx','unit_id'])
