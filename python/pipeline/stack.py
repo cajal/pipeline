@@ -1600,7 +1600,7 @@ class Registration(dj.Computed):
 
             a12 = linear[0, 1].item()
             a22 = linear[1, 1].item()
-            a32_linear[2, 1].item()
+            a32 = linear[2, 1].item()
 
             delta_x =  stack_x + translation[0].item()
             delta_y = stack_y + translation[1].item()
