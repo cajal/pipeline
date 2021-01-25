@@ -1331,6 +1331,7 @@ class StackCoordinateInterm(dj.Manual):
     def get_grid(self,a11,a21,a31,a12,a22,a32,delta_x,delta_y,delta_z,landmarks,deformations,rbf_radius,desired_res,field_dims):
         from .utils import registration
         from .utils import enhancement
+        import torch
         # Create grid at desired resolution
         grid = registration.create_grid(field_dims, desired_res=desired_res)  # h x w x 2
         grid = torch.as_tensor(grid, dtype=torch.float32)
