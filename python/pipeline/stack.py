@@ -1338,8 +1338,6 @@ class StackCoordinateInterm(dj.Manual):
 
         linear = torch.tensor([[a11, a12], [a21, a22], [a31, a32]])
         translation = torch.tensor([delta_x, delta_y, delta_z])
-        landmarks = torch.from_numpy(landmarks)
-        deformations = torch.from_numpy(deformations)
 
         affine_grid = registration.affine_product(grid, linear, translation)
         grid_distances = torch.norm(grid.unsqueeze(-2) - landmarks, dim=-1)
