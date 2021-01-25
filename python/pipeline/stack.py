@@ -1615,7 +1615,7 @@ class Registration(dj.Computed):
             
             train = pd.read_csv('/mnt/lab/users/ramosaj/registration/registration_test_set_1-22-21')
             units = train[['animal_id','scan_session','scan_idx','unit_id']].to_dict(orient='records')
-            unit_stack_coords = StackCoordinateInterim.proj('stack_x','stack_y','stack_z',scan_session='session') & units & {'animal_id': 17797, 'segmentation_method': 6} & f"registration_method = 5"
+            unit_stack_coords = StackCoordinateInterm.proj('stack_x','stack_y','stack_z',scan_session='session') & units & {'animal_id': 17797, 'segmentation_method': 6} & f"registration_method = 5"
             stack_params = CorrectedStack.proj('x','y','z','um_height','um_width','um_depth',stack_session='session') & {'animal_id': 17797}
             unit_np_stack_coords = (unit_stack_coords * stack_params).proj(unit_x = 'round(stack_x - x + um_width/2, 2)', unit_y = 'round(stack_y - y + um_height/2, 2)', unit_z = 'round(stack_z - z + um_depth/2, 2)').fetch(format='frame').reset_index()
             matches_with_distance = unit_np_stack_coords.merge(train[['animal_id','scan_session','scan_idx','unit_id','nucleus_x_2p','nucleus_y_2p','nucleus_z_2p']],on=['animal_id','scan_session','scan_idx'])
