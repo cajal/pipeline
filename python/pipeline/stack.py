@@ -1613,7 +1613,7 @@ class Registration(dj.Computed):
             match_key = ((meso.ScanSet * self.proj(session='scan_session')) & ckey & 'segmentation_method = 6').fetch1()
             StackCoordinateInterm().fill(match_key,a11,a21,a31,a12,a22,a32,delta_x,delta_y,delta_z,landmarks,deformations.detach(),rbf_radius)
             
-            train = pd.read_csv('/mnt/lab/users/ramosaj/registration_test_set_1-22-21')
+            train = pd.read_csv('/mnt/lab/users/ramosaj/registration/registration_test_set_1-22-21')
             units = train[['animal_id','scan_session','scan_idx','unit_id']].to_dict(orient='records')
             unit_stack_coords = StackCoordinateInterim.proj('stack_x','stack_y','stack_z',scan_session='session') & units & {'animal_id': 17797, 'segmentation_method': 6} & f"registration_method = 5"
             stack_params = CorrectedStack.proj('x','y','z','um_height','um_width','um_depth',stack_session='session') & {'animal_id': 17797}
