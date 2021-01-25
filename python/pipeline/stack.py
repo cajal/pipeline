@@ -1620,7 +1620,7 @@ class Registration(dj.Computed):
             unit_np_stack_coords = (unit_stack_coords * stack_params).proj(unit_x = 'round(stack_x - x + um_width/2, 2)', unit_y = 'round(stack_y - y + um_height/2, 2)', unit_z = 'round(stack_z - z + um_depth/2, 2)').fetch(format='frame').reset_index()
             matches_with_distance = unit_np_stack_coords.merge(train[['animal_id','scan_session','scan_idx','unit_id','nucleus_x_2p','nucleus_y_2p','nucleus_z_2p']],on=['animal_id','scan_session','scan_idx'])
             nuclei_coords = torch.from_numpy(matches_with_distance[['nucleus_x_2p','nucleus_y_2p','nucleus_z_2p']].values.astype(float))
-            unit_coords = torch.from_numpy(matches_with_distance['unit_x','unit_y','unit_z'].values.astype(float))
+            unit_coords = torch.from_numpy(matches_with_distance[['unit_x','unit_y','unit_z']].values.astype(float))
 
 
             l2_norm_loss = torch.norm(nuclei_coords - unit_coords)
