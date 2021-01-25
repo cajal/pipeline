@@ -1311,22 +1311,22 @@ class StackCoordinateInterm(dj.Manual):
     '''
     def fill(self,key,a11,a21,a31,a12,a22,a32,delta_x,delta_y,delta_z,landmarks,deformations,rbf_radius):
         from scipy import ndimage
-
+        
         # Get registration grid (px -> stack_coordinate)
-        stack_key = {**key, 'scan_session': key['session']}
         key['registration_method'] = 5
-        field_res,field_dims = (meso.ScanInfo.Field & key).fetch('microns_per_pixel','um_height','um_width')
+        
+        field_res = (meso.ScanInfo.Field & key).microns_per_pixel
+        field_dims = (meso.ScanInfo.Field & key).fetch1('um_height','um_width')
         grid = self.get_grid(a11,a21,a31,a12,a22,a32,delta_x,delta_y,delta_z,landmarks,deformations,rbf_radius,field_res,field_dims)       
 
-        
         field_units = meso.ScanSet.UnitInfo & (meso.ScanSet.Unit & key)
         for unit_key, px_x, px_y in zip(*field_units.fetch('KEY', 'px_x', 'px_y')):
             px_coords = np.array([[px_y], [px_x]])
             unit_x, unit_y, unit_z = [ndimage.map_coordinates(grid[..., i], px_coords,
-                                                                order=1)[0] for i in
-                                        range(3)]
+                                                              order=1)[0] for i in
+                                      range(3)]
             self.insert1({**key, **unit_key, 'stack_x': unit_x,
-                                                'stack_y': unit_y, 'stack_z': unit_z})
+                                               'stack_y': unit_y, 'stack_z': unit_z})
     
 
     def get_grid(self,a11,a21,a31,a12,a22,a32,delta_x,delta_y,delta_z,landmarks,deformations,rbf_radius,desired_res,field_dims):
@@ -1348,6 +1348,7 @@ class StackCoordinateInterm(dj.Manual):
         pred_grid = affine_grid + warping_field
 
         return pred_grid
+
 
 
 
@@ -1608,8 +1609,9 @@ class Registration(dj.Computed):
             
             ckey = key.copy()
             ckey['registration_method'] = 5
-            ckey['session'] = ckey['scan_session']
-            match_key = ((meso.ScanSet * stack.Registration.proj(session='scan_session')) & ckey & 'segmentation_method = 6').fetch1()
+            ckey['session'] = ckey['scan_session']  
+
+            match_key = ((meso.ScanSet * self.proj(session='scan_session')) & ckey & 'segmentation_method = 6').fetch1()
             StackCoordinateInterm().fill(match_key,a11,a21,a31,a12,a22,a32,delta_x,delta_y,delta_z,landmarks,deformations,rbf_radius)
             
             train = pd.read_csv('/mnt/lab/users/ramosaj/registration_test_set_1-22-21')
