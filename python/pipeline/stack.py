@@ -1611,7 +1611,7 @@ class Registration(dj.Computed):
             ckey['session'] = ckey['scan_session']  
 
             match_key = ((meso.ScanSet * self.proj(session='scan_session')) & ckey & 'segmentation_method = 6').fetch1()
-            StackCoordinateInterm().fill(match_key,a11,a21,a31,a12,a22,a32,delta_x,delta_y,delta_z,landmarks,deformations.detach().numpy(),rbf_radius)
+            StackCoordinateInterm().fill(match_key,a11,a21,a31,a12,a22,a32,delta_x,delta_y,delta_z,landmarks,deformations.detach(),rbf_radius)
             
             train = pd.read_csv('/mnt/lab/users/ramosaj/registration_test_set_1-22-21')
             units = train[['animal_id','scan_session','scan_idx','unit_id']].to_dict(orient='records')
