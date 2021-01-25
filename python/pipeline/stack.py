@@ -1592,7 +1592,7 @@ class Registration(dj.Computed):
             
             ## recalculate matches with pred_grid
             ## calculate loss
-
+            import pandas as pd
             stack_z, stack_y, stack_x = (CorrectedStack & stack_key).fetch1('z', 'y', 'x')
             a11 = linear[0, 0].item()
             a21 = linear[1, 0].item()
