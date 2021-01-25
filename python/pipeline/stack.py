@@ -9,9 +9,8 @@ from scipy import ndimage
 from scipy import optimize
 import itertools
 
-from . import experiment, notify, shared, reso
+from . import experiment, notify, shared, reso, meso
 anatomy = dj.create_virtual_module('pipeline_anatomy','pipeline_anatomy')
-meso = dj.create_virtual_module('pipeline_meso','pipeline_meso')
 
 from .utils import galvo_corrections, stitching, performance, enhancement
 from .utils.signal import mirrconv, float2uint8
