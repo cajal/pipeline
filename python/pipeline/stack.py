@@ -1308,7 +1308,7 @@ class StackCoordinateInterm(dj.Manual):
     stack_y         : float
     stack_z         : float
     '''
-    def fill(self,key,a11,a21,a31,a12,a22,a32,delta_x,delta_y,delta_z,landmarks,deformations,rbf_radius):
+    def get_units(self,key,a11,a21,a31,a12,a22,a32,delta_x,delta_y,delta_z,landmarks,deformations,rbf_radius):
         from scipy import ndimage
         
         # Get registration grid (px -> stack_coordinate)
@@ -1611,17 +1611,20 @@ class Registration(dj.Computed):
             ckey['session'] = ckey['scan_session']  
 
             match_key = ((meso.ScanSet * self.proj(session='scan_session')) & ckey & 'segmentation_method = 6').fetch1()
-            StackCoordinateInterm().fill(match_key,a11,a21,a31,a12,a22,a32,delta_x,delta_y,delta_z,landmarks,deformations.detach(),rbf_radius)
             
+            unit_list = self.get_units(match_key,a11,a21,a31,a12,a22,a32,delta_x,delta_y,delta_z,landmarks,deformations,rbf_radius)
             train = pd.read_csv('/mnt/lab/users/ramosaj/registration/registration_test_set_1-22-21')
-            units = train[['animal_id','scan_session','scan_idx','unit_id']].to_dict(orient='records')
-            unit_stack_coords = StackCoordinateInterm.proj('stack_x','stack_y','stack_z',scan_session='session') & units & {'animal_id': 17797, 'segmentation_method': 6} & f"registration_method = 5"
-            stack_params = CorrectedStack.proj('x','y','z','um_height','um_width','um_depth',stack_session='session') & {'animal_id': 17797}
-            unit_np_stack_coords = (unit_stack_coords * stack_params).proj(unit_x = 'round(stack_x - x + um_width/2, 2)', unit_y = 'round(stack_y - y + um_height/2, 2)', unit_z = 'round(stack_z - z + um_depth/2, 2)').fetch(format='frame').reset_index()
+            units = train[['animal_id','scan_session','scan_idx','unit_id']]
+            unit_stack_coords = pd.DataFrame(unit_list).rename({'session':'scan_session'},axis=1).merge(units,on=['animal_id','scan_session','scan_idx','unit_id'])
+            unit_np_stack_coords = unit_stack_coords.merge(stack_params)
+            unit_np_stack_coords['unit_x'] = round(unit_np_stack_coords['stack_x'] - unit_np_stack_coords['x'] + unit_np_stack_coords['um_width']/2, 2)
+            unit_np_stack_coords['unit_y'] = round(unit_np_stack_coords['stack_y'] - unit_np_stack_coords['y'] + unit_np_stack_coords['um_height']/2, 2)
+            unit_np_stack_coords['unit_z'] = round(unit_np_stack_coords['stack_z'] - unit_np_stack_coords['z'] + unit_np_stack_coords['um_depth']/2, 2)
+
+
             matches_with_distance = unit_np_stack_coords.merge(train[['animal_id','scan_session','scan_idx','unit_id','nucleus_x_2p','nucleus_y_2p','nucleus_z_2p']],on=['animal_id','scan_session','scan_idx'])
             nuclei_coords = torch.from_numpy(matches_with_distance[['nucleus_x_2p','nucleus_y_2p','nucleus_z_2p']].values.astype(float))
             unit_coords = torch.from_numpy(matches_with_distance[['unit_x','unit_y','unit_z']].values.astype(float))
-
 
             l2_norm_loss = torch.norm(nuclei_coords - unit_coords)
 
@@ -1641,9 +1644,6 @@ class Registration(dj.Computed):
             # Update
             affine_optimizer.step()
             nonrigid_optimizer.step()
-            dj.config['safemode'] = False
-            StackCoordinateInterm.delete()
-            dj.config['safemode'] = True
 
         # Save final results
         nonrigid_linear = linear.detach().clone()
@@ -1741,7 +1741,48 @@ class Registration(dj.Computed):
                                'score': nonrigid_score, 'reg_field': nonrigid_field},allow_direct_insert=True)
         self.notify(key)
     
+    def get_units(self,key,a11,a21,a31,a12,a22,a32,delta_x,delta_y,delta_z,landmarks,deformations,rbf_radius):
+        from scipy import ndimage
+        
+        # Get registration grid (px -> stack_coordinate)
+        key['registration_method'] = 5
+        
+        field_res = (meso.ScanInfo.Field & key).microns_per_pixel
+        field_dims = (meso.ScanInfo.Field & key).fetch1('um_height','um_width')
+        grid = self.get_grid_from_param(a11,a21,a31,a12,a22,a32,delta_x,delta_y,delta_z,landmarks,deformations,rbf_radius,field_res,field_dims)       
+        
+        unit_list = []
+        field_units = meso.ScanSet.UnitInfo & (meso.ScanSet.Unit & key)
+        for unit_key, px_x, px_y in zip(*field_units.fetch('KEY', 'px_x', 'px_y')):
+            px_coords = np.array([[px_y], [px_x]])
+            unit_x, unit_y, unit_z = [ndimage.map_coordinates(grid[..., i], px_coords,
+                                                              order=1)[0] for i in
+                                      range(3)]
+            unit_list.append({**key, **unit_key, 'stack_x': unit_x,
+                                               'stack_y': unit_y, 'stack_z': unit_z})
+        
+        return unit_list
     
+    def get_grid_from_param(self,a11,a21,a31,a12,a22,a32,delta_x,delta_y,delta_z,landmarks,deformations,rbf_radius,desired_res,field_dims):
+        from .utils import registration
+        from .utils import enhancement
+        import torch
+        # Create grid at desired resolution
+        grid = registration.create_grid(field_dims, desired_res=desired_res)  # h x w x 2
+        grid = torch.as_tensor(grid, dtype=torch.float32)
+
+        linear = torch.tensor([[a11, a12], [a21, a22], [a31, a32]])
+        translation = torch.tensor([delta_x, delta_y, delta_z])
+
+        affine_grid = registration.affine_product(grid, linear, translation)
+        grid_distances = torch.norm(grid.unsqueeze(-2) - landmarks, dim=-1)
+        grid_scores = torch.exp(-(grid_distances * (1 / rbf_radius)) ** 2)
+        warping_field = torch.einsum('whl,lt->wht', (grid_scores, deformations))
+
+        pred_grid = affine_grid + warping_field
+
+        return pred_grid.numpy()
+
     def make_distances(self,grid,key):
         pass
 
