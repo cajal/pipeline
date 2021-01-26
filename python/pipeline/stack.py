@@ -1633,7 +1633,7 @@ class Registration(dj.Computed):
             norm_deformations = deformations / torch.norm(deformations, dim=-1,
                                                           keepdim=True)
             cosine_similarity = torch.mm(norm_deformations, norm_deformations.t())
-            reg_term = -((cosine_similarity * landmark_scores).sum() /
+            reg_term = ((cosine_similarity * landmark_scores).sum() /
                          landmark_scores.sum())
 
             # Compute gradients
