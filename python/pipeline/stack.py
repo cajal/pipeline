@@ -1623,11 +1623,11 @@ class Registration(dj.Computed):
             unit_np_stack_coords['unit_z'] = round(unit_np_stack_coords['stack_z'] - unit_np_stack_coords['z'] + unit_np_stack_coords['um_depth']/2, 2)
 
 
-            matches_with_distance = unit_np_stack_coords.merge(train[['animal_id','scan_session','scan_idx','unit_id','nucleus_x_2p','nucleus_y_2p','nucleus_z_2p']],on=['animal_id','scan_session','scan_idx'])
+            matches_with_distance = unit_np_stack_coords.merge(train[['animal_id','scan_session','scan_idx','unit_id','nucleus_x_2p','nucleus_y_2p','nucleus_z_2p']],on=['animal_id','scan_session','scan_idx','unit_id'])
             nuclei_coords = torch.from_numpy(matches_with_distance[['nucleus_x_2p','nucleus_y_2p','nucleus_z_2p']].values.astype(float))
             unit_coords = torch.from_numpy(matches_with_distance[['unit_x','unit_y','unit_z']].values.astype(float))
 
-            l2_norm_loss = torch.norm(nuclei_coords - unit_coords)
+            l2_norm_loss = torch.norm(nuclei_coords - unit_coords,dim=1).sum()
 
             # Compute cosine similarity between landmarks (and weight em by distance)
             norm_deformations = deformations / torch.norm(deformations, dim=-1,
@@ -1637,7 +1637,7 @@ class Registration(dj.Computed):
                          landmark_scores.sum())
 
             # Compute gradients
-            loss = -1*l2_norm_loss + smoothness_factor * reg_term
+            loss = l2_norm_loss + smoothness_factor * reg_term
             print('Corr/loss at iteration {}: {:5.4f}/{:5.4f}'.format(i, -corr_loss,
                                                                       loss))
             loss.backward()
