@@ -1368,7 +1368,7 @@ class Registration(dj.Computed):
     @property
     def key_source(self):
         stacks = PreprocessedStack.proj(stack_session='session', stack_channel='channel')
-        return stacks * RegistrationTask * RegistrationGridSearch & "registration_method = 100"
+        return stacks * RegistrationTask * RegistrationGridSearch & "registration_method > 100"
 
     class Rigid(dj.Part):
         definition = """ # 3-d template matching keeping the stack straight
@@ -1633,13 +1633,13 @@ class Registration(dj.Computed):
             norm_deformations = deformations / torch.norm(deformations, dim=-1,
                                                           keepdim=True)
             cosine_similarity = torch.mm(norm_deformations, norm_deformations.t())
-            reg_term = ((cosine_similarity * landmark_scores).sum() /
+            reg_term = -((cosine_similarity * landmark_scores).sum() /
                          landmark_scores.sum())
 
             # Compute gradients
-            loss = l2_norm_loss + smoothness_factor * reg_term
-            print('Corr/loss at iteration {}: {:5.4f}/{:5.4f}'.format(i, -corr_loss,
-                                                                      loss))
+            lamda_ = 0.90
+            loss = (lambda_) * corr_loss + (1-lambda_) * l2_norm_loss + smoothness_factor * reg_term
+            print('Corr/loss at iteration {}: {:5.4f}/{:5.4f}'.format(i, -corr_loss,loss))
             loss.backward()
 
             # Update
