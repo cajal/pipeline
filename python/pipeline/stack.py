@@ -1616,7 +1616,7 @@ class Registration(dj.Computed):
             train = pd.read_csv('/mnt/lab/users/ramosaj/registration/registration_test_set_1-22-21')
             units = train[['animal_id','scan_session','scan_idx','unit_id']]
             unit_stack_coords = pd.DataFrame(unit_list).rename({'session':'scan_session'},axis=1).merge(units,on=['animal_id','scan_session','scan_idx','unit_id'])
-            stack_params = (stack.CorrectedStack & stack_key).proj('x','y','z','um_height','um_width','um_depth',stack_session='session').fetch(format='frame').reset_index()
+            stack_params = (CorrectedStack & stack_key).proj('x','y','z','um_height','um_width','um_depth',stack_session='session').fetch(format='frame').reset_index()
             unit_np_stack_coords = unit_stack_coords.merge(stack_params)
             unit_np_stack_coords['unit_x'] = round(unit_np_stack_coords['stack_x'] - unit_np_stack_coords['x'] + unit_np_stack_coords['um_width']/2, 2)
             unit_np_stack_coords['unit_y'] = round(unit_np_stack_coords['stack_y'] - unit_np_stack_coords['y'] + unit_np_stack_coords['um_height']/2, 2)
