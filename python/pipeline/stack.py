@@ -1627,7 +1627,7 @@ class Registration(dj.Computed):
             nuclei_coords = torch.from_numpy(matches_with_distance[['nucleus_x_2p','nucleus_y_2p','nucleus_z_2p']].values.astype(float))
             unit_coords = torch.from_numpy(matches_with_distance[['unit_x','unit_y','unit_z']].values.astype(float))
 
-            l2_norm_loss = torch.norm(nuclei_coords - unit_coords,dim=1).sum()
+            l2_norm_loss = torch.norm(nuclei_coords - unit_coords,dim=1).mean()
 
             # Compute cosine similarity between landmarks (and weight em by distance)
             norm_deformations = deformations / torch.norm(deformations, dim=-1,
