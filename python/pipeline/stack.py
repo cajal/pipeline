@@ -1637,7 +1637,7 @@ class Registration(dj.Computed):
                          landmark_scores.sum())
 
             # Compute gradients
-            lamda_ = 0.90
+            lambda_ = 0.90
             loss = (lambda_) * corr_loss + (1-lambda_) * l2_norm_loss + smoothness_factor * reg_term
             print('Corr/loss at iteration {}: {:5.4f}/{:5.4f}'.format(i, -corr_loss,loss))
             loss.backward()
