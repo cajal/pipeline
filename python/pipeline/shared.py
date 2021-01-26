@@ -211,45 +211,45 @@ class FilterMethod(dj.Lookup):
                ]
     
     
-    def _make_hamming_window(signal_fs, lowpass_fs, *args, **kwargs):
+    def _make_hamming_window(signal_freq, lowpass_freq, *args, **kwargs):
         """
         Create an array representing a hamming function which lowpass filters at lowpass_fs frequency on
         a signal of signal_fs frequency.
         
         Parameters:
-            signal_fs: Float/Int representing frequency of signal to be filtered in Hz (FPS)
-            lowpass_fs: Float/Int representing frequency to lowpass filter at in Hz
+            signal_freq: Float/Int representing frequency of signal to be filtered in Hz (FPS)
+            lowpass_freq: Float/Int representing frequency to lowpass filter at in Hz (FPS)
             
         Returns:
             hamming_filter: Numpy array of requested hamming window
         """
         
-        hamming_length = 2*round(signal_fs/lowpass_fs)+1
+        hamming_length = 2*round(signal_freq/lowpass_freq)+1
         hamming_filter = hamming(hamming_length, sym=True)
         hamming_filter = hamming_filter/np.sum(hamming_filter)
         
         return hamming_filter
 
 
-    def _lowpass_hamming(input_signal, signal_fs, lowpass_fs, *args, **kwargs):
+    def _lowpass_hamming(signal, signal_freq, lowpass_freq, *args, **kwargs):
         """
         Lowpass filters a given signal using a hamming window. Reflects the signal at start/end to avoid
         any edge artifacts. Filtering is zero-phase, meaning the signal will not be delayed in time after
         filtering.
         
         Parameters:
-            input_signal: Numpy array of the signal to be filtered
-            signal_fs: Float/Int sampling frequency of the input_signal in Hz (FPS)
-            lowpass_fs: Float/Int frequency to lowpass the signal at in Hz
+            signal: Numpy array of the signal to be filtered
+            signal_freq: Float/Int sampling frequency of the input_signal in Hz (FPS)
+            lowpass_freq: Float/Int frequency to lowpass the signal at in Hz
             
         Returns:
             filtered_signal: Numpy array of the lowpass filtered input signal
         """
         
-        hamming_filter = FilterMethod._make_hamming_window(signal_fs, lowpass_fs)
+        hamming_filter = FilterMethod._make_hamming_window(signal_freq, lowpass_freq)
 
         pad_length = len(hamming_filter)
-        padded_signal = np.pad(input_signal, pad_length, mode='reflect')
+        padded_signal = np.pad(signal, pad_length, mode='reflect')
 
         filtered_signal = convolve(padded_signal, hamming_filter, mode='same')
         filtered_signal = filtered_signal[pad_length:-pad_length]
@@ -257,27 +257,27 @@ class FilterMethod(dj.Lookup):
         return filtered_signal
 
 
-    def _bandpass_hamming(input_signal, signal_fs, lower_fs, upper_fs, *args, **kwargs):
+    def _bandpass_hamming(signal, signal_freq, lower_freq, upper_freq, *args, **kwargs):
         """
         Bandpass filters a given signal using a hamming window. Reflects the signal at the start/end to
         avoid any edge artifacts. Filtering is zero-phase, meaning the signal will not be delayed in time
         after filtering.
         
         Parameters:
-            input_signal: Numpy array of the signal to be filtered
-            signal_fs: Float/Int sampling frequency of the input_signal in Hz (FPS)
-            lower_fs: Float/Int lower frequency of bandpass in Hz
-            upper_fs: Float/Int upper frequency of bandpass in Hz
+            signal: Numpy array of the signal to be filtered
+            signal_freq: Float/Int sampling frequency of the input_signal in Hz (FPS)
+            lower_freq: Float/Int lower frequency of bandpass in Hz
+            upper_freq: Float/Int upper frequency of bandpass in Hz
             
         Returns:
             filtered_signal: Numpy array of the bandpass filtered input signal
         """
         
-        upper_hamming_filter = FilterMethod._make_hamming_window(signal_fs, upper_fs)
-        lower_hamming_filter = FilterMethod._make_hamming_window(signal_fs, lower_fs)
+        upper_hamming_filter = FilterMethod._make_hamming_window(signal_freq, upper_freq)
+        lower_hamming_filter = FilterMethod._make_hamming_window(signal_freq, lower_freq)
 
         pad_length = np.max((len(upper_hamming_filter), len(lower_hamming_filter)))
-        padded_signal = np.pad(input_signal, pad_length, mode='reflect')
+        padded_signal = np.pad(signal, pad_length, mode='reflect')
 
         highpass_signal = padded_signal - convolve(padded_signal, lower_hamming_filter, mode='same')
         filtered_signal = convolve(highpass_signal, upper_hamming_filter, mode='same')
@@ -286,28 +286,28 @@ class FilterMethod(dj.Lookup):
         return filtered_signal
     
     
-    def _median_filter(input_signal, signal_fs, window_sec, *args, **kwargs):
+    def _median_filter(signal, signal_freq, window_sec, *args, **kwargs):
         """
         Filters the signal by taking the median value within predefined window centered around every point
         in the signal. Reflects signal at the start/end to avoid any edge artifacts.
         
         Parameters:
-            input_signal: Numpy array of the signal to be filtered
-            signal_fs: Float/Int sampling frequency of the input_signal in Hz (FPS)
+            signal: Numpy array of the signal to be filtered
+            signal_freq: Float/Int sampling frequency of the input_signal in Hz (FPS)
             window_sec: Float/Int length of filter window to look for median in seconds
             
         Returns:
             filtered_signal: Numpy array of the median filtered input signal
         """
         
-        window_idx_length = round(signal_fs * window_sec)
+        window_idx_length = round(signal_freq * window_sec)
         
         ## Window length must be odd
         if window_idx_length % 2 == 0:
             window_idx_length = window_idx_length + 1
         
         pad_length = window_idx_length
-        padded_signal = np.pad(input_signal, pad_length, mode='reflect')
+        padded_signal = np.pad(signal, pad_length, mode='reflect')
         
         filtered_signal = medfilt(padded_signal, window_idx_length)
         filtered_signal = filtered_signal[pad_length:-pad_length]
@@ -315,7 +315,7 @@ class FilterMethod(dj.Lookup):
         return filtered_signal
     
     
-    def _nan_filler(input_signal, *args, **kwargs):
+    def _nan_filler(signal, *args, **kwargs):
         """
         Linearly interpolates over all NaNs in a signal. Values outside of non-NaN signal bounds
         are filled with nearest neighbor.
@@ -323,21 +323,21 @@ class FilterMethod(dj.Lookup):
         ex. [np.nan, np.nan, 1, 2, 3, np.nan, 5] -> [1, 1, 1, 2, 3, 4, 5]
         
         Parameters:
-            input_signal: Numpy array of the signal to be filtered
+            signal: Numpy array of the signal to be filtered
             
         Returns:
             filtered_signal: Numpy array of the interpolate signal with no NaNs
         """
         
-        filtered_signal = np.copy(input_signal)
         
-        nan_bool_mask = np.isnan(filtered_signal)
+        
+        nan_bool_mask = np.isnan(signal)
         nan_idx = nan_bool_mask.nonzero()[0]
         non_nan_bool_mask = ~nan_bool_mask
         non_nan_idx = (non_nan_bool_mask).nonzero()[0]
         
+        filtered_signal = np.copy(signal)
         filled_values = np.interp(nan_idx, non_nan_idx, filtered_signal[non_nan_idx])
-        
         filtered_signal[nan_idx] = filled_values
         
         return filtered_signal
@@ -350,8 +350,8 @@ class FilterMethod(dj.Lookup):
         
         ## Check if there are NaNs
         if filter_method not in filters_allowing_nans:
-            if 'input_signal' in kwargs:
-                signal_to_test = kwargs['input_signal']
+            if 'signal' in kwargs:
+                signal_to_test = kwargs['signal']
             else:
                 signal_to_test = args[0]
             if np.any(np.isnan(signal_to_test)):
@@ -359,20 +359,20 @@ class FilterMethod(dj.Lookup):
         
         ## Run requested filter
         if filter_method == "0.5Hz Hamming Lowpass":
-            kwargs['lowpass_fs'] = 0.5
+            kwargs['lowpass_freq'] = 0.5
             filtered_signal = FilterMethod._lowpass_hamming(*args, **kwargs)
         
         elif filter_method == "1Hz Hamming Lowpass":
-            kwargs['lowpass_fs'] = 1
+            kwargs['lowpass_freq'] = 1
             filtered_signal = FilterMethod._lowpass_hamming(*args, **kwargs)
         
         elif filter_method == "2Hz Hamming Lowpass":
-            kwargs['lowpass_fs'] = 2
+            kwargs['lowpass_freq'] = 2
             filtered_signal = FilterMethod._lowpass_hamming(*args, **kwargs)
         
         elif filter_method == "0.1 - 1Hz Hamming Bandpass":
-            kwargs['lower_fs'] = 0.1
-            kwargs['upper_fs'] = 1
+            kwargs['lower_freq'] = 0.1
+            kwargs['upper_freq'] = 1
             filtered_signal = FilterMethod._bandpass_hamming(*args, **kwargs)
         
         elif filter_method == '0.5sec Median Filter':
@@ -398,9 +398,9 @@ class FilterMethod(dj.Lookup):
         
         ## Linearly interpolate over NaNs
         nan_filter_func = (FilterMethod & {'filter_method': 'NaN Filler'}).run_filter
-        if 'input_signal' in kwargs:
-            nan_indices = np.where(np.isnan(kwargs['input_signal']))[0]
-            kwargs['input_signal'] = nan_filter_func(kwargs['input_signal'])
+        if 'signal' in kwargs:
+            nan_indices = np.where(np.isnan(kwargs['signal']))[0]
+            kwargs['signal'] = nan_filter_func(kwargs['signal'])
         else:
             nan_indices = np.where(np.isnan(args[0]))[0]
             args = list(args)
