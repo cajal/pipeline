@@ -1448,7 +1448,7 @@ class Registration(dj.Computed):
         lr_translation = 1  # learning rate / step size for the translation vector
         affine_iters = 200  # number of optimization iterations to learn the affine parameters
         random_seed = 1234  # seed for torch random number generator (used to initialize deformations)
-        lr_deformations = 0.01  # learning rate / step size for deformation values
+        lr_deformations = 1  # learning rate / step size for deformation values
         wd_deformations = 1e-4  # weight decay for deformations; controls their size
         nonrigid_iters = 200  # number of optimization iterations for the nonrigid parameters
 
@@ -1637,8 +1637,8 @@ class Registration(dj.Computed):
                          landmark_scores.sum())
 
             # Compute gradients
-            lambda_ = 0.90
-            loss = l2_norm_loss + smoothness_factor * reg_term
+            lamda_ = 0.90
+            loss =  l2_norm_loss + smoothness_factor * reg_term
             print('Corr/loss at iteration {}: {:5.4f}/{:5.4f}'.format(i, -corr_loss,loss))
             loss.backward()
 
