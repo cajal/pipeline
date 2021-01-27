@@ -17,10 +17,10 @@ spec:
             operator: "Equal"
             value: "true"
             effect: "NoSchedule"
-         volumes:
-          - name: mnt
-            hostPath:
-              path: /mnt
+          volumes:
+            - name: mnt
+              hostPath:
+                path: /mnt
           affinity: # Affinity to select just at-compute006 # certain nodes with 11GB, 12GB, or 24GB memory
             nodeAffinity:
               requiredDuringSchedulingIgnoredDuringExecution: # Require nodes to have this label
@@ -29,7 +29,7 @@ spec:
                   - key: kubernetes.io/hostname # Target label is hostname #gpu_mem_size
                     operator: In # Key must have one of the following values
                     values:
-                   - at-compute006
+                      - at-compute006
           containers:
           - name: minion
             image: at-docker.ad.bcm.edu:5000/pipeline:latest
