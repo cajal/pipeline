@@ -31,7 +31,7 @@ spec:
                     - jr-compute001
           containers:
           - name: minion
-            image: ninai/pipeline:latest
+            image: at-docker.ad.bcm.edu:5000/pipeline:latest
             volumeMounts:
             - name: mnt
               mountPath: /mnt
