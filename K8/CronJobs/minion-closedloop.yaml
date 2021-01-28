@@ -30,6 +30,7 @@ spec:
                     operator: In # Key must have one of the following values
                     values:
                       - at-compute006
+          priorityClassName: high-priority
           containers:
           - name: minion-closedloop
             image: at-docker.ad.bcm.edu:5000/pipeline:latest

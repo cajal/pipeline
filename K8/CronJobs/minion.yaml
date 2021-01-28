@@ -29,6 +29,7 @@ spec:
                     - at-compute005
                     - at-compute006
                     - jr-compute001
+          priorityClassName: high-priority
           containers:
           - name: minion
             image: at-docker.ad.bcm.edu:5000/pipeline:latest
