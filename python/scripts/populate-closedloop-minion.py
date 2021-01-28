@@ -41,6 +41,7 @@ for pipe in [reso, meso]:
     pipe.MaskClassification.populate(next_scans, {'classification_method': 2},
                                      reserve_jobs=True, suppress_errors=True)
     pipe.ScanSet.populate(next_scans, reserve_jobs=True, suppress_errors=True)
+    time.sleep(60)
     pipe.Activity.populate(next_scans, {'spike_method': 5}, reserve_jobs=True,
                            suppress_errors=True)
     full_scans = (pipe.ScanInfo.proj() & pipe.Activity) - (pipe.ScanInfo.Field -
