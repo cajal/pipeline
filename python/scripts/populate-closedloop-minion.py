@@ -2,6 +2,7 @@
 from pipeline import experiment, reso, meso, fuse, stack, pupil, treadmill, posture
 from stimulus import stimulus
 from stimline import tune
+import time
 
 # # Scans
 # for priority in range(120, -130, -10):  # highest to lowest priority
