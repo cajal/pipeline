@@ -3,11 +3,15 @@ import datajoint as dj
 from datajoint.jobs import key_hash
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import scanreader
 
 from . import experiment, injection, notify, shared
 from .utils import galvo_corrections, signal, quality, mask_classification, performance
 from .exceptions import PipelineException
+
+import logging
+logger = logging.getLogger(__name__)
 
 
 schema = dj.schema('pipeline_meso', locals(), create_tables=False)
@@ -1892,3 +1896,131 @@ class Func2StructMatching(dj.Computed):
             iou_matrix[:, best_func] = 0
 
 
+def rename(d, **kwargs):
+    """
+    Rename the dictionary's key according to name mapping specified in **kwargs.
+    If a key is renamed into another key that already existed, the renamed key and the
+    associated value is used.
+    
+    Example:
+    >> rename({'a': 5, 'b': 7}, a='x', b='y')
+    {'x': 5, 'y': 7}
+    
+    >> rename({'a': 5', 'b': 7}, a='b')
+    {'b': 5}
+    
+    """
+    return {kwargs[k] if k in kwargs else k: v for k, v in d.items() if k not in kwargs.values() or k in kwargs}
+
+@schema
+class ProximityCellMatch(dj.Computed):
+    """
+    Finds units in the target scan that is closest in distance to the source unit with repsect to a structural
+    scan. Use the following example to effectively find matched units across two scans.
+
+    Usage Example:
+        Consider that you want to match in scan 12345-1-15 (source scan) to scan 12345-3-5 (target scan). Furthermore
+        assume you have a list of unit ids from the source scan and call this variable `unit_ids`.
+        >> source_scan = dict(animal_id=12345, src_session=1, src_scan_idx=15)
+        >> target_scan = dict(animal_id=12345, session=3, scan_idx=5)
+        >> unit_ids = [3, 10, 30, ...]  # a list of unit ids in the source scan to find match
+        # create a list of keys
+        >> unit_keys = [dict(source_scan, **target_scan, src_unit_id=unit_id) for unit_id in unit_ids]]
+        # finally populate the table
+        >> ProximityCellMatch.populate(unit_keys)
+    """
+    definition = """
+    -> StackCoordinates.UnitInfo.proj(src_session='session', src_scan_idx='scan_idx', src_field='field', src_unit_id='unit_id')
+    -> ScanInfo # target cells
+    ---
+    -> ScanSet.Unit
+    match_distance: float   # distance between matched units in um
+    """
+    
+    def make(self, key):
+        src_map = dict(src_session='session', src_scan_idx='scan_idx', src_field='field', src_unit_id='unit_id')
+        src_key = rename(key, **src_map)
+        src_x, src_y, src_z = (StackCoordinates.UnitInfo() & src_key).fetch1('stack_x','stack_y','stack_z')
+
+        # only consider masks classified as "soma"
+        soma_units = (ScanSet.Unit() * MaskClassification.Type() & 'type="soma"')
+        dest_unit_keys, dest_x, dest_y, dest_z = (StackCoordinates.UnitInfo() & key & soma_units).fetch('KEY',
+                                                                                                     'stack_x',
+                                                                                                     'stack_y',
+                                                                                                     'stack_z',
+                                                                                                     order_by='unit_id')
+        if len(dest_unit_keys) == 0:
+            logger.info('Target scan is not matched to this structural set')
+            return
+        
+        dist = np.sqrt((dest_x - src_x) ** 2 + (dest_y - src_y) ** 2 + (dest_z - src_z) ** 2)
+        pos = dist.argmin()
+        min_dist = dist[pos]
+        
+        key = dict(key, **dest_unit_keys[pos])
+        key['match_distance'] = min_dist
+        self.insert1(key, ignore_extra_fields=True)
+        
+
+@schema
+class BestProximityCellMatch(dj.Computed):
+    """
+    Given a set of source units matched against the target scan via one or more structural scans,
+    find the "concensus" match by picking the target unit that was matched most frequently across
+    the structural scans.
+
+    WARNING: 
+    
+    The result of this table depends on the state of ProximityCellMatch table. For an example,
+    if a source unit dict(animal_id=12345, src_session=1, src_scan_idx=15, src_unit_id=10) was matched
+    against target scan dict(animal_id=12345, session=3, scan_idx=5) via three structural scans, there are
+    three "matched" entries found in ProximityCellMatch. The "best" match are then assessed across the
+    existing three such matches, to find the unit with most frequent match. 
+    If, however, you then later provide additional structural scans and/or fill out ProximityCellMatch
+    such that there are now five entries for the same source unit - target scan combination,
+    the result of BestProximityCellMatch that you have computed earlier will NOT reflect the result you
+    would get by computing the entry again now based on five such matches.
+
+    In other words, BestProximityCellMatch only yields the "best" match to the extent the information
+    is available in ProximityCellMatch at the time this table was populated. There is no guarantee that
+    the result of this table's computation will remain the best / consistent. 
+
+    If ever in doubt, you are recommended to drop the relevant best matches and recompute the entry.
+
+    Also note that the table is filled at the level of source SCAN - target scan pair, and not the
+    source scan unit - target scan pair. In other words, if you want to recompute the best match between
+    a single unit in a source scan - target scan, you will have to delete ALL best match entries found
+    between the source and target scan.
+    """
+    definition = """
+    -> ScanSet.Unit.proj(src_session='session', src_scan_idx='scan_idx', src_unit_id='unit_id')
+    -> ScanInfo
+    ---
+    -> ScanSet.Unit        # most frequently matched unit id
+    match_freq:  int       # how many times it was matched
+    total_stacks: int      # number of stacks used to match
+    mean_distance: float   # average match distance (in um)
+    best_prox_ts: TIMESTAMP    # timestamp of the processing
+    """
+
+    @property
+    def key_source(self):
+        src_scan = ScanInfo.proj(src_session='session', src_scan_idx='scan_idx')
+        dst_scan = ScanInfo
+        return src_scan * dst_scan * shared.SegmentationMethod & ProximityCellMatch()
+
+    def make(self, key):
+        df = pd.DataFrame((ProximityCellMatch & key).fetch())
+        attrs = list(key) + ['src_unit_id']
+
+        def get_info(df):
+            vc = df['unit_id'].value_counts()
+            vals = {}
+            vals['unit_id'] = int(vc.index[0])
+            vals['match_freq'] = vc.iloc[0]
+            vals['total_stacks'] = len(df)
+            vals['mean_distance'] = df.groupby('unit_id').mean().loc[vals['unit_id']]['match_distance']
+            return pd.Series(vals)
+
+        v = df.groupby(attrs).apply(get_info).reset_index()
+        self.insert(v.to_records(index=False))
