@@ -3,6 +3,15 @@ from pipeline import experiment, reso, meso, fuse, stack, pupil, treadmill, post
 from stimulus import stimulus
 from stimline import tune
 import time
+import logging 
+import datajoint as dj 
+
+## database logging code 
+
+logging.basicConfig(level=logging.ERROR)
+logging.getLogger('datajoint.connection').setLevel(logging.DEBUG)
+if hasattr(dj.connection, 'query_log_max_length'):
+    dj.connection.query_log_max_length = 3000 
 
 # # Scans
 # for priority in range(120, -130, -10):  # highest to lowest priority
