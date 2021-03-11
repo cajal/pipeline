@@ -64,6 +64,9 @@ stack.PreprocessedStack.populate(stack.RegistrationTask.proj(session='stack_sess
                                                              channel='stack_channel'),
                                  reserve_jobs=True, suppress_errors=True)
 stack.Registration.populate(reserve_jobs=True, suppress_errors=True)
+next_drifts = stack.DriftTask().fetch(dj.key)
+stack.RegistrationOverTime(next_drifts,reserve_jobs=True,suppress_errors=True)
+stack.Drift(next_drifts,reserve_jobs=True,supress_errors=True)
 
 # # tune (these are memory intensive)
 # tune.STA.populate(next_scans, reserve_jobs=True, suppress_errors=True)

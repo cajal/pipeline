@@ -1514,7 +1514,7 @@ class Activity(dj.Computed):
         definition = """ # deconvolved calcium acitivity
 
         -> ScanSet.Unit
-        -> shared.SpikeMethod
+        -> shared.S pikeMethod
         ---
         -> Activity                         # for it to act as part table of Activity
         trace               : longblob

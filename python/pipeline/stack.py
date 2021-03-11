@@ -1819,6 +1819,25 @@ class FieldSegmentation(dj.Computed):
                                     'mask_y': mask_y, 'mask_x': mask_x,
                                     'distance': distance})
 
+@schema
+class DriftTask(dj.Manual):
+    definition = """ # declare scan fields to register to a stack as well as channels and method used
+
+    -> CorrectedStack.proj(stack_session='session') # animal_id, stack_session, stack_idx, volume_id
+    -> shared.Channel.proj(stack_channel='channel')
+    -> experiment.Scan.proj(scan_session='session')  # animal_id, scan_session, scan_idx
+    -> shared.Channel.proj(scan_channel='channel')
+    -> shared.Field
+    -> shared.RegistrationMethod
+    """
+    def fill(self,scan_key,stack_key,field,channel):
+        stack_key['stack_session'] = stack_key.pop('session')
+        
+        scan_key['scan_session'] = scan_key.pop('session')
+        key = {**scan_key,**stack_key,'channel':channel,'field':field}
+        
+
+
 
 @schema
 class RegistrationOverTime(dj.Computed):
