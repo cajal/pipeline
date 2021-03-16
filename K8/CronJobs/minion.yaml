@@ -5,8 +5,8 @@ metadata:
 spec:
   schedule: "*/5 * * * *" # every 5 minutes
   concurrencyPolicy: Allow
-  failedJobHistoryLimit: 30
-  successfulJobHistoryLimit: 30
+  failedJobsHistoryLimit: 30
+  successfulJobsHistoryLimit: 30
   jobTemplate:
     spec:
       parallelism: 1  # how many process in parallel I want
