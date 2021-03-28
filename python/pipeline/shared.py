@@ -224,7 +224,7 @@ class FilterMethod(dj.Lookup):
             hamming_filter: Numpy array of requested hamming window
         """
         
-        hamming_length = 2*round(signal_freq/lowpass_freq)+1
+        hamming_length = int(2*round(signal_freq/lowpass_freq,0)+1)
         hamming_filter = hamming(hamming_length, sym=True)
         hamming_filter = hamming_filter/np.sum(hamming_filter)
         
