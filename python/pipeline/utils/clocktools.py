@@ -1,10 +1,12 @@
-import numbers
+import warnings
 import numpy as np
 import datajoint as dj
-from scipy import interpolate
+import matplotlib.pyplot as plt
 from stimulus import stimulus
-from pipeline.exceptions import PipelineException
+from scipy import interpolate
+from itertools import groupby
 from pipeline import treadmill, fuse, shared, odor
+from pipeline.exceptions import PipelineException
 
 pupil = dj.create_virtual_module("pipeline_eye", "pipeline_eye")
 
@@ -27,26 +29,18 @@ def find_idx_boundaries(indices, drop_single_idx=False):
 
     """
 
-    ## Since list slicing counts up to but not including ends, we need to add 1 to all detected end locations
-    ends = np.where(np.diff(indices) > 1)[0] + 1
-
-    ## Starts and ends will equal each other since list slicing includes start values, but start needs 0 appended
-    starts = np.copy(ends)
-    if len(starts) == 0 or starts[0] != 0:
-        starts = np.insert(starts, 0, 0)
-
-    ## np.diff returns an array one smaller than the indices list, so we need to add the last idx to the ends
-    if len(ends) == 0 or ends[-1] != len(indices):
-        ends = np.insert(ends, len(ends), len(indices))
-
-    ## Loop through all continuous idx start & end to see if any are too small (length = 1)
     events = []
-    for start, end in zip(starts, ends):
-        if end - start < 2:
+
+    ## Basic idea: If you
+    for k, g in groupby(enumerate(indices), lambda x: x[0] - x[1]):
+
+        event = np.array([e[1] for e in g])
+
+        if len(event) == 1:
             if not drop_single_idx:
-                raise PipelineException(f"Disconnected index found at index {start}")
+                raise PipelineException(f"Disconnected index found: {event[0]}")
         else:
-            events.append(indices[start:end])
+            events.append(event)
 
     return events
 
@@ -74,32 +68,14 @@ def find_time_boundaries(indices, times, drop_single_idx=False):
 
     """
 
-    ## If times are not the same size as indices, assume these times are for all recordings
-    ## and the recording time for IDX NUM is times[NUM] (ie. idx 5 was recorded at times[5])
-    if len(times) != len(indices):
-        times = np.array(times)[np.array(indices)]
+    idx_events = find_idx_boundaries(indices, drop_single_idx)
 
-    ## Since list slicing counts up to but not including ends, we need to add 1 to all detected end locations
-    ends = np.where(np.diff(indices) > 1)[0] + 1
-
-    ## Starts and ends will equal each other since list slicing includes start values, but start needs 0 appended
-    starts = np.copy(ends)
-    if len(starts) == 0 or starts[0] != 0:
-        starts = np.insert(starts, 0, 0)
-
-    ## np.diff returns an array one smaller than the indices list, so we need to add the last idx to the ends
-    if len(ends) == 0 or ends[-1] != len(indices):
-        ends = np.insert(ends, len(ends), len(indices))
-
-    ## Loop through all continuous idx start & end to see if any are too small (length = 1)
     time_boundaries = []
-    for start, end in zip(starts, ends):
-        if end - start < 2:
-            if not drop_single_idx:
-                raise PipelineException(f"Disconnected index found at index {start}")
-        else:
-            bounds = [np.nanmin(times[start:end]), np.nanmax(times[start:end])]
-            time_boundaries.append(bounds)
+    for idx_event in idx_events:
+
+        start = np.nanmin(times[idx_event])
+        end = np.nanmax(times[idx_event])
+        time_boundaries.append(np.array([start, end]))
 
     return time_boundaries
 
@@ -110,7 +86,45 @@ def fetch_timing_data(
     target_type: str,
     debug: bool = True,
 ):
+    """
+    Fetches timing data for source and target recordings. Adjusts both timings based on any calculable delays. Returns two
+    arrays. Converts target recording times on target clock into target recording times on source clock if the two are different.
 
+        Parameters:
+
+                scan_key: A dictionary specifying a single scan and/or field. A single field must be defined if requesting
+                          a source or target from ScanImage. If key specifies a single unit, unit delay will be added to
+                          all timepoints recorded. Single units can be specified via unique mask_id + field or via unit_id.
+                          If only field is specified, average field delay will be added.
+
+                source_type: A string specifying what recording times to fetch for source_times. Both target and source times
+                             will be returned on whatever clock is used for source_type. Fluorescence and deconvolution have
+                             a dash followed by "behavior" or "stimulus" to refer to which clock you are using.
+                             Supported options:
+                                 'fluorescence-stimulus', 'deconvolution-stimulus', ,'fluorescence-behavior',
+                                 'deconvolution-behavior', 'pupil', 'treadmill', 'respiration'
+
+                target_type: A string specifying what recording times to fetch for target_times. Both target and source times
+                             will be returned on whatever clock is used for source_type. Fluorescence and deconvolution have
+                             a dash followed by "behavior" or "stimulus" to refer to which clock you are using.
+                             Supported options:
+                                 'fluorescence-stimulus', 'deconvolution-stimulus', ,'fluorescence-behavior',
+                                 'deconvolution-behavior', 'pupil', 'treadmill', 'respiration'
+
+                debug: Set function to print helpful debug text while running
+
+
+        Returns:
+
+                source_times: Numpy array of times for source recording on source clock
+
+                target_times: Numpy array of times for target recording on source clock
+    """
+    
+    ## Make settings strings lowercase
+    source_type = source_type.lower()
+    target_type = target_type.lower()
+    
     ##
     ## Set pipe, error check scan_key, and fetch field offset
     ##
@@ -207,8 +221,9 @@ def fetch_timing_data(
     ## Error check inputs
     if source_type not in data_source_lookup or target_type not in data_source_lookup:
         msg = (
-            f"source and target type combination '{source_type}' and '{target_type}' not supported. "
-            f"Valid values are 'scan-behavior', 'scan-stimulus', 'treadmill', 'respiration' or 'pupil'."
+            f"Source and target type combination '{source_type}' and '{target_type}' not supported. "
+            f"Valid values are 'fluorescence-behavior', 'fluorescence-stimulus', 'deconvolution-behavior', "
+            f"'deconvolution-stimulus', treadmill', 'respiration' or 'pupil'."
         )
         raise PipelineException(msg)
 
@@ -262,10 +277,10 @@ def fetch_timing_data(
         interp_source = (interp_source_table & scan_key).fetch1("frame_times").squeeze()
         interp_target = (interp_target_table & scan_key).fetch1("frame_times").squeeze()
 
-        source2target_interp = interpolate.interp1d(
-            interp_source, interp_target, fill_value="extrapolate"
+        target2source_interp = interpolate.interp1d(
+            interp_target, interp_source, fill_value="extrapolate"
         )
-        source_times = source2target_interp(source_times)
+        target_times = target2source_interp(target_times)
 
     return source_times, target_times
 
@@ -278,9 +293,47 @@ def interpolate_signal_data(
     target_times,
     debug: bool = True,
 ):
+    """
+    Interpolates target_type recording onto source_times. If target FPS is higher than source FPS, run lowpass hamming
+    filter at source Hz over target_type recording before interpolating. Automatically slices ScanImage times and runs
+    error checking and length mismatches.
 
-    ## Pre-format source_type
+        Parameters:
+
+                scan_key: A dictionary specifying a single scan and/or field. A single field must be defined if requesting
+                          a source or target from ScanImage. If key specifies a single unit, unit delay will be added to
+                          all timepoints recorded. Single units can be specified via unique mask_id + field or via unit_id.
+                          If only field is specified, average field delay will be added.
+
+                source_type: A string specifying what indices you want to convert from. Fluorescence and deconvolution
+                             have a dash followed by "behavior" or "stimulus" to refer to which clock you are using.
+                             Supported options:
+                                 'fluorescence-stimulus', 'deconvolution-stimulus', ,'fluorescence-behavior',
+                                 'deconvolution-behavior', 'pupil', 'treadmill', 'respiration'
+
+                target_type: A string specifying what indices to convert into. Fluorescence and deconvolution have a
+                             dash followed by "behavior" or "stimulus" to refer to which clock you are using.
+                             Supported options:
+                                 'fluorescence-stimulus', 'deconvolution-stimulus', ,'fluorescence-behavior',
+                                 'deconvolution-behavior', 'pupil', 'treadmill', 'respiration'
+
+                source_times: Numpy array of times for source recording on source clock. Assumed to be corrected for
+                              delays such as average field delay or specific unit delay.
+
+                target_times: Numpy array of times for target recording on source clock. Assumed to be corrected for
+                              delays such as average field delay or specific unit delay.
+
+                debug: Set function to print helpful debug text while running
+
+
+        Returns:
+
+                interpolate_signal: Numpy array of target_type signal interpolated to recording times of source_type
+    """
+
+    ## Make settings strings lowercase
     source_type = source_type.lower()
+    target_type = target_type.lower()
 
     ## Define the pipe (meso/reso) to use
     if len(fuse.MotionCorrection & scan_key) == 0:
@@ -303,152 +356,180 @@ def interpolate_signal_data(
     ## Fetch required signal
     ## Note: Pupil requires .fetch() while other signals require .fetch1().
     ##       It is easier to make an if-elif-else structure than a lookup dictionary in this case.
-    if source_type in ("fluorescence-stimulus", "fluorescence-behavior"):
-        source_signal = (pipe.Fluorescence.Trace & scan_key).fetch1("trace")
-    if source_type in ("deconvolution-stimulus", "deconvolution-behavior"):
+    if target_type in ("fluorescence-stimulus", "fluorescence-behavior"):
+        target_signal = (pipe.Fluorescence.Trace & scan_key).fetch1("trace")
+    if target_type in ("deconvolution-stimulus", "deconvolution-behavior"):
         unit_key = (pipe.ScanSet.Unit & scan_key).fetch1()
-        source_signal = (pipe.Activity.Trace & unit_key).fetch1("trace")
-    if source_type == "pupil":
-        source_signal = (pupil.FittedPupil.Circle & scan_key).fetch("radius")
-    if source_type == "treadmill":
-        source_signal = (treadmill.Treadmill & scan_key).fetch1("treadmill_vel")
+        target_signal = (pipe.Activity.Trace & unit_key).fetch1("trace")
+    if target_type == "pupil":
+        target_signal = (pupil.FittedPupil.Circle & scan_key).fetch("radius")
+    if target_type == "treadmill":
+        target_signal = (treadmill.Treadmill & scan_key).fetch1("treadmill_vel")
 
     ## Calculate FPS to determine if lowpass filtering is needed
     source_fps = 1 / np.nanmedian(np.diff(source_times))
     target_fps = 1 / np.nanmedian(np.diff(target_times))
 
     ## Fill NaNs to prevent interpolation errors, but store NaNs for later to add back in after interpolating
-    target_replace_nans = None  # Use this as a switch to refill things later
-    if sum(np.isnan(source_signal)) > 0:
-        source_nan_indices = np.isnan(source_signal)
-        time_nan_indices = np.isnan(source_times)
-        source_replace_nans = np.logical_and(source_nan_indices, ~time_nan_indices)
-        if sum(source_replace_nans) > 0:
-            target_replace_nans = convert_clocks_idx_to_idx(
+    source_replace_nans = None  # Use this as a switch to refill things later
+    if sum(np.isnan(target_signal)) > 0:
+        target_nan_indices = np.isnan(target_signal)
+        time_nan_indices = np.isnan(target_times)
+        target_replace_nans = np.logical_and(target_nan_indices, ~time_nan_indices)
+        if sum(target_replace_nans) > 0:
+            source_replace_nans = convert_clocks(
                 scan_key,
-                np.where(source_replace_nans)[0],
-                source_type,
+                np.where(target_replace_nans)[0],
+                "indices",
                 target_type,
+                "indices",
+                source_type,
                 debug=False,
             )
         nan_filler_func = (
             shared.FilterMethod & {"filter_method": "NaN Filler"}
         ).run_filter
-        source_signal = nan_filler_func(source_signal)
+        target_signal = nan_filler_func(target_signal)
         if debug:
             biggest_time_gap = np.nanmax(
-                np.diff(source_times[np.where(~source_replace_nans)[0]])
+                np.diff(target_times[np.where(~target_replace_nans)[0]])
             )
             msg = (
-                f"Found NaNs in {sum(source_nan_indices)} locations, which corresponds to "
-                f"{round(100*sum(source_nan_indices)/len(source_signal),2)}% of total signal. "
+                f"Found NaNs in {sum(target_nan_indices)} locations, which corresponds to "
+                f"{round(100*sum(target_nan_indices)/len(target_signal),2)}% of total signal. "
                 f"Largest NaN gap found: {round(biggest_time_gap, 2)} seconds."
             )
             print(msg)
 
     ## Lowpass signal if needed
-    if target_fps < source_fps:
+    if source_fps < target_fps:
         if debug:
             msg = (
-                f"Source FPS of {round(source_fps,2)} is greater than target FPS {round(target_fps,2)}. "
-                f"Hamming lowpass filtering source signal before interpolation"
+                f"Target FPS of {round(target_fps,2)} is greater than source FPS {round(source_fps,2)}. "
+                f"Hamming lowpass filtering target signal before interpolation"
             )
             print(msg)
-        source_signal = shared.FilterMethod._lowpass_hamming(
-            signal=source_signal, signal_freq=source_fps, lowpass_freq=target_fps
+        target_signal = shared.FilterMethod._lowpass_hamming(
+            signal=target_signal, signal_freq=target_fps, lowpass_freq=source_fps
         )
 
     ## Timing and recording array lengths can differ slightly if recording was stopped mid-scan. Timings for
     ## the next X depths would be recorded, but fluorescence values would be dropped if all depths were not
     ## recorded. This would mean timings difference shouldn't be more than the number of depths of the scan.
-    if len(source_times) < len(source_signal):
+    if len(target_times) < len(target_signal):
         msg = (
-            f"More recording values than source time values exist! This should not be possible.\n"
-            f"Source time length: {len(source_times)}\n"
-            f"Source signal length: {len(source_signal)}"
+            f"More recording values than target time values exist! This should not be possible.\n"
+            f"Target time length: {len(target_times)}\n"
+            f"Target signal length: {len(target_signal)}"
         )
         raise PipelineException(msg)
 
-    elif len(source_times) > len(source_signal):
+    elif len(target_times) > len(target_signal):
 
         scan_res = pipe.ScanInfo.proj() & scan_key  ## To make sure we select all fields
         z_plane_num = len(dj.U("z") & (pipe.ScanInfo.Field & scan_res))
-        if (len(source_times) - len(source_signal)) > z_plane_num:
+        if (len(target_times) - len(target_signal)) > z_plane_num:
             msg = (
                 f"Extra timing values exceeds reasonable error bounds. "
-                f"Error length of {len(source_times) - len(source_signal)} with only {z_plane_num} z-planes."
+                f"Error length of {len(target_times) - len(target_signal)} with only {z_plane_num} z-planes."
             )
             raise PipelineException(msg)
 
         else:
-            
-            shorter_length = np.min((len(source_times), len(source_signal)))
-            source_times = source_times[:shorter_length]
-            source_signal = source_signal[:shorter_length]
+
+            shorter_length = np.min((len(target_times), len(target_signal)))
+            source_times = target_times[:shorter_length]
+            source_signal = target_signal[:shorter_length]
             if debug:
-                length_diff = np.abs(len(source_times) - len(source_signal))
+                length_diff = np.abs(len(target_times) - len(target_signal))
                 msg = (
-                    f"Source times and source signal show length mismatch within acceptable error."
+                    f"Target times and target signal show length mismatch within acceptable error."
                     f"Difference of {length_diff} within acceptable bounds of {z_plane_num} z-planes."
                 )
                 print(msg)
 
-    ## Interpolating source signal into target timings
+    ## Interpolating target signal into source timings
     signal_interp = interpolate.interp1d(
-        source_times, source_signal, bounds_error=False
+        target_times, target_signal, bounds_error=False
     )
-    interpolated_signal = signal_interp(target_times)
-    if target_replace_nans is not None:
-        for target_nan_idx in target_replace_nans:
-            interpolated_signal[target_nan_idx] = np.nan
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        interpolated_signal = signal_interp(source_times)
+    if source_replace_nans is not None:
+        for source_nan_idx in source_replace_nans:
+            interpolated_signal[source_nan_idx] = np.nan
 
     return interpolated_signal
 
 
-def convert_clocks_idx_to_idx(
+def convert_clocks(
     scan_key: dict,
-    indices,
+    input_list,
+    source_format: str,
     source_type: str,
+    target_format: str,
     target_type: str,
-    return_interpolate: bool = False,
     drop_single_idx: bool = True,
     debug: bool = True,
 ):
     """
-    Converts indices of interest on one type of clock/recording to a different one to be used for slicing or processing.
+    Converts indices or times of interest on source clock to indices, times, or signals on target clock. Can convert
+    a collection of event-triggered fragments of indices/times or a single flat list. Can also be used as an automated
+    times/signal fetching function by setting input_list to None and source_type equal to target_type.
 
         Parameters:
 
-                scan_key: A dictionary specifying a single scan and/or field. A single field must be defined if requesting
-                          a source or target from ScanImage. If key specifies a single unit, unit delay will be added to
-                          all timepoints recorded. Single units can be specified via unique mask_id + field or via unit_id.
-                          If only field is specified, average field delay will be added.
+                scan_key: A dictionary specifying a single scan and/or field. A single field must be defined if
+                          requesting a source or target from ScanImage. If key specifies a single unit, unit delay
+                          will be added to all timepoints recorded. Single units can be specified via unique
+                          mask_id + field or via unit_id. If only field is specified, average field delay will be
+                          added.
 
-                indices: List/array of indices to convert or a boolean array with True values at indices of interest.
-                         NOTE: Set to None to use the entire source signal length.
-                         Indices can be discontinuous fragments (something like 20 indices around a several spikes)
-                         and the function will return of list of lists, each containings the corresponding target_idx
-                         fragments.
-                         ex. [25,26,27..,29,503,504...] OR [False False ... True True True False...] OR None
 
-                source_type: A string specifying what indices you want to convert from. Fluorescence and deconvolution
-                             have a dash followed by "behavior" or "stimulus" to refer to which clock you are using.
-                             Supported options: 
+                input_list: List/array/None. Depending on the source_format, there are many possible structures:
+
+                             - source_type='indices'
+                                 1) List/array of indices to convert or a boolean array with True values at indices
+                                    of interest. Indices can be discontinuous fragments (something like 20 indices
+                                    around a several spikes) and the function will return of list of lists, each
+                                    containings the corresponding target_idx fragments.
+                                 2) None. Set input_list to None to use all indices where source time is not NaN.
+
+                             - source_type='times'
+                                 1) List of lists containing [start,stop] boundaries for times of note on source clock.
+                                    Start/Stop times are included (>=,<=). These boundaries are converted to all indices
+                                    equal to or between recording times on target recording.
+                                 2) None. Set input_list to None to use all times where source time is not NaN.
+
+
+                source_format: A string specifying what the input_list variable represents and what structure to expect.
+                               See details for input_list variable to learn more.
+                               Supported options:
+                                   'indices', 'times'
+
+
+                source_type: A string specifying what indices/times you want to convert from. Fluorescence and
+                             deconvolution have a dash followed by "behavior" or "stimulus" to refer to which clock
+                             you are using.
+                             Supported options:
                                  'fluorescence-stimulus', 'deconvolution-stimulus', ,'fluorescence-behavior',
                                  'deconvolution-behavior', 'pupil', 'treadmill', 'respiration'
 
-                target_type: A string specifying what indices to convert into. Fluorescence and deconvolution have a 
+
+                target_format: A string specifying what values to return. "Times" has a dash followed by "source"
+                               or "target" to specify if the returning times should be on the source clock or on
+                               the target clock. If set to "signal", returns interpolated target signal on the
+                               corresponding source_type recording times specified by input_list.
+                               Supported options:
+                                   'indices', 'times-source', 'times-target', 'signal'
+
+
+                target_type: A string specifying what indices to convert into. Fluorescence and deconvolution have a
                              dash followed by "behavior" or "stimulus" to refer to which clock you are using.
-                             Supported options: 
+                             Supported options:
                                  'fluorescence-stimulus', 'deconvolution-stimulus', ,'fluorescence-behavior',
                                  'deconvolution-behavior', 'pupil', 'treadmill', 'respiration'
 
-                return_interpolate: Boolean with the following behavior
-                                     - True: Interpolate source signal onto target clock, return interpolated signal
-                                             at indices instead of target indices
-                                             NOTE: NaNs in source signal are linearly interpolated over and then
-                                                   filled back in after interpolation onto target indices.
-                                     - False: Return corresponding indices for target
 
                 drop_single_idx: Boolean with the following behavior
                                      - True: Drop any signal fragments which would create a signal of length 1.
@@ -457,72 +538,155 @@ def convert_clocks_idx_to_idx(
                                     ex. Source IDX [1,2,...,300] on a 500HZ recording will only correspond to
                                         target IDX [1] if target is recorded at 1Hz.
 
+
                 debug: Set function to print helpful debug text while running
 
 
         Returns:
 
-                requested_array: Numpy array of corresponding indices in target type or interpolated source signal 
-                                 during target indices.
-                                 
+                requested_array: Numpy array of corresponding indices, times, or interpolated target signal. If
+                multiple continuous fragments or time boundaries are in input_list, return value is a list of arrays.
+
+
         Warnings:
-        
-                * NaN refilling for source signal will only refill values if NaNs stretch for multiple indices on 
-                  target clock
-                  
+
+                * NaN refilling for signal interpolation will only refill values if NaNs stretch for multiple indices
+                  on target clock
+
                 * Recording points where the time value is NaN are dropped from analysis/processing
+
+
+        Examples:
+
+                Fetch fluorescence signal for one unit:
+
+                    >>>key = dict(animal_id=17797, session=4, scan_idx=7, field=1, segmentation_method=6, mask_id=1, tracking_method=2)
+                    >>>settings = dict(scan_key=key, input_list=None, source_format='indices', source_type='fluorescence-behavior',
+                                       target_format='signal', target_type='fluorescence-behavior', drop_single_idx=True, debug=False)
+                    >>>fluorescence_signal = convert_clocks(settings)
+
+
+                Fetch recording times (on behavior clock) for one unit:
+
+                    >>>key = dict(animal_id=17797, session=4, scan_idx=7, field=1, segmentation_method=6, mask_id=1, tracking_method=2)
+                    >>>settings = dict(scan_key=key, input_list=None, source_format='indices', source_type='fluorescence-behavior',
+                                       target_format='times-source', target_type='fluorescence-behavior', drop_single_idx=True, debug=False)
+                    >>>fluorescence_times = convert_clocks(settings)
+
+
+                Interpolate entire treadmill trace to fluorescence recording times:
+
+                    >>>key = dict(animal_id=17797, session=4, scan_idx=7, field=1, segmentation_method=6, mask_id=1, tracking_method=2)
+                    >>>settings = dict(scan_key=key, input_list=None, source_format='indices', source_type='fluorescence-behavior',
+                                       target_format='signal', target_type='treadmill', drop_single_idx=True, debug=False)
+                    >>>interpolated_treadmill = convert_clocks(settings)
+
+
+                Convert discontinuous pupil IDX fragments to treadmill times (on behavior clock):
+
+                    >>>key = dict(animal_id=17797, session=4, scan_idx=7, field=1, segmentation_method=6, mask_id=1, tracking_method=2)
+                    >>>input_indices = np.concatenate(((np.arange(1000)), np.arange(1005, 2000)))
+                    >>>settings = dict(scan_key=key, input_list=input_indices, source_format='indices', source_type='pupil',
+                                       target_format='times-source', target_type='treadmill', drop_single_idx=True, debug=False)
+                    >>>treadmill_time_fragments = convert_clocks(settings)
+
+
+                Convert fluorescence time boundaries on behavior clock to fluorescence times on stimulus clock:
+
+                    >>>key = dict(animal_id=17797, session=4, scan_idx=7, field=1, segmentation_method=6, mask_id=1, tracking_method=2)
+                    >>>time_boundaries = [[400, 500], [501, 601]]
+                    >>>settings = dict(scan_key=key, input_list=time_boundaries, source_format='times', source_type='fluorescence-behavior',
+                                       target_format='times-target', target_type='fluorescence-stimulus', drop_single_idx=True, debug=False)
+                    >>>fluorescence_stimulus_times_in_bounds = convert_clocks(settings)
     """
+
+    ##
+    ## Make settings strings lowercase
+    ##
+
+    source_format = source_format.lower()
+    source_type = source_type.lower()
+    target_format = target_format.lower()
+    target_type = target_type.lower()
 
     ##
     ## Fetch source and target times, along with converting between Stimulus or Behavior clock if needed
     ##
 
-    source_times, target_times = fetch_timing_data(
+    source_times_source_clock, target_times_source_clock = fetch_timing_data(
         scan_key, source_type, target_type, debug
+    )
+    target_times_target_clock, source_times_target_clock = fetch_timing_data(
+        scan_key, target_type, source_type, debug
     )
 
     ##
     ## Convert indices to a list of numbers if argument equals None or a Boolean mask
     ##
 
-    if indices is None:
-        indices = np.arange(len(source_times))
-    elif type(indices[0]) == bool:
-        indices = np.where(indices)[0]
-    else:
-        ## Check for duplicates if manually entered
-        if len(np.unique(indices)) != len(indices):
-            msg = (
-                f"Duplicate entries found for provided indice array! "
-                f"Try to fix the error or use np.unique() on indices array."
-            )
-            raise PipelineException(msg)
+    if source_format == "indices":
+        if input_list is None:
+            input_list = np.arange(len(source_times_source_clock))
+        elif type(input_list[0]) == bool:
+            input_list = np.where(input_list)[0]
+        elif type(input_list[0]) == list or type(input_list[0]) == np.ndarray:
+            input_list = [
+                item for sublist in input_list for item in sublist
+            ]  ## Flatten array if list of lists
+        else:
+            ## Check for duplicates if manually entered
+            if len(np.unique(input_list)) != len(input_list):
+                msg = (
+                    f"Duplicate entries found for provided indice array! "
+                    f"Try to fix the error or use np.unique() on indices array."
+                )
+                raise PipelineException(msg)
+
+    ## Convert behavior to indices to make None input work smoothly
+    if "times" in source_format and input_list is None:
+        input_list = np.arange(len(source_times_source_clock))
+        source_format = "indices"
 
     ##
     ## Convert source indices to time boundaries, then convert time boundaries into target indices
     ##
 
     ## Convert indices into start/end times for each continuous fragment (incrementing by 1)
-    time_boundaries = find_time_boundaries(indices, source_times, drop_single_idx)
+    if source_format == "indices":
+        time_boundaries = find_time_boundaries(
+            input_list, source_times_source_clock, drop_single_idx
+        )
+    elif "times" in source_format:
+        time_boundaries = input_list
+    else:
+        msg = (
+            f"Source format {source_format} not supported. "
+            f"Valid options are 'indices' and 'times'."
+        )
+        raise PipelineException(msg)
+
     target_indices = []
     single_idx_count = 0
 
     ## Loop through start & end times and create list of indices corresponding to that block of time
-    for [start, end] in time_boundaries:
-        target_idx = np.where(
-            np.logical_and(target_times >= start, target_times <= end)
-        )[0]
-        if len(target_idx) < 2:
-            if drop_single_idx:
-                single_idx_count += 1
-            else:
-                msg = (
-                    f"Event of length {len(target_idx)} found. "
-                    f"Set drop_single_idx to True to suppress these errors."
+    with np.errstate(invalid="ignore"):
+        for [start, end] in time_boundaries:
+            target_idx = np.where(
+                np.logical_and(
+                    target_times_source_clock >= start, target_times_source_clock <= end
                 )
-                raise PipelineException(msg)
-        else:
-            target_indices.append(target_idx)
+            )[0]
+            if len(target_idx) < 2:
+                if drop_single_idx:
+                    single_idx_count += 1
+                else:
+                    msg = (
+                        f"Event of length {len(target_idx)} found. "
+                        f"Set drop_single_idx to True to suppress these errors."
+                    )
+                    raise PipelineException(msg)
+            else:
+                target_indices.append(target_idx)
 
     if debug:
         print(f"Indices converted. {single_idx_count} events of length 0 or 1 dropped.")
@@ -531,174 +695,62 @@ def convert_clocks_idx_to_idx(
     ## Interpolate related signal if requested, else just return the target_indices found.
     ##
 
-    if return_interpolate:
+    if target_format == "signal":
 
-        ## Create full interpolated signal
-        interpolated_signal = interpolate_signal_data(
-            scan_key, source_type, target_type, source_times, target_times, debug=debug
-        )
-
-        ## Split indices given into fragments based on which ones are continuous (incrementing by 1)
-        source_signal_fragments = []
-        for idx_fragment in target_indices:
-            source_signal_fragments.append(interpolated_signal[idx_fragment])
-
-        ## If full signal is converted, remove wrapping list
-        if len(source_signal_fragments) == 1:
-            source_signal_fragments = source_signal_fragments[0]
-
-        return source_signal_fragments
-
-    else:
-
-        return target_indices
-    
-
-def convert_clocks_idx_to_time(
-    scan_key: dict,
-    indices,
-    source_type: str,
-    target_type: str,
-    return_interpolate: bool = False,
-    drop_single_idx: bool = True,
-    debug: bool = True,
-):
-    """
-    Converts indices of interest on one type of clock/recording to times on a target clock/recording
-
-        Parameters:
-
-                scan_key: A dictionary specifying a single scan and/or field. A single field must be defined if requesting
-                          a source or target from ScanImage. If key specifies a single unit, unit delay will be added to
-                          all timepoints recorded. Single units can be specified via unique mask_id + field or via unit_id.
-                          If only field is specified, average field delay will be added.
-
-                indices: List/array of indices to convert or a boolean array with True values at indices of interest.
-                         NOTE: Set to None to use the entire source signal length.
-                         Indices can be discontinuous fragments (something like 20 indices around a several spikes)
-                         and the function will return of list of lists, each containings the corresponding target_idx
-                         fragments.
-                         ex. [25,26,27..,29,503,504...] OR [False False ... True True True False...] OR None
-
-                source_type: A string specifying what indices you want to convert from. Fluorescence and deconvolution
-                             have a dash followed by "behavior" or "stimulus" to refer to which clock you are using.
-                             Supported options:
-                                 'fluorescence-stimulus', 'deconvolution-stimulus', ,'fluorescence-behavior',
-                                 'deconvolution-behavior', 'pupil', 'treadmill', 'respiration'
-
-                target_type: A string specifying what times to convert into. Fluorescence and deconvolution have a
-                             dash followed by "behavior" or "stimulus" to refer to which clock you are using.
-                             Supported options:
-                                 'fluorescence-stimulus', 'deconvolution-stimulus', ,'fluorescence-behavior',
-                                 'deconvolution-behavior', 'pupil', 'treadmill', 'respiration'
-
-                return_interpolate: Boolean with the following behavior
-                                     - True: Interpolate source signal onto target clock, return interpolated signal
-                                             at indices instead of target indices
-                                             NOTE: NaNs in source signal are linearly interpolated over and then
-                                                   filled back in after interpolation onto target times.
-                                     - False: Return corresponding times for target
-
-                drop_single_idx: Boolean with the following behavior
-                                     - True: Drop any signal fragments which would create a signal of length 1.
-                                     - False: Raise an error and stop if any list of indices leads to a signal
-                                              of length 1.
-                                    ex. Source IDX [1,2,...,300] on a 500HZ recording will only correspond to
-                                        target IDX [1] if target is recorded at 1Hz.
-
-                debug: Set function to print helpful debug text while running
-
-
-        Returns:
-
-                requested_array: Numpy array of corresponding times in target type recording or interpolated
-                                 source signal during target times.
-
-        Warnings:
-
-                * NaN refilling for source signal will only refill values if NaNs stretch for multiple indices on
-                  target clock
-
-                * Recording points where the time value is NaN are dropped from analysis/processing
-    """
-
-    ##
-    ## Fetch source and target times, along with converting between Stimulus or Behavior clock if needed
-    ##
-
-    source_times, target_times = fetch_timing_data(
-        scan_key, source_type, target_type, debug
-    )
-
-    ##
-    ## Convert indices to a list of numbers if argument equals None or a Boolean mask
-    ##
-
-    if indices is None:
-        indices = np.arange(len(source_times))
-    elif type(indices[0]) == bool:
-        indices = np.where(indices)[0]
-    else:
-        ## Check for duplicates if manually entered
-        if len(np.unique(indices)) != len(indices):
+        ## Define source_indices if they're not already defined
+        if source_format == "indices":
+            source_indices = find_idx_boundaries(input_list, drop_single_idx)
+        elif "times" in source_format:
+            source_indices = convert_clocks(
+                scan_key,
+                input_list,
+                source_format,
+                source_type,
+                "indices",
+                target_type,
+                drop_single_idx,
+                False,
+            )
+        else:
             msg = (
-                f"Duplicate entries found for provided indice array! "
-                f"Try to fix the error or use np.unique() on indices array."
+                f"Source format {source_format} not supported. "
+                f"Valid options are 'indices' and 'times'."
             )
             raise PipelineException(msg)
 
-    ##
-    ## Convert source indices to time boundaries, then convert time boundaries into target indices
-    ##
-
-    ## Convert indices into start/end times for each continuous fragment (incrementing by 1)
-    time_boundaries = find_time_boundaries(indices, source_times, drop_single_idx)
-    target_indices = []
-    single_idx_count = 0
-
-    ## Loop through start & end times and create list of indices corresponding to that block of time
-    for [start, end] in time_boundaries:
-        target_idx = np.where(
-            np.logical_and(target_times >= start, target_times <= end)
-        )[0]
-        if len(target_idx) < 2:
-            if drop_single_idx:
-                single_idx_count += 1
-            else:
-                msg = (
-                    f"Event of length {len(target_idx)} found. "
-                    f"Set drop_single_idx to True to suppress these errors."
-                )
-                raise PipelineException(msg)
-        else:
-            target_indices.append(target_idx)
-
-    if debug:
-        print(f"Indices converted. {single_idx_count} events of length 0 or 1 dropped.")
-
-    ##
-    ## Interpolate related signal if requested, else return target times.
-    ##
-
-    if return_interpolate:
-
         ## Create full interpolated signal
         interpolated_signal = interpolate_signal_data(
-            scan_key, source_type, target_type, source_times, target_times, debug=debug
+            scan_key,
+            source_type,
+            target_type,
+            source_times_source_clock,
+            target_times_source_clock,
+            debug=debug,
         )
 
         ## Split indices given into fragments based on which ones are continuous (incrementing by 1)
-        source_signal_fragments = []
-        for idx_fragment in target_indices:
-            source_signal_fragments.append(interpolated_signal[idx_fragment])
+        target_signal_fragments = []
+        for idx_fragment in source_indices:
+            idx_fragment_mask = ~np.isnan(source_times_source_clock[idx_fragment])
+            masked_idx_fragment = idx_fragment[idx_fragment_mask]
+            target_signal_fragments.append(interpolated_signal[masked_idx_fragment])
 
         ## If full signal is converted, remove wrapping list
-        if len(source_signal_fragments) == 1:
-            source_signal_fragments = source_signal_fragments[0]
+        if len(target_signal_fragments) == 1:
+            target_signal_fragments = target_signal_fragments[0]
 
-        return source_signal_fragments
+        converted_values = target_signal_fragments
 
-    else:
+    elif "times" in target_format:
+
+        ## Set type of times to use
+        if target_format == "times-source":
+            target_times = target_times_source_clock
+        elif target_format == "times-target":
+            target_times = target_times_target_clock
+        else:
+            msg = f"'Times' target format must be 'times-source' or 'times-target'. Value was {target_format}."
+            raise PipelineException(msg)
 
         ## Convert indices to times and return
         source_idx_to_target_times = []
@@ -706,291 +758,24 @@ def convert_clocks_idx_to_time(
         for target_idx_list in target_indices:
             source_idx_to_target_times.append(target_times[target_idx_list])
 
-        return source_idx_to_target_times
+        if len(source_idx_to_target_times) == 1:
+            source_idx_to_target_times = source_idx_to_target_times[0]
 
+        converted_values = source_idx_to_target_times
 
-def convert_clocks_time_to_idx(
-    scan_key: dict,
-    time_boundaries,
-    source_type: str,
-    target_type: str,
-    return_interpolate: bool = False,
-    drop_single_idx: bool = True,
-    debug: bool = True,
-):
-    """
-    Converts time boundaries of interest on one type of clock/recording to indices on a target recording
+    elif target_format == "indices":
 
-        Parameters:
+        if len(target_indices) == 1:
+            target_indices = target_indices[0]
 
-                scan_key: A dictionary specifying a single scan and/or field. A single field must be defined if requesting
-                          a source or target from ScanImage. If key specifies a single unit, unit delay will be added to
-                          all timepoints recorded. Single units can be specified via unique mask_id + field or via unit_id.
-                          If only field is specified, average field delay will be added.
-
-                time_boundaries: List of lists containing [start,stop] boundaries for times of note on source clock.
-                                 Start/Stop times are included (>=,<=). These boundaries are converted to all indices
-                                 equal to or between recording times on target recording.
-                                 NOTE: Set to None to use the entire source signal length.
-                                 ex. [[271, 314], [690.321, 800.1]] OR None
-
-                source_type: A string specifying what times you want to convert from. Fluorescence and deconvolution
-                             have a dash followed by "behavior" or "stimulus" to refer to which clock you are using.
-                             Supported options:
-                                 'fluorescence-stimulus', 'deconvolution-stimulus', ,'fluorescence-behavior',
-                                 'deconvolution-behavior', 'pupil', 'treadmill', 'respiration'
-
-                target_type: A string specifying what indices to convert into. Fluorescence and deconvolution have a
-                             dash followed by "behavior" or "stimulus" to refer to which clock you are using.
-                             Supported options:
-                                 'fluorescence-stimulus', 'deconvolution-stimulus', ,'fluorescence-behavior',
-                                 'deconvolution-behavior', 'pupil', 'treadmill', 'respiration'
-
-                return_interpolate: Boolean with the following behavior
-                                     - True: Interpolate source signal onto target clock, return interpolated signal
-                                             at indices instead of target indices
-                                             NOTE: NaNs in source signal are linearly interpolated over and then
-                                                   filled back in after interpolation onto target times.
-                                     - False: Return corresponding indices between boundaries for target
-
-                drop_single_idx: Boolean with the following behavior
-                                     - True: Drop any signal fragments which would create a signal of length 1.
-                                     - False: Raise an error and stop if any list of indices leads to a signal
-                                              of length 1.
-                                    ex. Source IDX [1,2,...,300] on a 500HZ recording will only correspond to
-                                        target IDX [1] if target is recorded at 1Hz.
-
-                debug: Set function to print helpful debug text while running
-
-
-        Returns:
-
-                requested_array: Numpy array of corresponding times in target type recording or interpolated
-                                 source signal during target times.
-
-        Warnings:
-
-                * NaN refilling for source signal will only refill values if NaNs stretch for multiple indices on
-                  target clock
-
-                * Recording points where the time value is NaN are dropped from analysis/processing
-    """
-
-    ##
-    ## Fetch source and target times, along with converting between Stimulus or Behavior clock if needed
-    ##
-
-    source_times, target_times = fetch_timing_data(
-        scan_key, source_type, target_type, debug
-    )
-
-    ##
-    ## Check if None is used to set to full length of signal or fix common error of not having a list of lists
-    ##
-
-    if time_boundaries is None:
-        time_start = np.nanmin(source_times)
-        time_stop = np.nanmax(source_times)
-        time_boundaries = [[time_start, time_stop]]
-    elif isinstance(time_boundaries[0], numbers.Number):
-        time_boundaries = [time_boundaries]
-
-    ##
-    ## Convert source indices to time boundaries, then convert time boundaries into target indices
-    ##
-
-    target_indices = []
-    single_idx_count = 0
-
-    ## Loop through start & end times and create list of indices corresponding to that block of time
-    for [start, end] in time_boundaries:
-        target_idx = np.where(
-            np.logical_and(target_times >= start, target_times <= end)
-        )[0]
-        if len(target_idx) < 2:
-            if drop_single_idx:
-                single_idx_count += 1
-            else:
-                msg = (
-                    f"Event of length {len(target_idx)} found. "
-                    f"Set drop_single_idx to True to suppress these errors."
-                )
-                raise PipelineException(msg)
-        else:
-            target_indices.append(target_idx)
-
-    if debug:
-        print(f"Indices converted. {single_idx_count} events of length 0 or 1 dropped.")
-
-    ##
-    ## Interpolate related signal if requested, else just return the target_indices found.
-    ##
-
-    if return_interpolate:
-
-        ## Create full interpolated signal
-        interpolated_signal = interpolate_signal_data(
-            scan_key, source_type, target_type, source_times, target_times, debug=debug
-        )
-
-        ## Split indices given into fragments based on which ones are continuous (incrementing by 1)
-        source_signal_fragments = []
-        for idx_fragment in target_indices:
-            source_signal_fragments.append(interpolated_signal[idx_fragment])
-
-        ## If full signal is converted, remove wrapping list
-        if len(source_signal_fragments) == 1:
-            source_signal_fragments = source_signal_fragments[0]
-
-        return source_signal_fragments
+        converted_values = target_indices
 
     else:
 
-        return target_indices
-
-
-def convert_clocks_time_to_time(
-    scan_key: dict,
-    time_boundaries,
-    source_type: str,
-    target_type: str,
-    return_interpolate: bool = False,
-    drop_single_idx: bool = True,
-    debug: bool = True,
-):
-    """
-    Converts time boundaries of interest on one type of clock/recording to all times between those boundaries
-    on the target signal/clock
-
-        Parameters:
-
-                scan_key: A dictionary specifying a single scan and/or field. A single field must be defined if requesting
-                          a source or target from ScanImage. If key specifies a single unit, unit delay will be added to
-                          all timepoints recorded. Single units can be specified via unique mask_id + field or via unit_id.
-                          If only field is specified, average field delay will be added.
-
-                time_boundaries: List of lists containing [start,stop] boundaries for times of note on source clock.
-                                 Start/Stop times are included (>=,<=). These boundaries are converted to all indices
-                                 equal to or between recording times on target recording.
-                                 NOTE: Set to None to use the entire source signal length.
-                                 ex. [[271, 314], [690.321, 800.1]] OR None
-
-                source_type: A string specifying what times you want to convert from. Fluorescence and deconvolution
-                             have a dash followed by "behavior" or "stimulus" to refer to which clock you are using.
-                             Supported options:
-                                 'fluorescence-stimulus', 'deconvolution-stimulus', ,'fluorescence-behavior',
-                                 'deconvolution-behavior', 'pupil', 'treadmill', 'respiration'
-
-                target_type: A string specifying what indices to convert into. Fluorescence and deconvolution have a
-                             dash followed by "behavior" or "stimulus" to refer to which clock you are using.
-                             Supported options:
-                                 'fluorescence-stimulus', 'deconvolution-stimulus', ,'fluorescence-behavior',
-                                 'deconvolution-behavior', 'pupil', 'treadmill', 'respiration'
-
-                return_interpolate: Boolean with the following behavior
-                                     - True: Interpolate source signal onto target clock, return interpolated signal
-                                             between time boundaries instead of times
-                                             NOTE: NaNs in source signal are linearly interpolated over and then
-                                                   filled back in after interpolation onto target times.
-                                     - False: Return corresponding times between boundaries for target
-
-                drop_single_idx: Boolean with the following behavior
-                                     - True: Drop any signal fragments which would create a signal of length 1.
-                                     - False: Raise an error and stop if any list of indices leads to a signal
-                                              of length 1.
-                                    ex. Source IDX [1,2,...,300] on a 500HZ recording will only correspond to
-                                        target IDX [1] if target is recorded at 1Hz.
-
-                debug: Set function to print helpful debug text while running
-
-
-        Returns:
-
-                requested_array: Numpy array of corresponding times in target type recording or interpolated
-                                 source signal during target times.
-
-        Warnings:
-
-                * NaN refilling for source signal will only refill values if NaNs stretch for multiple indices on
-                  target clock
-
-                * Recording points where the time value is NaN are dropped from analysis/processing
-    """
-
-    ##
-    ## Fetch source and target times, along with converting between Stimulus or Behavior clock if needed
-    ##
-
-    source_times, target_times = fetch_timing_data(
-        scan_key, source_type, target_type, debug
-    )
-
-    ##
-    ## Check if None is used to set to full length of signal or fix common error of not having a list of lists
-    ##
-
-    if time_boundaries is None:
-        time_start = np.nanmin(source_times)
-        time_stop = np.nanmax(source_times)
-        time_boundaries = [[time_start, time_stop]]
-    elif isinstance(time_boundaries[0], numbers.Number):
-        time_boundaries = [time_boundaries]
-
-    ##
-    ## Convert source indices to time boundaries, then convert time boundaries into target indices
-    ##
-
-    target_indices = []
-    single_idx_count = 0
-
-    ## Loop through start & end times and create list of indices corresponding to that block of time
-    for [start, end] in time_boundaries:
-        target_idx = np.where(
-            np.logical_and(target_times >= start, target_times <= end)
-        )[0]
-        if len(target_idx) < 2:
-            if drop_single_idx:
-                single_idx_count += 1
-            else:
-                msg = (
-                    f"Event of length {len(target_idx)} found. "
-                    f"Set drop_single_idx to True to suppress these errors."
-                )
-                raise PipelineException(msg)
-        else:
-            target_indices.append(target_idx)
-
-    if debug:
-        print(f"Indices converted. {single_idx_count} events of length 0 or 1 dropped.")
-
-    ##
-    ## Interpolate related signal if requested, else return target times.
-    ##
-
-    if return_interpolate:
-
-        ## Create full interpolated signal
-        interpolated_signal = interpolate_signal_data(
-            scan_key, source_type, target_type, source_times, target_times, debug=debug
+        msg = (
+            f"Target format {target_format} is not supported. "
+            f"Valid options are 'indices', 'times-source', 'times-target', 'signal'."
         )
+        raise PipelineException(msg)
 
-        ## Split indices given into fragments based on which ones are continuous (incrementing by 1)
-        source_signal_fragments = []
-        for idx_fragment in target_indices:
-            source_signal_fragments.append(interpolated_signal[idx_fragment])
-
-        ## If full signal is converted, remove wrapping list
-        if len(source_signal_fragments) == 1:
-            source_signal_fragments = source_signal_fragments[0]
-
-        return source_signal_fragments
-
-    else:
-
-        ## Convert indices to times and return
-        source_times_to_target_times = []
-
-        for target_idx_list in target_indices:
-            source_times_to_target_times.append(target_times[target_idx_list])
-
-        return source_times_to_target_times
+    return converted_values
