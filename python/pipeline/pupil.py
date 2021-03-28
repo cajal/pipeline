@@ -1348,11 +1348,11 @@ class PupilPeriods(dj.Computed):
         -> PupilPeriods
         period_idx                : smallint unsigned
         ---
-        period_onset              : float               # period start time (in seconds)
-        period_offset             : float               # period stop time (in seconds)
-        peak_change_time          : float               # time (in seconds) at which peak change rate occurs
-        period_delta              : float               # overall change in size (in pixels, as a placeholder for now)
-        period_duration           : float               # period duration (in seconds)
+        period_onset              : float               # (sec) period start time
+        period_offset             : float               # (sec) period stop time
+        peak_change_time          : float               # (sec) time at which peak change rate occurs
+        period_delta              : float               # (mm) overall change in size (dilation > 0, constriction < 0)
+        period_duration           : float               # (sec) period duration
         """
         
     def _make_tuples(self, key):
