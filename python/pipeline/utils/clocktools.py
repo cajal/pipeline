@@ -33,8 +33,8 @@ def find_idx_boundaries(indices, drop_single_idx=False):
 
     ## Basic idea: If you have a list [1,2,3,20,21,22], subtracting the index of that value from it
     ## will lead to assigning different numbers to different clusters of values incrementing by one.
-    ## For instance [1-1, 2-2, 3-3, 20-4, 21-5, 22-6] = [0, 0, 0, -16, -16, -16]. Using groupby we
-    ## split these values into group 1 (everything assigned 0) and group 2 (everything assigned -16).
+    ## For instance [1-1, 2-2, 3-3, 20-4, 21-5, 22-6] = [0, 0, 0, 16, 16, 16]. Using groupby we
+    ## split these values into group 1 (everything assigned 0) and group 2 (everything assigned 16).
     for k, g in groupby(enumerate(indices), lambda x: x[0] - x[1]):
 
         event = np.array([e[1] for e in g])
