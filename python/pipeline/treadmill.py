@@ -8,6 +8,7 @@ import os
 
 from . import experiment, notify
 from .utils import h5, clocktools
+from .exceptions import PipelineException
 
 
 schema = dj.schema('pipeline_treadmill', locals())
@@ -85,7 +86,6 @@ class Treadmill(dj.Computed):
 
     @notify.ignore_exceptions
     def notify(self, key):
-        import matplotlib.pyplot as plt
         time, velocity = (self & key).fetch1('treadmill_time', 'treadmill_vel')
         fig = plt.figure()
         plt.plot(time, velocity)
@@ -150,7 +150,7 @@ class Running(dj.Computed):
         treadmill_fps = 1/np.nanmedian(np.diff(treadmill_times))
         
         ## Filter treadmill velocity and speed
-        ## NOTE: Treadmill speed is NOT absolute value to filtered velocity. Filtering is applied after np.abs.
+        ## NOTE: Treadmill speed is NOT absolute value of filtered velocity. Filtering is applied after np.abs.
         my_filter = (shared.FilterMethod & key).run_filter_with_renan
         filt_treadmill_velocity = my_filter(treadmill_velocity, treadmill_fps)
         filt_treadmill_speed = my_filter(treadmill_speed, treadmill_fps)
@@ -169,7 +169,7 @@ class Running(dj.Computed):
 
         else:
             
-            msg = f"Pupil period method id {key['period_method_id']} not supported."
+            msg = f"Running method id {key['running_method_id']} not supported."
             raise PipelineException(msg)
 
         ## Calculate statistics
@@ -230,11 +230,14 @@ class Running(dj.Computed):
         ## If we have two or more fragments, test if any should be combined
         if len(running_fragments) > 1:
 
-            ## Basic idea: Have a temporary start index. Loop through all lists of indices. Whenever there is a list
-            ## start idx which is more than maximum_time_gap seconds away from the previous list end, insert a combined 
-            ## list of indices between temporary start index and last index before that gap. Then update the temporary
-            ## start to be the first index after the detected gap. This loop has one blind spot, which is the final list. 
-            ## That is checked manually afterwards.
+            ## Explanation: You can think of the proceeding code like having two cursors, one for start_idx and another
+            ## for end_idx. Start by setting start and end cursors on the start and end of the first fragment. When 
+            ## looking at the second fragment, one of two things happens:
+            ## 1) The gap between the first and second fragment is below threshold. In that case, set the end cursor to 
+            ##    the end of the second fragment and keep looping through.
+            ## 2) The gap between the first and second fragment is greater than the threshold. In that case store an 
+            ##    np.arange from the start cursor to the end cursor before setting those cursors to the start and end of
+            ##    the second fragment, then continue looping through fragments.
 
             combined_running_fragments = []
             temp_start_idx = running_fragments[0][0]

@@ -31,7 +31,10 @@ def find_idx_boundaries(indices, drop_single_idx=False):
 
     events = []
 
-    ## Basic idea: If you
+    ## Basic idea: If you have a list [1,2,3,20,21,22], subtracting the index of that value from it
+    ## will lead to assigning different numbers to different clusters of values incrementing by one.
+    ## For instance [1-1, 2-2, 3-3, 20-4, 21-5, 22-6] = [0, 0, 0, -16, -16, -16]. Using groupby we
+    ## split these values into group 1 (everything assigned 0) and group 2 (everything assigned -16).
     for k, g in groupby(enumerate(indices), lambda x: x[0] - x[1]):
 
         event = np.array([e[1] for e in g])
@@ -56,10 +59,8 @@ def find_time_boundaries(indices, times, drop_single_idx=False):
 
         Parameters:
             indices: Flattened list or numpy array of indices to break apart into incrementing fragments
-            times: Flattened list or numpy array of times of recording. Can either be the same size as
-                   the list of indices (only the times corresponding to those indices) or can be the
-                   full list of all times recordings happened. If full list, indices are assumed to index
-                   their own recording time in the times array/list.
+            times: Flattened list or numpy array of times of recording. Must be the full list of times all
+                   recordings took place on, not just the times which correspond to the list indices.
             drop_single_idx: Boolean which sets if single indices not part of any sublist
                              should be dropped or raise an error upon detection.
 
@@ -296,7 +297,7 @@ def interpolate_signal_data(
     """
     Interpolates target_type recording onto source_times. If target FPS is higher than source FPS, run lowpass hamming
     filter at source Hz over target_type recording before interpolating. Automatically slices ScanImage times and runs
-    error checking and length mismatches.
+    error checking for length mismatches.
 
         Parameters:
 
@@ -358,13 +359,18 @@ def interpolate_signal_data(
     ##       It is easier to make an if-elif-else structure than a lookup dictionary in this case.
     if target_type in ("fluorescence-stimulus", "fluorescence-behavior"):
         target_signal = (pipe.Fluorescence.Trace & scan_key).fetch1("trace")
-    if target_type in ("deconvolution-stimulus", "deconvolution-behavior"):
+    elif target_type in ("deconvolution-stimulus", "deconvolution-behavior"):
         unit_key = (pipe.ScanSet.Unit & scan_key).fetch1()
         target_signal = (pipe.Activity.Trace & unit_key).fetch1("trace")
-    if target_type == "pupil":
+    elif target_type == "pupil":
         target_signal = (pupil.FittedPupil.Circle & scan_key).fetch("radius")
-    if target_type == "treadmill":
+    elif target_type == "treadmill":
         target_signal = (treadmill.Treadmill & scan_key).fetch1("treadmill_vel")
+    elif target_type == "respiration":
+        target_signal = ((odor.Respiration * odor.MesoMatch) & scan_key).fetch1("trace")
+    else:
+        msg = f"Error, target type {target_type} is not supported. Cannot fetch signal data."
+        raise PipelineException(msg)
 
     ## Calculate FPS to determine if lowpass filtering is needed
     source_fps = 1 / np.nanmedian(np.diff(source_times))
