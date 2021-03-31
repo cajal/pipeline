@@ -318,7 +318,6 @@ class TrackedVideo(dj.Computed):
         :param outdir: destination of plots
         """
         import seaborn as sns
-        import matplotlib.pyplot as plt
         plt.switch_backend('GTK3Agg')
 
         for key in self.fetch('KEY'):
@@ -1009,11 +1008,6 @@ def plot_fitting(key, start, end=-1, fit_type='Circle', fig=None, ax=None, mask_
         ax (:obj matplotlib.axes._subplots.AxesSubplot, optional): Axes object to pass. if ax provided as an argument,
             return the same ax object after updating
     """
-    from IPython import display
-    import pylab as pl
-    import matplotlib.pyplot as plt
-    from matplotlib.patches import Ellipse
-    import time
 
     if 'tracking_method' not in key.keys():
         raise KeyError('tracking_method is not define!')
