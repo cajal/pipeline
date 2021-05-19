@@ -1315,7 +1315,8 @@ class Registration(dj.Computed):
     @property
     def key_source(self):
         stacks = PreprocessedStack.proj(stack_session='session', stack_channel='channel')
-        return stacks * RegistrationTask & {'registration_method': 5}
+        
+        return (stacks * RegistrationTask & {'registration_method': 5}) & (meso.SummaryImages + reso.SummaryImages).proj(scan_session='session')
 
 
     class Rigid(dj.Part):
