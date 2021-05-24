@@ -90,9 +90,15 @@ classdef FieldCoordinates < dj.Manual
             pxpitch = mean(fieldWidths.\fieldWidthsInMicrons);
 
             if length(frames)>1
-                % construct a big field of view
+                % convert center coordinates to 0,0 coordinates
+                x_pos = x_pos - fieldWidths * pxpitch / 2;
+                y_pos = y_pos - fieldHeights * pxpitch / 2;
+                
+                % shift and convert microns to pixels
                 x_pos = (x_pos - min(x_pos))/pxpitch;
                 y_pos = (y_pos - min(y_pos))/pxpitch;
+                
+                % construct a big field of view
                 im = zeros(ceil(max(y_pos+fieldHeights)),ceil(max(x_pos+fieldWidths)));
                 for islice =length(frames):-1:1
                     frame = self.filterImage(ne7.mat.normalize(frames{islice}),self.createTform(tfp));
