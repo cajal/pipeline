@@ -2,10 +2,9 @@ version: '2.0'
 
 services:
   notebook:
-    image: at-docker.ad.bcm.edu:5000/pipeline:latest 
+    image: ninai/stimulus-pipeline:latest
     ports:
-      - "8887:8888"
-      - "8502:8501"
+      - "8888:8888"
     volumes:
       - /mnt/:/mnt/
       - /home/pipeline_data/:/tmp/
@@ -13,8 +12,13 @@ services:
     env_file: .env
     environment:
       - DISPLAY=$DISPLAY
-    entrypoint: /data/pipeline/entrypoint.sh
-    working_dir: /
+    entrypoint:
+      - jupyter 
+      - lab
+      - --ip=0.0.0.0
+      - --allow-root
+      - --NotebookApp.token=''
+      - --no-browser
 
 
   minion:
