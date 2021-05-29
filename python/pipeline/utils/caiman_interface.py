@@ -408,8 +408,9 @@ def deconvolve_detrended(trace, scan_fps, detrend_period=600, AR_order=2):
             c(t) = c(t-1) * AR_coeffs[0] + c(t-2) * AR_coeffs[1] + ...
     """
     detrend_window = int(round(detrend_period * scan_fps))
-    if detrend_window > 0:
-        chunks_len = len(trace) // detrend_window * detrend_window
+    n_chunks = len(trace) // detrend_window
+    if detrend_window > 0 and n_chunks > 0:
+        chunks_len = n_chunks * detrend_window
         trace_chunks = trace[:chunks_len].reshape(-1, detrend_window)
         data_prct = df_percentile(trace_chunks, axis=1)[0].mean()
         trace = trace - percentile_filter(trace, data_prct, detrend_window)
