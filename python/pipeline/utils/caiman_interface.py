@@ -393,11 +393,13 @@ def deconvolve(trace, AR_order=2):
     return spike_trace, AR_coeffs
 
 
-def deconvolve_detrended(trace, scan_fps, detrend_period=120, AR_order=2):
+def deconvolve_detrended(trace, scan_fps, detrend_period=600, AR_order=2):
     """Same as the the `deconvolve` method, except that the fluorescence trace is detrended 
     before autoregressive modeling
 
     :param np.array trace: 1-d array (num_frames) with the fluorescence trace.
+    :param float scan_fps: fps of the scan
+    :param float detrend_period: number of seconds over which percentiles are computed
     :param int AR_order: Order of the autoregressive process used to model the impulse
         response function, e.g., 0 = no modelling; 2 = model rise plus exponential decay.
 
@@ -407,10 +409,9 @@ def deconvolve_detrended(trace, scan_fps, detrend_period=120, AR_order=2):
     """
     detrend_window = int(round(detrend_period * scan_fps))
     if detrend_window > 0:
-        i = max((len(trace) - detrend_window) // 2, 0)
-        j = i + detrend_window
-        print(scan_fps, detrend_window, i, j, detrend_period, AR_order)
-        data_prct = df_percentile(trace[i:j])[0]
+        chunks_len = len(trace) // detrend_window * detrend_window
+        trace_chunks = trace[:chunks_len].reshape(-1, detrend_window)
+        data_prct = df_percentile(trace_chunks, axis=1)[0].mean()
         trace = trace - percentile_filter(trace, data_prct, detrend_window)
 
     _, _, _, AR_coeffs, _, spike_trace, _ = deconvolution.constrained_foopsi(trace,
