@@ -165,8 +165,10 @@ def read_imager_file(filename):
                         data['photodiode'] = np.array(trace['y-axis/data_vector/data'])
                     if trace.attrs['name'].decode() == 'hz':
                         data['photodiode_fps'] = trace['y-axis/data_vector/data'][0]
+                    if trace.attrs['name'].decode() == 'AudioStimWindow':
+                        data['auditory'] = np.array(trace['y-axis/data_vector/data'])
 
-            if group['id'].attrs['name'].decode() == 'imaging':
+            if group['id'].attrs['n]ame'].decode() == 'imaging':
                 for trace in group['traces'].values():
                     if trace.attrs['name'].decode() == 'movie':
                         raw_scan = np.array(trace['y-axis/data_vector/data'], dtype=np.float32)
