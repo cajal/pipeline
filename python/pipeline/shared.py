@@ -154,7 +154,7 @@ class AreaMaskMethod(dj.Lookup):
     """
 
     contents = [
-        [1, 'manual', '', 'matlab'],
+        [1, 2,'manual', '', 'matlab'],
     ]
 
 @schema
