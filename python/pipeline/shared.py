@@ -154,7 +154,8 @@ class AreaMaskMethod(dj.Lookup):
     """
 
     contents = [
-        [1, 'manual', '', 'matlab'],
+        [1,'manual','join_kernel_width = 100 um', 'matlab'],
+        [2,'manual','join_kernel_width = 750 um', 'matlab']
     ]
 
 @schema

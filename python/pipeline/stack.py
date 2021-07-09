@@ -2744,7 +2744,13 @@ class Area(dj.Computed):
             area_mask = np.max(stack_masks, axis=0)
 
             # close gaps in mask with 100 um kernel
-            kernel_width = 100
+            if(key['mask_method'] == 1)
+                kernel_width = 100
+            elif(key['mask_method'] == 2):
+                kernel_width = 750
+            else:
+              raise PipelineException('Mask Method not recognized')
+              
             kernel = np.ones(np.round(kernel_width * (stack_px_dims / stack_um_dims)).astype(int))
             area_mask = cv2.morphologyEx(area_mask, cv2.MORPH_CLOSE, kernel)
 
