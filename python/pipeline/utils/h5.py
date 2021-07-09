@@ -168,7 +168,7 @@ def read_imager_file(filename):
                     if trace.attrs['name'].decode() == 'AudioStimWindow':
                         data['auditory'] = np.array(trace['y-axis/data_vector/data'])
 
-            if group['id'].attrs['n]ame'].decode() == 'imaging':
+            if group['id'].attrs['name'].decode() == 'imaging':
                 for trace in group['traces'].values():
                     if trace.attrs['name'].decode() == 'movie':
                         raw_scan = np.array(trace['y-axis/data_vector/data'], dtype=np.float32)
