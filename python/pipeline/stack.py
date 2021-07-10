@@ -2682,7 +2682,6 @@ class Area(dj.Computed):
         return key_source
 
     def make(self, key):
-        def make(self, key):
         from scipy.interpolate import griddata
         import cv2
         #same as key source but retains brain area attribute
@@ -2729,15 +2728,7 @@ class Area(dj.Computed):
             stack_masks = np.array(stack_masks)
             stack_masks[np.isnan(stack_masks)] = 0
             area_mask = np.max(stack_masks, axis=0)
-
-            # close gaps in mask with 100 um kernel
-            if(key['mask_method'] == 1)
-                kernel_width = 100
-            elif(key['mask_method'] == 2):
-                kernel_width = 750
-            else:
-              raise PipelineException('Mask Method not recognized')
-              
+            kernel_width = 100
             kernel = np.ones(np.round(kernel_width * (stack_px_dims / stack_um_dims)).astype(int))
             area_mask = cv2.morphologyEx(area_mask, cv2.MORPH_CLOSE, kernel)
             area_masks.append(area_mask)
