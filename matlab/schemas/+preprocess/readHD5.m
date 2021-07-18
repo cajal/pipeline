@@ -169,15 +169,30 @@ switch version
             case 2.1
                 idx1 = find(waveformDescStr == ',') ; % need to take care of a comma misplacement in some files
                 waveformDescStr(idx1) = ' ' ;
-                teststr = 'Photodiode, ScanImageFrameSync, LaserPower, Time' ;
-                idx2 = find(teststr == ',') ;
-                teststr(idx2) = ' ' ;
-                assert(strcmp(deblank(waveformDescStr),deblank(teststr)),...
-            'waveform Channels Description is wrong for this file version');
-                wf = H5Tools.readDataset(fp,'Analog Signals') ;
-                data.syncPd = wf(:,1);
-                data.scanImage = wf(:,2);
-                data.ts = wf(:,4);
+                try
+                    teststr = 'Photodiode, ScanImageFrameSync, LaserPower, Time' ;
+                    idx2 = find(teststr == ',') ;
+                    teststr(idx2) = ' ' ;
+                    assert(strcmp(deblank(waveformDescStr),deblank(teststr)),...
+                        'waveform Channels Description is wrong for this file version');
+                    wf = H5Tools.readDataset(fp,'Analog Signals') ;
+                    data.syncPd = wf(:,1);
+                    data.scanImage = wf(:,2);
+                    data.ts = wf(:,4);
+                catch
+                    teststr = 'Photodiode, ScanImageFrameSync, LaserPower, AudioStimWindow, Time' ;
+                    idx2 = find(teststr == ',') ;
+                    teststr(idx2) = ' ' ;
+                    assert(strcmp(deblank(waveformDescStr),deblank(teststr)),...
+                        'waveform Channels Description is wrong for this file version');
+                                    wf = H5Tools.readDataset(fp,'Analog Signals') ;
+                    wf = H5Tools.readDataset(fp,'Analog Signals') ;
+                    data.syncPd = wf(:,1);
+                    data.scanImage = wf(:,2);
+                    data.audioStimWindow = wf(:,4) ;
+                    data.ts = wf(:,5);
+                end
+                settings = [] ;
         end
         
         

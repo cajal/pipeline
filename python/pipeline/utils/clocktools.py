@@ -4,11 +4,13 @@ import datajoint as dj
 import matplotlib.pyplot as plt
 from scipy import interpolate
 from itertools import groupby
-from pipeline import treadmill, fuse, shared, odor
+from pipeline import fuse, shared
 from pipeline.exceptions import PipelineException
 
 stimulus = dj.create_virtual_module("stimulus", "pipeline_stimulus")
-pupil = dj.create_virtual_module("pipeline_eye", "pipeline_eye")
+treadmill = dj.create_virtual_module("treadmill", "pipeline_treadmill")
+odor = dj.create_virtual_module("odor", "pipeline_odor")
+pupil = dj.create_virtual_module("pupil", "pipeline_eye")
 
 
 def find_idx_boundaries(indices, drop_single_idx=False):

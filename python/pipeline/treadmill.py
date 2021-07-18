@@ -7,7 +7,7 @@ from pipeline import shared
 import os
 
 from . import experiment, notify
-from .utils import h5, clocktools
+from .utils import h5
 from .exceptions import PipelineException
 
 
@@ -251,7 +251,9 @@ class Running(dj.Computed):
                 combined_running_fragments: List of lists of continuous incrementing indices corresponding to
                                             single periods of running.
         """
-
+        ## Import clocktools here to prevent dependency on stimulus for non-stimulus containers just importing treadmill
+        from .utils import clocktools
+        
         ## Splits list of indices into a list of lists. Each sublist contains indices which continuously increase by 1.
         ## This function also drops sublists which only contain a single idx.
         running_fragments = clocktools.find_idx_boundaries(running_indices, drop_single_idx=True)
