@@ -32,7 +32,6 @@ import datajoint as dj
 from datajoint.jobs import key_hash
 from datajoint.autopopulate import AutoPopulate
 
-from .utils import clocktools
 from .utils.decorators import gitlog
 from .utils import eye_tracking, h5
 from .utils.eye_tracking import PupilTracker, ManualTracker
@@ -1184,6 +1183,9 @@ class ProcessedPupil(dj.Computed):
         return deeplabcut_fitting * PupilFilterMethod
     
     def _make_tuples(self, key):
+              
+       ## Import clocktools here to prevent dependency on stimulus.py for non-stimulus Docker containers
+       from .utils import clocktools
 
         print(f'Generating ProcessedPupil for {key}')
         
