@@ -2,15 +2,15 @@ import warnings
 import numpy as np
 import datajoint as dj
 import matplotlib.pyplot as plt
-from stimulus import stimulus
 from scipy import interpolate
 from itertools import groupby
 from pipeline import fuse, shared
 from pipeline.exceptions import PipelineException
 
+stimulus = dj.create_virtual_module("stimulus", "pipeline_stimulus")
 treadmill = dj.create_virtual_module("treadmill", "pipeline_treadmill")
 odor = dj.create_virtual_module("odor", "pipeline_odor")
-pupil = dj.create_virtual_module("pipeline_eye", "pipeline_eye")
+pupil = dj.create_virtual_module("pupil", "pipeline_eye")
 
 
 def find_idx_boundaries(indices, drop_single_idx=False):
