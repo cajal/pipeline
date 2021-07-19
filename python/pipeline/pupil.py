@@ -1184,8 +1184,8 @@ class ProcessedPupil(dj.Computed):
     
     def _make_tuples(self, key):
               
-       ## Import clocktools here to prevent dependency on stimulus.py for non-stimulus Docker containers
-       from .utils import clocktools
+        ## Import clocktools here to prevent dependency on stimulus.py for non-stimulus Docker containers
+        from .utils import clocktools
 
         print(f'Generating ProcessedPupil for {key}')
         
