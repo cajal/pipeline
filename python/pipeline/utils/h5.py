@@ -82,6 +82,9 @@ def read_behavior_file(filename):
             data['ts'] = analog_signals[channel_names.index('Time')]
             if 'Temperature' in channel_names:
                 data['temperature'] = analog_signals[channel_names.index('Temperature')]
+            
+            if 'AudioStimWindow' in channel_names:
+                data['auditory'] = analog_signals[channel_names.index('AudioStimWindow')]
 
             if str(f.attrs['AS_Version'][0]) == '2.1':
                 data['scanImage'] = analog_signals[channel_names.index('ScanImageFrameSync')]
@@ -162,6 +165,8 @@ def read_imager_file(filename):
                         data['photodiode'] = np.array(trace['y-axis/data_vector/data'])
                     if trace.attrs['name'].decode() == 'hz':
                         data['photodiode_fps'] = trace['y-axis/data_vector/data'][0]
+                    if trace.attrs['name'].decode() == 'AudioStimWindow':
+                        data['auditory'] = np.array(trace['y-axis/data_vector/data'])
 
             if group['id'].attrs['name'].decode() == 'imaging':
                 for trace in group['traces'].values():

@@ -43,6 +43,7 @@ from IPython import display
 import pylab as pl
 import matplotlib.pyplot as plt
 from matplotlib.patches import Ellipse
+from scipy import interpolate
 import time
 import datetime
 
@@ -316,7 +317,6 @@ class TrackedVideo(dj.Computed):
         :param outdir: destination of plots
         """
         import seaborn as sns
-        import matplotlib.pyplot as plt
         plt.switch_backend('GTK3Agg')
 
         for key in self.fetch('KEY'):
@@ -538,8 +538,7 @@ class ConfigDeeplabcut(dj.Manual):
     shuffle             : smallint unsigned     # shuffle number used for the trained dlc model. Needed for dlc.analyze_videos
     trainingsetindex    : smallint unsigned     # trainingset index used for the trained dlc. model. Needed for dlc.analyze_videos
     """
-
-
+    
 @schema
 class Tracking(dj.Computed):
     definition = """
@@ -821,6 +820,16 @@ class FittedPupil(dj.Computed):
     ---
     fitting_ts=CURRENT_TIMESTAMP    : timestamp     # automatic
     """
+    
+    class EyePoints(dj.Part):
+        definition = """
+        -> master
+        label             : char(20)            # body part label for given points
+        ---
+        x                 : longblob            # array with the x coordinates of point_label in the eye video
+        y                 : longblob            # array with the y coordinatess of point_label in the eye video
+    
+        """
 
     class Circle(dj.Part):
         definition = """
@@ -918,6 +927,13 @@ class FittedPupil(dj.Computed):
             pupil_fit = DLC_tools.DeeplabcutPupilFitting(
                 config=config, bodyparts='all', cropped=True)
 
+            for bodypart in pupil_fit.bodyparts:
+                self.EyePoints.insert1({**key,
+                    'label': bodypart,
+                    'x': pupil_fit.df_bodyparts[bodypart]['x'].values,
+                    'y': pupil_fit.df_bodyparts[bodypart]['y'].values       
+                })
+
             for frame_num in tqdm(range(nframes)):
 
                 fit_dict = pupil_fit.fitted_core(frame_num=frame_num)
@@ -991,11 +1007,6 @@ def plot_fitting(key, start, end=-1, fit_type='Circle', fig=None, ax=None, mask_
         ax (:obj matplotlib.axes._subplots.AxesSubplot, optional): Axes object to pass. if ax provided as an argument,
             return the same ax object after updating
     """
-    from IPython import display
-    import pylab as pl
-    import matplotlib.pyplot as plt
-    from matplotlib.patches import Ellipse
-    import time
 
     if 'tracking_method' not in key.keys():
         raise KeyError('tracking_method is not define!')
@@ -1133,6 +1144,355 @@ def plot_fitting(key, start, end=-1, fit_type='Circle', fig=None, ax=None, mask_
         else:
             pupil_fit.plot_fitted_multi_frames(
                 start=start, end=end, fitting_method=fit_type)
+
+
+@schema
+class PupilFilterMethod(dj.Lookup):
+    definition = """ # Method to filter pupil trace
+    pupil_method_id               : tinyint unsigned    # index for pupil filter method
+    ---
+    -> shared.FilterMethod
+    pupil_source                  : enum("Circle", "Ellipse")
+    radius_type                   : enum("radius", "major_radius", "minor_radius")
+    """
+    
+    contents = [[1, '1Hz Hamming Lowpass', 'Circle', 'radius'],
+                [2, '2Hz Hamming Lowpass', 'Circle', 'radius']]
+    
+
+@schema
+class ProcessedPupil(dj.Computed):
+    definition = """ # Filtered pupil trace for further processing with pupil
+    -> FittedPupil
+    -> PupilFilterMethod
+    ---
+    valid_start                   : float        # (sec) pupil trace non-nan start time on Behavior clock
+    valid_end                     : float        # (sec) pupil trace non-nan end time on Behavior clock
+    valid_fraction                : float        # fraction of non-nan frames within valid start/end
+    longest_valid_epoch           : float        # (sec) longest continuous period of non-nan frames
+    mean_radius                   : float        # (pixels) mean pupil radius in pixels (ignoring nans)
+    radius_95                     : float        # (pixels) 95th percentile of radius
+    filtered_pupil_radius         : longblob     # radius trace after filtering
+    filtered_pupil_center         : longblob     # center trace after filtering
+    pupil_sampling_rate           : float        # (Hz) sampling rate of pupil (Hz)
+    """
+    
+    @property
+    def key_source(self):
+        deeplabcut_fitting = FittedPupil & {'tracking_method': 2}
+        return deeplabcut_fitting * PupilFilterMethod
+    
+    def _make_tuples(self, key):
+              
+        ## Import clocktools here to prevent dependency on stimulus.py for non-stimulus Docker containers
+        from .utils import clocktools
+
+        print(f'Generating ProcessedPupil for {key}')
+        
+        ## Fetch times and fps
+        eye_times = (Eye & key).fetch1('eye_time')
+        pupil_fps = 1/np.nanmedian(np.diff(eye_times))
+
+        ## Fetch radii and radius centers over time
+        pupil_source = (PupilFilterMethod & key).fetch('pupil_source')
+        if pupil_source == 'Circle':
+            source_table = FittedPupil.Circle
+        elif pupil_source == 'Ellipse':
+            source_table = FittedPupil.Ellipse
+        radius_type = (PupilFilterMethod & key).fetch1('radius_type')
+        pupil_radii = (source_table & key).fetch(radius_type)
+        pupil_centers = (source_table & key).fetch('center')
+
+        ## Define valid start and ending times
+        start_index = np.nanargmin(eye_times)
+        valid_start = eye_times[start_index]
+        end_index = np.nanargmax(eye_times)
+        valid_end = eye_times[end_index]
+
+        ## Calculate fraction of non-NaN to NaN entries in signal
+        valid_fraction = len(np.where(~np.isnan(pupil_radii))[0])/(end_index-start_index)
+
+        ## Find longest string of non-NaN radii. First find non-NaN indices, then find all continuous IDX fragments.
+        all_continuous_fragments = clocktools.find_idx_boundaries(
+                                                np.where(~np.isnan(pupil_radii))[0], 
+                                                drop_single_idx=True)
+        longest_fragment_idx = np.argmax([len(x) for x in all_continuous_fragments])
+        longest_fragment = all_continuous_fragments[longest_fragment_idx]
+        longest_valid_epoch = eye_times[longest_fragment[-1]] - eye_times[longest_fragment[0]]
+
+        ## Filter pupil radius based on filter method
+        filter_table_row = (shared.FilterMethod) & (PupilFilterMethod & key)
+        filtered_pupil_radii = filter_table_row.run_filter_with_renan(signal=pupil_radii, signal_freq=pupil_fps)
+        
+        ## Split center values and filter based on Filter Method defined 3 lines above
+        center_xs = [c[0] if c is not None else np.nan for c in pupil_centers]
+        center_ys = [c[1] if c is not None else np.nan for c in pupil_centers]
+        filtered_center_xs = filter_table_row.run_filter_with_renan(signal=center_xs, signal_freq=pupil_fps)
+        filtered_center_ys = filter_table_row.run_filter_with_renan(signal=center_ys, signal_freq=pupil_fps)
+        filtered_pupil_centers = [[x,y] for x,y in zip(filtered_center_xs,filtered_center_ys)]
+
+        ## Calculate extra statistics
+        mean_radius = np.nanmean(filtered_pupil_radii)
+        radius_95 = np.nanpercentile(filtered_pupil_radii, 95)
+        
+        self.insert1({**key, 'valid_start': valid_start, 'valid_end': valid_end,
+                    'valid_fraction': valid_fraction, 'longest_valid_epoch': longest_valid_epoch,
+                    'mean_radius': mean_radius, 'radius_95': radius_95, 'pupil_sampling_rate': pupil_fps,
+                    'filtered_pupil_radius': filtered_pupil_radii,
+                    'filtered_pupil_center': filtered_pupil_centers})
+
+
+@schema
+class PupilUnitConversionMethod(dj.Lookup):
+    definition = """ # Method to determine millimeters per pixel conversion factor in pupil movies
+    unit_conversion_method_id     : tinyint unsigned    # index for method to determine conversion factor
+    ---
+    conversion_method_description : varchar(256)
+    """
+    contents = [[1, 'Manual'],
+                [2, 'Measure eyelid width using DeepLabCut and convert using assumed universal mouse eyelid width 2.757mm'],]
+    
+
+
+@schema
+class PupilUnitConversion(dj.Computed):
+    definition = """ # Pixel to millimeter conversion factor
+    -> ProcessedPupil
+    -> PupilUnitConversionMethod
+    ---
+    conversion_factor             : float               # (mm/pixel) number of millimeters per pixel
+    """
+    
+    def make(self, key):
+        
+        print(f'Populating PupilUnitConversion for {key}')
+        
+        if key['unit_conversion_method_id'] == 1:
+            print('Skipping manual entry method. If you want to use it uncomment the populate code in this table.\n')
+            #conversion_factor = input('Enter manually calculated conversion factor in mm/pixel:\n')
+            #print('')
+            return
+            
+        elif key['unit_conversion_method_id'] == 2:
+            
+            ## ASSUMED CONSTANTS
+            eyelid_width_in_mm = 2.757    # millimeters
+
+            ## Fetch eyelid points to calculate eyelid widths for each frame
+            leftlid_x, leftlid_y = (FittedPupil.EyePoints & key & 'label="eyelid_left"').fetch1('x','y')
+            rightlid_x, rightlid_y = (FittedPupil.EyePoints & key & 'label="eyelid_right"').fetch1('x','y')
+            eyelid_widths = [np.sqrt((lx-rx)**2 + (ly-ry)**2) for lx,ly,rx,ry in 
+                             zip(leftlid_x, leftlid_y, rightlid_x, rightlid_y)]
+            
+            ## Assume that the true eyelid width is the median
+            eyelid_width_in_px = np.nanmedian(eyelid_widths)
+            
+            ## Define mm/px
+            conversion_factor = eyelid_width_in_mm / eyelid_width_in_px
+            
+            ## Sanity check extrapolated size
+            pupil_source = (PupilFilterMethod & key).fetch('pupil_source')
+            
+            if pupil_source == 'Circle':
+                source_table = FittedPupil.Circle
+            elif pupil_source == 'Ellipse':
+                source_table = FittedPupil.Ellipse
+            
+            radius_type = (PupilFilterMethod & key).fetch1('radius_type')
+            pupil_radii = (source_table & key).fetch(radius_type)
+            max_pupil_diameter_px = 2*np.nanpercentile(pupil_radii,99.9)
+            
+            if max_pupil_diameter_px > eyelid_width_in_px:
+                pupil_diameter_mm = round(max_pupil_diameter_px * conversion_factor, 3)
+                msg = f"Pupil diameter {pupil_diameter_mm}mm exceeds assumed eyelid width {eyelid_width_in_mm}mm."
+                raise PipelineException(msg)
+            
+        else:
+            
+            msg = f"Unit conversion method id {key['period_method_id']} is not supported."
+            raise PipelineException(msg)
+            
+        self.insert1({**key, 'conversion_factor': conversion_factor})
+
+
+@schema
+class PupilPeriodMethod(dj.Lookup):
+    definition = """ # Method to extract periods of dilation/constriction in pupil trace
+    period_method_id              : tinyint unsigned    # index of pupil period method
+    ---
+    period_method_description     : varchar(256)
+    """
+    
+    contents = [[1, 'Peak detection followed by filtering out events < 1sec or with an average speed < 0.02mm/sec. Any event comprised of over 15% NaNs is automatically dropped.'],
+                ]
+    
+
+@schema
+class PupilPeriods(dj.Computed):
+    definition = """ # Scan level statistics on dilations & constrictions
+    -> ProcessedPupil
+    -> PupilPeriodMethod
+    -> PupilUnitConversion
+    ---
+    dilation_freq                 : float               # dilations per second (within valid start/end)
+    constriction_freq             : float               # constrictions per second (within valid start/end)
+    num_pupil_periods             : smallint unsigned   # total number of dilation and constriction periods
+    """
+
+    class DilationConstriction(dj.Part):
+        definition = """ # Single period of dilation or constriction
+        -> PupilPeriods
+        period_idx                : smallint unsigned
+        ---
+        period_onset              : float               # (sec) period start time
+        period_offset             : float               # (sec) period stop time
+        peak_change_time          : float               # (sec) time at which peak change rate occurs
+        period_delta              : float               # (mm) overall change in size (dilation > 0, constriction < 0)
+        period_duration           : float               # (sec) period duration
+        """
+        
+    def _make_tuples(self, key):
+        
+        print(f'Populating PupilPeriods for {key}')
+
+        if key['period_method_id'] == 1:
+
+            ## DEFINE CONSTANTS
+            min_period_duration = 1      # sec
+            min_dilation_vel = 0.01      # mm/sec
+            min_constriction_vel = 0.01  # mm/sec (Note: This will be made negative in the code below)
+            max_nan_gap_percent = 0.15   # percentage of event made up by NaNs must be below this value
+
+            ## Fetch conversion factor
+            px_to_mm = (PupilUnitConversion & key).fetch1('conversion_factor')
+
+            ## Get timing data
+            pupil_times = (Eye & key).fetch1('eye_time')
+            pupil_fps = 1/np.nanmedian(np.diff(pupil_times))
+
+            ## Calculate peaks and valleys over nan-interpolated radii
+            ## np.diff(np.sign(derivative)) creates an array that's -1 when at a peak and 1 at valleys
+            ## (Apologies in advance for that opaque one-liner)
+            pupil_radii = (ProcessedPupil & key).fetch1('filtered_pupil_radius')
+            nan_filled_pupil_radii = (shared.FilterMethod & 'filter_method="NaN Filler"').run_filter(pupil_radii)
+            derivative_of_radii = np.gradient(nan_filled_pupil_radii, pupil_times)
+            peaks = np.where(np.diff(np.sign(derivative_of_radii)) < 0)[0]
+            valleys = np.where(np.diff(np.sign(derivative_of_radii)) > 0)[0]
+
+            ## Store all events in array to sort later
+            all_events = []
+
+            ## Find all constriction events that are valid
+            for start in peaks:
+
+                end = valleys[np.argmax(valleys > start)]  ## Note: This gives the idx of the first "True" in array
+                if sum(valleys > start) == 0:
+                    end = len(nan_filled_pupil_radii)-1
+
+                event_idx = np.arange(start,end+1)
+                period_duration = pupil_times[end] - pupil_times[start]
+                period_delta = (nan_filled_pupil_radii[end] - nan_filled_pupil_radii[start]) * px_to_mm
+                period_slope = period_delta / period_duration
+                peak_change_time = pupil_times[np.nanargmax(np.abs(derivative_of_radii[start:end]))]
+
+                ## Create key if passes threshold
+                if period_duration > min_period_duration and period_slope < -min_constriction_vel:
+                    if sum(np.isnan(pupil_radii[event_idx])) < len(event_idx)*max_nan_gap_percent:
+                        event_key = {'period_onset': pupil_times[start], 'period_offset': pupil_times[end],
+                                     'period_duration': period_duration, 'period_delta': period_slope,
+                                     'peak_change_time': peak_change_time}
+                        all_events.append(event_key)
+
+            ## Find all dilation events that are valid
+            for start in valleys:
+
+                end = peaks[np.argmax(peaks > start)]  ## Note: This gives the idx of the first "True" in array
+                if sum(peaks > start) == 0:
+                    end = len(nan_filled_pupil_radii)-1
+
+                event_idx = np.arange(start,end+1)
+                period_duration = pupil_times[end] - pupil_times[start]
+                period_delta = (nan_filled_pupil_radii[end] - nan_filled_pupil_radii[start]) * px_to_mm
+                period_slope = period_delta / period_duration
+                peak_change_time = pupil_times[np.nanargmax(np.abs(derivative_of_radii[start:end]))]
+
+                ## Create key if passes threshold
+                if period_duration > min_period_duration and period_slope > min_dilation_vel:
+                    if sum(np.isnan(pupil_radii[event_idx])) < len(event_idx)*max_nan_gap_percent:
+                        event_key = {'period_onset': pupil_times[start], 'period_offset': pupil_times[end],
+                                     'period_duration': period_duration, 'period_delta': period_slope,
+                                     'peak_change_time': peak_change_time}
+                        all_events.append(event_key)
+
+            ## Sort all events before adding index to keys
+            all_event_starts = [e['period_onset'] for e in all_events]
+            event_sorting = np.argsort(all_event_starts)
+            all_events = np.array(all_events)[event_sorting]
+            for n,event in enumerate(all_events):
+                event['period_idx'] = n+1
+
+            ## Calculate statistics for dilations/constrictions
+            dilation_num = len([e for e in all_events if e['period_delta'] > 0])
+            constriction_num = len([e for e in all_events if e['period_delta'] < 0])
+            valid_length = np.nanmax(pupil_times) - np.nanmin(pupil_times)
+            dilation_freq = dilation_num/valid_length
+            constriction_freq = constriction_num/valid_length
+
+            ## Insert data
+            pupil_period_key = {**key, 'dilation_freq': dilation_freq, 'constriction_freq': constriction_freq, 
+                                'num_pupil_periods': len(all_events)}
+            self.insert1(pupil_period_key)
+
+            for event in all_events:
+                self.DilationConstriction.insert1({**key, **event})
+
+        else:
+
+            msg = f"Pupil period method id {key['period_method_id']} not supported."
+            raise PipelineException(msg)
+            
+    def plot_pupil_periods(self, x_stepsize=None, figsize=(100,10)):
+
+        key = self.fetch1('KEY')
+        
+        ## Create figure
+        with plt.style.context('fivethirtyeight'):
+            fig,ax = plt.subplots(1,1,figsize=figsize)
+            pupil_slope_plot_dict = {1.0: 'C2', -1.0: 'C3'}
+
+            ## Get conversion factor for plotting
+            px_to_mm = (PupilUnitConversion & key).fetch('conversion_factor')
+
+            ## Get recording times and determine peaks/valleys
+            pupil_times = (Eye & key).fetch1('eye_time')
+            pupil_radii = (ProcessedPupil & key).fetch1('filtered_pupil_radius')
+            nan_filled_pupil_radii = (shared.FilterMethod & 'filter_method="NaN Filler"').run_filter(pupil_radii)
+            derivative_of_radii = np.gradient(nan_filled_pupil_radii, pupil_times)
+            peaks = np.where(np.diff(np.sign(derivative_of_radii)) < 0)[0]
+            valleys = np.where(np.diff(np.sign(derivative_of_radii)) > 0)[0]
+
+            ## Plot peaks/valleys on top of processed pupil diameter
+            ax.plot(pupil_times, 2 * pupil_radii * px_to_mm, color='black', alpha=0.7, linewidth=2)
+            ax.scatter(pupil_times[peaks], 2*pupil_radii[peaks]*px_to_mm, color='C0', marker='o', zorder=10)
+            ax.scatter(pupil_times[valleys], 2*pupil_radii[valleys]*px_to_mm, color='C1', marker='o', zorder=10)
+
+
+            ## Fetch pupil dilation and constriction data
+            all_onsets, all_offsets, all_deltas = (PupilPeriods.DilationConstriction & key).fetch('period_onset', 'period_offset', 'period_delta')
+            for onset,offset,delta in zip(all_onsets, all_offsets, all_deltas):
+                sign = np.sign(delta)
+                ax.axvspan(onset, offset, color=pupil_slope_plot_dict[sign], alpha=0.3)
+
+            ## Clean Plot
+            title = f"ID {key['animal_id']} Session {key['session']} Scan {key['scan_idx']}"
+            ax.set_title(title, fontsize=50)
+            ax.set_ylabel('Pupil Diameter (mm)', fontsize=20)
+            ax.set_xlabel('Scan Time (sec)', fontsize=20)
+            if x_stepsize is not None:
+                x_start, x_end = ax.get_xlim()
+                ax.xaxis.set_ticks(np.arange(round(x_start,0), round(x_end,0), x_stepsize))
+
+        return fig
 
 
 # class PlotFitting(object):

@@ -29,13 +29,14 @@ spec:
                     - 12GB
                     - 24GB
                     - 32GB
+          priorityClassName: high-priority
           volumes:
           - name: mnt
             hostPath:
               path: /mnt
           containers:
           - name: minion-gpu
-            image: ninai/pipeline:tf-gpu
+            image: at-docker.ad.bcm.edu:5000/pipeline:tf-gpu
             imagePullPolicy: Always  # needed because the image tag is not latest
             volumeMounts:
             - name: mnt
