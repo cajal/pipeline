@@ -291,8 +291,8 @@ classdef FieldCoordinates < dj.Manual
             fmask = ref_mask(YY+1:size(imS,1)+YY,XX+1:size(imS,2)+XX);
             fmask = self.filterImage(fmask,tform,1);
             fmask = fmask(...
-                round(size(fmask,1)/2)-floor(sz(1)/2)+1:floor(size(fmask,1)/2)+floor(sz(1)/2),...
-                round(size(fmask,2)/2)-floor(sz(2)/2)+1:floor(size(fmask,2)/2)+floor(sz(2)/2));
+                round(size(fmask,1)/2)-floor(sz(1)/2)+1:round(size(fmask,1)/2)+floor(sz(1)/2),...
+                round(size(fmask,2)/2)-floor(sz(2)/2)+1:round(size(fmask,2)/2)+floor(sz(2)/2));
         end
     end
 
