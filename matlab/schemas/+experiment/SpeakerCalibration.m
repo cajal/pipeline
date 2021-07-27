@@ -1,8 +1,6 @@
 %{
 # speaker sound pressure calibration
 speaker_id              : int               # some number that identifies the speaker
-rig                     : char              # setup name
-location                : tinyint           # 1 = Left, 2 = Right
 trial                   : int               # trial number of calibration
 ---
 sampling_freq           : float             # sampling frequency used during calibration
