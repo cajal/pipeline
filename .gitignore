@@ -84,4 +84,7 @@ startup.m
 
 # docker-compose-private.yml
 docker-compose-private.yml
+
+setDJ.m
+
 python/pipeline/.vscode/settings.json
