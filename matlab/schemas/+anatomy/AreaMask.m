@@ -60,10 +60,10 @@ classdef AreaMask < dj.Manual
                 area_map = single(uint8(imresize(area_map,1/params.downsample,'nearest')));
             end
             
-            % delete previous keys if existed
-            if exists(self & key)
-                del(anatomy.AreaMask & keys)
-            end
+%             % delete previous keys if existed
+%             if exists(self & key)
+%                 del(anatomy.AreaMask & keys)
+%             end
             
             % image
             figure;
