@@ -21,7 +21,7 @@ classdef AreaMask < dj.Manual
             
             % populate if retinotopy map doesn't exist
             ret_key = getRetKey(map.RetMap, key);
-            key = rmfield(ret_key,'ret_idx');
+%             key = rmfield(ret_key,'ret_idx');
             
             % get maps
             background = getBackground(map.RetMap & ret_key, params);
@@ -191,8 +191,8 @@ classdef AreaMask < dj.Manual
                 y_pos = y_pos - fieldHeights * pxpitch / 2;
                 
                 % start indexes
-                XX = round((x_pos - min(x_pos))/pxpitch);
-                YY = round((y_pos - min(y_pos))/pxpitch);
+                XX = (x_pos - min(x_pos))/pxpitch;
+                YY = (y_pos - min(y_pos))/pxpitch;
                 
                 % deconstruct the big field of view
                 for ifield = 1:length(x_pos)
@@ -200,7 +200,6 @@ classdef AreaMask < dj.Manual
                     fmasks{ifield} = ref_mask(YY(ifield)+1:fieldHeights(ifield)+YY(ifield),...
                         XX(ifield)+1:fieldWidths(ifield)+XX(ifield));
                 end
-     
             else % for all other scans there is no need to split the mask
                 keys = fetch(meso.ScanInfoField * reso.SummaryImagesAverage & key);
                 for ikey = 1:length(keys)
@@ -235,8 +234,8 @@ classdef AreaMask < dj.Manual
                 background = zeros(size(area_map));
                 for islice =length(masks):-1:1
                     mask = double(masks{islice})*find(strcmp(areas{islice},unique(areas)));
-                    y_idx = round(y_pos(islice)+1):round(y_pos(islice))+size(mask,1);
-                    x_idx = round(x_pos(islice)+1):round(x_pos(islice))+size(mask,2);
+                    y_idx = ceil(y_pos(islice)+1):ceil(y_pos(islice))+size(mask,1);
+                    x_idx = ceil(x_pos(islice)+1):ceil(x_pos(islice))+size(mask,2);
                     back = area_map(y_idx, x_idx);
                     area_map(y_idx, x_idx) = max(cat(3,mask,back),[],3);
                     background(y_idx, x_idx) = avg_image{islice}(1:size(mask,1),1:size(mask,2));
