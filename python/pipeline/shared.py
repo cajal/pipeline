@@ -154,7 +154,8 @@ class AreaMaskMethod(dj.Lookup):
     """
 
     contents = [
-        [1, 'manual', '', 'matlab'],
+        [1,'manual','join_kernel_width = 100 um', 'matlab'],
+        [2,'manual','join_kernel_width = 750 um', 'matlab']
     ]
 
 @schema
@@ -205,6 +206,7 @@ class FilterMethod(dj.Lookup):
     contents = [['0.5Hz Hamming Lowpass', 'signal, signal_freq (Hz)', '0.5Hz lowpass filter using hamming window'],
                 ['1Hz Hamming Lowpass', 'signal, signal_freq (Hz)', '1Hz lowpass filter, zero-phase (without added delay) using Hamming window'],
                 ['2Hz Hamming Lowpass', 'signal, signal_freq (Hz)', '2Hz lowpass filter, zero-phase (without added delay) using Hamming window'],
+                ['5Hz Hamming Lowpass', 'signal, signal_freq (Hz)', '5Hz lowpass filter, zero-phase (without added delay) using Hamming window'],
                 ['0.1 - 1Hz Hamming Bandpass', 'signal, signal_freq (Hz)', '0.1 - 1Hz bandpass filter, zero-phase (without added delay) using Hamming window'],
                 ['0.5sec Median Filter', 'signal, signal_freq (Hz)', 'Filter which returns median value over sliding 0.5sec window'],
                 ['NaN Filler', 'signal', 'Linearly interpolates over all NaNs in a signal with NaNs outside of bounds filled via nearest neighbor interpolation'],
@@ -300,7 +302,7 @@ class FilterMethod(dj.Lookup):
             filtered_signal: Numpy array of the median filtered input signal
         """
         
-        window_idx_length = round(signal_freq * window_sec)
+        window_idx_length = int(round(signal_freq * window_sec))
         
         ## Window length must be odd
         if window_idx_length % 2 == 0:
@@ -368,6 +370,10 @@ class FilterMethod(dj.Lookup):
         
         elif filter_method == "2Hz Hamming Lowpass":
             kwargs['lowpass_freq'] = 2
+            filtered_signal = FilterMethod._lowpass_hamming(*args, **kwargs)
+        
+        elif filter_method == "5Hz Hamming Lowpass":
+            kwargs['lowpass_freq'] = 5
             filtered_signal = FilterMethod._lowpass_hamming(*args, **kwargs)
         
         elif filter_method == "0.1 - 1Hz Hamming Bandpass":
