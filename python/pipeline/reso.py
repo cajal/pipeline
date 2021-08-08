@@ -51,7 +51,7 @@ class ScanInfo(dj.Imported):
 
     @property
     def key_source(self):
-        rigs = [{'rig': '2P2'}, {'rig': '2P3'}, {'rig': '2P5'}, {'rig': '3P1'}]
+        rigs = [{'rig': '2P2'}, {'rig': '2P3'}, {'rig': '2P5'}, {'rig': '3P1'}, {'rig': 'M2P2'}]
         reso_scans = experiment.Scan() & (experiment.Session() & rigs)
         return reso_scans * (Version() & {'pipe_version': CURRENT_VERSION})
 
@@ -926,8 +926,8 @@ class Segmentation(dj.Computed):
                     kwargs['soma_diameter'] = tuple(8 / (ScanInfo() & key).microns_per_pixel)
 
             ## Set performance/execution parameters (heuristically), decrease if memory overflows
-            kwargs['num_processes'] = 8  # Set to None for all cores available
-            kwargs['num_pixels_per_process'] = 10000
+            kwargs['num_processes'] = 12  # Set to None for all cores available
+            kwargs['num_pixels_per_process'] = 5000
 
             # Extract traces
             print('Extracting masks and traces (cnmf)...')

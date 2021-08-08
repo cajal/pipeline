@@ -18,9 +18,13 @@ setup(
     url='https://github.com/cajal/pipeline',
     keywords='neuroscientific data processing',
     packages=find_packages(exclude=['contrib', 'docs', 'tests*']),
+#    install_requires=['numpy', 'scipy', 'matplotlib', 'pandas', 'seaborn',
+#                      'imageio', 'imreg_dft', 'slacker', 'pyfftw', 'h5py',
+#                      'scikit-image', 'scikit-learn'],
     install_requires=['numpy', 'scipy', 'matplotlib', 'pandas', 'seaborn',
-                      'imageio', 'imreg_dft', 'slacker', 'pyfftw', 'h5py',
+                      'imageio', 'imreg_dft', 'slacker', 'h5py',
                       'scikit-image', 'scikit-learn'],
+
     classifiers=[
         'Development Status :: 1 - Beta',
         'Intended Audience :: Science/Research',
