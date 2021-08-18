@@ -31,26 +31,6 @@ spec:
                     - at-compute005
                     - at-compute006
                     - jr-compute001
-                    - at-node1
-                    - at-node2
-                    - at-node3
-                    - at-node4
-                    - at-node5
-                    - at-node6
-                    - at-node7
-                    - at-node8
-                    - at-node9
-                    - at-node10
-                    - at-node11
-                    - at-node12
-                    - at-node13
-                    - at-node14
-                    - at-node15
-                    - at-node16
-                    - at-node17
-                    - at-node18
-                    - at-node19
-                    - at-node20
           priorityClassName: high-priority
           containers:
           - name: minion
