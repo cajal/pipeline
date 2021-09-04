@@ -1,4 +1,4 @@
-FROM at-docker:5000/pipeline:latest
+FROM at-docker:5000/pipeline:base
 LABEL maintainer="Edgar Y. Walker, Fabian Sinz, Erick Cobos, Donnie Kim"
 
 WORKDIR /data
