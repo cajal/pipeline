@@ -1,4 +1,4 @@
-From ninai/pipeline:base
+From at-docker:5000/base
 
 LABEL maintainer="Erick Cobos <ecobos@bcm.edu>, Donnie Kim <donniek@bcm.edu>"
 
