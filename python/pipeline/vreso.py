@@ -8,8 +8,9 @@ from pipeline import reso, experiment, mice, notify, shared
 from pipeline.utils import galvo_corrections, signal, quality, mask_classification, performance, h5
 
 # external storage place
-dj.config['external'] = {'protocol': 'file',
-                         'location': '/mnt/dj-stor01/pipeline-externals'}
+dj.config['stores'] = {
+    'vreso':dict(protocol='file',location='/mnt/dj-stor01/pipeline-externals')
+}
 
 schema = dj.schema("pipeline_vreso", locals(), create_tables=False)
 CURRENT_VERSION = 1
@@ -70,11 +71,11 @@ class RecordingInfo(dj.Imported):
     definition = """ # Imported information of a single recording of a cell
     -> Recording
     ---
-    voltage                       : external            # (V_amplifier) recorded voltage
-    current                       : external            # (V_amplifier) recorded current
-    command                       : external            # (V_amplifier) output voltage/current into cell
-    patch_times                   : external            # (seconds) ephys recording times on timestamp/master clock
-    frame_times                   : external            # (seconds) scanimage times on timestamp/master clock
+    voltage                       : blob@vreso            # (V_amplifier) recorded voltage
+    current                       : blob@vreso            # (V_amplifier) recorded current
+    command                       : blob@vreso            # (V_amplifier) output voltage/current into cell
+    patch_times                   : blob@vreso            # (seconds) ephys recording times on timestamp/master clock
+    frame_times                   : blob@vreso            # (seconds) scanimage times on timestamp/master clock
     vgain                         : float               # (mV_cell/V_amplifier) gain applied to recorded voltage
     igain                         : float               # (nA_cell/V_amplifier) gain applied to recorded current
     command_gain                  : float               # ([cell_nA or cell_mV]/V_computer) gain applied to command output
@@ -167,7 +168,7 @@ class PatchSpikes(dj.Computed):
     definition = """
         -> RecordingInfo
         ---
-        spike_ts                  : external            # (seconds) array of times spikes occurred on timestamp/master clock
+        spike_ts                  : blob@vreso            # (seconds) array of times spikes occurred on timestamp/master clock
         """
 
 
@@ -176,7 +177,7 @@ class ManualPatchSpikes(dj.Manual):
     definition = """
         -> RecordingInfo
         ---
-        spike_ts                  : external            # (seconds) array of times spikes occurred on timestamp/master clock
+        spike_ts                  : blob@vreso            # (seconds) array of times spikes occurred on timestamp/master clock
         method_notes = ''         : varchar(256)
         """
 

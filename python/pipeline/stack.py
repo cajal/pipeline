@@ -1,6 +1,6 @@
 """ Schemas for structural stacks. """
 import datajoint as dj
-from datajoint.jobs import key_hash
+from datajoint.hash import key_hash
 import matplotlib.pyplot as plt
 import numpy as np
 import scanreader
@@ -21,8 +21,11 @@ Our stack/motor coordinate system is consistent with numpy's: z in the first axi
 downwards, y in the second axis pointing towards you and x on the third axis pointing to 
 the right.
 """
-dj.config['external-stack'] = {'protocol': 'file',
-                               'location': '/mnt/dj-stor01/pipeline-externals'}
+dj.config['stores'] = {
+    'stack': dict(protocol = 'file',
+                location='/mnt/dj-stor01/pipeline-externals')   
+}
+
 dj.config['cache'] = '/tmp/dj-cache'
 
 
@@ -948,9 +951,9 @@ class PreprocessedStack(dj.Computed):
     -> CorrectedStack
     -> shared.Channel
     ---
-    resized:        external-stack      # original stack resized to 1 um^3
-    lcned:          external-stack      # local contrast normalized stack. Filter size: (3, 25, 25)
-    sharpened:      external-stack      # sharpened stack. Filter size: 1
+    resized:        blob@stack      # original stack resized to 1 um^3
+    lcned:          blob@stack      # local contrast normalized stack. Filter size: (3, 25, 25)
+    sharpened:      blob@stack      # sharpened stack. Filter size: 1
     """
 
     @property
@@ -1197,7 +1200,7 @@ class Segmentation(dj.Computed):
     -> PreprocessedStack
     -> SegmentationTask
     ---
-    segmentation            : external-stack # voxel-wise cell-ids (0 for background)
+    segmentation            : blob@stack # voxel-wise cell-ids (0 for background)
     nobjects                : int            # number of cells found            
     """
 
@@ -1205,8 +1208,8 @@ class Segmentation(dj.Computed):
         definition = """ # attributes particular to convnet based methods
         -> master
         ---
-        centroids           : external-stack # voxel-wise probability of centroids
-        probs               : external-stack # voxel-wise probability of cell nuclei 
+        centroids           : blob@stack # voxel-wise probability of centroids
+        probs               : blob@stack # voxel-wise probability of cell nuclei 
         seg_threshold       : float          # threshold used for the probability maps
         min_voxels          : int            # minimum number of voxels (in cubic microns)
         max_voxels          : int            # maximum number of voxels (in cubic microns)
