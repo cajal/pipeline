@@ -1,4 +1,4 @@
-FROM ninai/pipeline:base
+FROM at-docker:5000/pipeline:latest
 LABEL maintainer="Edgar Y. Walker, Fabian Sinz, Erick Cobos, Donnie Kim"
 
 WORKDIR /data
