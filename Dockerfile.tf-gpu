@@ -1,4 +1,4 @@
-From at-docker:5000/pipeline:latest
+From at-docker:5000/pipeline:base
 
 LABEL maintainer="Erick Cobos <ecobos@bcm.edu>, Donnie Kim <donniek@bcm.edu>"
 
