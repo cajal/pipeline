@@ -77,7 +77,7 @@ class StackInfo(dj.Imported):
                              id_in_file in field_roi]
                 field_depths = [stack.field_depths[i] - surf_z for i in field_ids]
             else:
-                field_ids = np.array(range(stack.num_scanning_depths))
+                field_ids = range(stack.num_scanning_depths)
                 motor_zero = surf_z - stack.motor_position_at_zero[2]
                 if stack.is_slow_stack and not stack.is_slow_stack_with_fastZ:  # using motor
                     initial_fastZ = stack.initial_secondary_z or 0
@@ -86,7 +86,7 @@ class StackInfo(dj.Imported):
                 else:  # using fastZ
                     field_depths = [motor_zero + stack.field_depths[i] for i in field_ids]
             field_depths, field_ids = zip(*sorted(zip(field_depths, field_ids)))
-            tuple_['field_ids'] = field_ids
+            tuple_['field_ids'] = np.array(field_ids)
 
             # Get reso/meso specific coordinates
             x_zero, y_zero, _ = stack.motor_position_at_zero  # motor x, y at ScanImage's 0
