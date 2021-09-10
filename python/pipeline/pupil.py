@@ -955,8 +955,8 @@ class FittedPupil(dj.Computed):
                 data_ellipse.append([center, major_radius, minor_radius,
                                      rotation_angle, visible_portion])
 
-        data_circle = np.array(data_circle)
-        data_ellipse = np.array(data_ellipse)
+        data_circle = np.array(data_circle,dtype=np.float)
+        data_ellipse = np.array(data_ellipse,dtype=np.float)
 
         # now filter out the outliers by 5.5 std away from mean
         rejected_ind = DLC_tools.filter_by_fitting_std(
@@ -971,6 +971,7 @@ class FittedPupil(dj.Computed):
             (common_matrix, np.arange(nframes).reshape(-1, 1), data_circle))
 
         # insert data
+        data_circle.astype(np.float)
         self.Circle.insert(data_circle)
 
         # now repeat the process for ellipse
@@ -982,6 +983,7 @@ class FittedPupil(dj.Computed):
         data_ellipse = np.hstack(
             (common_matrix, np.arange(nframes).reshape(-1, 1), data_ellipse))
 
+        data_ellipse.astype(np.float)
         self.Ellipse.insert(data_ellipse)
 
 

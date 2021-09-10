@@ -282,7 +282,7 @@ class Quality(dj.Computed):
                     mean_intensities - mean_intensities.mean()
                 ) / mean_intensities.mean()
                 peaks, prominences, widths = quality.find_peaks(deviations)
-                widths = [w / scan.fps for w in widths]  # in seconds
+                widths = np.array([w / scan.fps for w in widths])  # in seconds
                 abnormal = peaks[
                     [p > 0.2 and w < 0.4 for p, w in zip(prominences, widths)]
                 ]
@@ -305,6 +305,10 @@ class Quality(dj.Computed):
                         "quantal_frame": quantal_frame,
                     }
                 )
+                abnormal = np.array(abnormal)
+                peaks = np.array(peaks)
+                prominences = np.array(prominences)
+            
                 self.EpileptiformEvents.insert1(
                     {
                         **field_key,
