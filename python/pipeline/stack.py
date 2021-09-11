@@ -700,7 +700,7 @@ class Stitching(dj.Computed):
             # Insert coordinates of each ROI forming this volume
             for roi_coord in roi.roi_coordinates:
                 tuple_ = {**key, 'roi_id': roi_coord.id, 'volume_id': volume_id,
-                          'stitch_xs': roi_coord.xs, 'stitch_ys': roi_coord.ys}
+                          'stitch_xs': np.array(roi_coord.xs,dtype=np.float), 'stitch_ys': np.array(roi_coord.ys,dtype=np.float)}
                 self.ROICoordinates().insert1(tuple_)
 
         self.notify(key)
