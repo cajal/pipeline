@@ -956,8 +956,8 @@ class FittedPupil(dj.Computed):
                                      rotation_angle, visible_portion])
 
 
-        data_circle = np.array(data_circle)
-        data_ellipse = np.array(data_ellipse)
+        data_circle = np.array(data_circle,dtype=np.float)
+        data_ellipse = np.array(data_ellipse,dtype=np.float)
         # now filter out the outliers by 5.5 std away from mean
         rejected_ind = DLC_tools.filter_by_fitting_std(
             data=data_circle, fitting_method='circle', std_magnitude=5.5)
