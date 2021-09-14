@@ -62,7 +62,7 @@ def resize(original, um_sizes, desired_res):
     input_tensor = torch.from_numpy(original.reshape(1, 1, *original.shape).astype(
         np.float32))
     grid_tensor = torch.from_numpy(grid.reshape(1, *grid.shape))
-    resized_tensor = F.grid_sample(input_tensor, grid_tensor, padding_mode='border')
+    resized_tensor = F.grid_sample(input_tensor, grid_tensor, padding_mode='border',align_corners=True)
     resized = resized_tensor.numpy().squeeze()
 
     return resized
@@ -101,7 +101,7 @@ def sample_grid(volume, grid):
 
     # Resample
     resampled = F.grid_sample(volume[None, None, ...], norm_grid[None, None, ...],
-                              padding_mode='zeros')
+                              padding_mode='zeros',align_corners=True)
     resampled = resampled.squeeze() # drop batch and channel dimension
 
     return resampled
