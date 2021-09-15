@@ -22,4 +22,4 @@ if hasattr(dj.connection, 'query_log_max_length'):
 next_scans = (experiment.AutoProcessing  & 'priority < 120' &
               (experiment.Scan & 'scan_ts > "2019-01-01 00:00:00"'))
 
-pupil.FittedPupil().populate(next_scans)
+pupil.FittedPupil().populate(next_scans,reserve_jobs=True)
