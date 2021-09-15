@@ -1978,16 +1978,10 @@ class ScanDone(dj.Computed):
 
     def make(self, key):
         scan_key = {k: v for k, v in key.items() if k in self.heading}
-
-        # Delete current ScanDone entry
-        with dj.config(safemode=False):
-            (ScanDone() & scan_key).delete()
-
-        # Reinsert in ScanDone
-        self.insert1(scan_key)
-
-        # Insert all processed fields in Partial
-        ScanDone.Partial().insert((Activity() & scan_key).proj())
+        nfields_populated = len(Activity & scan_key)
+        nfields = len(ScanInfo.Field & scan_key)
+        if(nfields == nfields_populated):
+            self.insert1(scan_key)
 
 
 from . import stack
