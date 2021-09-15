@@ -962,7 +962,7 @@ class FittedPupil(dj.Computed):
         rejected_ind = DLC_tools.filter_by_fitting_std(
             data=data_circle, fitting_method='circle', std_magnitude=5.5)
 
-        data_circle[rejected_ind] = np.nan, np.nan, -3.0
+        data_circle[rejected_ind] = None, None, -3.0
 
         common_entry = np.array(list(key.values()))
         common_matrix = np.tile(common_entry, (nframes, 1))
@@ -978,7 +978,7 @@ class FittedPupil(dj.Computed):
         rejected_ind = DLC_tools.filter_by_fitting_std(
             data=data_ellipse, fitting_method='ellipse', std_magnitude=5.5)
 
-        data_ellipse[rejected_ind, :] = np.nan, np.nan, np.nan, np.nan, -3.0
+        data_ellipse[rejected_ind, :] = None, None, None, None, -3.0
 
         data_ellipse = np.hstack(
             (common_matrix, np.arange(nframes).reshape(-1, 1), data_ellipse))
