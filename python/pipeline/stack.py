@@ -1675,7 +1675,7 @@ class Registration(dj.Computed):
 
         # Create grid at desired resolution
         grid = registration.create_grid(field_dims, desired_res=desired_res)  # h x w x 2
-        grid = torch.as_tensor(grid, dtype=torch.float32)
+        grid = torch.as_tensor(grid, dtype=torch.float64)
 
         # Apply required transform
         if type == 'rigid':
