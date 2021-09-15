@@ -268,6 +268,10 @@ class Quality(dj.Computed):
                                             'quantal_size': quantal_size,
                                             'zero_level': zero_level,
                                             'quantal_frame': quantal_frame})
+                
+                abnormal = np.array(abnormal)
+                peaks = np.array(peaks)
+                prominences = np.array(prominences)
                 self.EpileptiformEvents.insert1({**field_key, 'frequency': abnormal_freq,
                                                  'abn_indices': abnormal,
                                                  'peak_indices': peaks,
