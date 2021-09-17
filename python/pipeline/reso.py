@@ -1685,6 +1685,7 @@ class ScanDone(dj.Computed):
         nfields = len(ScanInfo.Field & scan_key)
         if(nfields == nfields_populated):
             self.insert1(scan_key)
+            self.Partial.insert(Activity & scan_key,skip_duplicates=True,ignore_extra_fields=True)
 
 
 from . import stack
