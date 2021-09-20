@@ -1,14 +1,16 @@
-import h5py
 import os
+import h5py
+import itertools
 
-import datajoint as dj
 import numpy as np
+import datajoint as dj
 
-from pipeline import mice
-from pipeline import meso
-from pipeline.utils import h5
 from commons import lab
+from scipy import ndimage
+from pipeline.utils import h5
+from datajoint.hash import key_hash
 from .exceptions import PipelineException
+from pipeline import meso, stack, mice, experiment, shared
 
 
 #dj.config['external-odor'] = {'protocol': 'file',
@@ -271,3 +273,196 @@ class MesoMatch(dj.Manual):
     ---
     -> meso.ScanInfo
     """
+
+
+@schema
+class StackMatching(dj.Computed):
+    definition = """ # match segmented masks by proximity in the stack
+    
+    -> stack.CorrectedStack.proj(stack_session='session')
+    -> shared.RegistrationMethod
+    -> shared.SegmentationMethod
+    ---
+    min_distance            :tinyint                   # distance used as threshold to accept two masks as the same
+    max_height              :tinyint                   # maximum allowed height of a joint mask
+    """
+
+    @property
+    def key_source(self):
+        return (stack.CorrectedStack.proj(stack_session='session') *
+                shared.RegistrationMethod.proj() * shared.SegmentationMethod.proj() &
+                stack.Registration & {'segmentation_method': 1}) & MesoMatch.proj(stack_session='session')
+
+    class Unit(dj.Part):
+        definition = """ # a unit in the stack
+        
+        -> master
+        munit_id            :int                       # unique id in the stack
+        ---
+        munit_x             :float                     # (um) position of centroid in motor coordinate system
+        munit_y             :float                     # (um) position of centroid in motor coordinate system
+        munit_z             :float                     # (um) position of centroid in motor coordinate system
+        """
+
+    class Match(dj.Part):
+        definition = """ # Scan unit to stack unit match (n:1 relation)
+        
+        -> master
+        -> experiment.Scan.proj(scan_session='session')  # animal_id, scan_session, scan_idx
+        unit_id             :int                       # unit id from ScanSet.Unit
+        ---
+        -> StackMatching.Unit
+        """
+
+    class MatchedUnit():
+        """ Coordinates for a set of masks that form a single cell."""
+
+        def __init__(self, key, x, y, z, plane_id):
+            self.keys = [key]
+            self.xs = [x]
+            self.ys = [y]
+            self.zs = [z]
+            self.plane_ids = [plane_id]
+            self.centroid = [x, y, z]
+
+        def join_with(self, other):
+            self.keys += other.keys
+            self.xs += other.xs
+            self.ys += other.ys
+            self.zs += other.zs
+            self.plane_ids += other.plane_ids
+            self.centroid = [np.mean(self.xs), np.mean(self.ys), np.mean(self.zs)]
+
+        def __lt__(self, other):
+            """ Used for sorting. """
+            return True
+
+    def make(self, key):
+        from scipy.spatial import distance
+        import bisect
+
+        # Set some params
+        min_distance = 40
+        max_height = 100
+
+        # Create list of units
+        units = []  # stands for matched units
+        for field in stack.Registration & key:
+            # Edge case: when two channels are registered, we don't know which to use
+            if len(stack.Registration.proj(ignore='scan_channel') & field) > 1:
+                msg = ('More than one channel was registered for {animal_id}-'
+                       '{scan_session}-{scan_idx} field {field}'.format(**field))
+                raise PipelineException(msg)
+
+            # Get registered grid
+            field_key = {'animal_id': field['animal_id'],
+                         'session': field['scan_session'], 'scan_idx': field['scan_idx'],
+                         'field': field['field']}
+            um_per_px = (meso.ScanInfo.Field & field_key).microns_per_pixel
+            grid = (stack.Registration & field).get_grid(type='affine', desired_res=um_per_px)
+
+            # Create cell objects
+            for channel_key in (meso.ScanSet & field_key &
+                                {'segmentation_method': key['segmentation_method']}):  # *
+                field_masks = meso.ScanSet.Unit & channel_key
+                unit_keys, xs, ys = (meso.ScanSet.UnitInfo & field_masks).fetch('KEY',
+                        'px_x', 'px_y')
+                px_coords = np.stack([ys, xs])
+                xs, ys, zs = [ndimage.map_coordinates(grid[..., i], px_coords, order=1)
+                              for i in range(3)]
+                units += [StackMatching.MatchedUnit(*args, key_hash(channel_key)) for args in
+                          zip(unit_keys, xs, ys, zs)]
+            # * Separating masks per channel allows masks in diff channels to be matched
+        print(len(units), 'initial units')
+
+        def find_close_units(centroid, centroids, min_distance):
+            """ Finds centroids that are closer than min_distance to centroid. """
+            dists = distance.cdist(np.expand_dims(centroid, 0), centroids)
+            indices = np.flatnonzero(dists < min_distance)
+            return indices, dists[0, indices]
+
+        def is_valid(unit1, unit2, max_height):
+            """ Checks that units belong to different fields and that the resulting unit
+            would not be bigger than 20 microns."""
+            different_fields = len(set(unit1.plane_ids) & set(unit2.plane_ids)) == 0
+            acceptable_height = (max(unit1.zs + unit2.zs) - min(
+                unit1.zs + unit2.zs)) < max_height
+            return different_fields and acceptable_height
+
+        # Create distance matrix
+        # For memory efficiency we use an adjacency list with only the units at less than 10 microns
+        centroids = np.stack([u.centroid for u in units])
+        distance_list = []  # list of triples (distance, unit1, unit2)
+        for i in range(len(units)):
+            indices, distances = find_close_units(centroids[i], centroids[i + 1:],
+                                                  min_distance)
+            for dist, j in zip(distances, i + 1 + indices):
+                if is_valid(units[i], units[j], max_height):
+                    bisect.insort(distance_list, (dist, units[i], units[j]))
+        print(len(distance_list), 'possible pairings')
+
+        # Join units
+        while (len(distance_list) > 0):
+            # Get next pair of units
+            d, unit1, unit2 = distance_list.pop(0)
+
+            # Remove them from lists
+            units.remove(unit1)
+            units.remove(unit2)
+            f = lambda x: (unit1 not in x[1:]) and (unit2 not in x[1:])
+            distance_list = list(filter(f, distance_list))
+
+            # Join them
+            unit1.join_with(unit2)
+
+            # Recalculate distances
+            centroids = [u.centroid for u in units]
+            indices, distances = find_close_units(unit1.centroid, centroids, min_distance)
+            for dist, j in zip(distances, indices):
+                if is_valid(unit1, units[j], max_height):
+                    bisect.insort(distance_list, (d, unit1, units[j]))
+
+            # Insert new unit
+            units.append(unit1)
+        print(len(units), 'number of final masks')
+
+        # Insert
+        self.insert1({**key, 'min_distance': min_distance, 'max_height': max_height})
+        for munit_id, munit in zip(itertools.count(start=1), units):
+            new_unit = {**key, 'munit_id': munit_id, 'munit_x': munit.centroid[0],
+                        'munit_y': munit.centroid[1], 'munit_z': munit.centroid[2]}
+            self.Unit().insert1(new_unit)
+            for subunit_key in munit.keys:
+                new_match = {**key, 'munit_id': munit_id, **subunit_key,
+                             'scan_session': subunit_key['session']}
+                self.Match().insert1(new_match, ignore_extra_fields=True)
+
+
+    def plot_centroids3d(self):
+        """ Plots the centroids of all units in the motor coordinate system (in microns)
+
+        :returns Figure. You can call show() on it.
+        :rtype: matplotlib.figure.Figure
+        """
+        import matplotlib.pyplot as plt
+        from mpl_toolkits.mplot3d import Axes3D
+
+        # Get centroids
+        xs, ys, zs = (StackMatching.Unit).fetch('munit_x', 'munit_y', 'munit_z')
+
+        # Plot
+        fig = plt.figure(figsize=(30, 10))
+        views = ((30,-60), (1,0), (90,0))  # (elev, azim)
+        for n,view in enumerate(views):
+
+            ax = fig.add_subplot(1, 3, n+1, projection='3d')
+            ax.view_init(elev=view[0], azim=view[1])
+            ax.scatter(xs, ys, zs, alpha=0.5)
+            ax.invert_zaxis()
+            ax.set_xlabel('x (um)')
+            ax.set_ylabel('y (um)')
+            ax.set_zlabel('z (um)')
+            
+        plt.tight_layout()
+
+        return fig
