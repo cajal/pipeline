@@ -254,7 +254,7 @@ class Quality(dj.Computed):
                 # Compute abnormal event frequency
                 deviations = (mean_intensities - mean_intensities.mean()) / mean_intensities.mean()
                 peaks, prominences, widths = quality.find_peaks(deviations)
-                widths = [w / scan.fps for w in widths] # in seconds
+                widths = np.array([w / scan.fps for w in widths]) # in seconds
                 abnormal = peaks[[p > 0.2 and w < 0.4 for p, w in zip(prominences, widths)]]
                 abnormal_freq = len(abnormal) / (scan.num_frames / scan.fps)
 
