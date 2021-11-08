@@ -101,7 +101,7 @@ def parallel_quality_metrics(chunks, results):
         results.append((frames, mean_intensity, contrast, mean_frame))
 
 
-def parallel_motion_shifts(chunks, results, raster_phase, fill_fraction, template):
+def parallel_motion_shifts(key,chunks, results, raster_phase, fill_fraction, template):
     """ Compute motion correction shifts to chunks of scan.
 
     Function to run in each process. Consumes input from chunks and writes results to
@@ -115,6 +115,7 @@ def parallel_motion_shifts(chunks, results, raster_phase, fill_fraction, templat
 
     :returns: (frames, y_shifts, x_shifts) tuples.
     """
+    
     while True:
         # Read next chunk (process locks until something can be read)
         frames, chunk = chunks.get()

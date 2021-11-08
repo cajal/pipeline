@@ -1,12 +1,10 @@
 apiVersion: batch/v1beta1
 kind: CronJob # This tells kubernetes what kind of class it is working with
 metadata:
-  name: minion
+  name: minion-closedloop
 spec:
   schedule: "*/5 * * * *" # every 5 minutes
   concurrencyPolicy: Allow
-  failedJobsHistoryLimit: 30
-  successfulJobsHistoryLimit: 30
   jobTemplate:
     spec:
       parallelism: 1  # how many process in parallel I want
@@ -14,60 +12,51 @@ spec:
         spec:
           restartPolicy: Never
           hostNetwork: true # This option will allow the pod to use the host network for internet access
+          tolerations:
+          - key: "closed_loop_minion"
+            operator: "Equal"
+            value: "true"
+            effect: "NoSchedule"
           volumes:
-          - name: mnt
-            hostPath:
-              path: /mnt
-          affinity: # Affinity to select certain nodes with 11GB, 12GB, or 24GB memory
-            nodeAffinity:
-              requiredDuringSchedulingIgnoredDuringExecution: # Require nodes to have this label
-                nodeSelectorTerms:
-                - matchExpressions:
-                  - key: kubernetes.io/hostname # Target label is gpu_mem_size
-                    operator: In # Key must have one of the following values
-                    values:
-                    - at-compute003
-                    - at-compute004
-                    - at-compute005
-                    - at-compute006
-                    - jr-compute001
-          priorityClassName: high-priority
+            - name: mnt
+              hostPath:
+                path: /mnt
+          affinity: # Affinity to select just at-compute006 # certain nodes with 11GB, 12GB, or 24GB memory
+             {{- toYaml .Values.closed-loop.affinity | nindent 6}}
+          priorityClassName: {{.Values.priority}}
           containers:
-          - name: minion
+          - name: minion-closedloop
             image: at-docker.ad.bcm.edu:5000/pipeline:latest
             volumeMounts:
             - name: mnt
               mountPath: /mnt
             resources:
-              requests:
-                cpu: 1
-                memory: 32Gi
-                ephemeral-storage: 50Gi
+              {{- toYaml .Values.resources | nindent 7}}
             env:
             - name: DJ_HOST
               valueFrom:
                 secretKeyRef:
-                  name: datajoint-credentials
+                  name: {{.Values.credentials.datajoint}}
                   key: DJ_HOST
             - name: DJ_USER
               valueFrom:
                 secretKeyRef:
-                  name: datajoint-credentials
+                  name: {{.Values.credentials.datajoint}}
                   key: DJ_USER
             - name: DJ_PASS
               valueFrom:
                 secretKeyRef:
-                  name: datajoint-credentials
+                  name: {{.Values.credentials.datajoint}}
                   key: DJ_PASS
             - name: GITHUB_USERNAME
               valueFrom:
                 secretKeyRef:
-                  name: github-credentials
+                  name: {{.Values.credentials.github}}
                   key: GITHUB_USERNAME
             - name: GITHUB_PASSWORD
               valueFrom:
                 secretKeyRef:
-                  name: github-credentials
+                  name: {{.Values.credentials.github}}
                   key: GITHUB_PASSWORD
             command: ["/bin/bash"]
             args: ["-c", "rm -r pipeline &&\
@@ -77,4 +66,4 @@ spec:
             pip3 install stimulus-pipeline/python/ &&\
             git clone https://$(GITHUB_USERNAME):$(GITHUB_PASSWORD)@github.com/cajal/stimuli.git &&\
             pip3 install stimuli/python/ &&\
-            python3 /data/pipeline/python/scripts/populate-minion.py"]
+            python3 /data/pipeline/python/scripts/populate-closedloop-minion.py"]

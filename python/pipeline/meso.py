@@ -5,6 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import scanreader
+import json
 
 from . import experiment, injection, notify, shared
 from .utils import galvo_corrections, signal, quality, mask_classification, performance
@@ -17,6 +18,9 @@ logger = logging.getLogger(__name__)
 
 schema = dj.schema("pipeline_meso", locals(), create_tables=True)
 CURRENT_VERSION = 1
+
+## connect to Redis for Caching
+
 
 
 @schema
@@ -115,6 +119,11 @@ class ScanInfo(dj.Imported):
         print("Reading header...")
         scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
         scan = scanreader.read_scan(scan_filename)
+        
+        serialized_scan_key = json.dumps(key)
+        serialized_scan = json.dumps(scan)
+        redis.put(serialized_scan_key,serialized_scan)
+
 
         # Get attributes
         tuple_ = key.copy()  # in case key is reused somewhere else
@@ -230,8 +239,8 @@ class Quality(dj.Computed):
 
     def make(self, key):
         # Read the scan
-        scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
-        scan = scanreader.read_scan(scan_filename)
+        serialized_scan_key = json.dumps(key)
+        scan = json.loads(redis.get(serialized_scan_key))
 
         # Insert in Quality
         self.insert1(key)
@@ -398,8 +407,8 @@ class RasterCorrection(dj.Computed):
         from scipy.signal import tukey
 
         # Read the scan
-        scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
-        scan = scanreader.read_scan(scan_filename, dtype=np.float32)
+        serialized_scan_key = json.dumps(key)
+        scan = json.loads(redis.get(serialized_scan_key))
 
         # Select correction channel
         channel = (CorrectionChannel() & key).fetch1("channel") - 1
@@ -474,8 +483,8 @@ class MotionCorrection(dj.Computed):
         from scipy import ndimage
 
         # Read the scan
-        scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
-        scan = scanreader.read_scan(scan_filename)
+        serialized_scan_key = json.dumps(key)
+        scan = json.loads(redis.get(serialized_scan_key))
 
         # Get some params
         px_height, px_width = (ScanInfo.Field() & key).fetch1("px_height", "px_width")
@@ -619,8 +628,8 @@ class MotionCorrection(dj.Computed):
         stop_index = start_index + num_video_frames
 
         # Load the scan
-        scan_filename = (experiment.Scan() & self).local_filenames_as_wildcard
-        scan = scanreader.read_scan(scan_filename, dtype=np.float32)
+        serialized_scan_key = json.dumps(key)
+        scan = json.loads(redis.get(serialized_scan_key))
         scan_ = scan[
             self.fetch1("field") - 1, :, :, channel - 1, start_index:stop_index
         ]
@@ -724,8 +733,8 @@ class SummaryImages(dj.Computed):
 
     def make(self, key):
         # Read the scan
-        scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
-        scan = scanreader.read_scan(scan_filename)
+        serialized_scan_key = json.dumps(key)
+        scan = json.loads(redis.get(serialized_scan_key))
 
         for channel in range(scan.num_channels):
             # Map: Compute some statistics in different chunks of the scan
@@ -988,8 +997,8 @@ class Segmentation(dj.Computed):
 
             # Read scan
             print("Reading scan...")
-            scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
-            scan = scanreader.read_scan(scan_filename)
+            serialized_scan_key = json.dumps(key)
+            scan = json.loads(redis.get(serialized_scan_key))
 
             # Create memory mapped file (as expected by CaImAn)
             print("Creating memory mapped file...")
@@ -1178,8 +1187,8 @@ class Segmentation(dj.Computed):
             # Load the scan
             channel = self.fetch1("channel") - 1
             field_id = self.fetch1("field") - 1
-            scan_filename = (experiment.Scan() & self).local_filenames_as_wildcard
-            scan = scanreader.read_scan(scan_filename, dtype=np.float32)
+            serialized_scan_key = json.dumps(key)
+            scan = json.loads(redis.get(serialized_scan_key))
             scan_ = scan[field_id, :, :, channel, start_index:stop_index]
 
             # Correct the scan
@@ -1420,8 +1429,8 @@ class Fluorescence(dj.Computed):
         print("Reading scan...")
         field_id = key["field"] - 1
         channel = key["channel"] - 1
-        scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
-        scan = scanreader.read_scan(scan_filename)
+        serialized_scan_key = json.dumps(key)
+        scan = json.loads(redis.get(serialized_scan_key))
 
         # Map: Extract traces
         print("Creating fluorescence traces...")
