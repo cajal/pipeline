@@ -589,8 +589,9 @@ class AutoProcessing(dj.Manual):
     definition = """ # scans that should enter automatic processing
     -> Scan
     ---
-    priority=0          :tinyint       # highest priority is processed first
-    autosegment=false   :boolean       # segment somas in the first channel with default method
+    priority=0          :tinyint            # highest priority is processed first
+    autosegment=false   :boolean            # segment somas in the first channel with default method
+    spike_method=5      :tinyint unsigned   # spike method
     """
 
 @schema
