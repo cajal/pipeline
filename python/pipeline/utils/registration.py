@@ -78,7 +78,7 @@ def affine_product(X, A, b):
 
     :return: A (d1 x d2 x 3) torch.Tensor corresponding to the transformed coordinates.
     """
-    return torch.einsum('ij,klj->kli', (A, X)) + b
+    return torch.einsum('ij,klj->kli', (A.double(), X.double())) + b
 
 
 def sample_grid(volume, grid):
