@@ -1,0 +1,14 @@
+FROM nvidia/cuda:10.0-cudnn7-devel-ubuntu18.04
+FROM at-docker:5000/pipeline:base
+FROM rayproject/ray:latest
+
+LABEL maintainer="Edgar Y. Walker, Fabian Sinz, Erick Cobos, Donnie Kim"
+
+WORKDIR /data
+
+# Install pipeline
+COPY . /data/pipeline
+RUN pip3 install -e pipeline/python/
+RUN pip3 install tensorflow==1.5.0
+
+ENTRYPOINT ["/bin/bash"]
