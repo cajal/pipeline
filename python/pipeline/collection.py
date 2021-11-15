@@ -1,7 +1,9 @@
 import datajoint as dj
 from pipeline import experiment
 
-schema = dj.schema('pipeline_collection', create_tables=True)
+anatomy = dj.create_virtual_module("anatomy", "pipeline_anatomy")
+
+schema = dj.schema("pipeline_collection", create_tables=True)
 
 
 @schema
@@ -38,6 +40,15 @@ class CuratedScan(dj.Manual):
     score				                :tinyint		        # subjective score of scan by experimenter
     notes=null                          :varchar(450)           # reviewer comments/concerns at time of entry
     """
+
+    class Area(dj.Part):
+        definition = """
+        -> master
+        -> anatomy.Area
+        ---
+        area_ts = CURRENT_TIMESTAMP     :timestamp              # timestamp of area entry
+        """
+
 
 @schema
 class CuratedStack(dj.Manual):
