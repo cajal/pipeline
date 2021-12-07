@@ -671,7 +671,7 @@ class MonCalib(dj.Computed):
 
     @property
     def key_source(self):
-        return ScanProtocol & 'protocol like "Moncalib;%" animal_id > 25700'
+        return ScanProtocol & 'protocol = "Moncalib;atlab" animal_id > 25700'
 
     def make(self, key):
         from pipeline.utils.h5 import read_behavior_file
