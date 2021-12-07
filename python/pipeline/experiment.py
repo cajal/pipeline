@@ -711,6 +711,10 @@ class MonCalib(dj.Computed):
         for start, end in zip(trial_starts, trial_ends):
             trial_mask = (ts > start) & (ts < end)
             pd_median += [np.median(pd[trial_mask])]
+
+        if not np.isfinite(pd_median).all():
+            self.insert1(dict(key, scan_on=scan_on, valid=False))
+            return
             
         def func(x, scale, gamma, offset):
             return scale * x ** gamma + offset
