@@ -720,7 +720,7 @@ class MonCalib(dj.Computed):
             return scale * x ** gamma + offset
 
         px = np.arange(52) * 5
-        scale, gamma, offset = curve_fit(func, px + 1e-8, pd_median)[0]
+        scale, gamma, offset = curve_fit(func, [1e-8, *px[1:]], pd_median)[0]
 
         pd_est = scale * px ** gamma + offset
         fvu = ((pd_median - pd_est) ** 2).mean() / np.var(pd_median)
