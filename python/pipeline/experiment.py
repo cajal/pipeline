@@ -658,20 +658,26 @@ class ProjectorSetup(dj.Lookup):
 
 @schema
 class MonCalib(dj.Computed):
-    definition = """ # monitor pixel (px) -> photodiode voltage (pd), pd = scale * px^gamma + offset
-    
+    definition = """ # Monitor calibration scan
     -> Scan
     ---
-    scale                   : float           # scale
-    gamma                   : float           # gamma
-    offset                  : float           # offset
-    fvu                     : float           # fraction variance unexplained by power function
-    scan_on                 : bool            # whether scan was on during monitor calibration
+    valid           : bool      # whether the monitor calibration scan is valid
+    scan_on         : bool      # whether scan collection was on
     """
+
+    class Fit(dj.Part):
+        definition = """ # monitor pixel (px) -> photodiode voltage (pd), pd = scale * px^gamma + offset
+        -> master
+        ---
+        scale       : float     # scale of power function
+        gamma       : float     # gamma of power function
+        offset      : float     # offset of power function
+        fvu         : float     # fraction variance unexplained by power function
+        """
 
     @property
     def key_source(self):
-        return ScanProtocol & 'protocol = "Moncalib;atlab" and animal_id > 25700'
+        return ScanProtocol & 'protocol = "Moncalib;atlab"'
 
     def make(self, key):
         from pipeline.utils.h5 import read_behavior_file
@@ -693,9 +699,13 @@ class MonCalib(dj.Computed):
         ts = data["ts"]
         pd = data["syncPd"]
         trial_starts = data["trialnum_ts"][1]
-        trial_ends = np.concatenate([trial_starts[1:], [trial_starts[-1] + np.diff(trial_starts).mean()]])
 
-        assert len(trial_starts) == 52  # pixel values 0 to 255 (inclusive), step=5
+        if len(trial_starts) != 52: # 52 pixel values (0:255:5)
+            self.insert1(dict(key, scan_on=scan_on, valid=False))
+            return
+
+        trial_length = np.diff(trial_starts).mean()
+        trial_ends = np.concatenate([trial_starts[1:], [trial_starts[-1] + trial_length]])
 
         pd_median = []
         for start, end in zip(trial_starts, trial_ends):
@@ -711,7 +721,8 @@ class MonCalib(dj.Computed):
         pd_est = scale * px ** gamma + offset
         fvu = ((pd_median - pd_est) ** 2).mean() / np.var(pd_median)
 
-        self.insert1(dict(key, scale=scale, gamma=gamma, offset=offset, fvu=fvu, scan_on=scan_on))
+        self.insert1(dict(key, scan_on=scan_on, valid=True))
+        self.Fit.insert1(dict(key, scale=scale, gamma=gamma, offset=offset, fvu=fvu))
 
 
 schema.spawn_missing_classes()
