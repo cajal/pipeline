@@ -1,6 +1,4 @@
-FROM nvidia/cuda:10.0-cudnn7-devel-ubuntu18.04
-FROM at-docker:5000/pipeline:base
-FROM rayproject/ray:latest
+FROM at-docker:5000/pipeline:base3.7
 
 LABEL maintainer="Edgar Y. Walker, Fabian Sinz, Erick Cobos, Donnie Kim"
 
@@ -10,5 +8,6 @@ WORKDIR /data
 COPY . /data/pipeline
 RUN pip3 install -e pipeline/python/
 RUN pip3 install tensorflow==1.5.0
+RUN pip3 install ray
 
 ENTRYPOINT ["/bin/bash"]

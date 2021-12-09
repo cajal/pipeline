@@ -2,6 +2,27 @@ import numpy as np
 import multiprocessing as mp
 from . import galvo_corrections
 import time
+import ray
+
+class ScanChunks():
+    def __init__(self,scan,field_id,channel,y=slice(None),x=slice(None),chunk_size_in_GB=0.5,num_processes=10,queue_size=10):
+        self.chunks = []
+        if chunk_size_in_GB > 2:
+            print('Warning: Processing chunks of data bigger than 2 GB could cause timeout '
+                'errors when sending data from the master to the working processes.')
+
+        # Calculate the number of frames per chunk
+        one_frame = scan[field_id, y, x, channel, 0]
+        bytes_per_frame = np.prod(one_frame.shape) * 4 # 4 bytes per pixel
+        chunk_size = int(round((chunk_size_in_GB * 1024**3) / bytes_per_frame))
+        num_frames = scan.num_frames
+        for i in range(0, num_frames, chunk_size):
+            frames = slice(i, min(i + chunk_size, num_frames))
+            self.chunks.append((frames, scan[field_id, y, x, channel, frames]))
+
+
+
+
 
 
 def map_frames(f, scan, field_id, channel, y=slice(None), x=slice(None), kwargs={},
@@ -41,36 +62,17 @@ def map_frames(f, scan, field_id, channel, y=slice(None), x=slice(None), kwargs=
 #        yield f(scan[field_id, y, x, channel, i: i + chunk_size])
 
     # Create a Queue to put in new chunks and a list for results
-    manager = mp.Manager()
-    chunks = manager.Queue(maxsize=queue_size)
-    results = manager.list()
-
-    # Start workers (will lock until data appears in chunks)
-    pool = []
-    for i in range(num_processes):
-        p = mp.Process(target=f, args=(chunks, results), kwargs=kwargs)
-        p.start()
-        pool.append(p)
-
-    # Produce data
     num_frames = scan.num_frames
     for i in range(0, num_frames, chunk_size):
         frames = slice(i, min(i + chunk_size, num_frames))
         chunks.put((frames, scan[field_id, y, x, channel, frames])) # frames, chunk tuples
         # chunks.put(((field_id, y, x, channel, frames), scan.filenames)) # scan_slices, filenames tuples
-
-    # Queue STOP signal
-    for i in range(num_processes):
-        chunks.put((None, None))
-
-    # Wait for processes to finish
-    for p in pool:
-        p.join()
-
-    return list(results)
+    
 
 
-def parallel_quality_metrics(chunks, results):
+
+@ray.remote
+def parallel_quality_metrics(chunk):
     """ Compute mean intensity per frame, contrast per frame and mean frame.
 
     :param queue chunks: Queue with inputs to consume.
@@ -79,29 +81,27 @@ def parallel_quality_metrics(chunks, results):
     :returns: Mean intensity per frame, contrast (99 -1 percentile) per frame, and mean
         frame (average over time in this chunk).
     """
-    while True:
-        # Read next chunk (process locks until something can be read)
-        frames, chunk = chunks.get()
-        if chunk is None:  # stop signal when all chunks have been processed
-            return
+    
+    frames, chunk = chunk
 
-        print(time.ctime(), 'Processing frames:', frames)
+    print(time.ctime(), 'Processing frames:', frames)
 
-        # Mean intensity
-        mean_intensity = np.mean(chunk, axis=(0, 1), dtype=float)
+    # Mean intensity
+    mean_intensity = np.mean(chunk, axis=(0, 1), dtype=float)
 
-        # Contrast
-        percentiles = np.percentile(chunk, q=(1, 99), axis=(0, 1))
-        contrast = (percentiles[1] - percentiles[0]).astype(float)
+    # Contrast
+    percentiles = np.percentile(chunk, q=(1, 99), axis=(0, 1))
+    contrast = (percentiles[1] - percentiles[0]).astype(float)
 
-        # Mean frame
-        mean_frame = np.mean(chunk, axis=-1, dtype=float)
+    # Mean frame
+    mean_frame = np.mean(chunk, axis=-1, dtype=float)
 
-        # Save results
-        results.append((frames, mean_intensity, contrast, mean_frame))
+    # Save results
+    return (frames, mean_intensity, contrast, mean_frame)
 
 
-def parallel_motion_shifts(key,chunks, results, raster_phase, fill_fraction, template):
+@ray.remote
+def parallel_motion_shifts(chunk, raster_phase, fill_fraction, template):
     """ Compute motion correction shifts to chunks of scan.
 
     Function to run in each process. Consumes input from chunks and writes results to
@@ -116,25 +116,22 @@ def parallel_motion_shifts(key,chunks, results, raster_phase, fill_fraction, tem
     :returns: (frames, y_shifts, x_shifts) tuples.
     """
     
-    while True:
-        # Read next chunk (process locks until something can be read)
-        frames, chunk = chunks.get()
-        if chunk is None:  # stop signal when all chunks have been processed
-            return
 
-        print(time.ctime(), 'Processing frames:', frames)
+    frames, chunk = chunk
 
-        # Correct raster
-        chunk = chunk.astype(np.float32, copy=False)
-        if abs(raster_phase) > 1e-7:
-            chunk = galvo_corrections.correct_raster(chunk, raster_phase, fill_fraction)
+    print(time.ctime(), 'Processing frames:', frames)
 
-        # Compute shifts
-        y_shifts, x_shifts = galvo_corrections.compute_motion_shifts(chunk, template,
-                                                                     num_threads=1)
+    # Correct raster
+    chunk = chunk.astype(np.float32, copy=False)
+    if abs(raster_phase) > 1e-7:
+        chunk = galvo_corrections.correct_raster(chunk, raster_phase, fill_fraction)
 
-        # Add to results
-        results.append((frames, y_shifts, x_shifts))
+    # Compute shifts
+    y_shifts, x_shifts = galvo_corrections.compute_motion_shifts(chunk, template,
+                                                                    num_threads=1)
+
+    # Add to results
+    return (frames, y_shifts, x_shifts)
 
 
 def parallel_summary_images(chunks, results, raster_phase, fill_fraction, y_shifts,
@@ -270,8 +267,8 @@ def parallel_fluorescence(chunks, results, raster_phase, fill_fraction, y_shifts
         # Save results
         results.append((frames, traces))
 
-
-def parallel_correct_scan(chunks, results, raster_phase, fill_fraction, y_shifts,
+@ray.remote
+def parallel_correct_scan(chunk, raster_phase, fill_fraction, y_shifts,
                           x_shifts):
     """ Correct scan and return corrected chunks.
 
@@ -283,20 +280,19 @@ def parallel_correct_scan(chunks, results, raster_phase, fill_fraction, y_shifts
 
     :returns: (frames, chunk). Corrected chunk (height x width x num_frames)
     """
-    while True:
-        # Read next chunk (process locks until something can be read)
-        frames, chunk = chunks.get()
-        if chunk is None:  # stop signal when all chunks have been processed
-            return
+    frames,chunk = chunk
+        
+    if chunk is None:  # stop signal when all chunks have been processed
+        return
 
-        print(time.ctime(), 'Processing frames:', frames)
+    print(time.ctime(), 'Processing frames:', frames)
 
-        # Correct field
-        chunk = _correct_field(chunk, raster_phase, fill_fraction, x_shifts[frames],
-                               y_shifts[frames])
+    # Correct field
+    chunk = _correct_field(chunk, raster_phase, fill_fraction, x_shifts[frames],
+                            y_shifts[frames])
 
-        # Save results
-        results.append((frames, chunk))
+    # Save results
+    return (frames, chunk)
 
 
 def _correct_field(field, raster_phase, fill_fraction, x_shifts, y_shifts):

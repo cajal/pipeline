@@ -19,8 +19,6 @@ logger = logging.getLogger(__name__)
 schema = dj.schema("pipeline_meso", locals(), create_tables=True)
 CURRENT_VERSION = 1
 
-## connect to Redis for Caching
-
 
 
 @schema
