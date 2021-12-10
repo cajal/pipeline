@@ -594,6 +594,15 @@ class AutoProcessing(dj.Manual):
     spike_method=5      :tinyint unsigned   # spike method
     """
 
+
+@schema
+class MesoClosedLoop(dj.Manual):
+    definition = """ # meso closed loops scans. CAUTION: other processing will stop until scans here finish
+    -> Scan
+    ---
+    spike_method=6      :tinyint unsigned   # spike method
+    """
+
 @schema
 class ProjectorColor(dj.Lookup):
     definition = """

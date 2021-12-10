@@ -1,0 +1,3 @@
+# TODO:
+# Image: Has to have kubernetes and datajoint python packages & credentials for accessing database and kubernetes services
+# Runs: /python/scripts/manager-mcl.py
