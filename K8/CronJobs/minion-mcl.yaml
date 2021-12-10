@@ -34,7 +34,7 @@ spec:
           - key: "meso_closed_loop"
             operator: "Equal"
             value: "true"
-            effect: "NoSchedule"
+            effect: "NoExecute"
           containers:
           - name: minion
             image: at-docker.ad.bcm.edu:5000/pipeline:latest

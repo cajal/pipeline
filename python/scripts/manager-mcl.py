@@ -17,9 +17,9 @@ while True:
 
     if unfinished_treadmill or unfinished_pupil or unfinished_fuse:
         pass
-        
+
         '''
-        TODO: add meso_closed_loop=true:NoSchedule taint to the following nodes:
+        TODO: add meso_closed_loop=true:NoExecute taint to the following nodes:
             at-compute003
             at-compute004
             at-compute005
@@ -29,7 +29,7 @@ while True:
         pass
 
         '''
-        TODO: remove meso_closed_loop=true:NoSchedule taint from the following nodes:
+        TODO: remove meso_closed_loop=true:NoExecute taint from the following nodes:
             at-compute003
             at-compute004
             at-compute005
