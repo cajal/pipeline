@@ -1,7 +1,7 @@
 apiVersion: batch/v1beta1
 kind: CronJob # This tells kubernetes what kind of class it is working with
 metadata:
-  name: minion
+  name: minion-mcl
 spec:
   schedule: "*/5 * * * *" # every 5 minutes
   concurrencyPolicy: Allow
@@ -36,7 +36,7 @@ spec:
             value: "true"
             effect: "NoExecute"
           containers:
-          - name: minion
+          - name: minion-mcl
             image: at-docker.ad.bcm.edu:5000/pipeline:latest
             volumeMounts:
             - name: mnt
