@@ -597,7 +597,7 @@ class AutoProcessing(dj.Manual):
 
 @schema
 class MesoClosedLoop(dj.Manual):
-    definition = """ # meso closed loops scans. CAUTION: other processing will stop until scans here finish
+    definition = """ # meso closed loop scans. CAUTION: other processing will stop until scans here finish
     -> Scan
     ---
     spike_method=6      :tinyint unsigned   # spike method
