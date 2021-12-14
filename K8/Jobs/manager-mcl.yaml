@@ -1,3 +1,70 @@
 # TODO:
 # Image: Has to have kubernetes and datajoint python packages & credentials for accessing database and kubernetes services
 # Runs: /python/scripts/manager-mcl.py
+apiVersion: v1
+kind: Pod # This tells kubernetes what kind of class it is working with
+metadata:
+  name: minion-mcl
+spec:
+  hostNetwork: true # This option will allow the pod to use the host network for internet access
+  volumes:
+  - name: mnt
+    hostPath:
+      path: /mnt
+  affinity: # Affinity to select certain nodes with 11GB, 12GB, or 24GB memory
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution: # Require nodes to have this label
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: kubernetes.io/hostname # Target label is gpu_mem_size
+            operator: In # Key must have one of the following values
+            values:
+            - at-compute003
+            - at-compute004
+            - at-compute005
+  priorityClassName: system-node-critical
+  tolerations:
+  - effect: NoExecute
+    operator: Exists
+  - effect: NoSchedule
+    operator: Exists
+  containers:
+  - name: minion-mcl
+    image: at-docker.ad.bcm.edu:5000/pipeline:latest
+    volumeMounts:
+    - name: mnt
+      mountPath: /mnt
+    env:
+    - name: DJ_HOST
+      valueFrom:
+        secretKeyRef:
+          name: datajoint-credentials
+          key: DJ_HOST
+    - name: DJ_USER
+      valueFrom:
+        secretKeyRef:
+          name: datajoint-credentials
+          key: DJ_USER
+    - name: DJ_PASS
+      valueFrom:
+        secretKeyRef:
+          name: datajoint-credentials
+          key: DJ_PASS
+    - name: GITHUB_USERNAME
+      valueFrom:
+        secretKeyRef:
+          name: github-credentials
+          key: GITHUB_USERNAME
+    - name: GITHUB_PASSWORD
+      valueFrom:
+        secretKeyRef:
+          name: github-credentials
+          key: GITHUB_PASSWORD
+    command: ["/bin/bash"]
+    args: ["-c", "rm -r pipeline &&\
+    git clone https://$(GITHUB_USERNAME):$(GITHUB_PASSWORD)@github.com/cajal/pipeline.git &&\
+    pip3 install pipeline/python/ &&\
+    git clone https://$(GITHUB_USERNAME):$(GITHUB_PASSWORD)@github.com/cajal/stimulus-pipeline.git &&\
+    pip3 install stimulus-pipeline/python/ &&\
+    git clone https://$(GITHUB_USERNAME):$(GITHUB_PASSWORD)@github.com/cajal/stimuli.git &&\
+    pip3 install stimuli/python/"]
