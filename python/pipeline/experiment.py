@@ -594,6 +594,15 @@ class AutoProcessing(dj.Manual):
     spike_method=5      :tinyint unsigned   # spike method
     """
 
+
+@schema
+class MesoClosedLoop(dj.Manual):
+    definition = """ # meso closed loop scans. CAUTION: other processing will stop until scans here finish
+    -> Scan
+    ---
+    spike_method=6      :tinyint unsigned   # spike method
+    """
+
 @schema
 class ProjectorColor(dj.Lookup):
     definition = """
@@ -654,6 +663,85 @@ class ProjectorSetup(dj.Lookup):
     display_height      : float         # projected display height in cm
     target_distance     : float         # distance from mouse to the display in cm
     """
+
+
+@schema
+class MonCalib(dj.Computed):
+    definition = """ # Monitor calibration scan
+    -> Scan
+    ---
+    valid           : bool      # whether the monitor calibration scan is valid
+    scan_on         : bool      # whether scan collection was on
+    """
+
+    class Fit(dj.Part):
+        definition = """ # monitor pixel (px) -> photodiode voltage (pd), pd = scale * px^gamma + offset
+        -> master
+        ---
+        scale       : float     # scale of power function
+        gamma       : float     # gamma of power function
+        offset      : float     # offset of power function
+        fvu         : float     # fraction variance unexplained by power function
+        """
+
+    @property
+    def key_source(self):
+        return ScanProtocol & 'protocol = "Moncalib;atlab"'
+
+    def make(self, key):
+        from pipeline.utils.h5 import read_behavior_file
+        from scipy.optimize import curve_fit
+
+        scan_path = (Scan & key).local_filenames_as_wildcard
+        scan_dir = os.path.split(scan_path)[0]
+
+        scan_file = (Scan & key).fetch1('filename')
+        behavior_file = (Scan.BehaviorFile() & key).fetch1('filename')
+
+        full_scan_file = os.path.join(scan_dir, f"{scan_file}_00001.tif")
+        full_beh_file = os.path.join(scan_dir, behavior_file)
+
+        scan_on = os.path.isfile(full_scan_file)
+
+        data = read_behavior_file(full_beh_file)
+
+        ts = data["ts"]
+        pd = data["syncPd"]
+        trial_starts = data["trialnum_ts"][1]
+
+        # deal with 32-bit unsigned integer wrapping
+        wrap_idx = np.where(np.diff(trials_starts) < 0)[0] 
+        if (len(wrap_idx) > 0):
+            for i in range(len(wrap_idx)):
+                trials_starts[wrap_idx[i]+1:] = 2**32 + trials_starts[wrap_idx[i]+1:]
+
+        if len(trial_starts) != 52: # 52 pixel values (0:255:5)
+            self.insert1(dict(key, scan_on=scan_on, valid=False))
+            return
+
+        trial_length = np.diff(trial_starts).mean()
+        trial_ends = np.concatenate([trial_starts[1:], [trial_starts[-1] + trial_length]])
+
+        pd_median = []
+        for start, end in zip(trial_starts, trial_ends):
+            trial_mask = (ts > start) & (ts < end)
+            pd_median += [np.median(pd[trial_mask])]
+
+        if not np.isfinite(pd_median).all():
+            self.insert1(dict(key, scan_on=scan_on, valid=False))
+            return
+            
+        def func(x, scale, gamma, offset):
+            return scale * x ** gamma + offset
+
+        px = np.arange(52) * 5
+        scale, gamma, offset = curve_fit(func, [1e-8, *px[1:]], pd_median)[0]
+
+        pd_est = scale * px ** gamma + offset
+        fvu = ((pd_median - pd_est) ** 2).mean() / np.var(pd_median)
+
+        self.insert1(dict(key, scan_on=scan_on, valid=True))
+        self.Fit.insert1(dict(key, scale=scale, gamma=gamma, offset=offset, fvu=fvu))
 
 
 schema.spawn_missing_classes()
