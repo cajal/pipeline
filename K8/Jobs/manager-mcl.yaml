@@ -62,6 +62,7 @@ spec:
           key: GITHUB_PASSWORD
     command: ["/bin/bash"]
     args: ["-c", "rm -r pipeline &&\
+    pip3 install kubernetes &&\
     git clone https://$(GITHUB_USERNAME):$(GITHUB_PASSWORD)@github.com/cajal/pipeline.git &&\
     pip3 install pipeline/python/ &&\
     git clone https://$(GITHUB_USERNAME):$(GITHUB_PASSWORD)@github.com/cajal/stimulus-pipeline.git &&\
