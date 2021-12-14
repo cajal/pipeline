@@ -4,7 +4,7 @@
 apiVersion: v1
 kind: Pod # This tells kubernetes what kind of class it is working with
 metadata:
-  name: minion-mcl
+  name: manager-mcl
 spec:
   hostNetwork: true # This option will allow the pod to use the host network for internet access
   volumes:
