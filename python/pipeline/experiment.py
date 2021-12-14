@@ -709,6 +709,12 @@ class MonCalib(dj.Computed):
         pd = data["syncPd"]
         trial_starts = data["trialnum_ts"][1]
 
+        # deal with 32-bit unsigned integer wrapping
+        wrap_idx = np.where(np.diff(trials_starts) < 0)[0] 
+        if (len(wrap_idx) > 0):
+            for i in range(len(wrap_idx)):
+                trials_starts[wrap_idx[i]+1:] = 2**32 + trials_starts[wrap_idx[i]+1:]
+
         if len(trial_starts) != 52: # 52 pixel values (0:255:5)
             self.insert1(dict(key, scan_on=scan_on, valid=False))
             return
