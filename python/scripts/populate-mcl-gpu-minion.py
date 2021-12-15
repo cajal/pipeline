@@ -1,5 +1,5 @@
 #!/usr/local/bin/python3
-from pipeline import stack, pupil, experiment
+from pipeline import pupil, experiment
 import logging 
 import time
 import datajoint as dj
@@ -14,7 +14,7 @@ if hasattr(dj.connection, 'query_log_max_length'):
 while True:
 
     # deeplabcut pupil tracking
-    next_scans = experiment.MesoClosedLoop() & (experiment.Scan() & 'scan_ts > "2019-01-01 00:00:00"')
+    next_scans = experiment.MesoClosedLoop()
     pupil.Tracking.populate(next_scans, {'tracking_method': 2}, reserve_jobs=True, suppress_errors=True)
     
     time.sleep(60)
