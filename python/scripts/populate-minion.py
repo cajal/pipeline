@@ -18,7 +18,7 @@ err_msg_timeout = 'error_message = "InternalError: (1205, \'Lock wait timeout ex
 err_msg_sigterm = 'error_message = "SystemExit: SIGTERM received"'
 timestamp = 'timestamp > "2021-12-10"'
 for schema in [stimulus, treadmill, pupil, posture, stack, reso, meso, fuse]:
-    (schema.jobs & [err_msg_timeout, err_msg_sigterm] & timestamp).delete()
+    (schema.schema.jobs & [err_msg_timeout, err_msg_sigterm] & timestamp).delete()
 
 
 # # Scans
