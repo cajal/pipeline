@@ -29,7 +29,7 @@ spec:
                     - 12GB
                     - 24GB
                     - 32GB
-          priorityClassName: high-priority
+          priorityClassName: medium-priority
           volumes:
           - name: mnt
             hostPath:
