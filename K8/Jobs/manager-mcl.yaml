@@ -1,23 +1,20 @@
-# TODO:
-# Image: Has to have kubernetes and datajoint python packages & credentials for accessing database and kubernetes services
-# Runs: /python/scripts/manager-mcl.py
 apiVersion: v1
-kind: Pod # This tells kubernetes what kind of class it is working with
+kind: Pod
 metadata:
   name: manager-mcl
 spec:
-  hostNetwork: true # This option will allow the pod to use the host network for internet access
+  hostNetwork: true
   volumes:
   - name: mnt
     hostPath:
       path: /mnt
-  affinity: # Affinity to select certain nodes with 11GB, 12GB, or 24GB memory
+  affinity:
     nodeAffinity:
-      requiredDuringSchedulingIgnoredDuringExecution: # Require nodes to have this label
+      requiredDuringSchedulingIgnoredDuringExecution:
         nodeSelectorTerms:
         - matchExpressions:
-          - key: kubernetes.io/hostname # Target label is gpu_mem_size
-            operator: In # Key must have one of the following values
+          - key: kubernetes.io/hostname
+            operator: In
             values:
             - at-compute003
             - at-compute004
@@ -62,7 +59,7 @@ spec:
           key: GITHUB_PASSWORD
     command: ["/bin/bash"]
     args: ["-c", "rm -r pipeline &&\
-    pip3 install kubernetes &&\
+    pip3 install kubernetes==20.13.0 &&\
     git clone https://$(GITHUB_USERNAME):$(GITHUB_PASSWORD)@github.com/cajal/pipeline.git &&\
     pip3 install pipeline/python/ &&\
     git clone https://$(GITHUB_USERNAME):$(GITHUB_PASSWORD)@github.com/cajal/stimulus-pipeline.git &&\
