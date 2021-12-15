@@ -26,7 +26,7 @@ spec:
   - effect: NoSchedule
     operator: Exists
   containers:
-  - name: minion-mcl
+  - name: manager-mcl
     image: at-docker.ad.bcm.edu:5000/pipeline:latest
     volumeMounts:
     - name: mnt
