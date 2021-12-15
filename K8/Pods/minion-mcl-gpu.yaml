@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: manager-mcl-gpu
+  name: minion-mcl-gpu
 spec:
   hostNetwork: true
   volumes:
