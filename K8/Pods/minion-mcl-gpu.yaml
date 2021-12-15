@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: manager-mcl
+  name: manager-mcl-gpu
 spec:
   hostNetwork: true
   volumes:
