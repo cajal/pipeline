@@ -19,7 +19,7 @@ while True:
     unfinished_pupil = experiment.MesoClosedLoop - pupil.Eye
     unfinished_fuse = experiment.MesoClosedLoop - fuse.ScanDone
     nodes = ['at-compute003','at-compute004','at-compute005']
-    nodes = v1.list_node(label_selector=f'kubernetes.io/hostname in ({','.join(nodes)})')
+    nodes = v1.list_node(label_selector=f'kubernetes.io/hostname in ({",".join(nodes)})')
         
     if unfinished_treadmill or unfinished_pupil or unfinished_fuse:
         for node in nodes.items:
