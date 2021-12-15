@@ -717,7 +717,6 @@ class MonCalib(dj.Computed):
         for uint8 in [ts, trial_starts]:
             wrap_idx = np.where(np.diff(uint8) < 0)[0] 
             if (len(wrap_idx) > 0):
-                print('here')
                 for i in range(len(wrap_idx)):
                     uint8[wrap_idx[i]+1:] = 2**32 + uint8[wrap_idx[i]+1:]
 
