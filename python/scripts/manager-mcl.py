@@ -9,14 +9,14 @@ v1 = client.CoreV1Api()
 
 experiment = dj.create_virtual_module('experiment', 'pipeline_experiment')
 treadmill = dj.create_virtual_module('treadmill', 'pipeline_treadmill')
-pupil = dj.create_virtual_module('pupil', 'pipeline_pupil')
+pupil = dj.create_virtual_module('pupil', 'pipeline_eye')
 fuse = dj.create_virtual_module('fuse', 'pipeline_fuse')
 
 
 while True:
 
     unfinished_treadmill = experiment.MesoClosedLoop - treadmill.Treadmill
-    unfinished_pupil = experiment.MesoClosedLoop - pupil.Eye
+    unfinished_pupil = experiment.MesoClosedLoop - pupil.FittedPupil
     unfinished_fuse = experiment.MesoClosedLoop - fuse.ScanDone
     nodes = ['at-compute003','at-compute004','at-compute005']
     nodes = v1.list_node(label_selector=f'kubernetes.io/hostname in ({",".join(nodes)})')
