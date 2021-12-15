@@ -720,7 +720,7 @@ class MonCalib(dj.Computed):
                 for i in range(len(wrap_idx)):
                     uint8[wrap_idx[i]+1:] = 2**32 + uint8[wrap_idx[i]+1:]
 
-        # 100ms delay at 100 MHz
+        # 100ms delay at 10MHz
         trial_starts += 1e6
 
         # compute trial length and trial ends
