@@ -1,0 +1,71 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: patch-deletion
+spec:
+  hostNetwork: true
+  volumes:
+    - name: mnt
+      hostPath:
+        path: /mnt
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: kubernetes.io/hostname
+                operator: In
+                values:
+                  - at-compute003
+                  - at-compute004
+                  - at-compute005
+  priorityClassName: high-priority
+  containers:
+    - name: patch-deletion
+      image: at-docker.ad.bcm.edu:5000/pipeline:latest
+      volumeMounts:
+        - name: mnt
+          mountPath: /mnt
+      resources:
+        requests:
+          cpu: 10
+          memory: 32Gi
+          ephemeral-storage: 50Gi
+      env:
+        - name: DJ_HOST
+          valueFrom:
+            secretKeyRef:
+              name: datajoint-credentials
+              key: DJ_HOST
+        - name: DJ_USER
+          valueFrom:
+            secretKeyRef:
+              name: datajoint-credentials
+              key: DJ_USER
+        - name: DJ_PASS
+          valueFrom:
+            secretKeyRef:
+              name: datajoint-credentials
+              key: DJ_PASS
+        - name: GITHUB_USERNAME
+          valueFrom:
+            secretKeyRef:
+              name: github-credentials
+              key: GITHUB_USERNAME
+        - name: GITHUB_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: github-credentials
+              key: GITHUB_PASSWORD
+      command: ["/bin/bash"]
+      args: [
+          "-c",
+          "rm -r pipeline &&\
+          git clone https://$(GITHUB_USERNAME):$(GITHUB_PASSWORD)@github.com/cajal/pipeline.git &&\
+          pip3 install pipeline/python/ &&\
+          git clone https://$(GITHUB_USERNAME):$(GITHUB_PASSWORD)@github.com/cajal/stimulus-pipeline.git &&\
+          pip3 install stimulus-pipeline/python/ &&\
+          git clone https://$(GITHUB_USERNAME):$(GITHUB_PASSWORD)@github.com/cajal/stimuli.git &&\
+          pip3 install stimuli/python/ &&\
+          python3 pipeline/python/scripts/patch-deletion.py",
+        ]
