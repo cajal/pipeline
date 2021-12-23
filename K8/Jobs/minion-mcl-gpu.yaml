@@ -1,4 +1,4 @@
-apiVersion: batch/v1
+apiVersion: v1
 kind: Job
 metadata:
   name: minion-mcl-gpu
@@ -6,7 +6,6 @@ spec:
   parallelism: 1
   template:
     spec:
-      restartPolicy: OnFailure
       hostNetwork: true
       volumes:
         - name: mnt
