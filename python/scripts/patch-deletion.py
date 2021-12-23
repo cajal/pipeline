@@ -14,7 +14,7 @@ if hasattr(dj.connection, 'query_log_max_length'):
 
 keys = MotionCorrection & (SummaryImages - SummaryImages.Correlation) & {"pipe_version": 1}
 
-for key in tqdm(keys):
+for key in tqdm(keys.fetch(dj.key)):
     # Read the scan
     scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
     scan = scanreader.read_scan(scan_filename)
