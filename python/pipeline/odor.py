@@ -202,7 +202,7 @@ class OdorSync(dj.Imported):
 
             # Attempt to fix by finding the largest fragment of times without an outlier and seeing if it matches requested frame number
             # We'll test for key presence in ScanInfo explicitly since fuse is not package with stimulus.py
-            n_frames_r = (meso.ScanInfo & (odor.MesoMatch & key)).fetch1('nframes_requested')
+            n_frames_r = (meso.ScanInfo & (MesoMatch & key)).fetch1('nframes_requested')
 
             # Since Python indexing in [inclusive:exclusive] we should make our boundaries in the same way. Right now, np.diff(frame_times)
             # shows too high of a gap at idx=100 if, in frame_times, idx 100 -> 101 has the error. This means it is currently written as
