@@ -201,7 +201,34 @@ class OdorSync(dj.Imported):
         frame_intervals = np.diff(frame_times)
         frame_period = np.median(frame_intervals)
         if np.any(abs(frame_intervals - frame_period) > 0.15 * frame_period):
-            raise PipelineException('Frame time period is irregular')
+
+            # Attempt to fix by finding the largest fragment of times without an outlier and seeing if it matches requested frame number
+            # We'll test for key presence in ScanInfo explicitly since fuse is not package with stimulus.py
+            n_frames_r = (meso.ScanInfo & (MesoMatch & key)).fetch1('nframes_requested')
+
+            # Since Python indexing in [inclusive:exclusive] we should make our boundaries in the same way. Right now, np.diff(frame_times)
+            # shows too high of a gap at idx=100 if, in frame_times, idx 100 -> 101 has the error. This means it is currently written as
+            # [exclusive:inclusive]. Adding 1 to each element in error_interval_idx will make it match Python convention.
+            # def: inclusive = less/greater than or equal to
+            #      exclusive = less/greater than
+            error_interval_idx = np.where((frame_intervals - frame_period) > frame_period*0.15)[0]
+            error_interval_idx += 1
+
+            bounds_idx = np.insert(error_interval_idx, [0,len(error_interval_idx)], [0,len(frame_times)])
+            corrected_start_idx = np.argmax(np.diff(bounds_idx))
+            corrected_start = bounds_idx[corrected_start_idx]
+            corrected_end = bounds_idx[corrected_start_idx+1]
+            corrected_length = len(frame_times[corrected_start:corrected_end])
+
+            if n_frames_r == corrected_length:
+                frame_times = frame_times[corrected_start:corrected_end]
+                msg = (f'Irregular frames detected but fixed! {n_frames_r} frames requested '
+                       f'and longest error free fragment found with {corrected_length} frames.')
+                print(msg)
+            else:
+                msg = (f'Irregular frames detected but unfixable. {n_frames_r} frames requested '
+                       f'and longest error free fragment found with {corrected_length} frames.')
+                raise PipelineException(msg)
 
         self.insert1({**key, 'signal_start_time': frame_times[0],
                       'signal_duration': frame_times[-1] - frame_times[0],
