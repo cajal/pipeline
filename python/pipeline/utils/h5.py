@@ -78,6 +78,13 @@ def read_behavior_file(filename):
             analog_signals = np.array(f['Analog Signals'])
             channel_names = f.attrs['AS_channelNames'].decode('ascii').split(',')
             channel_names = [cn.strip() for cn in channel_names]
+            
+            for i,channel_name in enumerate(channel_names): # only works up to 9 channels
+                if ':' in channel_name:
+                    colon_index = channel_name.find(':')        
+                    expanded_indices = np.arange(int(channel_name[colon_index-1]),int(channel_name[colon_index+1])+1)
+                    expanded_channel_names = [channel_name[:colon_index-1] + str(ex_i) for ex_i in expanded_indices]
+                    channel_names[i:i+1] = expanded_channel_names
             data['syncPd'] = analog_signals[channel_names.index('Photodiode')]
             data['ts'] = analog_signals[channel_names.index('Time')]
             if 'Temperature' in channel_names:
