@@ -107,10 +107,12 @@ class RunningMethod(dj.Lookup):
     ---
     run_method_description        : varchar(256)        # description of running classification method
     """
-    contents = [[1, 'Threshold (1cm/sec) based method requiring run times > 1sec and concatenating run times < 3sec apart'],
-                [2, 'Threshold (0.5cm/sec) based method with 1sec padding. Run times must be > 1sec long and are concatenated if < 3sec apart.'],
-                [3, 'Threshold (0.5cm/sec) based method with 10sec padding. Run times must be > 1sec long and are concatenated if < 21sec apart.'],
-                [4, 'Threshold (0.5cm/sec) based method with 1sec padding. Run times must be > 1sec long and are concatenated if < 5sec apart.']]
+    contents = [[1, '1cm/sec threshold. Run times must be >1sec long and are concatenated if <3sec apart.'],
+                [2, '0.5cm/sec threshold with 1sec padding at onset/offset. Run times must be >1sec long and are concatenated if <3sec apart.'],
+                [3, '0.5cm/sec threshold with 10sec padding at onset/offset. Run times must be >1sec long and are concatenated if <21sec apart.'],
+                [4, 'Poskanzer Method. 5cm/sec threshold. Run times must be >1sec long and are concatenated if <2sec apart.'],
+                [5, 'Poskanzer Method. 10cm/sec threshold. Run times must be >0.5sec long and are concatenated if <2sec apart.'],
+                [6, '0.5cm/sec threshold with 1sec padding at onset/offset. Run times must be >0.5sec long and are concatenated if <5sec apart.']]
  
     
 @schema
@@ -164,12 +166,7 @@ class Running(dj.Computed):
             run_speed_threshold = 1 ## cm/sec
             maximum_time_gap = 3    ## sec
             minimum_run_length = 1  ## sec
-            padding_time = 0 ## sec
-            
-            running_indices = np.where(filt_treadmill_speed > run_speed_threshold)[0]
-            combined_running_periods = self._combine_running_periods(running_indices, treadmill_times, maximum_time_gap)
-            finalized_running_periods = self._remove_short_running_periods(combined_running_periods, treadmill_times, minimum_run_length)
-
+            padding_time = 0 ## sec (MUST BE LESS THAN HALF MAXIMUM TIME GAP)
             
         elif key['running_method_id'] == 2:
         
@@ -178,10 +175,6 @@ class Running(dj.Computed):
             maximum_time_gap = 3    ## sec
             minimum_run_length = 1  ## sec
             padding_time = 1 ## sec (MUST BE LESS THAN HALF MAXIMUM TIME GAP)
-
-            running_indices = np.where(filt_treadmill_speed > run_speed_threshold)[0]
-            combined_running_periods = self._combine_running_periods(running_indices, treadmill_times, maximum_time_gap)
-            finalized_running_periods = self._remove_short_running_periods(combined_running_periods, treadmill_times, minimum_run_length)
         
         elif key['running_method_id'] == 3:
         
@@ -190,28 +183,42 @@ class Running(dj.Computed):
             maximum_time_gap = 21    ## sec
             minimum_run_length = 1  ## sec
             padding_time = 10 ## sec (MUST BE LESS THAN HALF MAXIMUM TIME GAP)
-
-            running_indices = np.where(filt_treadmill_speed > run_speed_threshold)[0]
-            combined_running_periods = self._combine_running_periods(running_indices, treadmill_times, maximum_time_gap)
-            finalized_running_periods = self._remove_short_running_periods(combined_running_periods, treadmill_times, minimum_run_length)
-
+                
         elif key['running_method_id'] == 4:
+        
+            ## CONSTANTS
+            run_speed_threshold = 5 ## cm/sec
+            maximum_time_gap = 2    ## sec
+            minimum_run_length = 1  ## sec
+            padding_time = 0 ## sec (MUST BE LESS THAN HALF MAXIMUM TIME GAP)
+            
+        elif key['running_method_id'] == 5:
+        
+            ## CONSTANTS
+            run_speed_threshold = 10 ## cm/sec
+            maximum_time_gap = 2    ## sec
+            minimum_run_length = 1  ## sec
+            padding_time = 10 ## sec (MUST BE LESS THAN HALF MAXIMUM TIME GAP)
+
+        elif key['running_method_id'] == 6:
         
             ## CONSTANTS
             run_speed_threshold = 0.5 ## cm/sec
             maximum_time_gap = 5    ## sec
-            minimum_run_length = 1  ## sec
+            minimum_run_length = 0.5  ## sec
             padding_time = 1 ## sec (MUST BE LESS THAN HALF MAXIMUM TIME GAP)
-
-            running_indices = np.where(filt_treadmill_speed > run_speed_threshold)[0]
-            combined_running_periods = self._combine_running_periods(running_indices, treadmill_times, maximum_time_gap)
-            finalized_running_periods = self._remove_short_running_periods(combined_running_periods, treadmill_times, minimum_run_length)
             
         else:
             
             msg = f"Running method id {key['running_method_id']} not supported."
             raise PipelineException(msg)
 
+        
+        ## Calculate running periods given method settings
+        running_indices = np.where(filt_treadmill_speed > run_speed_threshold)[0]
+        combined_running_periods = self._combine_running_periods(running_indices, treadmill_times, maximum_time_gap)
+        finalized_running_periods = self._remove_short_running_periods(combined_running_periods, treadmill_times, minimum_run_length)
+        
         ## Calculate statistics
         mean_run_velocity = np.nanmean(filt_treadmill_speed)
         mean_run_speed = np.nanmean(treadmill_speed)
