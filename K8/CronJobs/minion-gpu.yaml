@@ -29,6 +29,12 @@ spec:
                     - 12GB
                     - 24GB
                     - 32GB
+                  - key: kubernetes.io/hostname
+                    operator: NotIn
+                    values:
+                    - at-gpu10
+                    - at-gpu11
+                    - at-gpu12
           priorityClassName: medium-priority
           volumes:
           - name: mnt
