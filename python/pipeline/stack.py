@@ -31,7 +31,6 @@ dj.config['cache'] = '/tmp/dj-cache'
 
 schema = dj.schema('pipeline_stack', locals(), create_tables=False)
 
-
 @schema
 class StackInfo(dj.Imported):
     definition = """ # master table with general data about the stacks
@@ -893,6 +892,250 @@ class CorrectedStack(dj.Computed):
         :rtype: np.array (float32)
         """
         slice_rel = (CorrectedStack.Slice() & self & {'channel': channel})
+        slices = slice_rel.fetch('slice', order_by='islice')
+        return np.stack(slices)
+
+    def save_as_tiff(self, filename='stack.tif'):
+        """ Save current stack as a tiff file."""
+        from tifffile import imsave
+
+        # Create a composite interleaving channels
+        height, width, depth = self.fetch1('px_height', 'px_width', 'px_depth')
+        num_channels = (StackInfo() & self).fetch1('nchannels')
+        composite = np.zeros([num_channels * depth, height, width], dtype=np.float32)
+        for i in range(num_channels):
+            composite[i::num_channels] = self.get_stack(i + 1)
+
+        # Save
+        print('Saving file at:', filename)
+        imsave(filename, composite)
+
+    def save_video(self, filename='stack.mp4', channel=1, fps=10, dpi=250):
+        """ Creates an animation video showing a fly-over of the stack (top to bottom).
+
+        :param string filename: Output filename (path + filename)
+        :param int channel: What channel to use. Starts at 1
+        :param int start_index: Where in the scan to start the video.
+        :param int fps: Number of slices shown per second.
+        :param int dpi: Dots per inch, controls the quality of the video.
+
+        :returns Figure. You can call show() on it.
+        :rtype: matplotlib.figure.Figure
+        """
+        from matplotlib import animation
+
+        stack = self.get_stack(channel=channel)
+        num_slices = stack.shape[0]
+
+        fig, axes = plt.subplots(1, 1, sharex=True, sharey=True)
+        im = fig.gca().imshow(stack[int(num_slices / 2)])
+        video = animation.FuncAnimation(fig, lambda i: im.set_data(stack[i]), num_slices,
+                                        interval=1000 / fps)
+        fig.tight_layout()
+
+        if not filename.endswith('.mp4'):
+            filename += '.mp4'
+        print('Saving video at:', filename)
+        print('If this takes too long, stop it and call again with dpi <', dpi,
+              '(default)')
+        video.save(filename, dpi=dpi)
+
+        return fig
+    
+    
+@schema
+class CorrelationStack(dj.Computed):
+    definition = """ # all slices of each stack after corrections.
+
+    -> Stitching.Volume                 # animal_id, session, stack_idx, volume_id
+    ---
+    z               : float             # (um) center of volume in the motor coordinate system (cortex is at 0)
+    y               : float             # (um) center of volume in the motor coordinate system
+    x               : float             # (um) center of volume in the motor coordinate system
+    px_depth        : smallint          # number of slices
+    px_height       : smallint          # lines per frame
+    px_width        : smallint          # pixels per line
+    um_depth        : float             # depth in microns 
+    um_height       : float             # height in microns
+    um_width        : float             # width in microns
+    surf_z          : float             # (um) depth of first slice - half a z step (cortex is at z=0)     
+    """
+
+    class Slice(dj.Part):
+        definition = """ # single slice of one stack
+
+        -> CorrectedStack
+        -> shared.Channel
+        islice              : smallint          # index of slice in volume
+        ---
+        slice               : longblob          # image (height x width)
+        """
+    
+    def _make_tuples(self, key):
+        print('Correcting stack', key)
+        
+        for channel in range((StackInfo() & key).fetch1('nchannels')):
+            # Correct ROIs
+            rois = []
+            for roi_tuple in (StackInfo.ROI() * Stitching.ROICoordinates() & key).fetch():
+                # Load ROI
+                roi_filename = (experiment.Stack.Filename() &
+                                roi_tuple).local_filenames_as_wildcard
+                roi = scanreader.read_scan(roi_filename)
+
+                # Map: Apply corrections to each field in parallel
+                f = performance.parallel_correlate_stack  # function to map
+                raster_phase = (RasterCorrection() & roi_tuple).fetch1('raster_phase')
+                fill_fraction = (StackInfo() & key).fetch1('fill_fraction')
+                y_shifts, x_shifts = (MotionCorrection() & roi_tuple).fetch1('y_shifts',
+                                                                             'x_shifts')
+                field_ids = roi_tuple['field_ids']
+                results = performance.map_fields(f, roi, 
+                                                 field_ids=field_ids,
+                                                 channel=channel,
+                                                 kwargs={'raster_phase': raster_phase,
+                                                         'fill_fraction': fill_fraction,
+                                                         'y_shifts': y_shifts,
+                                                         'x_shifts': x_shifts})
+
+                results = sorted(results, key=lambda x:x[-1])
+
+                sum_x,sum_sqx,sum_xy = [np.array([r[i] for r in results]) for i in range(2,5)]
+                nframes = (dj.U('nframes') & (StackInfo.ROI & key)).fetch1('nframes')
+                denom_factor = np.sqrt(nframes * sum_sqx - sum_x **2)
+
+                corrs = np.zeros(sum_xy.shape)
+
+                for k in [0,1,2,3]:
+                    rotated_corrs = np.rot90(corrs,k=k,axes=(1,2))
+                    rotated_sum_x = np.rot90(sum_x,k=k,axes=(1,2))
+                    rotated_dfactor = np.rot90(denom_factor,k=k,axes=(1,2))
+                    rotated_sum_xy = np.rot90(sum_xy,k=k,axes=(1,2))
+
+                    # Compute correlation
+                    rotated_corrs[:,1:, :, k] = (
+                        nframes * rotated_sum_xy[:,1:, :, k]
+                        - rotated_sum_x[:,1:,:] * rotated_sum_x[:,:-1,:]
+                    ) / (rotated_dfactor[:,1:,:] * rotated_dfactor[:,:-1,:])
+                    rotated_corrs[:,1:, 1:, 4 + k] = (
+                        nframes * rotated_sum_xy[:,1:, 1:, 4 + k]
+                        - rotated_sum_x[:,1:, 1:] * rotated_sum_x[:,:-1, :-1]
+                    ) / (rotated_dfactor[:,1:, 1:] * rotated_dfactor[:,:-1, :-1])
+
+                    # Return back to original orientation
+                    corrs = np.rot90(rotated_corrs, k=4-k,axes=(1,2))
+
+                correlation_image = np.sum(corrs,axis=-1)
+                norm_factor = 5 * np.ones(correlation_image.shape)  # edges
+                norm_factor[[0, -1, 0, -1], [0, -1, -1, 0]] = 3  # corners
+                norm_factor[1:-1, 1:-1] = 8  # center
+                correlation_image /= norm_factor
+
+                # Create ROI object (with pixel x, y, z coordinates)
+                px_z = roi_tuple['roi_z'] * (roi_tuple['roi_px_depth'] /
+                                             roi_tuple['roi_um_depth'])
+                ys = list(roi_tuple['stitch_ys'])
+                xs = list(roi_tuple['stitch_xs'])
+                rois.append(stitching.StitchedROI(correlation_image, x=xs, y=ys, z=px_z,
+                                                       id_=roi_tuple['roi_id']))
+
+
+            def join_rows(rois_):
+                """ Iteratively join all rois that overlap in the same row."""
+                sorted_rois = sorted(rois_, key=lambda roi: (roi.x, roi.y))
+
+                prev_num_rois = float('inf')
+                while len(sorted_rois) < prev_num_rois:
+                    prev_num_rois = len(sorted_rois)
+
+                    for left, right in itertools.combinations(sorted_rois, 2):
+                        if left.is_aside_to(right):
+                            left_xs = [s.x for s in left.slices]
+                            left_ys = [s.y for s in left.slices]
+                            right.join_with(left, left_xs, left_ys)
+                            sorted_rois.remove(left)
+                            break  # restart joining
+
+                return sorted_rois        
+
+            # Stitch all rois together. This is convoluted because smooth blending in
+            # join_with assumes rois are next to (not below or atop of) each other
+            prev_num_rois = float('Inf')  # to enter the loop at least once
+            while len(rois) < prev_num_rois:
+                prev_num_rois = len(rois)
+
+                # Join rows
+                rois = join_rows(rois)
+
+                # Join columns
+                [roi.rot90() for roi in rois]
+                rois = join_rows(rois)
+                [roi.rot270() for roi in rois]
+
+            # Check stitching went alright
+            if len(rois) > 1:
+                msg = 'ROIs for volume {} could not be stitched properly'.format(key)
+                raise PipelineException(msg)
+
+            stitched = rois[0]
+
+            # Insert in CorrelationStack
+            roi_info = StackInfo.ROI() & key & {'roi_id': stitched.roi_coordinates[0].id}
+            um_per_px = roi_info.microns_per_pixel
+            tuple_ = key.copy()
+            tuple_['z'] = stitched.z * um_per_px[0]
+            tuple_['y'] = stitched.y * um_per_px[1]
+            tuple_['x'] = stitched.x * um_per_px[2]
+            tuple_['px_depth'] = stitched.depth
+            tuple_['px_height'] = stitched.height
+            tuple_['px_width'] = stitched.width
+            tuple_['um_depth'] = roi_info.fetch1('roi_um_depth')  # same as original rois
+            tuple_['um_height'] = stitched.height * um_per_px[1]
+            tuple_['um_width'] = stitched.width * um_per_px[2]
+            tuple_['surf_z'] = (stitched.z - stitched.depth / 2) * um_per_px[0]
+            self.insert1(tuple_, skip_duplicates=True)
+
+            # Insert each slice
+            for i, slice_ in enumerate(stitched.volume):
+                self.Slice().insert1({**key, 
+                                      'channel': channel + 1, 
+                                      'islice': i + 1,
+                                      'slice': slice_})
+
+            self.notify({**key, 'channel': channel + 1})
+            
+    
+    @notify.ignore_exceptions
+    def notify(self, key):
+        import imageio
+
+        volume = (self & key).get_stack(channel=key['channel'])
+        volume = volume[:: int(volume.shape[0] / 8)]  # volume at 8 diff depths
+        video_filename = '/tmp/' + key_hash(key) + '.gif'
+        imageio.mimsave(video_filename, float2uint8(volume), duration=1)
+
+        msg = ('correlation stack for {animal_id}-{session}-{stack_idx} volume {volume_id} '
+               'channel {channel}').format(**key)
+        slack_user = notify.SlackUser() & (experiment.Session() & key)
+        slack_user.notify(file=video_filename, file_title=msg,
+                          channel='#pipeline_quality')
+
+    @property
+    def microns_per_pixel(self):
+        """ Returns an array with microns per pixel in depth, height and width. """
+        um_dims = self.fetch1('um_depth', 'um_height', 'um_width')
+        px_dims = self.fetch1('px_depth', 'px_height', 'px_width')
+        return np.array([um_dim / px_dim for um_dim, px_dim in zip(um_dims, px_dims)])
+
+    def get_stack(self, channel=1):
+        """ Get full stack (num_slices, height, width).
+
+        :param int channel: What channel to use. Starts at 1
+
+        :returns The stack: a (num_slices, image_height, image_width) array.
+        :rtype: np.array (float32)
+        """
+        slice_rel = (CorrelationStack.Slice() & self & {'channel': channel})
         slices = slice_rel.fetch('slice', order_by='islice')
         return np.stack(slices)
 

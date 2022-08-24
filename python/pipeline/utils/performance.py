@@ -501,3 +501,58 @@ def parallel_correct_stack(chunks, results, raster_phase, fill_fraction, y_shift
 
         # Add to results
         results.append((field_idx, averaged))
+        
+def parallel_correlate_stack(chunks, results, raster_phase, fill_fraction, y_shifts,
+                               x_shifts, apply_anscombe=False):
+    
+    """ Apply corrections in parallel and return pixelwise neighborhood correlation of corrected field over time.
+    :param queue chunks: Queue with inputs to consume.
+    :param list results: Where to put results.
+    :param float raster_phase: Raster phase used for raster correction.
+    :param float fill_fraction: Fill fraction used for raster correction.
+    :param np.array y_shifts: Array with shifts in y for all fields.
+    :param np.array x_shifts: Array with shifts in x for all fields
+    :param bool apply_anscombe: Whether to apply anscombe transform to the input.
+    :returns: (field_id, corrected_field) tuples.
+    """
+    while True:
+        # Read next chunk (process locks until something can be read)
+        field_idx, field = chunks.get()
+        if field is None:  # stop signal when all chunks have been processed
+            return
+
+        print(time.ctime(), 'Processing field:', field_idx)
+
+        # Correct field
+        chunk = _correct_field(field, raster_phase, fill_fraction, x_shifts[field_idx],
+                               y_shifts[field_idx])
+        
+        # Compute sum and l6-norm
+        chunk_sum = np.sum(chunk, axis=-1, dtype=float)
+        chunk -= chunk.min()
+        chunk_l6norm = np.sum(chunk**6, axis=-1, dtype=float)
+
+        # Subtract overall brightness per frame
+        chunk -= chunk.mean(axis=(0, 1))
+
+        # Compute sum_x and sum_x^2
+        chunk_sum2 = np.sum(chunk, axis=-1, dtype=float)
+        chunk_sqsum = np.sum(chunk**2, axis=-1, dtype=float)
+
+        # Compute sum_xy: Multiply each pixel by its eight neighbors
+        chunk_xysum = np.zeros((chunk.shape[0], chunk.shape[1], 8))
+        for k in [0, 1, 2, 3]: # amount of 90 degree rotations
+            rotated_chunk = np.rot90(chunk, k=k)
+            rotated_xysum = np.rot90(chunk_xysum, k=k)
+
+            # Multiply each pixel by one above and by one above to the left
+            rotated_xysum[1:, :, k] = np.sum(rotated_chunk[1:] * rotated_chunk[:-1], axis=-1, dtype=float)
+            rotated_xysum[1:, 1:, 4 + k] = np.sum(rotated_chunk[1:, 1:] * rotated_chunk[:-1, :-1], axis=-1, dtype=float)
+
+            # Return back to original orientation
+            chunk = np.rot90(rotated_chunk, k=4 - k)
+            chunk_xysum = np.rot90(rotated_xysum, k=4 - k)
+
+        # Save results
+        results.append((chunk_sum, chunk_l6norm, chunk_sum2, chunk_sqsum, chunk_xysum,field_idx))
+        
