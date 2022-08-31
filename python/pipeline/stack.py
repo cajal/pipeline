@@ -1001,7 +1001,7 @@ class CorrelationStack(dj.Computed):
                 # map_fields does not inherently sort the output
                 results = sorted(results, key=lambda x:x[-1])
 
-                sum_x,sum_sqx,sum_xy = [np.array([r[i] for r in results]) for i in range(2,5)]
+                sum_x,sum_sqx,sum_xy = [np.array([r[i] for r in results]) for i in range(3)]
                 nframes = (dj.U('nframes') & (StackInfo.ROI & key)).fetch1('nframes')
                 denom_factor = np.sqrt(nframes * sum_sqx - sum_x **2)
 
