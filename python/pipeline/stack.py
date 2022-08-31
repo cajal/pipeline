@@ -945,7 +945,7 @@ class CorrectedStack(dj.Computed):
     
 @schema
 class CorrelationStack(dj.Computed):
-    definition = """ # all slices of each stack after corrections.
+    definition = """ # all correlation slices of each stack after corrections.
 
     -> Stitching.Volume                 # animal_id, session, stack_idx, volume_id
     ---
@@ -998,6 +998,7 @@ class CorrelationStack(dj.Computed):
                                                          'y_shifts': y_shifts,
                                                          'x_shifts': x_shifts})
 
+                # map_fields does not inherently sort the output
                 results = sorted(results, key=lambda x:x[-1])
 
                 sum_x,sum_sqx,sum_xy = [np.array([r[i] for r in results]) for i in range(2,5)]
