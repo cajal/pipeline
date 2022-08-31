@@ -528,9 +528,9 @@ def parallel_correlate_stack(chunks, results, raster_phase, fill_fraction, y_shi
                                y_shifts[field_idx])
         
         # Compute sum and l6-norm
-        chunk_sum = np.sum(chunk, axis=-1, dtype=float)
+#         chunk_sum = np.sum(chunk, axis=-1, dtype=float)
         chunk -= chunk.min()
-        chunk_l6norm = np.sum(chunk**6, axis=-1, dtype=float)
+#         chunk_l6norm = np.sum(chunk**6, axis=-1, dtype=float)
 
         # Subtract overall brightness per frame
         chunk -= chunk.mean(axis=(0, 1))
@@ -554,5 +554,6 @@ def parallel_correlate_stack(chunks, results, raster_phase, fill_fraction, y_shi
             chunk_xysum = np.rot90(rotated_xysum, k=4 - k)
 
         # Save results
-        results.append((chunk_sum, chunk_l6norm, chunk_sum2, chunk_sqsum, chunk_xysum,field_idx))
+#         results.append((chunk_sum, chunk_l6norm, chunk_sum2, chunk_sqsum, chunk_xysum,field_idx))
+        results.append((chunk_sum2, chunk_sqsum, chunk_xysum,field_idx))
         
