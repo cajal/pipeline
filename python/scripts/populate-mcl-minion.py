@@ -1,5 +1,5 @@
 #!/usr/local/bin/python3
-from pipeline import experiment, meso, fuse, pupil, treadmill
+from pipeline import experiment, meso, fuse, pupil, treadmill, stack
 from stimulus import stimulus
 import time
 import logging
@@ -41,3 +41,11 @@ fuse.MotionCorrection.populate(next_scans, reserve_jobs=True, suppress_errors=Tr
 fuse.ScanSet.populate(next_scans, reserve_jobs=True, suppress_errors=True)
 fuse.Activity.populate(next_scans, reserve_jobs=True, suppress_errors=True)
 fuse.ScanDone.populate(next_scans, reserve_jobs=True, suppress_errors=True)
+
+# stack
+stack.StackInfo.populate(next_scans.proj(dummy='scan_idx'), stack.CorrectionChannel, reserve_jobs=True, suppress_errors=True)
+stack.Quality.populate(next_scans.proj(dummy='scan_idx'), reserve_jobs=True, suppress_errors=True)
+stack.RasterCorrection.populate(next_scans.proj(dummy='scan_idx'), reserve_jobs=True, suppress_errors=True)
+stack.MotionCorrection.populate(next_scans.proj(dummy='scan_idx'), reserve_jobs=True, suppress_errors=True)
+stack.Stitching.populate(next_scans.proj(dummy='scan_idx'), reserve_jobs=True, suppress_errors=True)
+stack.CorrectedStack.populate(next_scans.proj(dummy='scan_idx'), reserve_jobs=True, suppress_errors=True)
