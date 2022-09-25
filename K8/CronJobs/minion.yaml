@@ -30,7 +30,14 @@ spec:
                     - at-compute004
                     - at-compute005
                     - at-compute006
-                    - jr-compute001
+                    - at-compute007
+                    - at-compute008
+                    - at-compute009
+                    - at-compute010
+                    - at-compute011
+                    - at-compute012
+                    - at-compute013
+                    - at-compute014    
           priorityClassName: high-priority
           containers:
           - name: minion
