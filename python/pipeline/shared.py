@@ -197,7 +197,8 @@ class MotionCorrectionMethod(dj.Lookup):
     correction_method_details   : varchar(1024)
     """
     contents = [
-        [1, "Default motion correction"],
+        [0, "Legacy motion correction (before 2023). Code has been replaced."],
+        [1, "Default motion correction meant to replicate legacy code"],
         [2, "Motion correction with global template and 10um movement limit"],
         [3, "Motion correction with global template, 10um movement limit, and 0.5um shift maximum for 30Hz"],
         [4, "Motion correction with global template, 10um movement limit, 0.33sec rolling mean, and 0.5um shift maximum for 30Hz"],
