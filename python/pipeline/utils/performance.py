@@ -53,7 +53,10 @@ def map_frames(f, scan, field_id, channel, y=slice(None), x=slice(None), kwargs=
         pool.append(p)
 
     # Produce data
-    num_frames = scan.num_frames
+    if isinstance(scan, np.ndarray):
+        num_frames = scan.shape[-1]
+    else:
+        num_frames = scan.num_frames
     for i in range(0, num_frames, chunk_size):
         frames = slice(i, min(i + chunk_size, num_frames))
         chunks.put((frames, scan[field_id, y, x, channel, frames])) # frames, chunk tuples
