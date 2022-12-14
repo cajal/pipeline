@@ -1,8 +1,10 @@
 """ Utilities for motion and raster correction of resonant scans. """
 import numpy as np
+import datajoint as dj
 from scipy import interpolate  as interp
 from scipy import signal
 from scipy import ndimage
+from tqdm import tqdm
 
 from ..exceptions import PipelineException
 from ..utils.signal import mirrconv
@@ -314,3 +316,276 @@ def correct_motion(scan, x_shifts, y_shifts, in_place=True):
 
     scan = np.reshape(reshaped_scan, original_shape)
     return scan
+
+def _get_field_size_info(key):
+    """
+    Small utility function to fetch field height/width in pixels.
+    Required to make template functions below pipeline agnostic.
+    
+    Returns:
+        tuple: (height, width, height_microns_per_pixel, width_microns_per_pixel)
+    """
+    # Define virtual modules here to prevent circular imports
+    reso = dj.create_virtual_module("reso", "pipeline_reso")
+    meso = dj.create_virtual_module("meso", "pipeline_meso")
+
+    # Fetch relevant field size info
+    if len(reso.ScanInfo & key) > 0:
+        px_height, px_width, um_height, um_width = (reso.ScanInfo & key).fetch1(
+            "px_height", "px_width", "um_height", "um_width"
+        )
+    elif len(meso.ScanInfo & key) > 0:
+        px_height, px_width, um_height, um_width = (meso.ScanInfo.Field & key).fetch1(
+            "px_height", "px_width", "um_height", "um_width"
+        )
+    else:
+        raise PipelineException(f"Could not find scan info for key: {key}.")
+
+    return px_height, px_width, um_height / px_height, um_width / px_width
+
+def _get_pipe(key):
+    """
+    Small utility function to return instance of meso/reso pipeline.
+    Required to make template functions below pipeline agnostic.
+    """
+    # Define virtual modules here to prevent circular imports
+    reso = dj.create_virtual_module("reso", "pipeline_reso")
+    meso = dj.create_virtual_module("meso", "pipeline_meso")
+    
+    if len(reso.ScanInfo & key) > 0:
+        return reso
+    elif len(meso.ScanInfo & key) > 0:
+        return meso
+    else:
+        raise PipelineException(f"Could not find key in meso or reso: {key}.")
+
+
+def low_memory_motion_correction(scan, raster_phase, fill_fraction, x_shifts, y_shifts):
+    """
+    Runs an in memory version of our current motion correction found in
+    pipeline.utils.galvo_correction. This uses far less memory than the
+    parallel motion correction used in motion_correction_method=1.
+    """
+
+    chunk_size_in_GB = 1
+    single_frame_size = scan[:, :, 0].nbytes
+    chunk_size = int(chunk_size_in_GB * 1024**3 / (single_frame_size))
+
+    start_indices = np.arange(0, scan.shape[-1], chunk_size)
+    if start_indices[-1] != scan.shape[-1]:
+        start_indices = np.insert(start_indices, len(start_indices), scan.shape[-1])
+
+    for start_idx, end_idx in tqdm(
+        zip(start_indices[:-1], start_indices[1:]), total=len(start_indices) - 1
+    ):
+
+        scan_fragment = scan[:, :, start_idx:end_idx]
+        if abs(raster_phase) > 1e-7:
+            scan_fragment = correct_raster(
+                scan_fragment, raster_phase, fill_fraction
+            )  # raster
+        scan_fragment = correct_motion(
+            scan_fragment, x_shifts[start_idx:end_idx], y_shifts[start_idx:end_idx]
+        )  # motion
+        scan[:, :, start_idx:end_idx] = scan_fragment
+
+    return scan
+
+
+def create_template(scan, key):
+    """
+    Creates the template all frames are compared against to determine the
+    amount of motion that occured. Exclusively used for the first iteration
+    of motion correction.
+    """
+
+    ## Get needed info
+    pipe = _get_pipe(key)
+    px_height, px_width, _, _ = _get_field_size_info(key)
+    skip_rows = int(
+        round(px_height * 0.10)
+    )  # we discard some rows/cols to avoid edge artifacts
+    skip_cols = int(round(px_width * 0.10))
+
+    ## Select template source
+    # Default behavior: use middle 2000 frames as template source
+    if key["motion_correction_method"] in (1,):
+        middle_frame = int(np.floor(scan.shape[-1] / 2))
+        mini_scan = scan[
+            :,
+            skip_rows:-skip_rows,
+            skip_cols:-skip_cols,
+            :,
+            max(middle_frame - 1000, 0) : middle_frame + 1000,
+        ]
+    # Use full scan as template
+    if key["motion_correction_method"] in (
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+    ):
+        mini_scan = scan[
+            :,
+            skip_rows:-skip_rows,
+            skip_cols:-skip_cols,
+            :,
+            :,
+        ]
+    else:
+        raise PipelineException(f"The create_template() function does not currently support motion_correction_method {key['motion_correction_method']}")
+    mini_scan = mini_scan.astype(np.float32, copy=False)
+
+    # Correct mini scan
+    correct_raster = (pipe.RasterCorrection() & key).get_correct_raster()
+    mini_scan = correct_raster(mini_scan)
+
+    # Create template
+    mini_scan = 2 * np.sqrt(mini_scan - mini_scan.min() + 3 / 8)  # *
+    template = np.mean(mini_scan, axis=-1).squeeze()
+
+    # Apply spatial filtering (if needed)
+    if key["motion_correction_method"] in (1,):
+        template = ndimage.gaussian_filter(template, 0.7)  # **
+    elif key["motion_correction_method"] in (2,3,4,5,6,7,8,):
+        pass
+    else:
+        raise PipelineException(f"The create_template() function does not currently support motion_correction_method {key['motion_correction_method']}")
+    del mini_scan
+    # * Anscombe tranform to normalize noise, increase contrast and decrease outliers' leverage
+    # ** Small amount of gaussian smoothing to get rid of high frequency noise
+
+    return template
+
+
+def create_refined_template(
+    scan, x_shifts, y_shifts, key, percentile_thresh=25, smoothing=False
+):
+    """
+    Creates the template all frames are compared against to determine the
+    amount of motion that occured. Exclusively used for the second iteration
+    of motion correction. Previous x_shifts and y_shifts are expected as
+    they are used to filter out frames with too much noise from those used
+    to create the template.
+    """
+
+    ## Get needed info
+    pipe = _get_pipe(key)
+    px_height, px_width, _, _ = _get_field_size_info(key)
+    skip_rows = int(
+        round(px_height * 0.10)
+    )  # we discard some rows/cols to avoid edge artifacts
+    skip_cols = int(round(px_width * 0.10))
+
+    # Find good frames based on previous motion
+    # NOTE: Use <= for threshold since sometimes 0 can be 25th percentile.
+    #       < leads to zero good frames in this condition.
+    total_shifts = np.sqrt(x_shifts**2 + y_shifts**2)
+    good_frame_threshold = np.percentile(total_shifts, percentile_thresh)
+    good_frames = total_shifts <= good_frame_threshold
+
+    # Select template source
+    mini_scan = scan[:, skip_rows:-skip_rows, skip_cols:-skip_cols, :, good_frames]
+    mini_scan = mini_scan.astype(np.float32, copy=False)
+
+    # Correct mini scan
+    correct_raster = (pipe.RasterCorrection() & key).get_correct_raster()
+    mini_scan = correct_raster(mini_scan)
+
+    # Create template
+    mini_scan = 2 * np.sqrt(mini_scan - mini_scan.min() + 3 / 8)  # *
+    template = np.mean(mini_scan, axis=-1).squeeze()
+    if smoothing:
+        template = ndimage.gaussian_filter(template, 0.7)  # **
+    del mini_scan
+    # * Anscombe tranform to normalize noise, increase contrast and decrease outliers' leverage
+    # ** Small amount of gaussian smoothing to get rid of high frequency noise
+
+    return template
+
+
+def process_xy_motion(x_shifts, y_shifts, key):
+    """
+    Filters raw x_shifts and y_shifts, removing outliers and replacing them
+    with interpolated values based on max_y_shift/max_x_shift. Has the
+    option of running a momentum based correction, enforcing a max distance
+    on amount of movement from one frame to the other.
+
+    NOTE: Momentum correction assumes starting position is median of entire
+            motion correction trace to avoid first frame being an outlier.
+    """
+
+    # Detect outliers
+    pipe = _get_pipe(key)
+    _, _, um_per_px_height, um_per_pixel_width = _get_field_size_info(key)
+    if key["motion_correction_method"] in (1,):
+        max_y_shift, max_x_shift = 20 / np.array([um_per_px_height, um_per_pixel_width])
+    elif key["motion_correction_method"] in (
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+    ):
+        max_y_shift, max_x_shift = 10 / np.array([um_per_px_height, um_per_pixel_width])
+    else:
+        raise PipelineException(f"The process_xy_motion function does not currently support motion_correction_method {key['motion_correction_method']}")
+    y_shifts, x_shifts, outliers = fix_outliers(
+        y_shifts, x_shifts, max_y_shift, max_x_shift
+    )
+
+    # Center shifts around zero
+    y_shifts -= np.median(y_shifts)
+    x_shifts -= np.median(x_shifts)
+
+    # Run momentum based correction
+    if key["motion_correction_method"] in (1,2,):
+        pass
+    elif key["motion_correction_method"] in (
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+    ):
+
+        fps = (pipe.ScanInfo & key).fetch1("fps")
+        movement_x_max, movement_y_max = 0.5 / np.array([um_per_px_height, um_per_pixel_width]) * 30 / fps
+
+        current_x_coord = np.median(x_shifts)
+        x_coords = [current_x_coord]
+        for shift in x_shifts[1:]:
+            expected_movement = current_x_coord - shift
+            if expected_movement < -movement_x_max:
+                current_x_coord = current_x_coord + movement_x_max
+            elif expected_movement > movement_x_max:
+                current_x_coord = current_x_coord - movement_x_max
+            else:
+                current_x_coord = shift
+            x_coords.append(current_x_coord)
+
+        current_y_coord = np.median(y_shifts)
+        y_coords = [current_y_coord]
+        for shift in y_shifts[1:]:
+            expected_movement = current_y_coord - shift
+            if expected_movement < -movement_y_max:
+                current_y_coord = current_y_coord + movement_y_max
+            elif expected_movement > movement_y_max:
+                current_y_coord = current_y_coord - movement_y_max
+            else:
+                current_y_coord = shift
+            y_coords.append(current_y_coord)
+
+        x_shifts = np.array(x_coords)
+        y_shifts = np.array(y_coords)
+
+    else:
+        raise PipelineException(f"The process_xy_motion() function does not currently support motion_correction_method {key['motion_correction_method']}")
+
+    return x_shifts, y_shifts, outliers
