@@ -460,12 +460,12 @@ class RasterCorrection(dj.Computed):
 @schema
 class MotionMethodForScan(dj.Manual):
     definition = """ # defines which motion correction method to use
-    -> ScanInfo
+    -> experiment.Scan
     ---
     -> shared.MotionCorrectionMethod
     """
 
-    def fill(self, key, motion_correction_method=8):
+    def fill(self, key, motion_correction_method=1):
         self.insert1({**key, "motion_correction_method": motion_correction_method}, 
                       ignore_extra_fields=True, skip_duplicates=True,)
 
@@ -594,97 +594,11 @@ class MotionCorrection(dj.Computed):
         # Run postprocessing on assumed xy shifts
         x_shifts, y_shifts, outliers = galvo_corrections.process_xy_motion(x_shifts, y_shifts, key)
 
-        # Run second iteration of motion correction using a global template
+        # Run second iteration of motion correction
         if key["motion_correction_method"] in (
             5,
-            7,
-        ):
-
-            print("Running second iteration...")
-
-            scan = scan[0, :, :, 0, :]
-            scan = scan.astype(np.dtype("float32"))
-
-            old_x_shifts = x_shifts.copy()
-            old_y_shifts = y_shifts.copy()
-
-            # Correct scan in place using low memory chunks
-            scan = galvo_corrections.low_memory_motion_correction(
-                scan, raster_phase, fill_fraction, x_shifts, y_shifts
-            )
-
-            # Provide a small amount of smoothing in time
-            if key["motion_correction_method"] in (5,):
-                window_size = 3
-            elif key["motion_correction_method"] in (7,):
-                fps = (ScanInfo & key).fetch1("fps")
-                window_size = np.max((int(fps / 5), 3))
-            else:
-                raise PipelineException(f"The smoothing for the second iteration of motion correction is not defined for {key['motion_correction_method']}")
-
-            # In place low memory convolution. This is slower
-            # but allows for the entire scan to be in memory.
-            start_indices = np.arange(0, scan.shape[-1], 1000)
-            if start_indices[-1] != scan.shape[-1]:
-                start_indices = np.insert(
-                    start_indices, len(start_indices), scan.shape[-1]
-                )
-            for start_idx, end_idx in tqdm(
-                zip(start_indices[:-1], start_indices[1:]), total=len(start_indices) - 1
-            ):
-                conv_start = np.max((0, start_idx - window_size))
-                conv_end = np.min((end_idx + window_size, scan.shape[-1]))
-                conv_fragment = ndimage.convolve1d(
-                    scan[:, :, conv_start:conv_end],
-                    np.ones(window_size) / window_size,
-                    axis=-1,
-                    mode="reflect",
-                )
-
-                # Use these so the offset will be zero when at beginning or end of scan
-                slice_start = start_idx - conv_start
-                slice_end = end_idx - conv_end + conv_fragment.shape[-1]
-                scan[:, :, start_idx:end_idx] = conv_fragment[
-                    :, :, slice_start:slice_end
-                ]
-
-            scan = np.expand_dims(scan, axis=(0, 3))
-            template = galvo_corrections.create_refined_template(scan, x_shifts, y_shifts, key)
-
-            f = performance.parallel_motion_shifts  # function to map
-            kwargs = {
-                "raster_phase": raster_phase,
-                "fill_fraction": fill_fraction,
-                "template": template,
-            }
-            results = performance.map_frames(
-                f,
-                scan,
-                field_id=0,
-                y=slice(skip_rows, -skip_rows),
-                x=slice(skip_cols, -skip_cols),
-                channel=0,
-                kwargs=kwargs,
-            )
-
-            second_y_shifts = np.zeros(scan.shape[-1])
-            second_x_shifts = np.zeros(scan.shape[-1])
-            for frames, chunk_y_shifts, chunk_x_shifts in results:
-                second_y_shifts[frames] = chunk_y_shifts
-                second_x_shifts[frames] = chunk_x_shifts
-
-            second_x_shifts, second_y_shifts, _ = galvo_corrections.process_xy_motion(
-                second_x_shifts,
-                second_y_shifts,
-                key,
-            )
-
-            x_shifts = second_x_shifts + old_x_shifts
-            y_shifts = second_y_shifts + old_y_shifts
-
-        # Run a second iteration of motion correction using multiple local templates
-        elif key["motion_correction_method"] in (
             6,
+            7,
             8,
         ):
 
@@ -702,9 +616,9 @@ class MotionCorrection(dj.Computed):
             )
 
             # Provide a small amount of smoothing in time
-            if key["motion_correction_method"] in (6,):
+            if key["motion_correction_method"] in (5,6):
                 window_size = 3
-            elif key["motion_correction_method"] in (8,):
+            elif key["motion_correction_method"] in (7,8):
                 fps = (ScanInfo & key).fetch1("fps")
                 window_size = np.max((int(fps / 5), 3))
             else:
@@ -738,96 +652,131 @@ class MotionCorrection(dj.Computed):
 
             scan = np.expand_dims(scan, axis=(0, 3))
 
-            # Actual fragment size will be ~chunk_size+overlap_size, so each
-            # local template will be made with ~2000 frames in the case of 1500+500.
-            chunk_size = 1500
-            overlap_size = 500
+            # Use a global template to run a second correction on the scan
+            if key["motion_correction_method"] in (5,7):
+                template = galvo_corrections.create_refined_template(scan, x_shifts, y_shifts, key)
 
-            # We use linspace to ensure there are no fragments at the end
-            # which are smaller than the overlap size, leading to multiple edge cases.
-            # This will create start_idx fragments approximately equal to chunk_size
-            start_indices = np.linspace(
-                0, scan.shape[-1], int(scan.shape[-1] / chunk_size)
-            ).astype(int)
-
-            x_shift_fragments = np.empty((len(start_indices) - 1, scan.shape[-1]))
-            y_shift_fragments = np.empty((len(start_indices) - 1, scan.shape[-1]))
-            x_shift_fragments[:] = np.NaN
-            y_shift_fragments[:] = np.NaN
-
-            f = performance.parallel_motion_shifts  # function to map
-
-            for n, (start_idx, end_idx_base) in tqdm(
-                enumerate(zip(start_indices[:-1], start_indices[1:])),
-                total=len(start_indices[1:]),
-            ):
-                end_idx = np.min((end_idx_base + overlap_size, scan.shape[-1]))
-
-                # Create a local template. Use all frames less than percentile_thresh of motion
-                local_template = galvo_corrections.create_refined_template(
-                    scan[:, :, :, :, start_idx:end_idx],
-                    old_x_shifts[start_idx:end_idx],
-                    old_y_shifts[start_idx:end_idx],
-                    key,
-                    percentile_thresh=100,
-                    smoothing=True,
-                )
-
-                # scan variable had excess fields and channels stripped away to reduce memory footprint
+                f = performance.parallel_motion_shifts  # function to map
                 kwargs = {
                     "raster_phase": raster_phase,
                     "fill_fraction": fill_fraction,
-                    "template": local_template,
+                    "template": template,
                 }
-                # Determine xy shifts via phase correlation
                 results = performance.map_frames(
                     f,
-                    scan[:, :, :, :, start_idx:end_idx],
+                    scan,
                     field_id=0,
                     y=slice(skip_rows, -skip_rows),
                     x=slice(skip_cols, -skip_cols),
                     channel=0,
                     kwargs=kwargs,
                 )
-                if type(scan) == np.ndarray:
-                    y_shifts_fragment = np.zeros(end_idx - start_idx)
-                    x_shifts_fragment = np.zeros(end_idx - start_idx)
+
+                second_y_shifts = np.zeros(scan.shape[-1])
+                second_x_shifts = np.zeros(scan.shape[-1])
                 for frames, chunk_y_shifts, chunk_x_shifts in results:
-                    y_shifts_fragment[frames] = chunk_y_shifts
-                    x_shifts_fragment[frames] = chunk_x_shifts
+                    second_y_shifts[frames] = chunk_y_shifts
+                    second_x_shifts[frames] = chunk_x_shifts
 
-                x_shift_fragments[n, start_idx:end_idx] = x_shifts_fragment
-                y_shift_fragments[n, start_idx:end_idx] = y_shifts_fragment
+            elif key["motion_correction_method"] in (6,8):
+                
+                # Actual fragment size will be ~chunk_size+overlap_size, so each
+                # local template will be made with ~2000 frames in the case of 1500+500.
+                chunk_size = 1500
+                overlap_size = 500
 
-                # Use the beginning of the fragment and weight it from 0 to 1 to be summed with
-                # overlap area added to end_idx. This will be used to take the weighted mean.
-                if start_idx != 0:
-                    start_taper_weights = np.linspace(0, 1, overlap_size)
-                    x_shift_fragments[n, start_idx : start_idx + overlap_size] = (
-                        x_shift_fragments[n, start_idx : start_idx + overlap_size]
-                        * start_taper_weights
+                # We use linspace to ensure there are no fragments at the end
+                # which are smaller than the overlap size, leading to multiple edge cases.
+                # This will create start_idx fragments approximately equal to chunk_size
+                start_indices = np.linspace(
+                    0, scan.shape[-1], int(scan.shape[-1] / chunk_size)
+                ).astype(int)
+
+                x_shift_fragments = np.empty((len(start_indices) - 1, scan.shape[-1]))
+                y_shift_fragments = np.empty((len(start_indices) - 1, scan.shape[-1]))
+                x_shift_fragments[:] = np.NaN
+                y_shift_fragments[:] = np.NaN
+
+                f = performance.parallel_motion_shifts  # function to map
+
+                for n, (start_idx, end_idx_base) in tqdm(
+                    enumerate(zip(start_indices[:-1], start_indices[1:])),
+                    total=len(start_indices[1:]),
+                ):
+                    end_idx = np.min((end_idx_base + overlap_size, scan.shape[-1]))
+
+                    # Create a local template. Use all frames less than percentile_thresh of motion
+                    local_template = galvo_corrections.create_refined_template(
+                        scan[:, :, :, :, start_idx:end_idx],
+                        old_x_shifts[start_idx:end_idx],
+                        old_y_shifts[start_idx:end_idx],
+                        key,
+                        percentile_thresh=100,
+                        smoothing=True,
                     )
-                    y_shift_fragments[n, start_idx : start_idx + overlap_size] = (
-                        y_shift_fragments[n, start_idx : start_idx + overlap_size]
-                        * start_taper_weights
+
+                    # scan variable had excess fields and channels stripped away to reduce memory footprint
+                    kwargs = {
+                        "raster_phase": raster_phase,
+                        "fill_fraction": fill_fraction,
+                        "template": local_template,
+                    }
+                    # Determine xy shifts via phase correlation
+                    results = performance.map_frames(
+                        f,
+                        scan[:, :, :, :, start_idx:end_idx],
+                        field_id=0,
+                        y=slice(skip_rows, -skip_rows),
+                        x=slice(skip_cols, -skip_cols),
+                        channel=0,
+                        kwargs=kwargs,
                     )
-                if end_idx_base != scan.shape[-1]:
-                    end_taper_weights = np.linspace(1, 0, overlap_size)
-                    x_shift_fragments[n, end_idx_base:end_idx] = (
-                        x_shift_fragments[n, end_idx_base:end_idx] * end_taper_weights
-                    )
-                    y_shift_fragments[n, end_idx_base:end_idx] = (
-                        y_shift_fragments[n, end_idx_base:end_idx] * end_taper_weights
-                    )
+                    if type(scan) == np.ndarray:
+                        y_shifts_fragment = np.zeros(end_idx - start_idx)
+                        x_shifts_fragment = np.zeros(end_idx - start_idx)
+                    for frames, chunk_y_shifts, chunk_x_shifts in results:
+                        y_shifts_fragment[frames] = chunk_y_shifts
+                        x_shifts_fragment[frames] = chunk_x_shifts
+
+                    x_shift_fragments[n, start_idx:end_idx] = x_shifts_fragment
+                    y_shift_fragments[n, start_idx:end_idx] = y_shifts_fragment
+
+                    # Use the beginning of the fragment and weight it from 0 to 1 to be summed with
+                    # overlap area added to end_idx. This will be used to take the weighted mean.
+                    if start_idx != 0:
+                        start_taper_weights = np.linspace(0, 1, overlap_size)
+                        x_shift_fragments[n, start_idx : start_idx + overlap_size] = (
+                            x_shift_fragments[n, start_idx : start_idx + overlap_size]
+                            * start_taper_weights
+                        )
+                        y_shift_fragments[n, start_idx : start_idx + overlap_size] = (
+                            y_shift_fragments[n, start_idx : start_idx + overlap_size]
+                            * start_taper_weights
+                        )
+                    if end_idx_base != scan.shape[-1]:
+                        end_taper_weights = np.linspace(1, 0, overlap_size)
+                        x_shift_fragments[n, end_idx_base:end_idx] = (
+                            x_shift_fragments[n, end_idx_base:end_idx] * end_taper_weights
+                        )
+                        y_shift_fragments[n, end_idx_base:end_idx] = (
+                            y_shift_fragments[n, end_idx_base:end_idx] * end_taper_weights
+                        )
+
+                second_x_shifts, second_y_shifts = (np.nansum(x_shift_fragments, axis=0), np.nansum(y_shift_fragments, axis=0))
+
+            else:
+
+                raise PipelineException(f"Motion correction method {key['motion_correction_method']} does not have second iteration defined.")
 
             second_x_shifts, second_y_shifts, _ = galvo_corrections.process_xy_motion(
-                np.nansum(x_shift_fragments, axis=0),
-                np.nansum(y_shift_fragments, axis=0),
+                second_x_shifts,
+                second_y_shifts,
                 key,
             )
 
             x_shifts = second_x_shifts + old_x_shifts
             y_shifts = second_y_shifts + old_y_shifts
+            
 
         # Create results tuple
         tuple_ = key.copy()
