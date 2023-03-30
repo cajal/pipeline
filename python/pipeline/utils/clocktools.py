@@ -173,6 +173,13 @@ def fetch_timing_data(
             raise PipelineException(msg)
 
         ## Determine field offset to slice times later on and set ms_delay to field average
+        ## Because field delay image uses top depth as 0, we need to subtract the minimum value of the first field's
+        ## delay_im that was recorded at that depth. This will give us the average delay for that field.
+        ##
+        ## WARNING: This requires an equality restriction on z, which is technically a float in the database. It
+        ##          is possible for this to fail for extreme values of z. At time of writing this only applies to
+        ##          4/34,210 fields. If this becomes a problem, we can add a tolerance to the equality restriction
+        ##          if no fields are found during the strict equality restriction.
         scan_restriction = (pipe.ScanInfo & scan_key).fetch("KEY")
         all_z = np.unique(
             (pipe.ScanInfo.Field & scan_restriction).fetch("z", order_by="field ASC")
@@ -183,22 +190,26 @@ def fetch_timing_data(
         if debug:
             print(f"Field offset found as {field_offset} for depths 0-{len(all_z)}")
 
+        ## Find first field recorded at that depth and download that field's delay image
+        first_roi_delay_im = (pipe.ScanInfo.Field & scan_restriction & {"z": field_z}).fetch(
+            "delay_image", order_by="field ASC", limit=1
+        )[0]
         field_delay_im = (pipe.ScanInfo.Field & scan_key).fetch1("delay_image")
-        average_field_delay = np.mean(field_delay_im)
+        average_field_delay = np.mean(field_delay_im) - np.min(first_roi_delay_im)  # Field delay counts from first field at first depth, so we need to subtract the minimum delay of the first field at that depth
         ms_delay = average_field_delay
         if debug:
             print(
-                f"Average field delay found to be {round(ms_delay,4)}ms. This will be used unless a unit is specified in the key."
+                f"Average field delay found to be {round(ms_delay*1000,1)}ms. This will be used unless a unit is specified in the key."
             )
 
         ## If included, add unit offset
         if "unit_id" in scan_key or "mask_id" in scan_key:
             if len(pipe.ScanSet.Unit & scan_key) > 0:
                 unit_key = (pipe.ScanSet.Unit & scan_key).fetch1()
-                ms_delay = (pipe.ScanSet.UnitInfo & unit_key).fetch1("ms_delay")
+                ms_delay = ((pipe.ScanSet.UnitInfo & unit_key).fetch1("ms_delay") / 1000) - np.min(first_roi_delay_im) # Delay is stored in milliseconds here, but timings is in seconds
                 if debug:
                     print(
-                        f"Unit found with delay of {round(ms_delay,4)}ms. Delay added to relevant times."
+                        f"Unit found with delay of {round(ms_delay*1000,1)}ms. Delay added to relevant times."
                     )
             else:
                 if debug:
@@ -571,7 +582,7 @@ def convert_clocks(
                     >>>key = dict(animal_id=17797, session=4, scan_idx=7, field=1, segmentation_method=6, mask_id=1, tracking_method=2)
                     >>>settings = dict(scan_key=key, input_list=None, source_format='indices', source_type='fluorescence-behavior',
                                        target_format='signal', target_type='fluorescence-behavior', drop_single_idx=True, debug=False)
-                    >>>fluorescence_signal = convert_clocks(settings)
+                    >>>fluorescence_signal = convert_clocks(**settings)
 
 
                 Fetch recording times (on behavior clock) for one unit:
@@ -587,7 +598,7 @@ def convert_clocks(
                     >>>key = dict(animal_id=17797, session=4, scan_idx=7, field=1, segmentation_method=6, mask_id=1, tracking_method=2)
                     >>>settings = dict(scan_key=key, input_list=None, source_format='indices', source_type='fluorescence-behavior',
                                        target_format='signal', target_type='treadmill', drop_single_idx=True, debug=False)
-                    >>>interpolated_treadmill = convert_clocks(settings)
+                    >>>interpolated_treadmill = convert_clocks(**settings)
 
 
                 Convert discontinuous pupil IDX fragments to treadmill times (on behavior clock):
@@ -596,7 +607,7 @@ def convert_clocks(
                     >>>input_indices = np.concatenate(((np.arange(1000)), np.arange(1005, 2000)))
                     >>>settings = dict(scan_key=key, input_list=input_indices, source_format='indices', source_type='pupil',
                                        target_format='times-source', target_type='treadmill', drop_single_idx=True, debug=False)
-                    >>>treadmill_time_fragments = convert_clocks(settings)
+                    >>>treadmill_time_fragments = convert_clocks(**settings)
 
 
                 Convert fluorescence time boundaries on behavior clock to fluorescence times on stimulus clock:
@@ -605,7 +616,7 @@ def convert_clocks(
                     >>>time_boundaries = [[400, 500], [501, 601]]
                     >>>settings = dict(scan_key=key, input_list=time_boundaries, source_format='times', source_type='fluorescence-behavior',
                                        target_format='times-target', target_type='fluorescence-stimulus', drop_single_idx=True, debug=False)
-                    >>>fluorescence_stimulus_times_in_bounds = convert_clocks(settings)
+                    >>>fluorescence_stimulus_times_in_bounds = convert_clocks(**settings)
     """
 
     ##
