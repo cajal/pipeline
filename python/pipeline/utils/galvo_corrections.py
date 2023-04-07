@@ -352,13 +352,32 @@ def _get_pipe(key):
     reso = dj.create_virtual_module("reso", "pipeline_reso")
     meso = dj.create_virtual_module("meso", "pipeline_meso")
     
-    if len(reso.ScanInfo & key) > 0:
+    if len(reso.ScanInfo & key) > 0 and len(meso.ScanInfo & key) > 0:
+        raise PipelineException(f"Found key in both meso and reso: {key}.")
+    elif len(reso.ScanInfo & key) > 0:
         return reso
     elif len(meso.ScanInfo & key) > 0:
         return meso
     else:
         raise PipelineException(f"Could not find key in meso or reso: {key}.")
-
+        
+def _get_correct_raster(key):
+    """
+    Small utility function to return function which corrects Raster phase
+    in a pipeline agnostic way. Converts scan to np.float32 if it is not
+    already a float dtype.
+    """
+    pipe = _get_pipe(key)
+    raster_phase = (pipe.RasterCorrection & key).fetch1("raster_phase")
+    fill_fraction = (pipe.ScanInfo & key).fetch1("fill_fraction")
+    if abs(raster_phase) < 1e-7:
+        correct_raster = lambda scan: scan.astype(np.float32, copy=False)
+    else:
+        correct_raster = lambda scan: correct_raster(
+            scan, raster_phase, fill_fraction
+        )
+    return correct_raster
+    
 
 def low_memory_motion_correction(scan, raster_phase, fill_fraction, x_shifts, y_shifts):
     """
@@ -419,7 +438,7 @@ def create_template(scan, key):
             max(middle_frame - 1000, 0) : middle_frame + 1000,
         ]
     # Use full scan as template
-    if key["motion_correction_method"] in (
+    elif key["motion_correction_method"] in (
         2,
         3,
         4,
@@ -427,6 +446,10 @@ def create_template(scan, key):
         6,
         7,
         8,
+        9,
+        10,
+        11,
+        12,
     ):
         mini_scan = scan[
             :,
@@ -437,10 +460,9 @@ def create_template(scan, key):
         ]
     else:
         raise PipelineException(f"The create_template() function does not currently support motion_correction_method {key['motion_correction_method']}")
-    mini_scan = mini_scan.astype(np.float32, copy=False)
 
     # Correct mini scan
-    correct_raster = (pipe.RasterCorrection() & key).get_correct_raster()
+    correct_raster = _get_correct_raster(key)
     mini_scan = correct_raster(mini_scan)
 
     # Create template
@@ -450,7 +472,7 @@ def create_template(scan, key):
     # Apply spatial filtering (if needed)
     if key["motion_correction_method"] in (1,):
         template = ndimage.gaussian_filter(template, 0.7)  # **
-    elif key["motion_correction_method"] in (2,3,4,5,6,7,8,):
+    elif key["motion_correction_method"] in (2,3,4,5,6,7,8,9,10,11,12,):
         pass
     else:
         raise PipelineException(f"The create_template() function does not currently support motion_correction_method {key['motion_correction_method']}")
@@ -492,7 +514,7 @@ def create_refined_template(
     mini_scan = mini_scan.astype(np.float32, copy=False)
 
     # Correct mini scan
-    correct_raster = (pipe.RasterCorrection() & key).get_correct_raster()
+    correct_raster = _get_correct_raster(key)
     mini_scan = correct_raster(mini_scan)
 
     # Create template
@@ -523,15 +545,7 @@ def process_xy_motion(x_shifts, y_shifts, key):
     _, _, um_per_px_height, um_per_pixel_width = _get_field_size_info(key)
     if key["motion_correction_method"] in (1,):
         max_y_shift, max_x_shift = 20 / np.array([um_per_px_height, um_per_pixel_width])
-    elif key["motion_correction_method"] in (
-        2,
-        3,
-        4,
-        5,
-        6,
-        7,
-        8,
-    ):
+    elif key["motion_correction_method"] in (2,3,4,5,6,7,8,9,10,11,12,):
         max_y_shift, max_x_shift = 10 / np.array([um_per_px_height, um_per_pixel_width])
     else:
         raise PipelineException(f"The process_xy_motion function does not currently support motion_correction_method {key['motion_correction_method']}")
@@ -546,14 +560,7 @@ def process_xy_motion(x_shifts, y_shifts, key):
     # Run momentum based correction
     if key["motion_correction_method"] in (1,2,):
         pass
-    elif key["motion_correction_method"] in (
-        3,
-        4,
-        5,
-        6,
-        7,
-        8,
-    ):
+    elif key["motion_correction_method"] in (3,4,5,6,7,8,9,10,11,12,):
 
         fps = (pipe.ScanInfo & key).fetch1("fps")
         movement_x_max, movement_y_max = 0.5 / np.array([um_per_px_height, um_per_pixel_width]) * 30 / fps

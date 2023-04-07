@@ -442,7 +442,7 @@ class RasterCorrection(dj.Computed):
         self.insert1(tuple_)
 
         # Fill MotionMethodForScan table with default motion correction method
-        MotionMethodForScan.fill(key)
+        MotionMethodForScan().fill(key)
 
     def get_correct_raster(self):
         """ Returns a function to perform raster correction on the scan. """
@@ -489,6 +489,7 @@ class MotionCorrection(dj.Computed):
         definition = """ # which motion correction method was used
         -> master
         ---
+        -> shared.Channel
         -> shared.MotionCorrectionMethod
         """
 
@@ -511,7 +512,7 @@ class MotionCorrection(dj.Computed):
         # Check channel number is compatible before continuing
         nchannels = (ScanInfo & key).fetch1("nchannels")
         if key["channel"] > nchannels:
-            return
+            raise PipelineException("Channel number exceeds number of channels in scan.")
         
         # Computation message
         print(f"Running motion correction for {key}")
@@ -527,7 +528,9 @@ class MotionCorrection(dj.Computed):
         
         # Remove unused fields/channels from the scan to conserve
         # memory. This also allows for convolution of meso scans
-        # where the fields are not the same dimension.
+        # where the fields are not the same dimension. We will
+        # keep the field and channel dimensions because map_frames
+        # and other functions expect them.
         scan = scan[
             key["field"] - 1 : key["field"],
             :,
@@ -546,6 +549,10 @@ class MotionCorrection(dj.Computed):
             6,
             7,
             8,
+            9,
+            10,
+            11,
+            12,
         ):
 
             fps = (ScanInfo & key).fetch1("fps")
@@ -571,7 +578,9 @@ class MotionCorrection(dj.Computed):
         skip_rows = int(round(px_height * 0.10))
         skip_cols = int(round(px_width * 0.10))
 
-        # Determine xy shifts via phase correlation
+        # Determine xy shifts via phase correlation. Field ID and channel are using dummy values
+        # as the scan has already been cropped to the field and channel of interest above. This
+        # was done to reduce memory usage.
         results = performance.map_frames(
             f,
             scan,
@@ -600,12 +609,36 @@ class MotionCorrection(dj.Computed):
             6,
             7,
             8,
+            9,
+            10,
+            11,
+            12,
         ):
 
             print("Running second iteration...")
 
+            # Reload the scan to remove the convolution that occurred above
+            if key["motion_correction_method"] in (9,10,11,12,):
+                import gc
+                del scan
+                gc.collect()  # Force garbage collection to free RAM to reload scan
+                print("Reloading scan. This will take a large amount of time...")
+                scan = scanreader.read_scan(scan_filename)
+                scan = scan[
+                    key["field"] - 1 : key["field"],
+                    :,
+                    :,
+                    key["channel"] - 1 : key["channel"],
+                    :,
+                ]
+
+            # We can now throw away the channel and field dimensions as low_memory_motion_correction
+            # doesn't need them. These were size 1 dimensions that were preserved to allow for the 
+            # map_frames function to work. The scan has already been cropped to the field and channel 
+            # of interest above. The map_frames call above wasn't replaced because we wanted minimal
+            # changes to the code.
             scan = scan[0, :, :, 0, :]
-            scan = scan.astype(np.dtype("float32"))
+            scan = scan.astype(np.dtype("float32"), copy=False)
 
             old_x_shifts = x_shifts.copy()
             old_y_shifts = y_shifts.copy()
@@ -616,9 +649,9 @@ class MotionCorrection(dj.Computed):
             )
 
             # Provide a small amount of smoothing in time
-            if key["motion_correction_method"] in (5,6):
+            if key["motion_correction_method"] in (5,6,9,10,):
                 window_size = 3
-            elif key["motion_correction_method"] in (7,8):
+            elif key["motion_correction_method"] in (7,8,11,12,):
                 fps = (ScanInfo & key).fetch1("fps")
                 window_size = np.max((int(fps / 5), 3))
             else:
@@ -653,7 +686,7 @@ class MotionCorrection(dj.Computed):
             scan = np.expand_dims(scan, axis=(0, 3))
 
             # Use a global template to run a second correction on the scan
-            if key["motion_correction_method"] in (5,7):
+            if key["motion_correction_method"] in (5,7,9,11,):
                 template = galvo_corrections.create_refined_template(scan, x_shifts, y_shifts, key)
 
                 f = performance.parallel_motion_shifts  # function to map
@@ -662,6 +695,9 @@ class MotionCorrection(dj.Computed):
                     "fill_fraction": fill_fraction,
                     "template": template,
                 }
+                # Determine xy shifts via phase correlation. Field ID and channel are using dummy values
+                # as the scan has already been cropped to the field and channel of interest above. This
+                # was done to reduce memory usage.
                 results = performance.map_frames(
                     f,
                     scan,
@@ -678,7 +714,7 @@ class MotionCorrection(dj.Computed):
                     second_y_shifts[frames] = chunk_y_shifts
                     second_x_shifts[frames] = chunk_x_shifts
 
-            elif key["motion_correction_method"] in (6,8):
+            elif key["motion_correction_method"] in (6,8,10,12,):
                 
                 # Actual fragment size will be ~chunk_size+overlap_size, so each
                 # local template will be made with ~2000 frames in the case of 1500+500.
@@ -721,7 +757,9 @@ class MotionCorrection(dj.Computed):
                         "fill_fraction": fill_fraction,
                         "template": local_template,
                     }
-                    # Determine xy shifts via phase correlation
+                    # Determine xy shifts via phase correlation. Field ID and channel are using dummy values
+                    # as the scan has already been cropped to the field and channel of interest above. This
+                    # was done to reduce memory usage.
                     results = performance.map_frames(
                         f,
                         scan[:, :, :, :, start_idx:end_idx],
@@ -791,7 +829,6 @@ class MotionCorrection(dj.Computed):
 
         # Create record of motion correction method
         method_used_key = key.copy()
-        method_used_key.pop("channel")
 
         # Insert
         self.insert1(tuple_)
