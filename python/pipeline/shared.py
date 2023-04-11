@@ -201,15 +201,15 @@ class MotionCorrectionMethod(dj.Lookup):
         [1, "Default motion correction meant to replicate legacy code"],
         [2, "Motion correction with global template and 10um movement limit"],
         [3, "Motion correction with global template, 10um movement limit, and 0.5um shift maximum for 30Hz"],
-        [4, "Motion correction with global template, 10um movement limit, 0.33sec rolling mean, and 0.5um shift maximum for 30Hz"],
+        [4, "Motion correction with global template, 10um movement limit, 0.33sec rolling mean (or 3 frame, whichever is larger), and 0.5um shift maximum for 30Hz"],
         [5, "Method 4 with second iteration of global template on scan with 3 frame rolling mean applied during second iteration on top of previous 0.33s rolling mean."],
         [6, "Method 4 with second iteration of 2000 frame local templates with 500 frame overlap on scan with 3 frame rolling mean applied during second iteration on top of previous 0.33s rolling mean."],
-        [7, "Method 4 with second iteration of global template on scan with 0.2s frame rolling mean applied during second iteration on top of previous 0.33s rolling mean."],
-        [8, "Method 4 with second iteration of 2000 frame local templates with 500 frame overlap on scan with 0.2s frame rolling mean applied during second iteration on top of previous 0.33s rolling mean."],
+        [7, "Method 4 with second iteration of global template on scan with 0.2s frame rolling mean (or 3 frame, whichever is larger) applied during second iteration on top of previous 0.33s rolling mean."],
+        [8, "Method 4 with second iteration of 2000 frame local templates with 500 frame overlap on scan with 0.2s frame rolling mean (or 3 frame, whichever is larger) applied during second iteration on top of previous 0.33s rolling mean."],
         [9, "Method 4 with second iteration of global template on scan with 3 frame rolling mean applied during second iteration. Reloads scan to remove previous filtering before second iteration."],
         [10, "Method 4 with second iteration of 2000 frame local templates with 500 frame overlap on scan with 3 frame rolling mean applied during second iteration. Reloads scan to remove previous filtering before second iteration."],
-        [11, "Method 4 with second iteration of global template on scan with 0.2s frame rolling mean applied during second iteration. Reloads scan to remove previous filtering before second iteration."],
-        [12, "Method 4 with second iteration of 2000 frame local templates with 500 frame overlap on scan with 0.2s frame rolling mean applied during second iteration. Reloads scan to remove previous filtering before second iteration."],
+        [11, "Method 4 with second iteration of global template on scan with 0.2s frame rolling mean (or 3 frame, whichever is larger) applied during second iteration. Reloads scan to remove previous filtering before second iteration."],
+        [12, "Method 4 with second iteration of 2000 frame local templates with 500 frame overlap on scan with 0.2s frame rolling mean (or 3 frame, whichever is larger) applied during second iteration. Reloads scan to remove previous filtering before second iteration."],
     ]
 
 

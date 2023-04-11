@@ -413,7 +413,7 @@ class MotionMethodForScan(dj.Manual):
 
 @schema
 class MotionCorrection(dj.Computed):
-    definition = """ # experimental motion correction for galvo scans
+    definition = """ # motion correction for galvo scans
 
     -> RasterCorrection
     ---
