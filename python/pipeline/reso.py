@@ -4,6 +4,8 @@ from datajoint.jobs import key_hash
 import matplotlib.pyplot as plt
 import numpy as np
 import scanreader
+from scipy import ndimage
+from tqdm import tqdm
 
 from . import experiment, injection, notify, shared
 from .utils import galvo_corrections, signal, quality, mask_classification, performance
@@ -380,16 +382,33 @@ class RasterCorrection(dj.Computed):
         # Insert
         self.insert1(tuple_)
 
+        # Fill MotionMethodForScan table with default motion correction method
+        MotionMethodForScan().fill(key)
+
     def get_correct_raster(self):
         """ Returns a function to perform raster correction on the scan. """
-        raster_phase = self.fetch1('raster_phase')
-        fill_fraction = (ScanInfo() & self).fetch1('fill_fraction')
+        raster_phase = self.fetch1("raster_phase")
+        fill_fraction = (ScanInfo() & self).fetch1("fill_fraction")
         if abs(raster_phase) < 1e-7:
             correct_raster = lambda scan: scan.astype(np.float32, copy=False)
         else:
-            correct_raster = lambda scan: galvo_corrections.correct_raster(scan,
-                                                             raster_phase, fill_fraction)
+            correct_raster = lambda scan: galvo_corrections.correct_raster(
+                scan, raster_phase, fill_fraction
+            )
         return correct_raster
+    
+
+@schema
+class MotionMethodForScan(dj.Manual):
+    definition = """ # defines which motion correction method to use
+    -> experiment.Scan
+    ---
+    -> shared.MotionCorrectionMethod
+    """
+
+    def fill(self, key, motion_correction_method=1):
+        self.insert1({**key, "motion_correction_method": motion_correction_method}, 
+                      ignore_extra_fields=True, skip_duplicates=True,)
 
 
 @schema
@@ -407,102 +426,365 @@ class MotionCorrection(dj.Computed):
     align_time=CURRENT_TIMESTAMP    : timestamp     # automatic
     """
 
+    class MotionMethodUsed(dj.Part):
+        definition = """ # which motion correction method was used
+        -> master
+        ---
+        -> shared.Channel
+        -> shared.MotionCorrectionMethod
+        """
+
     @property
     def key_source(self):
-        return RasterCorrection() & {'pipe_version': CURRENT_VERSION}
-
+        return RasterCorrection() & {"pipe_version": CURRENT_VERSION} & MotionMethodForScan()
+    
+    
     def make(self, key):
         """Computes the motion shifts per frame needed to correct the scan."""
-        from scipy import ndimage
 
-        # Get some params
-        px_height, px_width, nframes, nfields, fps = (ScanInfo() & key).fetch1('px_height', 'px_width',
-                                                                               'nframes', 'nfields', 'fps')
-        channel = (CorrectionChannel() & key).fetch1('channel') - 1
-        field_id = key['field'] - 1
+        # Add motion_correction_method and channel to key
+        if len(MotionMethodForScan & key) == 0:
+            raise PipelineException(
+                f"No motion correction method specified for scan {key}. Insert into MotionMethodForScan to fix."
+            )
+        key["motion_correction_method"] = (MotionMethodForScan & key).fetch1('motion_correction_method')
+        key["channel"] = (CorrectionChannel & key).fetch1('channel')
+        
+        # Check channel number is compatible before continuing
+        nchannels = (ScanInfo & key).fetch1("nchannels")
+        if key["channel"] > nchannels:
+            raise PipelineException("Channel number exceeds number of channels in scan.")
+        
+        # Computation message
+        print(f"Running motion correction for {key}")
 
-        # Motion correction fails if FPS is too high
-        if fps < 100:
+        # Read the scan
+        scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
+        scan = scanreader.read_scan(scan_filename)
+        
+        # Store this info for the notify function as we will drop it
+        # immediately after this line.
+        num_frames = scan.num_frames
+        num_fields = scan.num_fields
+        
+        # Remove unused fields/channels from the scan to conserve
+        # memory. This also allows for convolution of meso scans
+        # where the fields are not the same dimension. We will
+        # keep the field and channel dimensions because map_frames
+        # and other functions expect them.
+        scan = scan[
+            key["field"] - 1 : key["field"],
+            :,
+            :,
+            key["channel"] - 1 : key["channel"],
+            :,
+        ]
+        template = galvo_corrections.create_template(scan, key)
 
-            # Read the scan
-            scan_filename = (experiment.Scan() & key).local_filenames_as_wildcard
-            scan = scanreader.read_scan(scan_filename)
+        ## Run a 0.33sec rolling mean
+        if key["motion_correction_method"] in (1,2,3,):
+            pass
+        elif key["motion_correction_method"] in (
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+        ):
 
-            # Load some frames from middle of scan to compute template
-            skip_rows = int(round(px_height * 0.10))  # we discard some rows/cols to avoid edge artifacts
-            skip_cols = int(round(px_width * 0.10))
-            middle_frame = int(np.floor(scan.num_frames / 2))
-            mini_scan = scan[field_id, skip_rows: -skip_rows, skip_cols: -skip_cols, channel,
-                             max(middle_frame - 1000, 0): middle_frame + 1000]
-            mini_scan = mini_scan.astype(np.float32, copy=False)
+            fps = (ScanInfo & key).fetch1("fps")
+            window_size = np.max((int(fps / 3), 3))
+            scan = ndimage.convolve1d(
+                scan, np.ones(window_size) / window_size, axis=-1, mode="reflect"
+            )
+        else:
+            raise PipelineException(f"Rolling mean to use is not defined for motion_correction_method {key['motion_correction_method']}")
 
-            # Correct mini scan
-            correct_raster = (RasterCorrection() & key).get_correct_raster()
-            mini_scan = correct_raster(mini_scan)
+        # Map: compute motion shifts in parallel
+        f = performance.parallel_motion_shifts  # function to map
+        raster_phase = (RasterCorrection() & key).fetch1("raster_phase")
+        fill_fraction = (ScanInfo() & key).fetch1("fill_fraction")
+        kwargs = {
+            "raster_phase": raster_phase,
+            "fill_fraction": fill_fraction,
+            "template": template,
+        }
 
-            # Create template
-            mini_scan = 2 * np.sqrt(mini_scan - mini_scan.min() + 3 / 8)  # *
-            template = np.mean(mini_scan, axis=-1)
-            template = ndimage.gaussian_filter(template, 0.7)  # **
-            # * Anscombe tranform to normalize noise, increase contrast and decrease outliers' leverage
-            # ** Small amount of gaussian smoothing to get rid of high frequency noise
+        # Determine border cutoff to avoid edge artifacts
+        px_height, px_width = (ScanInfo & key).fetch1("px_height", "px_width")
+        skip_rows = int(round(px_height * 0.10))
+        skip_cols = int(round(px_width * 0.10))
 
-            # Map: compute motion shifts in parallel
-            f = performance.parallel_motion_shifts  # function to map
-            raster_phase = (RasterCorrection() & key).fetch1('raster_phase')
-            fill_fraction = (ScanInfo() & key).fetch1('fill_fraction')
-            kwargs = {'raster_phase': raster_phase, 'fill_fraction': fill_fraction,
-                      'template': template}
-            results = performance.map_frames(f, scan, field_id=field_id,
-                                             y=slice(skip_rows, -skip_rows),
-                                             x=slice(skip_cols, -skip_cols), channel=channel,
-                                             kwargs=kwargs)
-
-            # Reduce
+        # Determine xy shifts via phase correlation. Field ID and channel are using dummy values
+        # as the scan has already been cropped to the field and channel of interest above. This
+        # was done to reduce memory usage.
+        results = performance.map_frames(
+            f,
+            scan,
+            field_id=0,
+            y=slice(skip_rows, -skip_rows),
+            x=slice(skip_cols, -skip_cols),
+            channel=0,
+            kwargs=kwargs,
+        )
+        if type(scan) == np.ndarray:
+            y_shifts = np.zeros(scan.shape[-1])
+            x_shifts = np.zeros(scan.shape[-1])
+        else:
             y_shifts = np.zeros(scan.num_frames)
             x_shifts = np.zeros(scan.num_frames)
-            for frames, chunk_y_shifts, chunk_x_shifts in results:
-                y_shifts[frames] = chunk_y_shifts
-                x_shifts[frames] = chunk_x_shifts
+        for frames, chunk_y_shifts, chunk_x_shifts in results:
+            y_shifts[frames] = chunk_y_shifts
+            x_shifts[frames] = chunk_x_shifts
 
-            # Detect outliers
-            max_y_shift, max_x_shift = 20 / (ScanInfo() & key).microns_per_pixel
-            y_shifts, x_shifts, outliers = galvo_corrections.fix_outliers(y_shifts, x_shifts,
-                                                                          max_y_shift,
-                                                                          max_x_shift)
+        # Run postprocessing on assumed xy shifts
+        x_shifts, y_shifts, outliers = galvo_corrections.process_xy_motion(x_shifts, y_shifts, key)
 
-            # Center shifts around zero
-            y_shifts -= np.median(y_shifts)
-            x_shifts -= np.median(x_shifts)
+        # Run second iteration of motion correction
+        if key["motion_correction_method"] in (
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+        ):
 
-        else:
+            print("Running second iteration...")
 
-            # Fill with dummy values
-            print(f'FPS of {int(fps)} is greater than 100. Not correcting for motion.')
-            y_shifts = np.zeros(nframes, dtype=np.float32)
-            x_shifts = np.zeros(nframes, dtype=np.float32)
-            outliers = np.zeros(nframes, dtype=np.bool)
-            template = np.zeros((px_height, px_height), dtype=np.float32)
+            # Reload the scan to remove the convolution that occurred above
+            if key["motion_correction_method"] in (9,10,11,12,):
+                import gc
+                del scan
+                gc.collect()  # Force garbage collection to free RAM to reload scan
+                print("Reloading scan. This will take a large amount of time...")
+                scan = scanreader.read_scan(scan_filename)
+                scan = scan[
+                    key["field"] - 1 : key["field"],
+                    :,
+                    :,
+                    key["channel"] - 1 : key["channel"],
+                    :,
+                ]
 
+            # We can now throw away the channel and field dimensions as low_memory_motion_correction
+            # doesn't need them. These were size 1 dimensions that were preserved to allow for the 
+            # map_frames function to work. The scan has already been cropped to the field and channel 
+            # of interest above. The map_frames call above wasn't replaced because we wanted minimal
+            # changes to the code.
+            scan = scan[0, :, :, 0, :]
+            scan = scan.astype(np.dtype("float32"), copy=False)
+
+            old_x_shifts = x_shifts.copy()
+            old_y_shifts = y_shifts.copy()
+
+            # Correct scan in place using low memory chunks
+            scan = galvo_corrections.low_memory_motion_correction(
+                scan, raster_phase, fill_fraction, x_shifts, y_shifts
+            )
+
+            # Provide a small amount of smoothing in time
+            if key["motion_correction_method"] in (5,6,9,10,):
+                window_size = 3
+            elif key["motion_correction_method"] in (7,8,11,12,):
+                fps = (ScanInfo & key).fetch1("fps")
+                window_size = np.max((int(fps / 5), 3))
+            else:
+                raise PipelineException(f"The smoothing for the second iteration of motion correction is not defined for {key['motion_correction_method']}")
+
+            # In place low memory convolution. This is slower
+            # but allows for the entire scan to be in memory.
+            start_indices = np.arange(0, scan.shape[-1], 1000)
+            if start_indices[-1] != scan.shape[-1]:
+                start_indices = np.insert(
+                    start_indices, len(start_indices), scan.shape[-1]
+                )
+            for start_idx, end_idx in tqdm(
+                zip(start_indices[:-1], start_indices[1:]), total=len(start_indices) - 1
+            ):
+                conv_start = np.max((0, start_idx - window_size))
+                conv_end = np.min((end_idx + window_size, scan.shape[-1]))
+                conv_fragment = ndimage.convolve1d(
+                    scan[:, :, conv_start:conv_end],
+                    np.ones(window_size) / window_size,
+                    axis=-1,
+                    mode="reflect",
+                )
+
+                # Use these so the offset will be zero when at beginning or end of scan
+                slice_start = start_idx - conv_start
+                slice_end = end_idx - conv_end + conv_fragment.shape[-1]
+                scan[:, :, start_idx:end_idx] = conv_fragment[
+                    :, :, slice_start:slice_end
+                ]
+
+            scan = np.expand_dims(scan, axis=(0, 3))
+
+            # Use a global template to run a second correction on the scan
+            if key["motion_correction_method"] in (5,7,9,11,):
+                template = galvo_corrections.create_refined_template(scan, x_shifts, y_shifts, key)
+
+                f = performance.parallel_motion_shifts  # function to map
+                kwargs = {
+                    "raster_phase": raster_phase,
+                    "fill_fraction": fill_fraction,
+                    "template": template,
+                }
+                # Determine xy shifts via phase correlation. Field ID and channel are using dummy values
+                # as the scan has already been cropped to the field and channel of interest above. This
+                # was done to reduce memory usage.
+                results = performance.map_frames(
+                    f,
+                    scan,
+                    field_id=0,
+                    y=slice(skip_rows, -skip_rows),
+                    x=slice(skip_cols, -skip_cols),
+                    channel=0,
+                    kwargs=kwargs,
+                )
+
+                second_y_shifts = np.zeros(scan.shape[-1])
+                second_x_shifts = np.zeros(scan.shape[-1])
+                for frames, chunk_y_shifts, chunk_x_shifts in results:
+                    second_y_shifts[frames] = chunk_y_shifts
+                    second_x_shifts[frames] = chunk_x_shifts
+
+            elif key["motion_correction_method"] in (6,8,10,12,):
+                
+                # Actual fragment size will be ~chunk_size+overlap_size, so each
+                # local template will be made with ~2000 frames in the case of 1500+500.
+                chunk_size = 1500
+                overlap_size = 500
+
+                # We use linspace to ensure there are no fragments at the end
+                # which are smaller than the overlap size, leading to multiple edge cases.
+                # This will create start_idx fragments approximately equal to chunk_size
+                start_indices = np.linspace(
+                    0, scan.shape[-1], int(scan.shape[-1] / chunk_size)
+                ).astype(int)
+
+                x_shift_fragments = np.empty((len(start_indices) - 1, scan.shape[-1]))
+                y_shift_fragments = np.empty((len(start_indices) - 1, scan.shape[-1]))
+                x_shift_fragments[:] = np.NaN
+                y_shift_fragments[:] = np.NaN
+
+                f = performance.parallel_motion_shifts  # function to map
+
+                for n, (start_idx, end_idx_base) in tqdm(
+                    enumerate(zip(start_indices[:-1], start_indices[1:])),
+                    total=len(start_indices[1:]),
+                ):
+                    end_idx = np.min((end_idx_base + overlap_size, scan.shape[-1]))
+
+                    # Create a local template. Use all frames less than percentile_thresh of motion
+                    local_template = galvo_corrections.create_refined_template(
+                        scan[:, :, :, :, start_idx:end_idx],
+                        old_x_shifts[start_idx:end_idx],
+                        old_y_shifts[start_idx:end_idx],
+                        key,
+                        percentile_thresh=100,
+                        smoothing=True,
+                    )
+
+                    # scan variable had excess fields and channels stripped away to reduce memory footprint
+                    kwargs = {
+                        "raster_phase": raster_phase,
+                        "fill_fraction": fill_fraction,
+                        "template": local_template,
+                    }
+                    # Determine xy shifts via phase correlation. Field ID and channel are using dummy values
+                    # as the scan has already been cropped to the field and channel of interest above. This
+                    # was done to reduce memory usage.
+                    results = performance.map_frames(
+                        f,
+                        scan[:, :, :, :, start_idx:end_idx],
+                        field_id=0,
+                        y=slice(skip_rows, -skip_rows),
+                        x=slice(skip_cols, -skip_cols),
+                        channel=0,
+                        kwargs=kwargs,
+                    )
+                    if type(scan) == np.ndarray:
+                        y_shifts_fragment = np.zeros(end_idx - start_idx)
+                        x_shifts_fragment = np.zeros(end_idx - start_idx)
+                    for frames, chunk_y_shifts, chunk_x_shifts in results:
+                        y_shifts_fragment[frames] = chunk_y_shifts
+                        x_shifts_fragment[frames] = chunk_x_shifts
+
+                    x_shift_fragments[n, start_idx:end_idx] = x_shifts_fragment
+                    y_shift_fragments[n, start_idx:end_idx] = y_shifts_fragment
+
+                    # Use the beginning of the fragment and weight it from 0 to 1 to be summed with
+                    # overlap area added to end_idx. This will be used to take the weighted mean.
+                    if start_idx != 0:
+                        start_taper_weights = np.linspace(0, 1, overlap_size)
+                        x_shift_fragments[n, start_idx : start_idx + overlap_size] = (
+                            x_shift_fragments[n, start_idx : start_idx + overlap_size]
+                            * start_taper_weights
+                        )
+                        y_shift_fragments[n, start_idx : start_idx + overlap_size] = (
+                            y_shift_fragments[n, start_idx : start_idx + overlap_size]
+                            * start_taper_weights
+                        )
+                    if end_idx_base != scan.shape[-1]:
+                        end_taper_weights = np.linspace(1, 0, overlap_size)
+                        x_shift_fragments[n, end_idx_base:end_idx] = (
+                            x_shift_fragments[n, end_idx_base:end_idx] * end_taper_weights
+                        )
+                        y_shift_fragments[n, end_idx_base:end_idx] = (
+                            y_shift_fragments[n, end_idx_base:end_idx] * end_taper_weights
+                        )
+
+                second_x_shifts, second_y_shifts = (np.nansum(x_shift_fragments, axis=0), np.nansum(y_shift_fragments, axis=0))
+
+            else:
+
+                raise PipelineException(f"Motion correction method {key['motion_correction_method']} does not have second iteration defined.")
+
+            second_x_shifts, second_y_shifts, _ = galvo_corrections.process_xy_motion(
+                second_x_shifts,
+                second_y_shifts,
+                key,
+            )
+
+            x_shifts = second_x_shifts + old_x_shifts
+            y_shifts = second_y_shifts + old_y_shifts
+            
 
         # Create results tuple
         tuple_ = key.copy()
-        tuple_['field'] = field_id + 1
-        tuple_['motion_template'] = template
-        tuple_['y_shifts'] = y_shifts
-        tuple_['x_shifts'] = x_shifts
-        tuple_['outlier_frames'] = outliers
-        tuple_['y_std'] = np.std(y_shifts)
-        tuple_['x_std'] = np.std(x_shifts)
+        tuple_.pop("motion_correction_method")
+        tuple_.pop("channel")
+        tuple_["motion_template"] = template
+        tuple_["y_shifts"] = y_shifts
+        tuple_["x_shifts"] = x_shifts
+        tuple_["outlier_frames"] = outliers
+        tuple_["y_std"] = np.std(y_shifts)
+        tuple_["x_std"] = np.std(x_shifts)
+
+        # Create record of motion correction method
+        method_used_key = key.copy()
 
         # Insert
         self.insert1(tuple_)
-
+        self.MotionMethodUsed.insert1(method_used_key)
+        
         # Notify after all fields have been processed
-        scan_key = {'animal_id': key['animal_id'], 'session': key['session'],
-                    'scan_idx': key['scan_idx'], 'pipe_version': key['pipe_version']}
+        scan_key = {
+            "animal_id": key["animal_id"],
+            "session": key["session"],
+            "scan_idx": key["scan_idx"],
+            "pipe_version": key["pipe_version"],
+            "motion_correction_method": key["motion_correction_method"]
+        }
         if len(MotionCorrection - CorrectionChannel & scan_key) > 0:
-            self.notify(scan_key, nframes, nfields)
+            self.notify(scan_key, num_frames, num_fields)
 
     @notify.ignore_exceptions
     def notify(self, key, num_frames, num_fields):
