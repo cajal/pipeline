@@ -371,12 +371,10 @@ def _get_correct_raster(key):
     raster_phase = (pipe.RasterCorrection & key).fetch1("raster_phase")
     fill_fraction = (pipe.ScanInfo & key).fetch1("fill_fraction")
     if abs(raster_phase) < 1e-7:
-        correct_raster = lambda scan: scan.astype(np.float32, copy=False)
-    else:
-        correct_raster = lambda scan: correct_raster(
-            scan, raster_phase, fill_fraction
-        )
-    return correct_raster
+        return lambda scan: scan.astype(np.float32, copy=False)
+    return lambda scan: correct_raster(
+        scan, raster_phase, fill_fraction
+    )
     
 
 def low_memory_motion_correction(scan, raster_phase, fill_fraction, x_shifts, y_shifts):
