@@ -2066,14 +2066,6 @@ class FieldSegmentation(dj.Computed):
                                     'mask_y': mask_y, 'mask_x': mask_x,
                                     'distance': distance})
 
-@schema
-class RegistrationOverTimeTask(dj.Manual):
-    definition = """ # scans that will be candidates for stack.RegistrationOverTime
-    -> PreprocessedStack.proj(stack_session='session', stack_channel='channel')
-    -> RegistrationTask
-    ---
-    zdrift_query_ts=CURRENT_TIMESTAMP : timestamp
-    """
 
 @schema
 class RegistrationOverTime(dj.Computed):
@@ -2082,10 +2074,18 @@ class RegistrationOverTime(dj.Computed):
     -> PreprocessedStack.proj(stack_session='session', stack_channel='channel')
     -> RegistrationTask
     """
+
     @property
     def key_source(self):
-        return RegistrationOverTimeTask & (meso.SummaryImages + reso.SummaryImages).proj(scan_session='session')
+        keys = (
+            PreprocessedStack.proj(stack_session='session', stack_channel='channel')
+            * (RegistrationTask & {'registration_method': 5})
+            * experiment.Stack.proj(..., stack_session='session')
+            & 'stack_ts > "2023-04-01 00:00:00"'
+        )
+        return keys
 
+    
     class Chunk(dj.Part):
         definition = """ # single registered chunk
 
