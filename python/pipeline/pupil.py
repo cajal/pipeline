@@ -729,11 +729,17 @@ class Tracking(dj.Computed):
             """
 
             print('Tracking labels with Deeplabcut!')
+            # get which rig the experiment was performed on
+            rig = (experiment.Session & key).fetch1('rig')
 
-            # change config_path if we were to update DLC model configuration
-            temp_config = (ConfigDeeplabcut & dict(
-                config_path='/mnt/lab/DeepLabCut/pupil_track-Donnie-2019-02-12/config.yaml')).fetch1()
-
+            if rig in ['RS1',]:
+                # in some rigs, there is no internal illumination from infrared leakage from two photon excitation
+                # i.e., pupil is black on gray background, and a separate dlc model is required
+                temp_config = (ConfigDeeplabcut & dict(config_path='/mnt/lab/DeepLabCut/pupil_track-Maria-Alex-2023-05-15/config.yaml')).fetch1()
+            else:
+                # assume all other rigs have two photon leakage (default dlc model) until new exception emerges
+                temp_config = (ConfigDeeplabcut & dict(config_path='/mnt/lab/DeepLabCut/pupil_track-Donnie-2019-02-12/config.yaml')).fetch1()
+                
             # save config_path into the key
             key['config_path'] = temp_config['config_path']
 
