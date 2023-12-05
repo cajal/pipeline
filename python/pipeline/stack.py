@@ -2068,6 +2068,13 @@ class FieldSegmentation(dj.Computed):
 
 
 @schema
+class RegistrationOverTimeTask(dj.Manual):
+    definition = """ # scans that will be candidates for stack.RegistrationOverTime
+    -> PreprocessedStack.proj(stack_session='session', stack_channel='channel')
+    -> RegistrationTask
+    """
+
+@schema
 class RegistrationOverTime(dj.Computed):
     definition = """ # register a field at different timepoints of recording
     
@@ -2082,7 +2089,7 @@ class RegistrationOverTime(dj.Computed):
             * (RegistrationTask & {'registration_method': 5})
             * experiment.Stack.proj(..., stack_session='session')
             & 'stack_ts > "2023-04-01 00:00:00"'
-        )
+        ) & RegistrationOverTimeTask
         return keys
 
     
