@@ -54,7 +54,7 @@ class ScanInfo(dj.Imported):
 
     @property
     def key_source(self):
-        rigs = [{"rig": "2P4"}, {"rig": "R2P1"}]
+        rigs = [{"rig": "2P4"}, {"rig": "R2P1"}, {"rig": "V2P1"}]
         meso_scans = experiment.Scan() & (experiment.Session() & rigs)
         return meso_scans * (Version() & {"pipe_version": CURRENT_VERSION})
 
