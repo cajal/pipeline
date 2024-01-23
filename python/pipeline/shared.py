@@ -10,9 +10,9 @@ schema = dj.schema('pipeline_shared', locals(), create_tables=False)
 @schema
 class Field(dj.Lookup):
     definition = """ # fields in mesoscope scans
-    field       : tinyint
+    field       : smallint
     """
-    contents = [[i] for i in range(1, 25)]
+    contents = [[i] for i in range(1, 150)]
 
 @schema
 class Channel(dj.Lookup):
