@@ -1,7 +1,7 @@
 apiVersion: batch/v1beta1
 kind: CronJob # This tells kubernetes what kind of class it is working with
 metadata:
-  name: minion
+  name: minion-rot
 spec:
   schedule: "*/5 * * * *" # every 5 minutes
   concurrencyPolicy: Allow
@@ -78,7 +78,7 @@ spec:
                   key: GITHUB_PASSWORD
             command: ["/bin/bash"]
             args: ["-c", "rm -r pipeline &&\
-            git clone https://$(GITHUB_USERNAME):$(GITHUB_PASSWORD)@github.com/cajal/pipeline.git &&\
+            git clone https://$(GITHUB_USERNAME):$(GITHUB_PASSWORD)@github.com/ZhuokunDing/pipeline.git &&\
             pip3 install pipeline/python/ &&\
             git clone https://$(GITHUB_USERNAME):$(GITHUB_PASSWORD)@github.com/cajal/stimulus-pipeline.git &&\
             pip3 install stimulus-pipeline/python/ &&\
