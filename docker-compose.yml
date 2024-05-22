@@ -47,7 +47,7 @@ services:
 
   
   bash:
-    image: ninai/stimulus-pipeline:latest
+    image: at-docker:5000/stimulus-pipeline:latest
     volumes:
       - /mnt/:/mnt/
       - /home/pipeline_data/:/tmp/
