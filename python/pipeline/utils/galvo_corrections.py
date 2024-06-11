@@ -74,8 +74,17 @@ def compute_motion_shifts(scan, template, in_place=True, num_threads=8):
 
     ..note:: Based in imreg_dft.translation().
     """
-    import pyfftw
-    from imreg_dft import utils
+    try:
+        import cupy as cp
+        from cupy.fft import fft2, ifft2, fftshift
+        from cupy import abs
+        gpu_flag = True
+    except Exception:
+        gpu_flag = False
+        import pyfftw
+        from imreg_dft import utils
+        from numpy.fft import fftshift
+        from numpy import abs
 
     # Add third dimension if scan is a single image
     if scan.ndim == 2:
@@ -84,27 +93,52 @@ def compute_motion_shifts(scan, template, in_place=True, num_threads=8):
     # Get some params
     image_height, image_width, num_frames = scan.shape
     taper = np.outer(signal.tukey(image_height, 0.2), signal.tukey(image_width, 0.2))
+    
+    if gpu_flag:
+        
+        # transfer arrays to the GPU
+        template = cp.array(template)
+        taper = cp.array(taper)
+        
+        # get fourier transform of template
+        template_freq = cp.fft.fft(template * taper).conj()
+        abs_template_freq = abs(template_freq)
+        eps = abs_template_freq.max() * 1e-15
+        
+    else:
 
-    # Prepare fftw
-    frame = pyfftw.empty_aligned((image_height, image_width), dtype='complex64')
-    fft = pyfftw.builders.fft2(frame, threads=num_threads, overwrite_input=in_place,
-                               avoid_copy=True)
-    ifft = pyfftw.builders.ifft2(frame, threads=num_threads, overwrite_input=in_place,
-                                 avoid_copy=True)
+        # Prepare fftw
+        frame = pyfftw.empty_aligned((image_height, image_width), dtype='complex64')
+        fft2 = pyfftw.builders.fft2(frame, threads=num_threads, overwrite_input=in_place,
+                                   avoid_copy=True)
+        ifft2 = pyfftw.builders.ifft2(frame, threads=num_threads, overwrite_input=in_place,
+                                     avoid_copy=True)
 
-    # Get fourier transform of template
-    template_freq = fft(template * taper).conj() # we only need the conjugate
-    abs_template_freq = abs(template_freq)
-    eps = abs_template_freq.max() * 1e-15
+        # Get fourier transform of template
+        template_freq = fft(template * taper).conj() # we only need the conjugate
+        abs_template_freq = abs(template_freq)
+        eps = abs_template_freq.max() * 1e-15
 
+        
     # Compute subpixel shifts per image
     y_shifts = np.empty(num_frames)
     x_shifts = np.empty(num_frames)
     for i in range(num_frames):
+        
+        # transfer to GPU if necessary
+        if gpu_flag:
+            scan_frame = cp.array(scan[:, :, i])
+        else:
+            scan_frame = scan[:, :, i]
+            
         # Compute correlation via cross power spectrum
-        image_freq = fft(scan[:, :, i] * taper)
+        image_freq = fft2(scan_frame * taper)
         cross_power = (image_freq * template_freq) / (abs(image_freq) * abs_template_freq + eps)
-        shifted_cross_power = np.fft.fftshift(abs(ifft(cross_power)))
+        shifted_cross_power = fftshift(abs(ifft2(cross_power)))
+        
+        # transfer back from GPU if necessary
+        if gpu_flag:
+            shifted_cross_power = shifted_cross_power.get()
 
         # Get best shift
         shifts = np.unravel_index(np.argmax(shifted_cross_power), shifted_cross_power.shape)
