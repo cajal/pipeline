@@ -2,9 +2,12 @@
 import numpy as np
 import datajoint as dj
 from scipy import interpolate  as interp
-from scipy import signal
 from scipy import ndimage
 from tqdm import tqdm
+try:
+    from scipy.signal import tukey
+except Exception:
+    from scipy.signal.windows import tukey
 
 from ..exceptions import PipelineException
 from ..utils.signal import mirrconv
@@ -76,18 +79,22 @@ def compute_motion_shifts(scan, template, in_place=True, num_threads=8, try_gpu=
 
     ..note:: Based in imreg_dft.translation().
     """
+    from imreg_dft import utils
+    
     gpu_flag = False
     if try_gpu:
         try:
+            # functions needed for GPU computations
             import cupy as cp
             from cupy.fft import fft2, ifft2, fftshift
             from cupy import abs
-            gpu_flag = True
+            gpu_flag = True   
         except Exception:
             gpu_flag = False
+            
     if not gpu_flag:
+        # functions needed for CPU computations
         import pyfftw
-        from imreg_dft import utils
         from numpy.fft import fftshift
         from numpy import abs
 
@@ -97,7 +104,7 @@ def compute_motion_shifts(scan, template, in_place=True, num_threads=8, try_gpu=
 
     # Get some params
     image_height, image_width, num_frames = scan.shape
-    taper = np.outer(signal.tukey(image_height, 0.2), signal.tukey(image_width, 0.2))
+    taper = np.outer(tukey(image_height, 0.2), tukey(image_width, 0.2))
     
     if gpu_flag:
         
@@ -106,7 +113,7 @@ def compute_motion_shifts(scan, template, in_place=True, num_threads=8, try_gpu=
         taper = cp.array(taper)
         
         # get fourier transform of template
-        template_freq = cp.fft.fft(template * taper).conj()
+        template_freq = fft2(template * taper).conj()
         abs_template_freq = abs(template_freq)
         eps = abs_template_freq.max() * 1e-15
         
@@ -120,7 +127,7 @@ def compute_motion_shifts(scan, template, in_place=True, num_threads=8, try_gpu=
                                      avoid_copy=True)
 
         # Get fourier transform of template
-        template_freq = fft(template * taper).conj() # we only need the conjugate
+        template_freq = fft2(template * taper).conj() # we only need the conjugate
         abs_template_freq = abs(template_freq)
         eps = abs_template_freq.max() * 1e-15
 
