@@ -58,7 +58,7 @@ def compute_raster_phase(image, temporal_fill_fraction):
     return angle_shift
 
 
-def compute_motion_shifts(scan, template, in_place=True, num_threads=8):
+def compute_motion_shifts(scan, template, in_place=True, num_threads=8, try_gpu=True):
     """ Compute shifts in y and x for rigid subpixel motion correction.
 
     Returns the number of pixels that each image in the scan was to the right (x_shift)
@@ -74,13 +74,16 @@ def compute_motion_shifts(scan, template, in_place=True, num_threads=8):
 
     ..note:: Based in imreg_dft.translation().
     """
-    try:
-        import cupy as cp
-        from cupy.fft import fft2, ifft2, fftshift
-        from cupy import abs
-        gpu_flag = True
-    except Exception:
-        gpu_flag = False
+    gpu_flag = False
+    if try_gpu:
+        try:
+            import cupy as cp
+            from cupy.fft import fft2, ifft2, fftshift
+            from cupy import abs
+            gpu_flag = True
+        except Exception:
+            gpu_flag = False
+    if not gpu_flag:
         import pyfftw
         from imreg_dft import utils
         from numpy.fft import fftshift
