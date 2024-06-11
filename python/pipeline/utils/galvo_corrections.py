@@ -69,6 +69,8 @@ def compute_motion_shifts(scan, template, in_place=True, num_threads=8, try_gpu=
     :param np.array template: 2-d template image. Each frame in scan is aligned to this.
     :param bool in_place: Whether the scan can be overwritten.
     :param int num_threads: Number of threads used for the ffts.
+    :param bool try_gpu: Whether to try to compute motion shifts on a GPU device. Will
+                           default to CPU computation if no GPU device is found.
 
     :returns: (y_shifts, x_shifts) Two arrays (num_frames) with the y, x motion shifts.
 
