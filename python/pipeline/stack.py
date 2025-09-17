@@ -29,7 +29,7 @@ dj.config['stores'] = {
 dj.config['cache'] = '/tmp/dj-cache'
 
 
-schema = dj.schema('pipeline_stack', locals(), create_tables=False)
+schema = dj.schema('pipeline_stack', locals(), create_tables=True)
 
 @schema
 class StackInfo(dj.Imported):
@@ -2068,17 +2068,34 @@ class FieldSegmentation(dj.Computed):
 
 
 @schema
+class RegistrationOverTimeTask(dj.Manual):
+    definition = """ # scans that will be candidates for stack.RegistrationOverTime
+    -> CorrectedStack.proj(stack_session='session') # animal_id, stack_session, stack_idx, volume_id
+    -> shared.Channel.proj(stack_channel='channel')
+    -> experiment.Scan.proj(scan_session='session')  # animal_id, scan_session, scan_idx
+    -> shared.Channel.proj(scan_channel='channel')
+    -> shared.Field
+    -> shared.RegistrationMethod
+    """
+
+@schema
 class RegistrationOverTime(dj.Computed):
     definition = """ # register a field at different timepoints of recording
     
     -> PreprocessedStack.proj(stack_session='session', stack_channel='channel')
     -> RegistrationTask
     """
+
     @property
     def key_source(self):
-        stacks = PreprocessedStack.proj(stack_session='session', stack_channel='channel')
-        return stacks * RegistrationTask & {'registration_method': 5}
+        keys = (
+            PreprocessedStack.proj(stack_session='session', stack_channel='channel')
+            * (RegistrationTask & {'registration_method': 5})
+            * experiment.Stack.proj(..., stack_session='session')
+        ) & RegistrationOverTimeTask
+        return keys
 
+    
     class Chunk(dj.Part):
         definition = """ # single registered chunk
 
